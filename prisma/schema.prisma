@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      Role     @default(STAFF)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Drug {
+  id           String   @id @default(cuid())
+  name         String
+  genericName  String?
+  manufacturer String?
+  dosageForm   String?
+  strength     String?
+  stock        Int      @default(0)
+  reorderLevel Int      @default(10)
+  price        Float    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Order {
+  id        String      @id @default(cuid())
+  status    OrderStatus @default(PENDING)
+  total     Float       @default(0)
+  notes     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  items     OrderItem[]
+}
+
+model OrderItem {
+  id       String @id @default(cuid())
+  orderId  String
+  drugId   String
+  quantity Int
+  price    Float
+  order    Order  @relation(fields: [orderId], references: [id])
+}
+
+enum Role {
+  ADMIN
+  PHARMACIST
+  STAFF
+}
+
+enum OrderStatus {
+  PENDING
+  APPROVED
+  DISPENSED
+  CANCELLED
+}
