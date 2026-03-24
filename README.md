@@ -1,36 +1,21 @@
-# Glimmora-Pharma
+# Pharma Glimmora
 
-A modern pharmaceutical management platform.
+GxP / GMP inspection-readiness SaaS for pharma and biotech companies.
+
+Built for compliance with **21 CFR 210/211/11**, **EU GMP Annex 11/15**, **ICH Q9/Q10**, **GAMP 5**, **WHO GMP**, and **MHRA** guidelines.
 
 ## Tech Stack
 
-- **Frontend**: Next.js 14, React, TypeScript, Tailwind CSS
-- **Backend**: Next.js API Routes
-- **Database**: Prisma ORM
-- **Auth**: NextAuth.js
-- **Testing**: Jest, React Testing Library
-
-## Getting Started
-
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-## Project Structure
-
-```
-src/
-├── app/            # Next.js App Router pages & layouts
-├── components/     # Reusable UI components
-├── lib/            # Shared utilities & helpers
-├── services/       # Business logic & API service layers
-├── types/          # TypeScript type definitions
-├── hooks/          # Custom React hooks
-└── config/         # App configuration
-prisma/
-└── schema.prisma   # Database schema
-public/             # Static assets
-```
+| Layer        | Technology                                            |
+| ------------ | ----------------------------------------------------- |
+| Framework    | React 19 + TypeScript                                 |
+| Build        | Vite 8                                                |
+| Styling      | Tailwind CSS v4 (`@tailwindcss/vite`)                 |
+| Routing      | React Router v7                                       |
+| Global State | Redux Toolkit + React Redux                           |
+| Server State | TanStack React Query v5                               |
+| HTTP         | Axios                                                 |
+| Forms        | React Hook Form + Zod                                 |
+| Icons        | Lucide React                                          |
+| Charts       | Recharts                                              |
+| Date/Time    | Day.js (UTC + Timezone + Relative Time)               |
