@@ -1,11 +1,11 @@
 import type { Middleware } from "@reduxjs/toolkit";
-import type { AuthState } from "./auth.slice";
-import type { SettingsState } from "./settings.slice";
+import authReducer from "./auth.slice";
+import settingsReducer from "./settings.slice";
 
 // Standalone type — avoids circular import with index.ts
 type PersistedState = {
-  auth?: Partial<AuthState>;
-  settings?: Partial<SettingsState>;
+  auth?: Partial<ReturnType<typeof authReducer>>;
+  settings?: Partial<ReturnType<typeof settingsReducer>>;
 };
 
 const STORAGE_KEY = "glimmora-state";
