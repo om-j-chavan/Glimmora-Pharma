@@ -1,13 +1,20 @@
 import type { Middleware } from "@reduxjs/toolkit";
-import type { RootState } from "./index";
+import type { AuthState } from "./auth.slice";
+import type { SettingsState } from "./settings.slice";
+
+// Standalone type — avoids circular import with index.ts
+type PersistedState = {
+  auth?: Partial<AuthState>;
+  settings?: Partial<SettingsState>;
+};
 
 const STORAGE_KEY = "glimmora-state";
 
-export function loadPersistedState(): Partial<RootState> | undefined {
+export function loadPersistedState(): PersistedState | undefined {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return undefined;
-    return JSON.parse(raw) as Partial<RootState>;
+    return JSON.parse(raw) as PersistedState;
   } catch {
     return undefined;
   }
@@ -16,7 +23,7 @@ export function loadPersistedState(): Partial<RootState> | undefined {
 export const persistMiddleware: Middleware = (store) => (next) => (action) => {
   const result = next(action);
   try {
-    const state = store.getState() as RootState;
+    const state = store.getState();
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({

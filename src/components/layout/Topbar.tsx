@@ -67,7 +67,7 @@ export function Topbar() {
   const { role } = useRole();
 
   const initials = user?.name
-    ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
+    ? user.name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)
     : "?";
 
   const badge = roleBadge[role as UserRole] ?? roleBadge.viewer;

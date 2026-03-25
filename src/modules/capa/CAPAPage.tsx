@@ -30,7 +30,7 @@ const RISK_COLOR: Record<string, string> = {
 
 export function CAPAPage() {
   const navigate = useNavigate();
-  const { canCloseCapa, isViewOnly } = useRole();
+  const { isViewOnly } = useRole();
   const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const agiCapa = useAppSelector((s) => s.settings.agi.agents.capa);
 

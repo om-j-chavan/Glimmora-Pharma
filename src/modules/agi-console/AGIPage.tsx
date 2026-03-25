@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, Shield, Eye, Activity, AlertTriangle, CheckCircle, Settings } from "lucide-react";
+import { Bot, Shield, Activity, AlertTriangle, CheckCircle, Settings } from "lucide-react";
 import { useRole } from "@/hooks/useRole";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import {

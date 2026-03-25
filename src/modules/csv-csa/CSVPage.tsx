@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search, Download, Shield, AlertTriangle, CheckCircle, Clock } from "lucide-react";
+import { Search, Download, Shield, AlertTriangle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useRole } from "@/hooks/useRole";
 
@@ -29,7 +29,7 @@ const VAL_COLOR: Record<string, string> = { "Validated": "badge-green", "Qualifi
 const PRI_COLOR: Record<string, string> = { Critical: "badge-red", Major: "badge-amber", Minor: "badge-gray" };
 
 export function CSVPage() {
-  const { isViewOnly } = useRole();
+  useRole();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [riskFilter, setRiskFilter] = useState("");

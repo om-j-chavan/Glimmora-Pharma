@@ -72,7 +72,7 @@ export function DashboardPage() {
   const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const agiCapa = useAppSelector((s) => s.settings.agi.agents.capa);
   const ichq9On = useAppSelector((s) => s.settings.frameworks.ichq9);
-  const { role } = useRole();
+  useRole();
 
   const [timeframe, setTimeframe] = useState("30");
   const [siteFilter, setSiteFilter] = useState("");
