@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
 import { useActiveSite } from "@/hooks/useActiveSite";
 import { logout } from "@/store/auth.slice";
@@ -93,6 +94,8 @@ export function Sidebar() {
   const location = useLocation();
   const activeSite = useActiveSite();
   const { allowedPaths } = useRole();
+  const capas = useAppSelector((s) => s.capa.items);
+  const openCapaCount = capas.filter((c) => c.status === "Open" || c.status === "In Progress").length;
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(location.pathname)])
@@ -248,6 +251,11 @@ export function Sidebar() {
                             <>
                               <item.icon className="w-4 h-4" aria-hidden="true" />
                               {item.label}
+                              {item.path === "capa" && openCapaCount > 0 && (
+                                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#ef4444] text-white min-w-[18px] text-center">
+                                  {openCapaCount}
+                                </span>
+                              )}
                               {isActive && <span className="sr-only">(current page)</span>}
                             </>
                           )}

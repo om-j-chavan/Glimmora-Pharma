@@ -6,6 +6,8 @@ import type { AGISettings } from "@/store/settings.slice";
 import { Settings, Zap, Save } from "lucide-react";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { Toggle } from "@/components/ui/Toggle";
 import { Dropdown } from "@/components/ui/Dropdown";
 
 interface AgentEntry {
@@ -99,9 +101,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
               <label htmlFor="agi-confidence" className="text-[11px] font-medium text-(--text-secondary)">
                 Confidence Threshold
               </label>
-              <span className="text-[12px] font-semibold text-(--brand) bg-(--brand-muted) px-2 py-0.5 rounded-full">
-                {agi.confidence}%
-              </span>
+              <Badge variant="blue">{agi.confidence}%</Badge>
             </div>
             <p id="agi-conf-hint" className="text-[11px] text-(--text-muted) mb-3">
               Higher = fewer suggestions, higher reliability. Lower = catches more weak signals.
@@ -134,9 +134,12 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
 
       {/* Agents card */}
       <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
-        <div className="flex items-center gap-2 px-5 py-4 border-b border-(--bg-border)">
-          <Zap className="w-4 h-4 text-(--brand)" aria-hidden="true" />
-          <span className="text-[13px] font-semibold text-(--text-primary)">Per-module agents</span>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-(--brand)" aria-hidden="true" />
+            <span className="text-[13px] font-semibold text-(--text-primary)">Per-module agents</span>
+          </div>
+          <Badge variant="green">{activeAgentCount} active</Badge>
         </div>
 
         <fieldset className="border-none p-0 m-0">
@@ -145,36 +148,22 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
             {AGENTS.map((agent) => (
               <li key={agent.key} className="flex items-center justify-between px-5 py-4">
                 <div className="flex-1 pr-4">
-                  <span id={`agent-label-${agent.key}`} className="text-[13px] font-medium text-(--text-primary)">
+                  <span className="text-[13px] font-medium text-(--text-primary)">
                     {agent.name}
                   </span>
-                  <p id={`agent-desc-${agent.key}`} className="text-[11px] text-(--card-muted) mt-0.5">
+                  <p className="text-[11px] text-(--card-muted) mt-0.5">
                     {agent.desc}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={agi.agents[agent.key]}
-                  aria-labelledby={`agent-label-${agent.key}`}
-                  aria-describedby={`agent-desc-${agent.key}`}
-                  onClick={() => !readOnly && dispatch(toggleAgent(agent.key))}
+                <Toggle
+                  id={`agent-${agent.key}`}
+                  checked={agi.agents[agent.key]}
+                  onChange={() => !readOnly && dispatch(toggleAgent(agent.key))}
+                  label={agent.name}
+                  description={agent.desc}
                   disabled={readOnly}
-                  className={`relative inline-flex h-5 w-9 rounded-full border transition-colors duration-200 shrink-0 ${readOnly ? "opacity-60 cursor-not-allowed" : "cursor-pointer"} ${
-                    agi.agents[agent.key]
-                      ? "bg-(--brand) border-(--brand)"
-                      : "bg-(--bg-border) border-(--bg-border)"
-                  }`}
-                >
-                  <span
-                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
-                      agi.agents[agent.key] ? "translate-x-4.5" : "translate-x-0.5"
-                    }`}
-                  />
-                  <span className="sr-only">
-                    {agi.agents[agent.key] ? "On" : "Off"}
-                  </span>
-                </button>
+                  hideLabel
+                />
               </li>
             ))}
           </ul>

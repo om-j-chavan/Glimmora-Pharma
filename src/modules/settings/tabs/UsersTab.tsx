@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
+import { Toggle } from "@/components/ui/Toggle";
 
 const ROLES = [
   { value: "super_admin", label: "Super Admin" },
@@ -122,28 +123,14 @@ function UserForm({
       </div>
 
       {/* GxP Signatory toggle */}
-      <div className="flex items-center justify-between py-3 border-t border-(--bg-border)">
-        <div>
-          <p className="text-[13px] font-medium text-(--text-primary)">GxP Signatory Authority</p>
-          <p className="text-[11px] text-(--card-muted) mt-0.5">Enables Sign &amp; Approve buttons</p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={watch("gxpSignatory")}
-          aria-label="GxP Signatory"
-          onClick={() => setValue("gxpSignatory", !watch("gxpSignatory"))}
-          className={`relative inline-flex h-5 w-9 cursor-pointer rounded-full border transition-colors duration-200 ${
-            watch("gxpSignatory")
-              ? "bg-(--brand) border-(--brand)"
-              : "bg-(--bg-border) border-(--bg-border)"
-          }`}
-        >
-          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
-            watch("gxpSignatory") ? "translate-x-4.5" : "translate-x-0.5"
-          }`} />
-          <span className="sr-only">{watch("gxpSignatory") ? "Enabled" : "Disabled"}</span>
-        </button>
+      <div className="py-3 border-t border-(--bg-border)">
+        <Toggle
+          id="form-gxp-sig"
+          checked={watch("gxpSignatory")}
+          onChange={(v) => setValue("gxpSignatory", v)}
+          label="GxP Signatory Authority"
+          description="Enables Sign & Approve buttons"
+        />
       </div>
 
       <div className="flex justify-end gap-2 pt-3 border-t border-(--bg-border)">
@@ -257,25 +244,14 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 align-middle">
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={user.gxpSignatory}
-                        aria-label={`GxP Signatory for ${user.name}`}
-                        onClick={() =>
-                          dispatch(updateUser({ id: user.id, patch: { gxpSignatory: !user.gxpSignatory } }))
-                        }
-                        className={`relative inline-flex h-5 w-9 cursor-pointer rounded-full border transition-colors duration-200 ${
-                          user.gxpSignatory
-                            ? "bg-(--brand) border-(--brand)"
-                            : "bg-(--bg-border) border-(--bg-border)"
-                        }`}
-                      >
-                        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
-                          user.gxpSignatory ? "translate-x-4.5" : "translate-x-0.5"
-                        }`} />
-                        <span className="sr-only">{user.gxpSignatory ? "Enabled" : "Disabled"}</span>
-                      </button>
+                      <Toggle
+                        id={`sig-${user.id}`}
+                        checked={user.gxpSignatory}
+                        onChange={() => dispatch(updateUser({ id: user.id, patch: { gxpSignatory: !user.gxpSignatory } }))}
+                        label={`GxP Signatory for ${user.name}`}
+                        disabled={readOnly}
+                        hideLabel
+                      />
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <Dropdown

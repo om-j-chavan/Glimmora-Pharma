@@ -5,6 +5,8 @@ import { toggleFramework } from "@/store/settings.slice";
 import type { FrameworkSettings } from "@/store/settings.slice";
 import { Info } from "lucide-react";
 import { Popup } from "@/components/ui/Popup";
+import { Toggle } from "@/components/ui/Toggle";
+import { Badge } from "@/components/ui/Badge";
 
 interface FrameworkEntry {
   key: keyof FrameworkSettings;
@@ -33,12 +35,11 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
   const [pendingKey, setPendingKey] = useState<keyof FrameworkSettings | null>(null);
 
   const handleToggle = (key: keyof FrameworkSettings) => {
+    if (readOnly) return;
     if (frameworks[key]) {
-      // Turning OFF — show warning first
       setPendingKey(key);
       setWarnPopup(true);
     } else {
-      // Turning ON — dispatch immediately
       dispatch(toggleFramework(key));
     }
   };
@@ -50,9 +51,7 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
         <h2 id="frameworks-heading" className="text-[15px] font-semibold text-(--text-primary)">
           Regulatory frameworks
         </h2>
-        <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-(--brand-muted) text-(--brand)">
-          {activeCount} of 9 active
-        </span>
+        <Badge variant="blue">{activeCount} of 9 active</Badge>
       </div>
 
       {/* Info banner */}
@@ -69,37 +68,25 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
           {FRAMEWORKS.map((fw) => (
             <li key={fw.key} className="flex items-center justify-between px-5 py-4">
               <div className="flex-1 pr-4">
-                <p id={`fw-label-${fw.key}`} className="text-[13px] font-semibold text-(--text-primary) mb-0.5">
+                <p className="text-[13px] font-semibold text-(--text-primary) mb-0.5">
                   {fw.name}
                 </p>
-                <p id={`fw-desc-${fw.key}`} className="text-[11px] text-(--card-muted)">
+                <p className="text-[11px] text-(--card-muted)">
                   {fw.desc}
                 </p>
                 <p className="text-[11px] text-(--brand) mt-1">
-                  → {fw.effect}
+                  &rarr; {fw.effect}
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={frameworks[fw.key]}
-                aria-labelledby={`fw-label-${fw.key}`}
-                aria-describedby={`fw-desc-${fw.key}`}
-                onClick={() => !readOnly && handleToggle(fw.key)}
+              <Toggle
+                id={`fw-${fw.key}`}
+                checked={frameworks[fw.key]}
+                onChange={() => handleToggle(fw.key)}
+                label={fw.name}
+                description={fw.desc}
                 disabled={readOnly}
-                className={`relative inline-flex h-5 w-9 rounded-full border transition-colors duration-200 shrink-0 ${readOnly ? "opacity-60 cursor-not-allowed" : "cursor-pointer"} ${
-                  frameworks[fw.key]
-                    ? "bg-(--brand) border-(--brand)"
-                    : "bg-(--bg-border) border-(--bg-border)"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
-                    frameworks[fw.key] ? "translate-x-4.5" : "translate-x-0.5"
-                  }`}
-                />
-                <span className="sr-only">{frameworks[fw.key] ? "On" : "Off"}</span>
-              </button>
+                hideLabel
+              />
             </li>
           ))}
         </ul>

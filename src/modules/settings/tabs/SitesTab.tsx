@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { Badge } from "@/components/ui/Badge";
 
 const siteSchema = z.object({
   name: z.string().min(2, "Site name is required"),
@@ -213,18 +214,14 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
                     <td className="px-4 py-3 text-[12px] text-(--text-primary) truncate">{site.location}</td>
                     <td className="px-4 py-3 text-[12px] text-(--text-primary) truncate">{site.gmpScope}</td>
                     <td className="px-4 py-3 align-middle">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${riskBadge[site.risk]}`}>
+                      <Badge variant={site.risk === "HIGH" ? "red" : site.risk === "MEDIUM" ? "amber" : "green"}>
                         {site.risk}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-4 py-3 align-middle">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        site.status === "Active"
-                          ? "bg-(--success-bg) text-(--success)"
-                          : "bg-(--bg-elevated) text-(--card-muted) border border-(--bg-border)"
-                      }`}>
+                      <Badge variant={site.status === "Active" ? "green" : "gray"}>
                         {site.status}
-                      </span>
+                      </Badge>
                     </td>
                     {!readOnly && (
                       <td className="px-4 py-3 text-right">
