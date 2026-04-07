@@ -37,7 +37,7 @@ export interface PopupProps {
 const CONFIG = {
   success: {
     Icon: CheckCircle2,
-    iconColor: "#4a5e3a",
+    iconColor: "#10b981",
     iconBg: {
       dark: "bg-[rgba(16,185,129,0.12)]",
       light: "bg-[#f0fdf4]",
@@ -46,11 +46,11 @@ const CONFIG = {
       dark: "border-[rgba(16,185,129,0.25)]",
       light: "border-[#a7f3d0]",
     },
-    timerColor: "bg-[#4a5e3a]",
+    timerColor: "bg-[#10b981]",
   },
   error: {
     Icon: AlertCircle,
-    iconColor: "#c0392b",
+    iconColor: "#ef4444",
     iconBg: {
       dark: "bg-[rgba(239,68,68,0.12)]",
       light: "bg-[#fef2f2]",
@@ -60,13 +60,13 @@ const CONFIG = {
       light: "border-[#fca5a5]",
     },
     primaryBtn: {
-      dark: "bg-[#c0392b] hover:bg-[#dc2626] text-white",
+      dark: "bg-[#ef4444] hover:bg-[#dc2626] text-white",
       light: "bg-[#dc2626] hover:bg-[#b91c1c] text-white",
     },
   },
   warning: {
     Icon: AlertTriangle,
-    iconColor: "#c9a84c",
+    iconColor: "#f59e0b",
     iconBg: {
       dark: "bg-[rgba(245,158,11,0.12)]",
       light: "bg-[#fffbeb]",
@@ -76,18 +76,18 @@ const CONFIG = {
       light: "border-[#fcd34d]",
     },
     primaryBtn: {
-      dark: "bg-[#c9a84c] hover:bg-[#d97706] text-[#0a1628]",
+      dark: "bg-[#f59e0b] hover:bg-[#d97706] text-[#0a1628]",
       light: "bg-[#d97706] hover:bg-[#b45309] text-white",
     },
     ghostBtn: {
-      dark: "bg-[rgba(245,158,11,0.08)] text-[#c9a84c] border border-[rgba(245,158,11,0.2)] hover:bg-[rgba(245,158,11,0.14)]",
+      dark: "bg-[rgba(245,158,11,0.08)] text-[#f59e0b] border border-[rgba(245,158,11,0.2)] hover:bg-[rgba(245,158,11,0.14)]",
       light:
         "bg-[#fffbeb] text-[#92400e] border border-[#fcd34d] hover:bg-[#fef3c7]",
     },
   },
   confirmation: {
     Icon: AlertTriangle,
-    iconColor: "#c0392b",
+    iconColor: "#ef4444",
     iconBg: {
       dark: "bg-[rgba(239,68,68,0.1)]",
       light: "bg-[#fef2f2]",
@@ -97,18 +97,18 @@ const CONFIG = {
       light: "border-[#fca5a5]",
     },
     primaryBtn: {
-      dark: "bg-[#c0392b] hover:bg-[#dc2626] text-white",
+      dark: "bg-[#ef4444] hover:bg-[#dc2626] text-white",
       light: "bg-[#dc2626] hover:bg-[#b91c1c] text-white",
     },
     ghostBtn: {
-      dark: "bg-[rgba(255,255,255,0.04)] text-[#d5bfb2] border border-[#6b5349] hover:bg-[rgba(255,255,255,0.08)] hover:text-[#e2e8f0]",
+      dark: "bg-[rgba(255,255,255,0.04)] text-[#94a3b8] border border-[#1e3a5a] hover:bg-[rgba(255,255,255,0.08)] hover:text-[#e2e8f0]",
       light:
         "bg-[#f3f4f6] text-[#374151] border border-[#d1d5db] hover:bg-[#e5e7eb] hover:text-[#111827]",
     },
   },
   progress: {
     Icon: Loader2,
-    iconColor: "#4a8fa8",
+    iconColor: "#6366f1",
     iconBg: {
       dark: "bg-[rgba(99,102,241,0.12)]",
       light: "bg-[#eef2ff]",
@@ -117,8 +117,8 @@ const CONFIG = {
       dark: "border-[rgba(99,102,241,0.25)]",
       light: "border-[#c4b5fd]",
     },
-    barColor: "bg-[#4a8fa8]",
-    trackColor: { dark: "bg-[#503e37]", light: "bg-[#eef2ff]" },
+    barColor: "bg-[#6366f1]",
+    trackColor: { dark: "bg-[#0a1f38]", light: "bg-[#eef2ff]" },
     progressValColor: { dark: "text-[#818cf8]", light: "text-[#4f46e5]" },
   },
 } as const;
@@ -251,7 +251,7 @@ export function Popup({
         className={clsx(
           "relative rounded-xl overflow-hidden w-full max-w-[380px] border shadow-2xl",
           "animate-[popupIn_0.15s_ease-out]",
-          isDark ? "bg-[#3a2d28]" : "bg-white",
+          isDark ? "bg-[#071526]" : "bg-white",
           cfg.border[m],
           className,
         )}
@@ -288,7 +288,7 @@ export function Popup({
               <p
                 className={clsx(
                   "text-[12px] mt-1 leading-relaxed",
-                  isDark ? "text-[#8e7065]" : "text-[#6b7280]",
+                  isDark ? "text-[#8899b8]" : "text-[#6b7280]",
                   variant === "progress" && "animate-pulse",
                 )}
               >
@@ -306,7 +306,7 @@ export function Popup({
             >
               <X
                 className="w-3.5 h-3.5"
-                style={{ stroke: isDark ? "#d5bfb2" : "#374151" }}
+                style={{ stroke: isDark ? "#94a3b8" : "#374151" }}
                 strokeWidth={2.5}
               />
             </button>
@@ -356,7 +356,7 @@ export function Popup({
               <span
                 className={clsx(
                   "text-[10px]",
-                  isDark ? "text-[#8e7065]" : "text-[#9ca3af]",
+                  isDark ? "text-[#6b7fa3]" : "text-[#9ca3af]",
                 )}
               >
                 {progressLabel ?? "Processing..."}

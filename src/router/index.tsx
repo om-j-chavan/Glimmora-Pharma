@@ -69,7 +69,7 @@ export const router = createBrowserRouter([
         path: "inspection",
         loader: makeRoleLoader("inspection"),
         lazy: async () => ({
-          Component: (await import("@/modules/inspection/InspectionPage")).InspectionPage,
+          Component: (await import("@/modules/inspection/InspectionPage")).default,
         }),
       },
       {
@@ -98,6 +98,12 @@ export const router = createBrowserRouter([
         loader: makeRoleLoader("governance"),
         lazy: async () => ({
           Component: (await import("@/modules/governance/GovernancePage")).GovernancePage,
+        }),
+      },
+      {
+        path: "subscription",
+        lazy: async () => ({
+          Component: (await import("@/modules/subscription/SubscriptionPage")).SubscriptionPage,
         }),
       },
     ],

@@ -1,21 +1,26 @@
-import { Bell, Search, HelpCircle, Calendar, Clock, Menu } from "lucide-react";
+import { HelpCircle, Calendar, Clock, Globe, X, Menu } from "lucide-react";
 import { useState, useEffect } from "react";
+import clsx from "clsx";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole, ROLE_LABELS } from "@/hooks/useRole";
 import type { UserRole } from "@/hooks/useRole";
+import { setSelectedSite } from "@/store/auth.slice";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { ColorThemePicker } from "@/components/ui/ColorThemePicker";
+import { NotificationBell } from "./NotificationBell";
 import dayjs from "@/lib/dayjs";
 
 const roleBadge: Record<UserRole, { bg: string; color: string }> = {
-  super_admin:        { bg: "rgba(192,57,43,0.12)",   color: "#c0392b" },
-  qa_head:            { bg: "rgba(123,104,165,0.12)", color: "#7b68a5" },
-  qc_lab_director:    { bg: "rgba(74,94,58,0.12)",    color: "#4a5e3a" },
-  regulatory_affairs: { bg: "rgba(165,120,101,0.12)", color: "#a57865" },
-  csv_val_lead:       { bg: "rgba(74,143,168,0.12)",  color: "#4a8fa8" },
-  it_cdo:             { bg: "rgba(110,76,62,0.12)",   color: "#6e4c3e" },
-  operations_head:    { bg: "rgba(201,168,76,0.12)",  color: "#c9a84c" },
-  viewer:             { bg: "rgba(142,112,101,0.10)", color: "#8e7065" },
+  super_admin:        { bg: "rgba(239,68,68,0.12)",   color: "#ef4444" },
+  qa_head:            { bg: "rgba(139,92,246,0.12)",  color: "#a78bfa" },
+  qc_lab_director:    { bg: "rgba(16,185,129,0.12)",  color: "#10b981" },
+  regulatory_affairs: { bg: "rgba(236,72,153,0.12)",  color: "#f472b6" },
+  csv_val_lead:       { bg: "rgba(14,165,233,0.12)",  color: "#38bdf8" },
+  it_cdo:             { bg: "rgba(20,184,166,0.12)",  color: "#2dd4bf" },
+  operations_head:    { bg: "rgba(245,158,11,0.12)",  color: "#f59e0b" },
+  viewer:             { bg: "rgba(148,163,184,0.1)",   color: "#94a3b8" },
 };
 
 function DateTimeBlock() {
@@ -26,58 +31,32 @@ function DateTimeBlock() {
   }, []);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        flexShrink: 0,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 12px",
-          borderRadius: 8,
-          background: "var(--bg-elevated)",
-          border: "1px solid var(--bg-border)",
-        }}
-      >
-        <Calendar size={13} aria-hidden="true" style={{ color: "var(--text-muted)" }} />
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Date</span>
-        <span style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 600 }}>
-          {now.format("DD MMM YYYY")}
-        </span>
+    <div className="flex items-center gap-3 px-3.5 h-9 rounded-lg shrink-0" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+      <div className="flex items-center gap-2">
+        <Calendar size={13} aria-hidden="true" style={{ color: "var(--brand)" }} />
+        <span className="text-[12px] font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>{now.format("DD MMM YYYY")}</span>
       </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "6px 12px",
-          borderRadius: 8,
-          background: "var(--bg-elevated)",
-          border: "1px solid var(--bg-border)",
-        }}
-      >
-        <Clock size={13} aria-hidden="true" style={{ color: "var(--text-muted)" }} />
-        <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>Time</span>
-        <span style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 600 }}>
-          {now.format("h:mm A")}
-        </span>
+      <div aria-hidden="true" className="w-px h-4" style={{ background: "var(--bg-border)" }} />
+      <div className="flex items-center gap-2">
+        <Clock size={13} aria-hidden="true" style={{ color: "var(--brand)" }} />
+        <span className="text-[12px] font-semibold tabular-nums" style={{ color: "var(--text-primary)" }}>{now.format("h:mm A")}</span>
       </div>
     </div>
   );
 }
 
-export function Topbar() {
+export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
+  const dispatch = useAppDispatch();
+  const { org, tenantName, allSites } = useTenantConfig();
+  const companyName = org.companyName || tenantName;
   const user = useAppSelector((s) => s.auth.user);
+  const selectedSite = useAppSelector((s) => s.auth.selectedSiteId);
+  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { role } = useRole();
+  const isSuperAdmin = role === "super_admin";
 
   const initials = user?.name
-    ? user.name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)
+    ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
     : "?";
 
   const badge = roleBadge[role as UserRole] ?? roleBadge.viewer;
@@ -85,198 +64,112 @@ export function Topbar() {
   return (
     <header
       role="banner"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "0 20px",
-        height: 64,
-        flexShrink: 0,
-        background: "var(--bg-surface)",
-        borderBottom: "1px solid var(--bg-border)",
-      }}
+      className="flex items-center gap-2 sm:gap-2.5 px-3 sm:px-5 h-14 shrink-0"
+      style={{ background: "var(--bg-surface)", borderBottom: "1px solid var(--bg-border)" }}
     >
-      {/* Hamburger */}
-      <button
-        type="button"
-        aria-label="Toggle sidebar"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 34,
-          height: 34,
-          borderRadius: 8,
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          color: "var(--text-secondary)",
-          flexShrink: 0,
-        }}
-      >
-        <Menu size={18} aria-hidden="true" />
-      </button>
-
-      {/* Date / Time */}
-      <DateTimeBlock />
-
-      {/* Search */}
-      <div style={{ flex: 1, display: "flex", justifyContent: "center" }}>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            width: "100%",
-            maxWidth: 420,
-            padding: "0 12px",
-            height: 36,
-            borderRadius: 8,
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--bg-border)",
-            cursor: "text",
-            transition: "border-color 0.15s, box-shadow 0.15s",
-          }}
-          onFocus={(e) => {
-            const el = e.currentTarget;
-            el.style.borderColor = "var(--brand)";
-            el.style.boxShadow = "0 0 0 3px var(--brand-muted)";
-          }}
-          onBlur={(e) => {
-            const el = e.currentTarget;
-            el.style.borderColor = "var(--bg-border)";
-            el.style.boxShadow = "none";
-          }}
+      {/* ── Hamburger (mobile only) ── */}
+      {onMenuToggle && (
+        <button
+          type="button"
+          onClick={onMenuToggle}
+          aria-label="Toggle navigation menu"
+          className="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border-none cursor-pointer shrink-0"
+          style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)" }}
         >
-          <Search size={14} aria-hidden="true" style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-          <input
-            type="search"
-            aria-label="Search modules, CAPAs, findings"
-            placeholder="Search..."
-            style={{
-              flex: 1,
-              background: "none",
-              border: "none",
-              outline: "none",
-              fontSize: 13,
-              color: "var(--text-primary)",
-              minWidth: 0,
-            }}
-          />
-          <kbd
-            aria-hidden="true"
-            style={{
-              fontSize: 10,
-              color: "var(--text-muted)",
-              background: "var(--bg-border)",
-              padding: "2px 6px",
-              borderRadius: 4,
-              fontFamily: "IBM Plex Mono, monospace",
-              flexShrink: 0,
-            }}
-          >
-            Ctrl K
-          </kbd>
-        </label>
+          <Menu size={18} aria-hidden="true" />
+        </button>
+      )}
+
+      {/* ── Company name ── */}
+      <div className="flex items-center gap-2 shrink-0 min-w-0">
+        <span className="text-[13px] font-semibold truncate max-w-[120px] sm:max-w-none" style={{ color: "var(--text-primary)" }}>
+          {companyName || "Pharma Glimmora"}
+        </span>
+        <span className="hidden sm:inline text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: "var(--success-bg)", color: "var(--success)" }}>
+          GxP Live
+        </span>
       </div>
 
-      {/* Right actions */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-        <ColorThemePicker />
+      {/* ── Date / Time (hidden below md) ── */}
+      <div className="hidden md:block">
+        <DateTimeBlock />
+      </div>
+
+      {/* ── Site selector (super admin, hidden below lg) ── */}
+      {isSuperAdmin && allSites.length > 0 && (
+        <div className="hidden lg:flex items-center gap-1.5 shrink-0" aria-label="Site filter">
+          <Globe size={14} aria-hidden="true" style={{ color: "var(--text-muted)" }} />
+          <select
+            value={selectedSite ?? ""}
+            onChange={(e) => dispatch(setSelectedSite(e.target.value || null))}
+            className={clsx(
+              "text-[12px] font-medium border rounded-lg px-2.5 py-1.5 cursor-pointer outline-none transition-colors",
+              isDark ? "bg-[#242019] border-[#3d362c] text-[#f4ede6]" : "bg-[#faf9f7] border-[#e8e4dd] text-[#302d29]",
+            )}
+            aria-label="Filter by site"
+          >
+            <option value="">All sites</option>
+            {allSites.map((site) => (
+              <option key={site.id} value={site.id}>{site.name}</option>
+            ))}
+          </select>
+          {selectedSite && (
+            <button
+              type="button"
+              onClick={() => dispatch(setSelectedSite(null))}
+              className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border-none cursor-pointer"
+              style={{ background: "var(--brand-muted)", color: "var(--brand)" }}
+              aria-label="Clear site filter"
+            >
+              <X size={10} aria-hidden="true" />
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Spacer ── */}
+      <div className="flex-1 min-w-0" />
+
+      {/* ── Right actions ── */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="hidden md:block"><ColorThemePicker /></div>
         <ThemeToggle />
 
-        {/* Help */}
-        <button
+        {/* Help (hidden below sm) */}
+        {/* <button
           type="button"
           aria-label="Help and documentation"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            padding: "6px 12px",
-            borderRadius: 8,
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: "pointer",
-            transition: "all 0.15s",
-            background: "var(--brand)",
-            border: "none",
-            color: "#ffffff",
-          }}
+          className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-medium cursor-pointer transition-all"
+          style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)", color: "var(--text-secondary)" }}
         >
           <HelpCircle size={13} aria-hidden="true" />
-          Help
-        </button>
-
-        {/* Notifications */}
-        <button
-          type="button"
-          aria-label="Notifications"
-          style={{
-            position: "relative",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 34,
-            height: 34,
-            borderRadius: 8,
-            cursor: "pointer",
-            transition: "all 0.15s",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--bg-border)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <Bell size={15} aria-hidden="true" />
-          <span
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              top: 7,
-              right: 7,
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "var(--danger)",
-            }}
-          />
-        </button>
+          <span className="hidden md:inline">Help</span>
+        </button> */}
 
         {/* Divider */}
-        <div aria-hidden="true" style={{ width: 1, height: 28, background: "var(--bg-border)", margin: "0 4px" }} />
+        <div aria-hidden="true" className="hidden sm:block w-px h-5.5 mx-0.5" style={{ background: "var(--bg-border)" }} />
 
-        {/* User avatar + name + role */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Notifications */}
+        <NotificationBell />
+
+        {/* Divider */}
+        <div aria-hidden="true" className="w-px h-5.5 mx-0.5" style={{ background: "var(--bg-border)" }} />
+
+        {/* User */}
+        <div className="flex items-center gap-2">
           <div
             aria-label={user?.name ?? "User avatar"}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              fontSize: 12,
-              fontWeight: 700,
-              background: badge.bg,
-              color: badge.color,
-              border: `2px solid ${badge.color}30`,
-              letterSpacing: "0.02em",
-              flexShrink: 0,
-            }}
+            className="flex items-center justify-center w-8 h-8 sm:w-[34px] sm:h-[34px] rounded-full text-[11px] sm:text-[12px] font-bold shrink-0"
+            style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "2px solid var(--brand-border)" }}
           >
             {initials}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.3 }}>
+          <div className="hidden sm:flex flex-col items-start">
+            <span className="text-[12px] font-semibold leading-tight" style={{ color: "var(--text-primary)" }}>
               {user?.name ?? "—"}
             </span>
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--text-secondary)",
-              }}
-            >
+            <span className="text-[10px] font-semibold px-1.5 py-px rounded-full" style={{ background: badge.bg, color: badge.color }}>
               {ROLE_LABELS[role as UserRole]}
             </span>
           </div>

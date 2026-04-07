@@ -279,6 +279,33 @@ body {
   border-radius: 2px;
 }
 
+/* ── Responsive table padding ── */
+@media (max-width: 640px) {
+  .data-table th,
+  .data-table td {
+    padding: 8px 8px;
+    font-size: 11px;
+  }
+  .stat-card {
+    padding: 12px;
+  }
+  .stat-value {
+    font-size: 22px;
+  }
+  .card-header {
+    padding: 12px 14px;
+  }
+  .card-body {
+    padding: 12px 14px;
+  }
+  .page-title {
+    font-size: 16px;
+  }
+  .page-subtitle {
+    font-size: 12px;
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

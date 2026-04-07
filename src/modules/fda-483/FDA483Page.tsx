@@ -29,6 +29,8 @@ import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
+import { useTenantData } from "@/hooks/useTenantData";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import {
   addEvent,
   updateEvent,
@@ -50,6 +52,8 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
+import { useSetupStatus } from "@/hooks/useSetupStatus";
+import { NoSitesPopup } from "@/components/shared";
 
 /* ── Helpers ── */
 
@@ -156,17 +160,16 @@ const TABS: { id: TabId; label: string; Icon: typeof FileWarning }[] = [
 export function FDA483Page() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
-  const events = useAppSelector((s) => s.fda483?.items ?? []);
-  const sites = useAppSelector((s) => s.settings.sites);
-  const users = useAppSelector((s) => s.settings.users);
-  const timezone = useAppSelector((s) => s.settings.org.timezone);
-  const dateFormat = useAppSelector((s) => s.settings.org.dateFormat);
+  const { fda483Events: events, capas, tenantId } = useTenantData();
+  const { org, sites, users } = useTenantConfig();
+  const timezone = org.timezone;
+  const dateFormat = org.dateFormat;
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const capas = useAppSelector((s) => s.capa.items);
   const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const agiAgent = useAppSelector((s) => s.settings.agi.agents.fda483);
   const user = useAppSelector((s) => s.auth.user);
   const { role, canSign } = useRole();
+  const { hasSites } = useSetupStatus();
 
   function ownerName(id: string) {
     return users.find((u) => u.id === id)?.name ?? id;
@@ -198,6 +201,7 @@ export function FDA483Page() {
   >({});
   const [fishboneRoot, setFishboneRoot] = useState("");
   const [freeformRCA, setFreeformRCA] = useState("");
+  const [noSitesOpen, setNoSitesOpen] = useState(false);
 
   /* ── Derived from Redux so selectedEvent stays fresh ── */
   const liveEvent = selectedEvent
@@ -266,6 +270,7 @@ export function FDA483Page() {
       addEvent({
         ...data,
         id,
+        tenantId: tenantId ?? "",
         observations: [],
         commitments: [],
         responseDraft: "",
@@ -357,7 +362,7 @@ export function FDA483Page() {
     <main
       id="main-content"
       aria-label="FDA 483 and warning letter support"
-      className="w-full max-w-[1440px] mx-auto space-y-6"
+      className="w-full space-y-5"
     >
       {/* Header */}
       <header className="flex items-start justify-between flex-wrap gap-4">
@@ -373,7 +378,7 @@ export function FDA483Page() {
           <Button
             variant="primary"
             icon={Plus}
-            onClick={() => setAddEventOpen(true)}
+            onClick={() => { if (!hasSites) { setNoSitesOpen(true); return; } setAddEventOpen(true); }}
           >
             Log event
           </Button>
@@ -2049,6 +2054,7 @@ export function FDA483Page() {
                         dispatch(
                           addCAPA({
                             id: capaId,
+                            tenantId: tenantId ?? "",
                             source: "483",
                             risk: selectedObs.severity,
                             owner: user?.id ?? "",
@@ -2701,6 +2707,7 @@ export function FDA483Page() {
           </Button>
         </div>
       </Modal>
+      <NoSitesPopup isOpen={noSitesOpen} onClose={() => setNoSitesOpen(false)} feature="FDA 483 events" />
     </main>
   );
 }

@@ -1,18 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Users, UserPlus, Save } from "lucide-react";
+import clsx from "clsx";
+import { Plus, Pencil, Users, UserPlus, Save, Lock } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { addUser, updateUser } from "@/store/settings.slice";
-import type { UserConfig } from "@/store/settings.slice";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { usePlanLimits } from "@/hooks/usePlanLimits";
+import { PlanLimitUsageBar, PlanLimitPopup, EmptyState, DataTable, type Column } from "@/components/shared";
+import { addTenantUser, updateTenantUser, type TenantUserConfig } from "@/store/auth.slice";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
 import { Toggle } from "@/components/ui/Toggle";
+import { Badge } from "@/components/ui/Badge";
 
 const ROLES = [
   { value: "super_admin", label: "Super Admin" },
@@ -24,6 +28,8 @@ const ROLES = [
   { value: "operations_head", label: "Operations Head" },
   { value: "viewer", label: "Viewer" },
 ] as const;
+
+const ALL_SITES_ROLES = ["super_admin", "qa_head", "it_cdo"];
 
 const roleChip: Record<string, string> = {
   super_admin: "bg-(--danger-bg) text-(--danger)",
@@ -42,6 +48,8 @@ const userSchema = z.object({
   role: z.string().min(1, "Role is required"),
   gxpSignatory: z.boolean(),
   status: z.enum(["Active", "Inactive"]),
+  allSites: z.boolean(),
+  assignedSites: z.array(z.string()),
 });
 
 type UserFormValues = z.infer<typeof userSchema>;
@@ -65,6 +73,9 @@ function UserForm({
   submitLabel: string;
   submitIcon: typeof Plus;
 }) {
+  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
+  const { allSites: tenantSites } = useTenantConfig();
+
   const {
     register,
     handleSubmit,
@@ -75,6 +86,26 @@ function UserForm({
     resolver: zodResolver(userSchema),
     defaultValues,
   });
+
+  const watchRole = watch("role");
+  const watchAllSites = watch("allSites");
+  const watchSites = watch("assignedSites") ?? [];
+
+  // Auto-set allSites when role changes
+  useEffect(() => {
+    if (ALL_SITES_ROLES.includes(watchRole)) {
+      setValue("allSites", true);
+      setValue("assignedSites", []);
+    }
+  }, [watchRole, setValue]);
+
+  const toggleSite = (siteId: string, checked: boolean) => {
+    if (checked) {
+      setValue("assignedSites", [...watchSites, siteId]);
+    } else {
+      setValue("assignedSites", watchSites.filter((id) => id !== siteId));
+    }
+  };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
@@ -133,6 +164,77 @@ function UserForm({
         />
       </div>
 
+      {/* Site assignment */}
+      <div className="py-3 border-t border-(--bg-border) space-y-3">
+        <div className={clsx(
+          "flex items-center justify-between p-3 rounded-lg border",
+          isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]",
+        )}>
+          <div>
+            <p id="all-sites-label" className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
+              Access all sites
+            </p>
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              User can see data from every site
+            </p>
+          </div>
+          <Toggle
+            id="form-all-sites"
+            checked={watchAllSites}
+            onChange={(v) => {
+              setValue("allSites", v);
+              if (v) setValue("assignedSites", []);
+            }}
+            label="Access all sites"
+            hideLabel
+            disabled={ALL_SITES_ROLES.includes(watchRole)}
+          />
+        </div>
+
+        {ALL_SITES_ROLES.includes(watchRole) && (
+          <p className="text-[11px] text-[#10b981]">This role automatically gets access to all sites</p>
+        )}
+
+        {!watchAllSites && !ALL_SITES_ROLES.includes(watchRole) && (
+          <div>
+            <p className="text-[11px] font-medium text-(--text-secondary) mb-2">Assigned sites</p>
+            {tenantSites.length === 0 ? (
+              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>No sites configured yet. Add sites in the Sites tab first.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {tenantSites.map((site) => (
+                  <label
+                    key={site.id}
+                    className={clsx(
+                      "flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-colors",
+                      watchSites.includes(site.id)
+                        ? isDark ? "bg-[rgba(14,165,233,0.08)] border-[#0ea5e9]" : "bg-[#eff6ff] border-[#0ea5e9]"
+                        : isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-[#0ea5e9]"
+                      checked={watchSites.includes(site.id)}
+                      onChange={(e) => toggleSite(site.id, e.target.checked)}
+                      aria-label={`Assign ${site.name}`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{site.name}</p>
+                      <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{site.location} &middot; {site.gmpScope}</p>
+                    </div>
+                    <Badge variant={site.risk === "HIGH" ? "red" : site.risk === "MEDIUM" ? "amber" : "green"}>{site.risk}</Badge>
+                  </label>
+                ))}
+              </div>
+            )}
+            {tenantSites.length > 0 && watchSites.length === 0 && (
+              <p className="text-[11px] text-[#f59e0b] mt-2">No sites assigned — user won&apos;t see any location-specific data</p>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="flex justify-end gap-2 pt-3 border-t border-(--bg-border)">
         <Button variant="secondary" onClick={onCancel}>Cancel</Button>
         <Button icon={submitIcon} type="submit" loading={isSubmitting}>{submitLabel}</Button>
@@ -143,34 +245,42 @@ function UserForm({
 
 export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
-  const users = useAppSelector((s) => s.settings.users);
+  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
+  const { users, tenantId } = useTenantConfig();
+  const { isAtLimit, isNearLimit, getCount, getLimit, tenantPlan } = usePlanLimits();
+
+  const userCount = getCount("users");
+  const userLimit = getLimit("users");
+  const atLimit = isAtLimit("users");
+  const nearLimit = isNearLimit("users");
 
   const [addModal, setAddModal] = useState(false);
   const [editModal, setEditModal] = useState(false);
-  const [editingUser, setEditingUser] = useState<UserConfig | null>(null);
+  const [editingUser, setEditingUser] = useState<TenantUserConfig | null>(null);
 
   const [addedPopup, setAddedPopup] = useState(false);
   const [savedPopup, setSavedPopup] = useState(false);
   const [deactivatePopup, setDeactivatePopup] = useState(false);
   const [userToDeactivate, setUserToDeactivate] = useState<string | null>(null);
+  const [planLimitOpen, setPlanLimitOpen] = useState(false);
 
   const getRoleLabel = (value: string) =>
     ROLES.find((r) => r.value === value)?.label ?? value;
 
   const handleAdd = (data: UserFormValues) => {
-    dispatch(addUser({ ...data, id: crypto.randomUUID() }));
+    dispatch(addTenantUser({ tenantId, user: { ...data, id: crypto.randomUUID(), assignedSites: data.allSites ? [] : data.assignedSites } }));
     setAddModal(false);
     setAddedPopup(true);
   };
 
-  const openEdit = (user: UserConfig) => {
+  const openEdit = (user: TenantUserConfig) => {
     setEditingUser(user);
     setEditModal(true);
   };
 
   const handleEdit = (data: UserFormValues) => {
     if (editingUser) {
-      dispatch(updateUser({ id: editingUser.id, patch: data }));
+      dispatch(updateTenantUser({ tenantId, userId: editingUser.id, patch: { ...data, assignedSites: data.allSites ? [] : data.assignedSites } }));
     }
     setEditModal(false);
     setEditingUser(null);
@@ -182,7 +292,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       setUserToDeactivate(userId);
       setDeactivatePopup(true);
     } else {
-      dispatch(updateUser({ id: userId, patch: { status: "Active" } }));
+      dispatch(updateTenantUser({ tenantId, userId, patch: { status: "Active" } }));
     }
   };
 
@@ -196,89 +306,41 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             {users.length}
           </span>
         </div>
-        {!readOnly && <Button icon={Plus} size="sm" onClick={() => setAddModal(true)}>Add user</Button>}
+        {!readOnly && (
+          <Button icon={atLimit ? Lock : Plus} size="sm" className={clsx(atLimit && "opacity-70")} onClick={() => { if (atLimit) { setPlanLimitOpen(true); return; } setAddModal(true); }}>
+            {atLimit ? "Limit reached" : "Add user"}
+          </Button>
+        )}
       </div>
+
+      {/* Usage bar */}
+      <PlanLimitUsageBar icon={Users} label="Team members" count={userCount} limit={userLimit} plan={tenantPlan} atLimit={atLimit} nearLimit={nearLimit} />
 
       {/* Table card */}
       <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
-        {users.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-3">
-            <Users className="w-8 h-8 text-(--bg-border)" aria-hidden="true" />
-            <p className="text-[13px] text-(--card-muted)">No users configured yet</p>
-            <p className="text-[12px] text-(--text-muted)">Add your first platform user above</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse table-fixed" aria-label="Configured platform users">
-              <caption className="sr-only">List of users with roles, signatory status, and account status</caption>
-              <colgroup>
-                <col className="w-[22%]" />
-                <col className="w-[18%]" />
-                <col className="w-[16%]" />
-                <col className="w-[18%]" />
-                <col className="w-[14%]" />
-                <col className="w-[12%]" />
-              </colgroup>
-              <thead>
-                <tr className="border-b border-(--bg-border)">
-                  <th scope="col" className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-(--text-muted)">Name</th>
-                  <th scope="col" className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-(--text-muted)">Role</th>
-                  <th scope="col" className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-(--text-muted)">GxP Signatory</th>
-                  <th scope="col" className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-(--text-muted)">Status</th>
-                  <th scope="col" className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-(--text-muted)">Email</th>
-                  {!readOnly && <th scope="col" className="px-4 py-3 text-right"><span className="sr-only">Actions</span></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user: UserConfig, i: number) => (
-                  <tr
-                    key={user.id}
-                    className={`hover:bg-(--bg-surface) transition-colors ${
-                      i < users.length - 1 ? "border-b border-(--bg-border)" : ""
-                    }`}
-                  >
-                    <td className="px-4 py-3 text-[12px] font-semibold text-(--text-primary) truncate">{user.name}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${roleChip[user.role] ?? "bg-(--bg-elevated) text-(--text-secondary)"}`}>
-                        {getRoleLabel(user.role)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 align-middle">
-                      <Toggle
-                        id={`sig-${user.id}`}
-                        checked={user.gxpSignatory}
-                        onChange={() => dispatch(updateUser({ id: user.id, patch: { gxpSignatory: !user.gxpSignatory } }))}
-                        label={`GxP Signatory for ${user.name}`}
-                        disabled={readOnly}
-                        hideLabel
-                      />
-                    </td>
-                    <td className="px-4 py-3 align-middle">
-                      <Dropdown
-                        options={STATUS_OPTIONS}
-                        value={user.status}
-                        onChange={(v) => handleStatusChange(user.id, v)}
-                        width="w-28"
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-[12px] text-(--text-secondary) truncate">{user.email}</td>
-                    {!readOnly && (
-                      <td className="px-4 py-3 text-right">
-                        <Button variant="ghost" size="sm" icon={Pencil} aria-label={`Edit ${user.name}`} onClick={() => openEdit(user)} />
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable<TenantUserConfig>
+          variant="table-fixed"
+          ariaLabel="Configured platform users"
+          caption="List of users with roles, site access, signatory status, and account status"
+          keyFn={(u) => u.id}
+          data={users}
+          emptyState={<EmptyState icon={Users} title="Add your first team member" description="Users are assigned to findings, CAPAs, systems and 483 events as owners." hint="Without users, owner dropdowns in all modules will be empty." actionLabel="Add first user" onAction={() => setAddModal(true)} readOnly={readOnly} />}
+          columns={[
+            { key: "name", header: "Name", width: "w-[20%]", render: (u) => <span className="text-[12px] font-semibold text-(--text-primary) truncate">{u.name}</span> },
+            { key: "role", header: "Role", width: "w-[15%]", render: (u) => <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${roleChip[u.role] ?? "bg-(--bg-elevated) text-(--text-secondary)"}`}>{getRoleLabel(u.role)}</span> },
+            { key: "sites", header: "Sites", width: "w-[12%]", render: (u) => u.allSites || ALL_SITES_ROLES.includes(u.role) ? <Badge variant="green">All sites</Badge> : u.assignedSites.length === 0 ? <Badge variant="red">No sites</Badge> : <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{u.assignedSites.length} site{u.assignedSites.length !== 1 ? "s" : ""}</span> },
+            { key: "gxp", header: "GxP Signatory", width: "w-[13%]", render: (u) => <Toggle id={`sig-${u.id}`} checked={u.gxpSignatory} onChange={() => dispatch(updateTenantUser({ tenantId, userId: u.id, patch: { gxpSignatory: !u.gxpSignatory } }))} label={`GxP Signatory for ${u.name}`} disabled={readOnly} hideLabel /> },
+            { key: "status", header: "Status", width: "w-[14%]", render: (u) => <Dropdown options={STATUS_OPTIONS} value={u.status} onChange={(v) => handleStatusChange(u.id, v)} width="w-28" /> },
+            { key: "email", header: "Email", width: "w-[16%]", render: (u) => <span className="text-[12px] text-(--text-secondary) truncate">{u.email}</span> },
+            ...(!readOnly ? [{ key: "actions", header: "Actions", srOnly: true, width: "w-[10%]", align: "right" as const, render: (u: TenantUserConfig) => <Button variant="ghost" size="sm" icon={Pencil} aria-label={`Edit ${u.name}`} onClick={() => openEdit(u)} /> }] : []),
+          ]}
+        />
       </div>
 
       {/* Add modal */}
       <Modal open={addModal} onClose={() => setAddModal(false)} title="Add New User">
         <UserForm
-          defaultValues={{ name: "", email: "", role: "viewer", gxpSignatory: true, status: "Active" }}
+          defaultValues={{ name: "", email: "", role: "viewer", gxpSignatory: true, status: "Active", allSites: false, assignedSites: [] }}
           onSubmit={handleAdd}
           onCancel={() => setAddModal(false)}
           submitLabel="Add user"
@@ -297,6 +359,8 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
               role: editingUser.role,
               gxpSignatory: editingUser.gxpSignatory,
               status: editingUser.status,
+              allSites: editingUser.allSites ?? ALL_SITES_ROLES.includes(editingUser.role),
+              assignedSites: editingUser.assignedSites ?? [],
             }}
             onSubmit={handleEdit}
             onCancel={() => { setEditModal(false); setEditingUser(null); }}
@@ -309,6 +373,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       {/* Popups */}
       <Popup isOpen={addedPopup} variant="success" title="User added" description="New user can now be assigned as owner in CAPAs and findings." onDismiss={() => setAddedPopup(false)} />
       <Popup isOpen={savedPopup} variant="success" title="User updated" description="Changes saved successfully." onDismiss={() => setSavedPopup(false)} />
+      <PlanLimitPopup isOpen={planLimitOpen} onClose={() => setPlanLimitOpen(false)} resource="user" plan={tenantPlan} limit={userLimit} count={userCount} />
       <Popup
         isOpen={deactivatePopup}
         variant="confirmation"
@@ -317,7 +382,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         onDismiss={() => { setDeactivatePopup(false); setUserToDeactivate(null); }}
         actions={[
           { label: "Cancel", style: "ghost", onClick: () => { setDeactivatePopup(false); setUserToDeactivate(null); } },
-          { label: "Yes, deactivate", style: "primary", onClick: () => { if (userToDeactivate) dispatch(updateUser({ id: userToDeactivate, patch: { status: "Inactive" } })); setDeactivatePopup(false); setUserToDeactivate(null); } },
+          { label: "Yes, deactivate", style: "primary", onClick: () => { if (userToDeactivate) dispatch(updateTenantUser({ tenantId, userId: userToDeactivate, patch: { status: "Inactive" } })); setDeactivatePopup(false); setUserToDeactivate(null); } },
         ]}
       />
     </section>

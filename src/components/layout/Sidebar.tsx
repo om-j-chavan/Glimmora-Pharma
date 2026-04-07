@@ -18,12 +18,15 @@ import {
   FlaskConical,
   Cpu,
   SlidersHorizontal,
+  CreditCard,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
+import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useActiveSite } from "@/hooks/useActiveSite";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { logout } from "@/store/auth.slice";
 
 interface NavItem {
@@ -76,6 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: SlidersHorizontal,
     items: [
       { path: "settings", label: "Settings", icon: Settings },
+      { path: "subscription", label: "Subscription", icon: CreditCard },
     ],
   },
 ];
@@ -88,19 +92,22 @@ function getGroupForPath(pathname: string): string {
   return "qms";
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
   const activeSite = useActiveSite();
-  const { allowedPaths } = useRole();
+  const { allowedPaths, role } = useRole();
   const capas = useAppSelector((s) => s.capa.items);
   const openCapaCount = capas.filter((c) => c.status === "Open" || c.status === "In Progress").length;
+  const { setupNeeded, completedCount, totalSteps } = useSetupStatus();
+  const { tenantPlan } = useTenantConfig();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(location.pathname)])
   );
 
+  // Auto-expand the group containing the active page on route change
   useEffect(() => {
     const active = getGroupForPath(location.pathname);
     setOpenGroups((prev) => {
@@ -120,7 +127,10 @@ export function Sidebar() {
 
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((item) => allowedPaths.includes(item.path)),
+    items: g.items.filter((item) => {
+      if (item.path === "subscription") return role === "super_admin";
+      return allowedPaths.includes(item.path);
+    }),
   })).filter((g) => g.items.length > 0);
 
   const handleLogout = () => {
@@ -131,20 +141,17 @@ export function Sidebar() {
   return (
     <aside
       aria-label="Application navigation"
-      className="w-[260px] min-h-screen flex flex-col shrink-0"
-      style={{
-        background: "var(--sidebar-bg)",
-        borderRight: "1px solid var(--sidebar-border)",
-      }}
+      className="w-60 min-h-screen flex flex-col shrink-0"
+      style={{ background: "var(--bg-surface)", borderRight: "1px solid var(--bg-border)" }}
     >
-      {/* Logo */}
+      {/* ── Logo ── */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 10,
-          padding: "14px 16px",
-          borderBottom: "1px solid var(--sidebar-border)",
+          padding: "16px 16px 14px",
+          borderBottom: "1px solid var(--bg-border)",
         }}
       >
         <div
@@ -156,19 +163,20 @@ export function Sidebar() {
             width: 32,
             height: 32,
             borderRadius: 8,
-            background: "#f0a500",
+            background: "var(--brand-muted)",
+            border: "1px solid var(--brand-border)",
             flexShrink: 0,
           }}
         >
-          <ShieldCheck size={16} style={{ color: "#ffffff" }} aria-hidden="true" />
+          <ShieldCheck size={16} style={{ color: "var(--brand)" }} aria-hidden="true" />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: "var(--sidebar-text)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
+          <div style={{ color: "var(--brand)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
             Pharma Glimmora
           </div>
           <div
             style={{
-              color: "var(--sidebar-text-muted)",
+              color: "var(--text-muted)",
               fontSize: 11,
               marginTop: 2,
               overflow: "hidden",
@@ -181,7 +189,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Nav groups */}
+      {/* ── Nav groups ── */}
       <nav aria-label="Main navigation" style={{ flex: 1, padding: "8px 0", overflowY: "auto" }}>
         <ul role="list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {visibleGroups.map((group) => {
@@ -196,36 +204,34 @@ export function Sidebar() {
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 10,
-                    width: "calc(100% - 16px)",
-                    padding: "9px 12px",
+                    gap: 8,
+                    width: "100%",
+                    padding: "8px 12px",
                     margin: "2px 8px",
+                    width: "calc(100% - 16px)",
                     borderRadius: 8,
-                    background: isOpen ? "var(--sidebar-surface)" : "none",
+                    background: "none",
                     border: "none",
                     cursor: "pointer",
                     transition: "background 0.15s",
-                    color: "var(--sidebar-text)",
-                    fontSize: 13,
-                    fontWeight: 500,
+                    color: "var(--sidebar-text-muted)",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    letterSpacing: "0.02em",
+                    textTransform: "uppercase" as const,
                   }}
-                  onMouseEnter={(e) => {
-                    if (!isOpen) (e.currentTarget as HTMLElement).style.background = "var(--sidebar-accent)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isOpen) (e.currentTarget as HTMLElement).style.background = "none";
-                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--sidebar-accent)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}
                 >
-                  <group.icon size={16} aria-hidden="true" style={{ flexShrink: 0, color: "var(--sidebar-text-muted)" }} />
+                  <group.icon size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
                   <span style={{ flex: 1, textAlign: "left" }}>{group.label}</span>
                   <ChevronDown
-                    size={14}
+                    size={13}
                     aria-hidden="true"
                     style={{
                       flexShrink: 0,
                       transition: "transform 0.2s",
                       transform: isOpen ? "rotate(0deg)" : "rotate(-90deg)",
-                      color: "var(--sidebar-text-muted)",
                     }}
                   />
                 </button>
@@ -236,8 +242,10 @@ export function Sidebar() {
                     role="list"
                     style={{
                       listStyle: "none",
-                      margin: "2px 0 6px 0",
-                      padding: "0 0 0 20px",
+                      margin: "2px 0 4px 0",
+                      padding: 0,
+                      borderLeft: "1px solid var(--bg-border)",
+                      marginLeft: 24,
                     }}
                   >
                     {group.items.map((item) => (
@@ -246,27 +254,29 @@ export function Sidebar() {
                           to={item.path === "/" ? "/" : `/${item.path}`}
                           end={item.path === "/"}
                           className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
-                          style={{ marginLeft: 0, paddingLeft: 12 }}
+                          style={{ marginLeft: 0, marginRight: 8, paddingLeft: 10 }}
+                          onClick={onNavigate}
                         >
                           {({ isActive }) => (
                             <>
                               <item.icon className="w-4 h-4" aria-hidden="true" />
                               {item.label}
                               {item.path === "capa" && openCapaCount > 0 && (
-                                <span
-                                  style={{
-                                    marginLeft: "auto",
-                                    fontSize: 9,
-                                    fontWeight: 700,
-                                    padding: "1px 6px",
-                                    borderRadius: 20,
-                                    background: "#dc2626",
-                                    color: "#ffffff",
-                                    minWidth: 18,
-                                    textAlign: "center",
-                                  }}
-                                >
+                                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#ef4444] text-white min-w-[18px] text-center">
                                   {openCapaCount}
+                                </span>
+                              )}
+                              {item.path === "subscription" && tenantPlan === "trial" && (
+                                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#f59e0b] text-white min-w-[18px] text-center">
+                                  Trial
+                                </span>
+                              )}
+                              {item.path === "settings" && setupNeeded && (
+                                <span
+                                  className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#0ea5e9] text-white min-w-[32px] text-center"
+                                  aria-label={`Setup: ${completedCount} of ${totalSteps} complete`}
+                                >
+                                  {completedCount}/{totalSteps}
                                 </span>
                               )}
                               {isActive && <span className="sr-only">(current page)</span>}
@@ -283,8 +293,8 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {/* Footer */}
-      <div style={{ borderTop: "1px solid var(--sidebar-border)" }}>
+      {/* ── Footer ── */}
+      <div style={{ borderTop: "1px solid var(--bg-border)" }}>
         <div style={{ padding: "8px 8px 4px" }}>
           <button
             type="button"
@@ -294,7 +304,7 @@ export function Sidebar() {
             aria-label="Sign out"
           >
             <LogOut className="w-4 h-4" aria-hidden="true" />
-            Log Out
+            Sign Out
           </button>
         </div>
         <div
@@ -303,7 +313,7 @@ export function Sidebar() {
             justifyContent: "space-between",
             padding: "6px 16px 10px",
             fontSize: 10,
-            color: "var(--sidebar-text-muted)",
+            color: "var(--text-muted)",
           }}
         >
           <span>© 2025 Glimmora International</span>

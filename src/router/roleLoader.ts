@@ -1,7 +1,19 @@
 import { redirect } from "react-router";
 import { store } from "@/store";
-import { ROLE_NAV } from "@/hooks/useRole";
-import type { UserRole } from "@/hooks/useRole";
+import type { RoleKey, ModuleKey } from "@/store/permissions.slice";
+
+/** Maps route path segments to module keys */
+const PATH_TO_MODULE: Record<string, ModuleKey> = {
+  "gap-assessment": "gap",
+  capa: "capa",
+  "csv-csa": "csv",
+  "fda-483": "fda483",
+  evidence: "evidence",
+  "agi-console": "agi",
+  governance: "governance",
+  settings: "settings",
+  inspection: "dashboard", // fallback
+};
 
 export function makeRoleLoader(path: string) {
   return function roleLoader() {
@@ -9,8 +21,14 @@ export function makeRoleLoader(path: string) {
     if (!token || !user) return redirect("/login");
     if (!activeSiteId) return redirect("/site-picker");
 
-    const allowed = ROLE_NAV[(user.role as UserRole)] ?? ["/"];
-    if (!allowed.includes(path)) return redirect("/");
+    const matrix = store.getState().permissions?.matrix;
+    if (matrix) {
+      const role = user.role as RoleKey;
+      const moduleKey = PATH_TO_MODULE[path];
+      if (moduleKey && matrix[role]?.[moduleKey] === "none") {
+        return redirect("/");
+      }
+    }
 
     return null;
   };

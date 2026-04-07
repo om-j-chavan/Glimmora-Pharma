@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Info, Save, Pencil } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { useAppSelector } from "@/hooks/useAppSelector";
-import { updateOrg } from "@/store/settings.slice";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { updateTenantOrg } from "@/store/auth.slice";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -36,7 +36,7 @@ const TIMEZONES = [
 const REGIONS = [
   { value: "FDA", label: "FDA (United States)" },
   { value: "EMA", label: "EMA (European Union)" },
-  { value: "India — CDSCO + WHO GMP", label: "India — CDSCO + WHO GMP" },
+  { value: "India", label: "India — CDSCO + WHO GMP" },
   { value: "CDSCO", label: "CDSCO (India)" },
   { value: "PMDA", label: "PMDA (Japan)" },
   { value: "TGA", label: "TGA (Australia)" },
@@ -63,11 +63,18 @@ function Field({ label, value }: { label: string; value: string }) {
 
 export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
-  const org = useAppSelector((s) => s.settings.org);
+  const { org, tenantId } = useTenantConfig();
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [pendingData, setPendingData] = useState<OrgFormValues | null>(null);
+
+  const orgDefaults: OrgFormValues = {
+    companyName: org.companyName,
+    timezone: org.timezone,
+    dateFormat: org.dateFormat as OrgFormValues["dateFormat"],
+    regulatoryRegion: org.regulatoryRegion,
+  };
 
   const {
     register,
@@ -78,10 +85,15 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
     formState: { errors, isSubmitting },
   } = useForm<OrgFormValues>({
     resolver: zodResolver(orgSchema),
-    defaultValues: org,
+    defaultValues: orgDefaults,
   });
 
-  const openEdit = () => { reset(org); setEditOpen(true); };
+  useEffect(() => {
+    reset(orgDefaults);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [org.companyName, org.timezone, org.dateFormat, org.regulatoryRegion]);
+
+  const openEdit = () => { reset(orgDefaults); setEditOpen(true); };
 
   const onFormSubmit = (data: OrgFormValues) => {
     setPendingData(data);
@@ -89,7 +101,7 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   const confirmSave = () => {
-    if (pendingData) dispatch(updateOrg(pendingData));
+    if (pendingData) dispatch(updateTenantOrg({ tenantId, patch: pendingData }));
     setConfirmOpen(false);
     setEditOpen(false);
     setPendingData(null);
