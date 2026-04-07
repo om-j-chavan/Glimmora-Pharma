@@ -9,8 +9,8 @@
   --bg-border: #1e3a5a;
   --bg-hover: #0d2a4a;
   --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #475569;
+  --text-secondary: #b0bdd4;
+  --text-muted: #8899b8;
   --brand: #0ea5e9;
   --brand-hover: #0284c7;
   --brand-muted: rgba(14, 165, 233, 0.12);
@@ -25,10 +25,10 @@
   --info-bg: rgba(99, 102, 241, 0.12);
   --card-bg: var(--bg-elevated);
   --card-border: var(--bg-border);
-  --card-text: #e2e8f0;
-  --card-muted: #64748b;
+  --card-text: #f1f5f9;
+  --card-muted: #94a3b8;
   --chart-grid: var(--bg-border);
-  --chart-tick: #475569;
+  --chart-tick: #94a3b8;
   --scrollbar-thumb: var(--bg-border);
 }
 
@@ -240,6 +240,33 @@ body {
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 2px;
+}
+
+/* ── Responsive table padding ── */
+@media (max-width: 640px) {
+  .data-table th,
+  .data-table td {
+    padding: 8px 8px;
+    font-size: 11px;
+  }
+  .stat-card {
+    padding: 12px;
+  }
+  .stat-value {
+    font-size: 22px;
+  }
+  .card-header {
+    padding: 12px 14px;
+  }
+  .card-body {
+    padding: 12px 14px;
+  }
+  .page-title {
+    font-size: 16px;
+  }
+  .page-subtitle {
+    font-size: 12px;
+  }
 }
 
 .sr-only {

@@ -18,12 +18,15 @@ import {
   FlaskConical,
   Cpu,
   SlidersHorizontal,
+  CreditCard,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
+import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useActiveSite } from "@/hooks/useActiveSite";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { logout } from "@/store/auth.slice";
 
 interface NavItem {
@@ -76,6 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: SlidersHorizontal,
     items: [
       { path: "settings", label: "Settings", icon: Settings },
+      { path: "subscription", label: "Subscription", icon: CreditCard },
     ],
   },
 ];
@@ -88,14 +92,16 @@ function getGroupForPath(pathname: string): string {
   return "qms";
 }
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const location = useLocation();
   const activeSite = useActiveSite();
-  const { allowedPaths } = useRole();
+  const { allowedPaths, role } = useRole();
   const capas = useAppSelector((s) => s.capa.items);
   const openCapaCount = capas.filter((c) => c.status === "Open" || c.status === "In Progress").length;
+  const { setupNeeded, completedCount, totalSteps } = useSetupStatus();
+  const { tenantPlan } = useTenantConfig();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(location.pathname)])
@@ -121,7 +127,10 @@ export function Sidebar() {
 
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((item) => allowedPaths.includes(item.path)),
+    items: g.items.filter((item) => {
+      if (item.path === "subscription") return role === "super_admin";
+      return allowedPaths.includes(item.path);
+    }),
   })).filter((g) => g.items.length > 0);
 
   const handleLogout = () => {
@@ -246,6 +255,7 @@ export function Sidebar() {
                           end={item.path === "/"}
                           className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
                           style={{ marginLeft: 0, marginRight: 8, paddingLeft: 10 }}
+                          onClick={onNavigate}
                         >
                           {({ isActive }) => (
                             <>
@@ -254,6 +264,19 @@ export function Sidebar() {
                               {item.path === "capa" && openCapaCount > 0 && (
                                 <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#ef4444] text-white min-w-[18px] text-center">
                                   {openCapaCount}
+                                </span>
+                              )}
+                              {item.path === "subscription" && tenantPlan === "trial" && (
+                                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#f59e0b] text-white min-w-[18px] text-center">
+                                  Trial
+                                </span>
+                              )}
+                              {item.path === "settings" && setupNeeded && (
+                                <span
+                                  className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#0ea5e9] text-white min-w-[32px] text-center"
+                                  aria-label={`Setup: ${completedCount} of ${totalSteps} complete`}
+                                >
+                                  {completedCount}/{totalSteps}
                                 </span>
                               )}
                               {isActive && <span className="sr-only">(current page)</span>}

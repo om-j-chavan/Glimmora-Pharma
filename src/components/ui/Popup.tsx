@@ -288,7 +288,7 @@ export function Popup({
               <p
                 className={clsx(
                   "text-[12px] mt-1 leading-relaxed",
-                  isDark ? "text-[#64748b]" : "text-[#6b7280]",
+                  isDark ? "text-[#8899b8]" : "text-[#6b7280]",
                   variant === "progress" && "animate-pulse",
                 )}
               >
@@ -356,7 +356,7 @@ export function Popup({
               <span
                 className={clsx(
                   "text-[10px]",
-                  isDark ? "text-[#475569]" : "text-[#9ca3af]",
+                  isDark ? "text-[#6b7fa3]" : "text-[#9ca3af]",
                 )}
               >
                 {progressLabel ?? "Processing..."}

@@ -1,46 +1,7 @@
 import { useAppSelector } from "./useAppSelector";
+import type { RoleKey, ModuleKey } from "@/store/permissions.slice";
 
-export type UserRole =
-  | "super_admin"
-  | "qa_head"
-  | "qc_lab_director"
-  | "regulatory_affairs"
-  | "csv_val_lead"
-  | "it_cdo"
-  | "operations_head"
-  | "viewer";
-
-export const ROLE_NAV: Record<UserRole, string[]> = {
-  super_admin: [
-    "/", "settings", "gap-assessment", "capa",
-    "csv-csa", "inspection", "evidence",
-    "fda-483", "agi-console", "governance",
-  ],
-  qa_head: [
-    "/", "settings", "gap-assessment", "capa",
-    "evidence", "fda-483", "governance",
-  ],
-  qc_lab_director: [
-    "/", "gap-assessment", "capa", "evidence", "governance",
-  ],
-  regulatory_affairs: [
-    "/", "gap-assessment", "capa", "evidence",
-    "fda-483", "governance",
-  ],
-  csv_val_lead: [
-    "/", "gap-assessment", "capa", "csv-csa",
-    "inspection", "evidence", "governance",
-  ],
-  it_cdo: [
-    "/", "settings", "agi-console",
-  ],
-  operations_head: [
-    "/", "inspection", "governance",
-  ],
-  viewer: [
-    "/", "governance",
-  ],
-};
+export type UserRole = RoleKey;
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
@@ -53,21 +14,69 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   viewer: "Viewer",
 };
 
+/** Maps module keys to route paths for sidebar/nav */
+const MODULE_PATHS: Record<ModuleKey, string> = {
+  dashboard: "/",
+  gap: "gap-assessment",
+  capa: "capa",
+  csv: "csv-csa",
+  fda483: "fda-483",
+  evidence: "evidence",
+  agi: "agi-console",
+  governance: "governance",
+  settings: "settings",
+};
+
 export function useRole() {
   const user = useAppSelector((s) => s.auth.user);
-  const role = (user?.role ?? "viewer") as UserRole;
-  const allowedPaths = ROLE_NAV[role] ?? ["/"];
+  const matrix = useAppSelector((s) => s.permissions?.matrix);
+  const role = (user?.role ?? "viewer") as RoleKey;
+
+  function getAccess(mod: ModuleKey) {
+    return matrix?.[role]?.[mod] ?? "none";
+  }
+
+  function canAccessModule(mod: ModuleKey) {
+    return getAccess(mod) !== "none";
+  }
+
+  function canEdit(mod: ModuleKey) {
+    const level = getAccess(mod);
+    return level === "full" || level === "limited";
+  }
+
+  // Legacy path-based canAccess for sidebar/router compatibility
+  function canAccess(path: string) {
+    // Check if path matches any module
+    for (const [mod, p] of Object.entries(MODULE_PATHS)) {
+      if (p === path || path === `/${p}`) {
+        return canAccessModule(mod as ModuleKey);
+      }
+    }
+    // Default allow for root path
+    if (path === "/") return canAccessModule("dashboard");
+    return true;
+  }
+
+  const allowedPaths = (Object.entries(MODULE_PATHS) as [ModuleKey, string][])
+    .filter(([mod]) => canAccessModule(mod))
+    .map(([, path]) => path);
+
+  const gxp = user?.gxpSignatory === true;
 
   return {
     role,
-    canSign: user?.gxpSignatory === true,
-    canCloseCapa: role === "qa_head" || role === "super_admin",
-    canApproveDocs: user?.gxpSignatory === true,
-    canEditSettings: role === "super_admin",
-    canViewAGI: role === "it_cdo" || role === "super_admin",
-    canView483: ["regulatory_affairs", "qa_head", "super_admin"].includes(role),
-    isViewOnly: role === "viewer",
+    getAccess,
+    canAccessModule,
+    canEdit,
+    canAccess,
+    canSign: gxp && canEdit("capa"),
+    canCloseCapa: gxp && (role === "qa_head" || role === "super_admin"),
+    canApproveDocs: gxp && canEdit("evidence"),
+    canEditSettings: canEdit("settings"),
+    canViewAGI: canAccessModule("agi"),
+    canView483: canAccessModule("fda483"),
+    isViewOnly: role === "viewer" || (matrix?.[role] ? Object.values(matrix[role]).every((v) => v === "readonly" || v === "none") : false),
     allowedPaths,
-    canAccess: (path: string) => allowedPaths.includes(path),
   };
 }

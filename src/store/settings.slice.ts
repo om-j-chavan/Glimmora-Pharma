@@ -1,29 +1,8 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
-export interface OrgSettings {
-  companyName: string;
-  timezone: string;
-  dateFormat: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD";
-  regulatoryRegion: string;
-}
-
-export interface SiteConfig {
-  id: string;
-  name: string;
-  location: string;
-  gmpScope: string;
-  risk: "HIGH" | "MEDIUM" | "LOW";
-  status: "Active" | "Inactive";
-}
-
-export interface UserConfig {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  gxpSignatory: boolean;
-  status: "Active" | "Inactive";
-}
+// Re-exported for backwards compatibility — canonical source is auth.slice.ts
+export type { TenantSiteConfig as SiteConfig } from "./auth.slice";
+export type { TenantUserConfig as UserConfig } from "./auth.slice";
 
 export interface FrameworkSettings {
   p210: boolean;
@@ -52,22 +31,11 @@ export interface AGISettings {
 }
 
 interface SettingsState {
-  org: OrgSettings;
-  sites: SiteConfig[];
-  users: UserConfig[];
   frameworks: FrameworkSettings;
   agi: AGISettings;
 }
 
 const initialState: SettingsState = {
-  org: {
-    companyName: "",
-    timezone: "Asia/Kolkata",
-    dateFormat: "DD/MM/YYYY",
-    regulatoryRegion: "",
-  },
-  sites: [],
-  users: [],
   frameworks: {
     p210: false,
     p11: false,
@@ -98,36 +66,6 @@ const settingsSlice = createSlice({
   name: "settings",
   initialState,
   reducers: {
-    updateOrg(state, { payload }: PayloadAction<Partial<OrgSettings>>) {
-      state.org = { ...state.org, ...payload };
-    },
-    addSite(state, { payload }: PayloadAction<SiteConfig>) {
-      if (!state.sites.some((s) => s.id === payload.id)) {
-        state.sites.push(payload);
-      }
-    },
-    removeSite(state, { payload }: PayloadAction<string>) {
-      state.sites = state.sites.filter((s) => s.id !== payload);
-    },
-    updateSite(
-      state,
-      { payload }: PayloadAction<{ id: string; patch: Partial<SiteConfig> }>,
-    ) {
-      const site = state.sites.find((s) => s.id === payload.id);
-      if (site) Object.assign(site, payload.patch);
-    },
-    addUser(state, { payload }: PayloadAction<UserConfig>) {
-      if (!state.users.some((u) => u.id === payload.id)) {
-        state.users.push(payload);
-      }
-    },
-    updateUser(
-      state,
-      { payload }: PayloadAction<{ id: string; patch: Partial<UserConfig> }>,
-    ) {
-      const user = state.users.find((u) => u.id === payload.id);
-      if (user) Object.assign(user, payload.patch);
-    },
     toggleFramework(
       state,
       { payload }: PayloadAction<keyof FrameworkSettings>,
@@ -150,12 +88,6 @@ const settingsSlice = createSlice({
 });
 
 export const {
-  updateOrg,
-  addSite,
-  removeSite,
-  updateSite,
-  addUser,
-  updateUser,
   toggleFramework,
   updateAGI,
   toggleAgent,

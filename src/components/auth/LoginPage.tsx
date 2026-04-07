@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -14,10 +14,7 @@ import {
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { setCredentials } from "@/store/auth.slice";
-import { updateOrg, addSite } from "@/store/settings.slice";
-import { store } from "@/store";
-import type { AuthUser } from "@/store/auth.slice";
+import { setCredentials, type AuthUser } from "@/store/auth.slice";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
@@ -28,56 +25,58 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const MOCK_ACCOUNTS: Record<string, { password: string; user: AuthUser }> = {
-  "admin@pharmaglimmora.com": {
-    password: "Admin@123",
-    user: { id: "u-001", name: "System Administrator", email: "admin@pharmaglimmora.com", role: "super_admin", gxpSignatory: true, orgId: "org-1" },
-  },
-  "qa@pharmaglimmora.com": {
-    password: "QaHead@123",
-    user: { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", role: "qa_head", gxpSignatory: true, orgId: "org-1" },
-  },
-  "ra@pharmaglimmora.com": {
-    password: "RegAff@123",
-    user: { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", role: "regulatory_affairs", gxpSignatory: true, orgId: "org-1" },
-  },
-  "csv@pharmaglimmora.com": {
-    password: "CsvVal@123",
-    user: { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", role: "csv_val_lead", gxpSignatory: true, orgId: "org-1" },
-  },
-  "qc@pharmaglimmora.com": {
-    password: "QcLab@123",
-    user: { id: "u-005", name: "Dr. Nisha Rao", email: "qc@pharmaglimmora.com", role: "qc_lab_director", gxpSignatory: true, orgId: "org-1" },
-  },
-  "it@pharmaglimmora.com": {
-    password: "ItCdo@123",
-    user: { id: "u-006", name: "Vikram Singh", email: "it@pharmaglimmora.com", role: "it_cdo", gxpSignatory: false, orgId: "org-1" },
-  },
-  "ops@pharmaglimmora.com": {
-    password: "OpsHead@123",
-    user: { id: "u-007", name: "Suresh Kumar", email: "ops@pharmaglimmora.com", role: "operations_head", gxpSignatory: false, orgId: "org-1" },
-  },
-  "viewer@pharmaglimmora.com": {
-    password: "Viewer@123",
-    user: { id: "u-008", name: "View Only User", email: "viewer@pharmaglimmora.com", role: "viewer", gxpSignatory: false, orgId: "org-1" },
-  },
+  // Pharma Glimmora International
+  "admin@pharmaglimmora.com": { password: "Admin@123", user: { id: "u-001", name: "System Administrator", email: "admin@pharmaglimmora.com", role: "super_admin", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "qa@pharmaglimmora.com": { password: "QaHead@123", user: { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", role: "qa_head", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "ra@pharmaglimmora.com": { password: "RegAff@123", user: { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", role: "regulatory_affairs", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "csv@pharmaglimmora.com": { password: "CsvVal@123", user: { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", role: "csv_val_lead", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "qc@pharmaglimmora.com": { password: "QcLab@123", user: { id: "u-005", name: "Dr. Nisha Rao", email: "qc@pharmaglimmora.com", role: "qc_lab_director", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "it@pharmaglimmora.com": { password: "ItCdo@123", user: { id: "u-006", name: "Vikram Singh", email: "it@pharmaglimmora.com", role: "it_cdo", gxpSignatory: false, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "ops@pharmaglimmora.com": { password: "OpsHead@123", user: { id: "u-007", name: "Suresh Kumar", email: "ops@pharmaglimmora.com", role: "operations_head", gxpSignatory: false, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "viewer@pharmaglimmora.com": { password: "Viewer@123", user: { id: "u-008", name: "View Only User", email: "viewer@pharmaglimmora.com", role: "viewer", gxpSignatory: false, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  // ABC Pharma Ltd
+  "admin@abcpharma.com": { password: "Admin@123", user: { id: "u-abc-001", name: "ABC Admin", email: "admin@abcpharma.com", role: "super_admin", gxpSignatory: true, orgId: "org-2", tenantId: "tenant-abc" } },
+  "qa@abcpharma.com": { password: "QaHead@123", user: { id: "u-abc-002", name: "Dr. Sunita Rao", email: "qa@abcpharma.com", role: "qa_head", gxpSignatory: true, orgId: "org-2", tenantId: "tenant-abc" } },
+  // XYZ Biotech
+  "admin@xyzbiotech.com": { password: "Admin@123", user: { id: "u-xyz-001", name: "XYZ Admin", email: "admin@xyzbiotech.com", role: "super_admin", gxpSignatory: true, orgId: "org-3", tenantId: "tenant-xyz" } },
+  "qa@xyzbiotech.com": { password: "QaHead@123", user: { id: "u-xyz-002", name: "Dr. Arjun Das", email: "qa@xyzbiotech.com", role: "qa_head", gxpSignatory: true, orgId: "org-3", tenantId: "tenant-xyz" } },
 };
 
-const CRED_ROWS: [string, string, string, string][] = [
-  ["Super Admin", "admin@pharmaglimmora.com", "Admin@123", "#ef4444"],
-  ["QA Head", "qa@pharmaglimmora.com", "QaHead@123", "#a78bfa"],
-  ["Regulatory Affairs", "ra@pharmaglimmora.com", "RegAff@123", "#f472b6"],
-  ["CSV/Val Lead", "csv@pharmaglimmora.com", "CsvVal@123", "#38bdf8"],
-  ["QC/Lab Director", "qc@pharmaglimmora.com", "QcLab@123", "#10b981"],
-  ["IT/CDO", "it@pharmaglimmora.com", "ItCdo@123", "#2dd4bf"],
-  ["Operations Head", "ops@pharmaglimmora.com", "OpsHead@123", "#f59e0b"],
-  ["Viewer", "viewer@pharmaglimmora.com", "Viewer@123", "#94a3b8"],
+const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
+  {
+    org: "Pharma Glimmora International",
+    rows: [
+      ["Super Admin", "admin@pharmaglimmora.com", "Admin@123", "#ef4444"],
+      ["QA Head", "qa@pharmaglimmora.com", "QaHead@123", "#a78bfa"],
+      ["CSV/Val Lead", "csv@pharmaglimmora.com", "CsvVal@123", "#38bdf8"],
+      ["QC/Lab Director", "qc@pharmaglimmora.com", "QcLab@123", "#10b981"],
+      ["Viewer", "viewer@pharmaglimmora.com", "Viewer@123", "#94a3b8"],
+    ],
+  },
+  {
+    org: "ABC Pharma Ltd",
+    rows: [
+      ["Super Admin", "admin@abcpharma.com", "Admin@123", "#ef4444"],
+      ["QA Head", "qa@abcpharma.com", "QaHead@123", "#a78bfa"],
+    ],
+  },
+  {
+    org: "XYZ Biotech",
+    rows: [
+      ["Super Admin", "admin@xyzbiotech.com", "Admin@123", "#ef4444"],
+      ["QA Head", "qa@xyzbiotech.com", "QaHead@123", "#a78bfa"],
+    ],
+  },
 ];
 
 export function LoginPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
+  const tenants = useAppSelector((s) => s.auth.tenants);
   const [showCreds, setShowCreds] = useState(false);
+  const [loadingTenant, setLoadingTenant] = useState(false);
+  const [loadingName, setLoadingName] = useState("");
 
   const {
     register,
@@ -97,21 +96,12 @@ export function LoginPage() {
 
     dispatch(setCredentials({ token: "mock-token-" + Date.now(), user: account.user }));
 
-    dispatch(updateOrg({
-      companyName: "Novagen Pharma Ltd.",
-      timezone: "Asia/Kolkata",
-      dateFormat: "DD/MM/YYYY",
-      regulatoryRegion: "India — CDSCO + WHO GMP",
-    }));
+    const userTenant = tenants.find((t) => t.id === account.user.tenantId);
 
-    if (store.getState().settings.sites.length === 0) {
-      dispatch(addSite({ id: "site-1", name: "Mumbai API Manufacturing", location: "Mumbai, MH", gmpScope: "API / Bulk Drug", risk: "HIGH", status: "Active" }));
-      dispatch(addSite({ id: "site-2", name: "Pune Formulation Plant", location: "Pune, MH", gmpScope: "Solid Dosage", risk: "MEDIUM", status: "Active" }));
-      dispatch(addSite({ id: "site-3", name: "Hyderabad QC Lab", location: "Hyderabad, TS", gmpScope: "Testing & Release", risk: "MEDIUM", status: "Active" }));
-      dispatch(addSite({ id: "site-4", name: "Chennai Packaging", location: "Chennai, TN", gmpScope: "Secondary Packaging", risk: "LOW", status: "Active" }));
-    }
-
-    navigate("/site-picker");
+    setLoadingName(userTenant?.name ?? "workspace");
+    setLoadingTenant(true);
+    await new Promise((r) => setTimeout(r, 600));
+    navigate("/");
   };
 
   return (
@@ -132,12 +122,23 @@ export function LoginPage() {
           </p>
         </div>
 
+        {/* Loading tenant */}
+        {loadingTenant && (
+          <div className="flex flex-col items-center justify-center gap-3 py-8" role="status" aria-live="polite">
+            <div className="w-8 h-8 rounded-full border-2 border-[#0ea5e9] border-t-transparent animate-spin" />
+            <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+              Loading {loadingName}...
+            </p>
+          </div>
+        )}
+
         {/* Form */}
         <form
           onSubmit={handleSubmit(onSubmit)}
           aria-label="Sign in to Pharma Glimmora"
           noValidate
           className="w-full space-y-4 mt-8"
+          style={{ display: loadingTenant ? "none" : undefined }}
         >
           {/* Root error */}
           {errors.root && (
@@ -203,7 +204,7 @@ export function LoginPage() {
         </form>
 
         {/* Footer */}
-        <div className="flex items-center justify-between mt-8 pt-5 border-t border-[#0f2039]">
+        <div className="flex items-center justify-between mt-8 pt-5 border-t border-[#0f2039]" style={{ display: loadingTenant ? "none" : undefined }}>
           <div className="flex items-center gap-1.5 text-[11px] text-[#334155]">
             <Shield className="w-3 h-3" aria-hidden="true" />
             21 CFR Part 11 compliant
@@ -212,7 +213,7 @@ export function LoginPage() {
         </div>
 
         {/* Dev credentials toggle */}
-        <div className="mt-4">
+        <div className="mt-4" style={{ display: loadingTenant ? "none" : undefined }}>
           <button
             type="button"
             onClick={() => setShowCreds((v) => !v)}
@@ -248,35 +249,18 @@ export function LoginPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {CRED_ROWS.map(([role, email, pass, colour], i) => (
-                    <tr
-                      key={i}
-                      onClick={() => {
-                        setValue("email", email);
-                        setValue("password", pass);
-                        setShowCreds(false);
-                      }}
-                      className={clsx(
-                        "cursor-pointer transition-colors",
-                        isDark ? "hover:bg-[#0a1f38]" : "hover:bg-[#f8fafc]",
-                        i < CRED_ROWS.length - 1 && (isDark ? "border-b border-[#0f2039]" : "border-b border-[#f8fafc]"),
-                      )}
-                    >
-                      <td className="px-2.5 py-2">
-                        <span
-                          className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                          style={{ background: colour + "1a", color: colour }}
-                        >
-                          {role}
-                        </span>
-                      </td>
-                      <td className={clsx("px-2.5 py-2 font-mono", isDark ? "text-[#64748b]" : "text-[#94a3b8]")}>
-                        {email}
-                      </td>
-                      <td className={clsx("px-2.5 py-2 font-mono", isDark ? "text-[#64748b]" : "text-[#94a3b8]")}>
-                        {pass}
-                      </td>
-                    </tr>
+                  {CRED_ROWS.map((group) => (
+                    <Fragment key={group.org}>
+                      <tr><td colSpan={3} className={clsx("px-2.5 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider", isDark ? "text-[#0ea5e9]" : "text-[#0284c7]")}>{group.org}</td></tr>
+                      {group.rows.map(([role, email, pass, colour], i) => (
+                        <tr key={i} onClick={() => { setValue("email", email); setValue("password", pass); setShowCreds(false); }}
+                          className={clsx("cursor-pointer transition-colors", isDark ? "hover:bg-[#0a1f38]" : "hover:bg-[#f8fafc]", i < group.rows.length - 1 && (isDark ? "border-b border-[#0f2039]" : "border-b border-[#f8fafc]"))}>
+                          <td className="px-2.5 py-2"><span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: colour + "1a", color: colour }}>{role}</span></td>
+                          <td className={clsx("px-2.5 py-2 font-mono", isDark ? "text-[#64748b]" : "text-[#94a3b8]")}>{email}</td>
+                          <td className={clsx("px-2.5 py-2 font-mono", isDark ? "text-[#64748b]" : "text-[#94a3b8]")}>{pass}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
