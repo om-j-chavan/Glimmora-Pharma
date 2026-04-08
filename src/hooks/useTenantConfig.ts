@@ -24,6 +24,7 @@ export function useTenantConfig() {
     if (!userConfig) return allSites;
     if (userConfig.allSites) return allSites;
     if (currentUser?.role === "super_admin") return allSites;
+    if (currentUser?.role === "customer_admin") return allSites;
     if (currentUser?.role === "qa_head") return allSites;
     return allSites.filter((s) => userConfig.assignedSites.includes(s.id));
   })();

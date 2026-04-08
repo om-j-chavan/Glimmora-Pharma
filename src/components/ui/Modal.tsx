@@ -36,7 +36,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
       <div
         ref={panelRef}
@@ -46,7 +46,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
         aria-labelledby="modal-title"
         onClick={(e) => e.stopPropagation()}
         className={clsx(
-          "relative w-full max-w-130 rounded-xl overflow-hidden border shadow-2xl",
+          "relative w-full max-w-[680px] rounded-xl overflow-hidden border shadow-2xl",
           "bg-(--bg-surface) border-(--bg-border)",
           "animate-[popupIn_0.15s_ease-out]",
           "focus:outline-none",
@@ -64,7 +64,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
             <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
           </button>
         </div>
-        <div className="p-5 max-h-[70vh] overflow-y-auto">{children}</div>
+        <div className="p-5 max-h-[80vh] overflow-y-auto">{children}</div>
       </div>
     </div>
   );

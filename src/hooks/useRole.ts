@@ -5,6 +5,7 @@ export type UserRole = RoleKey;
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: "Super Admin",
+  customer_admin: "Customer Admin",
   qa_head: "QA Head",
   qc_lab_director: "QC/Lab Director",
   regulatory_affairs: "Regulatory Affairs",
@@ -71,7 +72,7 @@ export function useRole() {
     canEdit,
     canAccess,
     canSign: gxp && canEdit("capa"),
-    canCloseCapa: gxp && (role === "qa_head" || role === "super_admin"),
+    canCloseCapa: gxp && (role === "qa_head" || role === "super_admin" || role === "customer_admin"),
     canApproveDocs: gxp && canEdit("evidence"),
     canEditSettings: canEdit("settings"),
     canViewAGI: canAccessModule("agi"),

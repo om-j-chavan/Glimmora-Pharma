@@ -88,7 +88,8 @@ The selected color applies to: active nav item highlight, primary buttons, links
 | # | Role | Label | Primary responsibilities |
 |---|---|---|---|
 | 1 | `super_admin` | Super Admin | Full platform access, user management, AGI policy, all modules |
-| 2 | `qa_head` | QA Head | CAPA closure, QMS oversight, batch disposition, management review |
+| 2 | `customer_admin` | Customer Admin | Full platform access identical to Super Admin — manages tenant workspace |
+| 3 | `qa_head` | QA Head | CAPA closure, QMS oversight, batch disposition, management review |
 | 3 | `qc_lab_director` | QC/Lab Director | Lab compliance, OOS/OOT, data integrity controls, evidence |
 | 4 | `regulatory_affairs` | Regulatory Affairs | 483/WL support, agency commitments, response coordination |
 | 5 | `csv_val_lead` | CSV/Val Lead | Computerized systems validation, Part 11/Annex 11, CSV roadmap |

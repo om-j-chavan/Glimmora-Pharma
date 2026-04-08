@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/Badge";
 
 const ROLES = [
   { value: "super_admin", label: "Super Admin" },
+  { value: "customer_admin", label: "Customer Admin" },
   { value: "qa_head", label: "QA Head" },
   { value: "qc_lab_director", label: "QC/Lab Director" },
   { value: "regulatory_affairs", label: "Regulatory Affairs" },
@@ -29,10 +30,11 @@ const ROLES = [
   { value: "viewer", label: "Viewer" },
 ] as const;
 
-const ALL_SITES_ROLES = ["super_admin", "qa_head", "it_cdo"];
+const ALL_SITES_ROLES = ["super_admin", "customer_admin", "qa_head", "it_cdo"];
 
 const roleChip: Record<string, string> = {
   super_admin: "bg-(--danger-bg) text-(--danger)",
+  customer_admin: "bg-(--brand-muted) text-(--brand)",
   qa_head: "bg-(--info-bg) text-(--info)",
   qc_lab_director: "bg-(--success-bg) text-(--success)",
   regulatory_affairs: "bg-pink-500/12 text-pink-400",

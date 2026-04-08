@@ -106,7 +106,7 @@ export function SubscriptionPage() {
     isNearLimit(usage.findings, currentPlan.limits.findings);
 
   /* ── Access guard ── */
-  if (role !== "super_admin") {
+  if (role !== "super_admin" && role !== "customer_admin") {
     return (
       <main id="main-content" aria-label="Subscription management" className="w-full space-y-5">
         <div className={clsx("flex items-start gap-3 p-4 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>

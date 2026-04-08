@@ -2,7 +2,7 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 export type AccessLevel = "full" | "limited" | "readonly" | "none";
 
-export type RoleKey = "super_admin" | "qa_head" | "qc_lab_director" | "regulatory_affairs" | "csv_val_lead" | "it_cdo" | "operations_head" | "viewer";
+export type RoleKey = "super_admin" | "customer_admin" | "qa_head" | "qc_lab_director" | "regulatory_affairs" | "csv_val_lead" | "it_cdo" | "operations_head" | "viewer";
 
 export type ModuleKey = "dashboard" | "gap" | "capa" | "csv" | "fda483" | "evidence" | "agi" | "governance" | "settings";
 
@@ -10,6 +10,7 @@ export type PermissionMatrix = Record<RoleKey, Record<ModuleKey, AccessLevel>>;
 
 const DEFAULT_MATRIX: PermissionMatrix = {
   super_admin:        { dashboard: "full", gap: "full", capa: "full", csv: "full", fda483: "full", evidence: "full", agi: "full", governance: "full", settings: "full" },
+  customer_admin:     { dashboard: "full", gap: "full", capa: "full", csv: "full", fda483: "full", evidence: "full", agi: "full", governance: "full", settings: "full" },
   qa_head:            { dashboard: "full", gap: "full", capa: "full", csv: "full", fda483: "full", evidence: "full", agi: "full", governance: "full", settings: "limited" },
   qc_lab_director:    { dashboard: "readonly", gap: "full", capa: "limited", csv: "full", fda483: "readonly", evidence: "full", agi: "readonly", governance: "readonly", settings: "none" },
   regulatory_affairs: { dashboard: "readonly", gap: "full", capa: "limited", csv: "readonly", fda483: "full", evidence: "full", agi: "readonly", governance: "full", settings: "none" },

@@ -10,8 +10,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
 
-const ROLES: RoleKey[] = ["super_admin", "qa_head", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head", "viewer"];
-const ROLE_LABELS: Record<string, string> = { super_admin: "Super Admin", qa_head: "QA Head", qc_lab_director: "QC / Lab Director", regulatory_affairs: "Regulatory Affairs", csv_val_lead: "CSV / Val Lead", it_cdo: "IT / CDO", operations_head: "Operations Head", viewer: "Viewer" };
+const ROLES: RoleKey[] = ["super_admin", "customer_admin", "qa_head", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head", "viewer"];
+const ROLE_LABELS: Record<string, string> = { super_admin: "Super Admin", customer_admin: "Customer Admin", qa_head: "QA Head", qc_lab_director: "QC / Lab Director", regulatory_affairs: "Regulatory Affairs", csv_val_lead: "CSV / Val Lead", it_cdo: "IT / CDO", operations_head: "Operations Head", viewer: "Viewer" };
 const MODULES: { key: ModuleKey; label: string }[] = [
   { key: "dashboard", label: "Dashboard" }, { key: "gap", label: "Gap Assessment" }, { key: "capa", label: "CAPA" },
   { key: "csv", label: "CSV/CSA" }, { key: "fda483", label: "FDA 483" }, { key: "evidence", label: "Evidence" },
@@ -32,7 +32,7 @@ export function PermissionsTab() {
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
-  const isSuperAdmin = role === "super_admin";
+  const isSuperAdmin = role === "super_admin" || role === "customer_admin";
 
   const [savedPopup, setSavedPopup] = useState(false);
   const [resetConfirm, setResetConfirm] = useState<RoleKey | null>(null);
@@ -64,24 +64,24 @@ export function PermissionsTab() {
       {/* Matrix */}
       <div className="card overflow-hidden"><div className="overflow-x-auto">
         <table className="w-full" aria-label="Role permissions matrix"><caption className="sr-only">Role-based access levels \u2014 click to edit</caption>
-          <thead><tr className={clsx("border-b", isDark ? "border-[#1e3a5a]" : "border-[#e2e8f0]")}>
+          <thead><tr className={clsx("border-b", isDark ? "border-[#3d362c]" : "border-[#e8e4dd]")}>
             <th scope="col" className="text-left py-3 px-4 w-44 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Role</th>
             {MODULES.map((m) => <th key={m.key} scope="col" className="text-center py-3 px-2 text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{m.label}</th>)}
             {isSuperAdmin && <th scope="col" className="text-center py-3 px-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Reset</th>}
           </tr></thead>
           <tbody>
             {ROLES.map((rk) => (
-              <tr key={rk} className={clsx("border-b last:border-0", isDark ? "border-[#0f2039] hover:bg-[#071526]" : "border-[#f1f5f9] hover:bg-[#f8fafc]")}>
+              <tr key={rk} className={clsx("border-b last:border-0", isDark ? "border-[#3d362c] hover:bg-[#2e2820]" : "border-[#f5f3ef] hover:bg-[#faf9f7]")}>
                 <th scope="row" className="py-3 px-4">
                   <div className="flex items-center gap-2">
                     <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{ROLE_LABELS[rk]}</span>
                     {rk === user?.role && <Badge variant="blue">you</Badge>}
-                    {rk === "super_admin" && <Badge variant="green">platform</Badge>}
+                    {(rk === "super_admin" || rk === "customer_admin") && <Badge variant="green">platform</Badge>}
                   </div>
                 </th>
                 {MODULES.map((mod) => {
                   const level = (matrix?.[rk]?.[mod.key] ?? "none") as AccessLevel;
-                  const isLocked = rk === "super_admin";
+                  const isLocked = rk === "super_admin" || rk === "customer_admin";
                   const canToggle = isSuperAdmin && !isLocked;
                   const col = LEVEL_COLORS[level];
                   return (
@@ -96,7 +96,7 @@ export function PermissionsTab() {
                     </td>
                   );
                 })}
-                {isSuperAdmin && <td className="py-2 px-2 text-center">{rk !== "super_admin" && <Button variant="ghost" size="xs" icon={RotateCw} aria-label={`Reset ${ROLE_LABELS[rk]}`} onClick={() => setResetConfirm(rk)} />}</td>}
+                {isSuperAdmin && <td className="py-2 px-2 text-center">{rk !== "super_admin" && rk !== "customer_admin" && <Button variant="ghost" size="xs" icon={RotateCw} aria-label={`Reset ${ROLE_LABELS[rk]}`} onClick={() => setResetConfirm(rk)} />}</td>}
               </tr>
             ))}
           </tbody>
@@ -112,7 +112,7 @@ export function PermissionsTab() {
             { color: "#0ea5e9", title: "Read only", desc: "Can view all data in this module. Cannot create, edit or delete any record." },
             { color: "#334155", title: "No access", desc: "Module is hidden from sidebar. User cannot navigate to this screen." },
           ]).map((item) => (
-            <div key={item.title} className={clsx("flex items-start gap-3 p-3 rounded-lg", isDark ? "bg-[#071526]" : "bg-[#f8fafc]")}>
+            <div key={item.title} className={clsx("flex items-start gap-3 p-3 rounded-lg", isDark ? "bg-[#242019]" : "bg-[#faf9f7]")}>
               <div className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0" style={{ background: item.color }} />
               <div><p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{item.title}</p><p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>{item.desc}</p></div>
             </div>

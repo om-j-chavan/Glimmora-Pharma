@@ -63,11 +63,11 @@ export function SettingsPage() {
           hidden={active !== tab.id}
           className="focus:outline-none"
         >
-          {tab.id === "org" && <OrgTab readOnly={role !== "super_admin"} />}
-          {tab.id === "sites" && <SitesTab readOnly={role !== "super_admin"} />}
-          {tab.id === "users" && <UsersTab readOnly={role !== "super_admin"} />}
-          {tab.id === "frameworks" && <FrameworksTab readOnly={role !== "super_admin"} />}
-          {tab.id === "agi" && <AGIPolicyTab readOnly={role !== "super_admin" && role !== "it_cdo"} />}
+          {tab.id === "org" && <OrgTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+          {tab.id === "sites" && <SitesTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+          {tab.id === "users" && <UsersTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+          {tab.id === "frameworks" && <FrameworksTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+          {tab.id === "agi" && <AGIPolicyTab readOnly={role !== "super_admin" && role !== "customer_admin" && role !== "it_cdo"} />}
           {tab.id === "permissions" && <PermissionsTab />}
         </section>
       ))}

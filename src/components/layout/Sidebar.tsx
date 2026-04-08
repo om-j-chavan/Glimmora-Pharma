@@ -129,7 +129,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
     items: g.items.filter((item) => {
-      if (item.path === "subscription") return role === "super_admin";
+      if (item.path === "subscription") return role === "super_admin" || role === "customer_admin";
       if (item.path === "readiness") return true;
       return allowedPaths.includes(item.path);
     }),

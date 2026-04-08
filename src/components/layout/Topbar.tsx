@@ -14,6 +14,7 @@ import dayjs from "@/lib/dayjs";
 
 const roleBadge: Record<UserRole, { bg: string; color: string }> = {
   super_admin:        { bg: "rgba(239,68,68,0.12)",   color: "#ef4444" },
+  customer_admin:     { bg: "rgba(139,105,20,0.12)",  color: "#8b6914" },
   qa_head:            { bg: "rgba(139,92,246,0.12)",  color: "#a78bfa" },
   qc_lab_director:    { bg: "rgba(16,185,129,0.12)",  color: "#10b981" },
   regulatory_affairs: { bg: "rgba(236,72,153,0.12)",  color: "#f472b6" },
@@ -53,7 +54,7 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const selectedSite = useAppSelector((s) => s.auth.selectedSiteId);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { role } = useRole();
-  const isSuperAdmin = role === "super_admin";
+  const isSuperAdmin = role === "super_admin" || role === "customer_admin";
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)

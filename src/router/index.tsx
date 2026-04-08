@@ -10,6 +10,21 @@ export const router = createBrowserRouter([
     }),
   },
   {
+    path: "/admin",
+    loader: authLoader,
+    lazy: async () => ({
+      Component: (await import("@/modules/admin/AdminShell")).AdminShell,
+    }),
+    children: [
+      {
+        index: true,
+        lazy: async () => ({
+          Component: (await import("@/modules/admin/CustomerAccountsPage")).CustomerAccountsPage,
+        }),
+      },
+    ],
+  },
+  {
     path: "/site-picker",
     loader: authLoader,
     lazy: async () => ({

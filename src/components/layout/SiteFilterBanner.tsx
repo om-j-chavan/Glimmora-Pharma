@@ -12,7 +12,7 @@ export function SiteFilterBanner() {
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { allSites } = useTenantConfig();
 
-  if (user?.role !== "super_admin" || !selectedSiteId) return null;
+  if ((user?.role !== "super_admin" && user?.role !== "customer_admin") || !selectedSiteId) return null;
 
   const site = allSites.find((s) => s.id === selectedSiteId);
   if (!site) return null;

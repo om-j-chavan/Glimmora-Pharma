@@ -1,4 +1,4 @@
-import { useState, Fragment } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -19,14 +19,29 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
 const schema = z.object({
-  email: z.string().email("Enter a valid email"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  email: z.string().min(1, "Username or email is required"),
+  password: z.string().min(1, "Password is required"),
 });
 type FormValues = z.infer<typeof schema>;
+
+const SUPER_ADMIN_SEED: { username: string; password: string; user: AuthUser } = {
+  username: "superadmin",
+  password: "1",
+  user: {
+    id: "u-platform-sa",
+    name: "Platform Super Admin",
+    email: "superadmin",
+    role: "super_admin",
+    gxpSignatory: true,
+    orgId: "org-platform",
+    tenantId: "tenant-glimmora",
+  },
+};
 
 const MOCK_ACCOUNTS: Record<string, { password: string; user: AuthUser }> = {
   // Pharma Glimmora International
   "admin@pharmaglimmora.com": { password: "Admin@123", user: { id: "u-001", name: "System Administrator", email: "admin@pharmaglimmora.com", role: "super_admin", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
+  "custadmin@pharmaglimmora.com": { password: "CustAdmin@123", user: { id: "u-009", name: "Customer Administrator", email: "custadmin@pharmaglimmora.com", role: "customer_admin", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
   "qa@pharmaglimmora.com": { password: "QaHead@123", user: { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", role: "qa_head", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
   "ra@pharmaglimmora.com": { password: "RegAff@123", user: { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", role: "regulatory_affairs", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
   "csv@pharmaglimmora.com": { password: "CsvVal@123", user: { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", role: "csv_val_lead", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
@@ -47,6 +62,7 @@ const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
     org: "Pharma Glimmora International",
     rows: [
       ["Super Admin", "admin@pharmaglimmora.com", "Admin@123", "#ef4444"],
+      ["Customer Admin", "custadmin@pharmaglimmora.com", "CustAdmin@123", "#8b6914"],
       ["QA Head", "qa@pharmaglimmora.com", "QaHead@123", "#a78bfa"],
       ["CSV/Val Lead", "csv@pharmaglimmora.com", "CsvVal@123", "#38bdf8"],
       ["QC/Lab Director", "qc@pharmaglimmora.com", "QcLab@123", "#10b981"],
@@ -78,6 +94,17 @@ export function LoginPage() {
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [loadingName, setLoadingName] = useState("");
 
+  // Bootstrap: ensure platform super_admin account exists
+  useEffect(() => {
+    const key = SUPER_ADMIN_SEED.username.toLowerCase();
+    if (!MOCK_ACCOUNTS[key]) {
+      MOCK_ACCOUNTS[key] = {
+        password: SUPER_ADMIN_SEED.password,
+        user: SUPER_ADMIN_SEED.user,
+      };
+    }
+  }, []);
+
   const {
     register,
     handleSubmit,
@@ -87,21 +114,63 @@ export function LoginPage() {
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   const onSubmit = async (data: FormValues) => {
-    const account = MOCK_ACCOUNTS[data.email.toLowerCase().trim()];
+    const key = data.email.toLowerCase().trim();
 
-    if (!account || account.password !== data.password) {
-      setError("root", { message: "Invalid email or password" });
+    // 1. Check static mock accounts first
+    const mockAccount = MOCK_ACCOUNTS[key];
+    if (mockAccount && mockAccount.password === data.password) {
+      dispatch(setCredentials({ token: "mock-token-" + Date.now(), user: mockAccount.user }));
+
+      if (mockAccount.user.role === "super_admin") {
+        setLoadingName("Platform Admin");
+        setLoadingTenant(true);
+        await new Promise((r) => setTimeout(r, 600));
+        navigate("/admin");
+        return;
+      }
+
+      const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
+      setLoadingName(userTenant?.name ?? "workspace");
+      setLoadingTenant(true);
+      await new Promise((r) => setTimeout(r, 600));
+      navigate("/");
       return;
     }
 
-    dispatch(setCredentials({ token: "mock-token-" + Date.now(), user: account.user }));
+    // 2. Check dynamically created tenant users (username or email match)
+    for (const tenant of tenants) {
+      const tenantUser = tenant.config.users.find(
+        (u) => u.email.toLowerCase() === key || u.name.toLowerCase() === key,
+      );
+      if (tenantUser && tenantUser.status === "Active") {
+        const user: AuthUser = {
+          id: tenantUser.id,
+          name: tenantUser.name,
+          email: tenantUser.email,
+          role: tenantUser.role as AuthUser["role"],
+          gxpSignatory: tenantUser.gxpSignatory,
+          orgId: tenant.id,
+          tenantId: tenant.id,
+        };
+        dispatch(setCredentials({ token: "mock-token-" + Date.now(), user }));
 
-    const userTenant = tenants.find((t) => t.id === account.user.tenantId);
+        if (user.role === "super_admin") {
+          setLoadingName("Platform Admin");
+          setLoadingTenant(true);
+          await new Promise((r) => setTimeout(r, 600));
+          navigate("/admin");
+          return;
+        }
 
-    setLoadingName(userTenant?.name ?? "workspace");
-    setLoadingTenant(true);
-    await new Promise((r) => setTimeout(r, 600));
-    navigate("/");
+        setLoadingName(tenant.name);
+        setLoadingTenant(true);
+        await new Promise((r) => setTimeout(r, 600));
+        navigate("/");
+        return;
+      }
+    }
+
+    setError("root", { message: "Invalid username or password" });
   };
 
   return (
