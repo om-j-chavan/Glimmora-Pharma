@@ -61,6 +61,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: "csv-csa",    label: "CSV / CSA",  icon: Monitor },
       { path: "inspection", label: "Inspection", icon: Map },
+      { path: "readiness",  label: "Readiness",  icon: ShieldCheck },
       { path: "fda-483",    label: "FDA 483",    icon: Building2 },
     ],
   },
@@ -129,6 +130,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     ...g,
     items: g.items.filter((item) => {
       if (item.path === "subscription") return role === "super_admin";
+      if (item.path === "readiness") return true;
       return allowedPaths.includes(item.path);
     }),
   })).filter((g) => g.items.length > 0);
@@ -184,7 +186,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               whiteSpace: "nowrap",
             }}
           >
-            {activeSite?.name ?? "—"}
+            {activeSite?.name ?? "All sites"}
           </div>
         </div>
       </div>

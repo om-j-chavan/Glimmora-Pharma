@@ -8,8 +8,7 @@ export function authLoader() {
 }
 
 export function siteLoader() {
-  const { token, activeSiteId } = store.getState().auth;
+  const { token } = store.getState().auth;
   if (!token) return redirect("/login");
-  if (!activeSiteId) return redirect("/site-picker");
   return null;
 }

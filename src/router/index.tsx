@@ -101,6 +101,12 @@ export const router = createBrowserRouter([
         }),
       },
       {
+        path: "readiness",
+        lazy: async () => ({
+          Component: (await import("@/modules/readiness/ReadinessPage")).ReadinessPage,
+        }),
+      },
+      {
         path: "subscription",
         lazy: async () => ({
           Component: (await import("@/modules/subscription/SubscriptionPage")).SubscriptionPage,

@@ -11,6 +11,7 @@ import agiDriftReducer from "./agiDrift.slice";
 import raidReducer from "./raid.slice";
 import permissionsReducer from "./permissions.slice";
 import notificationsReducer from "./notifications.slice";
+import readinessReducer from "./readiness.slice";
 import { loadPersistedState, persistMiddleware } from "./persistence";
 
 const persisted = loadPersistedState();
@@ -29,6 +30,7 @@ export const store = configureStore({
     raid: raidReducer,
     permissions: permissionsReducer,
     notifications: notificationsReducer,
+    readiness: readinessReducer,
   },
   preloadedState: persisted,
   middleware: (getDefaultMiddleware) =>

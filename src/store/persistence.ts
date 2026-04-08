@@ -2,7 +2,7 @@ import type { Middleware } from "@reduxjs/toolkit";
 
 const STORAGE_KEY = "glimmora-state";
 const VERSION_KEY = "glimmora-version";
-const CURRENT_VERSION = "13";
+const CURRENT_VERSION = "14";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function loadPersistedState(): Record<string, any> | undefined {
@@ -39,6 +39,7 @@ export const persistMiddleware: Middleware = (store) => (next) => (action) => {
         raid: state.raid,
         permissions: state.permissions,
         notifications: state.notifications,
+        readiness: state.readiness,
       }),
     );
   } catch {
