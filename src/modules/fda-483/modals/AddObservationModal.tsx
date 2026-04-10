@@ -33,9 +33,9 @@ export function AddObservationModal({
   onClose,
   onSave,
 }: AddObservationModalProps) {
-  const form = useForm<ObsFormData>({
+  const form = useForm({
     resolver: zodResolver(obsSchema),
-    defaultValues: { severity: "Major", status: "Open" },
+    defaultValues: { number: defaultNumber, text: "", area: "", regulation: "", severity: "Major" as const, status: "Open" as const },
   });
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export function AddObservationModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingObs?.id]);
 
-  function handleSubmit(data: ObsFormData) {
+  function handleSubmit(data: any) {
     onSave(data);
     form.reset();
   }

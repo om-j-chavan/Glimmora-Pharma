@@ -142,7 +142,7 @@ export function GapRegisterTab({
           <aside aria-label="Finding detail" className="card lg:col-span-1">
             <div className="card-header">
               <span className="font-mono text-[12px] text-[#0ea5e9] font-semibold">{selectedFinding.id}</span>
-              <Button variant="ghost" size="xs" icon={() => <span className="w-3.5 h-3.5 flex items-center justify-center" aria-hidden="true">&times;</span>} aria-label="Close detail panel" onClick={() => onSelectFinding(null)} />
+              <Button variant="ghost" size="xs" aria-label="Close detail panel" onClick={() => onSelectFinding(null)}>&times;</Button>
             </div>
             <div className="card-body space-y-4 overflow-y-auto" style={{ maxHeight: 600 }}>
               <div className="flex gap-2 flex-wrap">{severityBadge(selectedFinding.severity)}{statusBadge(selectedFinding.status)}</div>

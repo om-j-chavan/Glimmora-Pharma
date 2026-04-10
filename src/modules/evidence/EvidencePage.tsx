@@ -77,19 +77,19 @@ export function EvidencePage() {
     const docs: EvidenceDocument[] = [...evidence.documents];
     findings.forEach((f) => {
       if (f.evidenceLink?.trim() && !docs.find((d) => d.reference === f.evidenceLink)) {
-        docs.push({ id: `finding-${f.id}`, title: f.requirement, reference: f.evidenceLink, type: "Record", area: (f.area as DocArea) || "QMS", findingId: f.id, version: "1.0", status: f.status === "Closed" ? "Current" : "Under Review", author: f.owner, effectiveDate: f.createdAt, tags: [f.framework, f.severity].filter(Boolean), complianceTags: [f.framework], createdAt: f.createdAt });
+        docs.push({ id: `finding-${f.id}`, title: f.requirement, reference: f.evidenceLink, type: "Record", area: (f.area as DocArea) || "QMS", findingId: f.id, version: "1.0", status: f.status === "Closed" ? "Current" : "Under Review", author: f.owner, effectiveDate: f.createdAt, tags: [f.framework, f.severity].filter(Boolean), complianceTags: [f.framework], createdAt: f.createdAt, tenantId: f.tenantId ?? "" });
       }
     });
     capas.forEach((c) => {
       c.evidenceLinks.forEach((link, i) => {
         if (!docs.find((d) => d.reference === link)) {
-          docs.push({ id: `capa-${c.id}-${i}`, title: `${c.id} \u2014 Evidence ${i + 1}`, reference: link, type: "Record", area: "QMS", capaId: c.id, version: "1.0", status: c.status === "Closed" ? "Current" : "Under Review", author: c.owner, effectiveDate: c.createdAt, tags: ["CAPA", c.source], complianceTags: [c.source], createdAt: c.createdAt });
+          docs.push({ id: `capa-${c.id}-${i}`, title: `${c.id} \u2014 Evidence ${i + 1}`, reference: link, type: "Record", area: "QMS", capaId: c.id, version: "1.0", status: c.status === "Closed" ? "Current" : "Under Review", author: c.owner, effectiveDate: c.createdAt, tags: ["CAPA", c.source], complianceTags: [c.source], createdAt: c.createdAt, tenantId: c.tenantId ?? "" });
         }
       });
     });
     fda483Events.forEach((e) => {
       if (e.responseDraft?.trim() && !docs.find((d) => d.eventId === e.id)) {
-        docs.push({ id: `event-${e.id}`, title: `${e.referenceNumber} \u2014 Response Draft`, reference: e.referenceNumber, type: "Record", area: "Regulatory", eventId: e.id, version: "1.0", status: e.status === "Response Submitted" ? "Current" : "Draft", author: "", effectiveDate: e.createdAt, tags: [e.type, e.agency], complianceTags: [e.type], createdAt: e.createdAt });
+        docs.push({ id: `event-${e.id}`, title: `${e.referenceNumber} \u2014 Response Draft`, reference: e.referenceNumber, type: "Record", area: "Regulatory", eventId: e.id, version: "1.0", status: e.status === "Response Submitted" ? "Current" : "Draft", author: "", effectiveDate: e.createdAt, tags: [e.type, e.agency], complianceTags: [e.type], createdAt: e.createdAt, tenantId: e.tenantId ?? "" });
       }
     });
     return docs;

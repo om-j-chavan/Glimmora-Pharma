@@ -84,7 +84,7 @@ export const router = createBrowserRouter([
         path: "inspection",
         loader: makeRoleLoader("inspection"),
         lazy: async () => ({
-          Component: (await import("@/modules/inspection/InspectionPage")).default,
+          Component: (await import("@/modules/inspection/InspectionPage")).InspectionPage,
         }),
       },
       {

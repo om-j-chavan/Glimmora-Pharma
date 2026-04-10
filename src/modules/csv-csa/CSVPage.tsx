@@ -152,7 +152,7 @@ export function CSVPage() {
   }
 
   function onActivitySave(data: ActivityForm) {
-    const newAct: RoadmapActivity = { ...data, id: crypto.randomUUID(), startDate: dayjs(data.startDate).utc().toISOString(), endDate: dayjs(data.endDate).utc().toISOString() };
+    const newAct: RoadmapActivity = { ...data, id: crypto.randomUUID(), startDate: dayjs(data.startDate).utc().toISOString(), endDate: dayjs(data.endDate).utc().toISOString(), tenantId: tenantId ?? "" };
     dispatch(addActivity({ ...newAct, tenantId: tenantId ?? "" }));
     auditLog({ action: "ROADMAP_ACTIVITY_ADDED", module: "csv-csa", recordId: newAct.id, newValue: newAct });
     setAddActivityOpen(false); setActivityAddedPopup(true);
@@ -220,7 +220,7 @@ export function CSVPage() {
       <div role="tabpanel" id="panel-detail" aria-labelledby="tab-detail" tabIndex={0} hidden={activeTab !== "detail"}>
         <SystemDetailTab
           selectedSystem={selectedSystem} systems={systems} roadmap={roadmap}
-          findings={findings} capas={capas}
+          findings={findings} capas={capas as any}
           sites={sites} users={users} timezone={timezone} dateFormat={dateFormat}
           isDark={isDark} isViewOnly={isViewOnly} role={role}
           showPart11={showPart11} showAnnex11={showAnnex11} showGAMP5={showGAMP5}

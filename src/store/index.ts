@@ -32,9 +32,10 @@ export const store = configureStore({
     notifications: notificationsReducer,
     readiness: readinessReducer,
   },
-  preloadedState: persisted,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  preloadedState: persisted as any,
   middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(persistMiddleware),
+    getDefaultMiddleware({ serializableCheck: false }).concat(persistMiddleware),
 });
 
 export type RootState = ReturnType<typeof store.getState>;
