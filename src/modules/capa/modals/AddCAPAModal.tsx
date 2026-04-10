@@ -13,6 +13,7 @@ const capaSchema = z.object({
   source: z.enum(["483", "Internal Audit", "Deviation", "Complaint", "OOS", "Change Control", "Gap Assessment"]),
   risk: z.enum(["Critical", "Major", "Minor"]),
   owner: z.string().min(1, "Owner required"),
+  siteId: z.string().min(1, "Site required"),
   dueDate: z.string().min(1, "Due date required"),
   description: z.string().min(10, "Description required"),
   rcaMethod: z.enum(["5 Why", "Fishbone", "Fault Tree", "Other"]).optional(),
@@ -27,13 +28,14 @@ interface AddCAPAModalProps {
   onClose: () => void;
   onSave: (data: CAPAForm) => void;
   users: UserConfig[];
+  sites: SiteConfig[];
   isDark: boolean;
 }
 
-export function AddCAPAModal({ isOpen, onClose, onSave, users, isDark }: AddCAPAModalProps) {
+export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, isDark }: AddCAPAModalProps) {
   const { register: reg, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<CAPAForm>({
     resolver: zodResolver(capaSchema),
-    defaultValues: { source: "Gap Assessment", risk: "Major", effectivenessCheck: true, diGate: false },
+    defaultValues: { source: "Gap Assessment", risk: "Major", siteId: "", effectivenessCheck: true, diGate: false },
   });
 
   function onSubmit(data: CAPAForm) {
@@ -53,6 +55,7 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, isDark }: AddCAPA
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Source <span className="text-(--danger)">*</span></p><Controller name="source" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "483", label: "FDA 483" }, { value: "Internal Audit", label: "Internal Audit" }, { value: "Deviation", label: "Deviation" }, { value: "Complaint", label: "Complaint" }, { value: "OOS", label: "OOS" }, { value: "Change Control", label: "Change Control" }, { value: "Gap Assessment", label: "Gap Assessment" }]} />} /></div>
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Risk <span className="text-(--danger)">*</span></p><Controller name="risk" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />} /></div>
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Owner <span className="text-(--danger)">*</span></p><Controller name="owner" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} />{errors.owner && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.owner.message}</p>}</div>
+          <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p><Controller name="siteId" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select site" width="w-full" options={sites.filter((s) => s.status === "Active").map((s) => ({ value: s.id, label: s.name }))} />} />{errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}</div>
           <div><label htmlFor="capa-due" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Due date <span className="text-(--danger)">*</span></label><input id="capa-due" type="date" className="input text-[12px]" {...reg("dueDate")} />{errors.dueDate && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.dueDate.message}</p>}</div>
           <div className="col-span-2"><label htmlFor="capa-desc" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Description <span className="text-(--danger)">*</span></label><textarea id="capa-desc" rows={3} className="input text-[12px] resize-none" placeholder="Describe the issue..." {...reg("description")} />{errors.description && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.description.message}</p>}</div>
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">RCA method (optional)</p><Controller name="rcaMethod" control={control} render={({ field }) => <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select method..." width="w-full" options={[{ value: "5 Why", label: "5 Why" }, { value: "Fishbone", label: "Fishbone" }, { value: "Fault Tree", label: "Fault Tree" }, { value: "Other", label: "Other" }]} />} /></div>

@@ -64,6 +64,8 @@ export function useRole() {
     .map(([, path]) => path);
 
   const gxp = user?.gxpSignatory === true;
+  const isSuperAdmin = role === "super_admin";
+  const isCustomerAdmin = role === "customer_admin";
 
   return {
     role,
@@ -72,12 +74,15 @@ export function useRole() {
     canEdit,
     canAccess,
     canSign: gxp && canEdit("capa"),
-    canCloseCapa: gxp && (role === "qa_head" || role === "super_admin" || role === "customer_admin"),
+    canCloseCapa: gxp && (role === "qa_head" || isSuperAdmin || isCustomerAdmin),
     canApproveDocs: gxp && canEdit("evidence"),
     canEditSettings: canEdit("settings"),
     canViewAGI: canAccessModule("agi"),
     canView483: canAccessModule("fda483"),
     isViewOnly: role === "viewer" || (matrix?.[role] ? Object.values(matrix[role]).every((v) => v === "readonly" || v === "none") : false),
+    isSuperAdmin,
+    isCustomerAdmin,
+    canManageUsers: isSuperAdmin || isCustomerAdmin,
     allowedPaths,
   };
 }

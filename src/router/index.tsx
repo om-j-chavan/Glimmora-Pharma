@@ -121,12 +121,6 @@ export const router = createBrowserRouter([
           Component: (await import("@/modules/readiness/ReadinessPage")).ReadinessPage,
         }),
       },
-      {
-        path: "subscription",
-        lazy: async () => ({
-          Component: (await import("@/modules/subscription/SubscriptionPage")).SubscriptionPage,
-        }),
-      },
     ],
   },
 ]);

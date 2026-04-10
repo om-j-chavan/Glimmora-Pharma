@@ -24,12 +24,12 @@ export function SettingsPage() {
   const { role } = useRole();
 
   return (
-    <div className="flex-1 bg-(--bg-base)">
-      {/* Tab bar */}
+    <div className="flex flex-col -m-3 sm:-m-4 lg:-m-5 h-full min-h-0">
+      {/* Tab bar — pinned at top, never scrolls */}
       <div
         role="tablist"
         aria-label="Settings sections"
-        className="sticky top-0 z-10 flex border-b border-(--bg-border) mb-4 gap-0 bg-(--bg-base)"
+        className="flex shrink-0 border-b border-(--bg-border) bg-(--bg-base) px-3 sm:px-4 lg:px-5 overflow-x-auto"
       >
         {TABS.map((tab) => (
           <button
@@ -52,25 +52,27 @@ export function SettingsPage() {
         ))}
       </div>
 
-      {/* Tab panels */}
-      {TABS.map((tab) => (
-        <section
-          key={tab.id}
-          role="tabpanel"
-          id={`tab-panel-${tab.id}`}
-          aria-labelledby={`tab-btn-${tab.id}`}
-          tabIndex={0}
-          hidden={active !== tab.id}
-          className="focus:outline-none"
-        >
-          {tab.id === "org" && <OrgTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-          {tab.id === "sites" && <SitesTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-          {tab.id === "users" && <UsersTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-          {tab.id === "frameworks" && <FrameworksTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-          {tab.id === "agi" && <AGIPolicyTab readOnly={role !== "super_admin" && role !== "customer_admin" && role !== "it_cdo"} />}
-          {tab.id === "permissions" && <PermissionsTab />}
-        </section>
-      ))}
+      {/* Tab content — scrolls independently */}
+      <div className="flex-1 overflow-y-auto min-h-0 p-3 sm:p-4 lg:p-5">
+        {TABS.map((tab) => (
+          <section
+            key={tab.id}
+            role="tabpanel"
+            id={`tab-panel-${tab.id}`}
+            aria-labelledby={`tab-btn-${tab.id}`}
+            tabIndex={0}
+            hidden={active !== tab.id}
+            className="focus:outline-none"
+          >
+            {tab.id === "org" && <OrgTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+            {tab.id === "sites" && <SitesTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+            {tab.id === "users" && <UsersTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+            {tab.id === "frameworks" && <FrameworksTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
+            {tab.id === "agi" && <AGIPolicyTab readOnly={role !== "super_admin" && role !== "customer_admin" && role !== "it_cdo"} />}
+            {tab.id === "permissions" && <PermissionsTab />}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

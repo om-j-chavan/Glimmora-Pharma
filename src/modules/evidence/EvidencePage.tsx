@@ -63,6 +63,7 @@ export function EvidencePage() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { findings, capas, systems, fda483Events, evidenceDocs, evidencePacks, tenantId } = useTenantData();
+  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const evidence = { documents: evidenceDocs, packs: evidencePacks };
   const { org, users } = useTenantConfig();
   const timezone = org.timezone;
@@ -172,7 +173,7 @@ export function EvidencePage() {
     if (data.type === "Audit Trail") complianceTags.push("ALCOA+");
     if (data.type === "Validation") complianceTags.push("GAMP 5");
     const tagsList = data.tags ? data.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
-    dispatch(addDocument({ ...data, id, tenantId: tenantId ?? "", complianceTags, tags: tagsList, effectiveDate: dayjs(data.effectiveDate).utc().toISOString(), expiryDate: data.expiryDate ? dayjs(data.expiryDate).utc().toISOString() : undefined, systemId: data.systemId || undefined, findingId: data.findingId || undefined, capaId: data.capaId || undefined, url: data.url || undefined, createdAt: "" }));
+    dispatch(addDocument({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", complianceTags, tags: tagsList, effectiveDate: dayjs(data.effectiveDate).utc().toISOString(), expiryDate: data.expiryDate ? dayjs(data.expiryDate).utc().toISOString() : undefined, systemId: data.systemId || undefined, findingId: data.findingId || undefined, capaId: data.capaId || undefined, url: data.url || undefined, createdAt: "" }));
     auditLog({ action: "EVIDENCE_DOCUMENT_ADDED", module: "evidence", recordId: id, newValue: data });
     setAddDocOpen(false); setAddedPopup(true); docForm.reset();
   }

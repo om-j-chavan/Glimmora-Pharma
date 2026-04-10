@@ -18,7 +18,6 @@ import {
   FlaskConical,
   Cpu,
   SlidersHorizontal,
-  CreditCard,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -26,7 +25,6 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useActiveSite } from "@/hooks/useActiveSite";
-import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { logout } from "@/store/auth.slice";
 
 interface NavItem {
@@ -80,7 +78,6 @@ const NAV_GROUPS: NavGroup[] = [
     icon: SlidersHorizontal,
     items: [
       { path: "settings", label: "Settings", icon: Settings },
-      { path: "subscription", label: "Subscription", icon: CreditCard },
     ],
   },
 ];
@@ -98,11 +95,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   const activeSite = useActiveSite();
-  const { allowedPaths, role } = useRole();
+  const { allowedPaths } = useRole();
   const capas = useAppSelector((s) => s.capa.items);
   const openCapaCount = capas.filter((c) => c.status === "Open" || c.status === "In Progress").length;
   const { setupNeeded, completedCount, totalSteps } = useSetupStatus();
-  const { tenantPlan } = useTenantConfig();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(location.pathname)])
@@ -129,7 +125,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
     items: g.items.filter((item) => {
-      if (item.path === "subscription") return role === "super_admin" || role === "customer_admin";
       if (item.path === "readiness") return true;
       return allowedPaths.includes(item.path);
     }),
@@ -143,7 +138,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <aside
       aria-label="Application navigation"
-      className="w-60 min-h-screen flex flex-col shrink-0"
+      className="w-60 h-screen flex flex-col shrink-0"
       style={{ background: "var(--bg-surface)", borderRight: "1px solid var(--bg-border)" }}
     >
       {/* ── Logo ── */}
@@ -268,11 +263,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                                   {openCapaCount}
                                 </span>
                               )}
-                              {item.path === "subscription" && tenantPlan === "trial" && (
-                                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#f59e0b] text-white min-w-[18px] text-center">
-                                  Trial
-                                </span>
-                              )}
                               {item.path === "settings" && setupNeeded && (
                                 <span
                                   className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#0ea5e9] text-white min-w-[32px] text-center"
@@ -318,7 +308,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             color: "var(--text-muted)",
           }}
         >
-          <span>© 2025 Glimmora International</span>
+          <span>© {new Date().getFullYear()} Glimmora International</span>
           <span>v2.0</span>
         </div>
       </div>

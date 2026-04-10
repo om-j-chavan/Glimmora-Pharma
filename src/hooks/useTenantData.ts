@@ -16,7 +16,14 @@ export function useTenantData() {
     }),
   );
 
-  const capas = useAppSelector((s) => (s.capa?.items ?? []).filter((c) => !c.tenantId || c.tenantId === tenantId));
+  const capas = useAppSelector((s) =>
+    (s.capa?.items ?? []).filter((c) => {
+      if (c.tenantId && c.tenantId !== tenantId) return false;
+      if (c.siteId && !accessibleSiteIds.includes(c.siteId)) return false;
+      if (selectedSiteId && c.siteId !== selectedSiteId) return false;
+      return true;
+    }),
+  );
 
   const systems = useAppSelector((s) =>
     (s.systems?.items ?? []).filter((sys) => {
@@ -27,7 +34,15 @@ export function useTenantData() {
     }),
   );
 
-  const roadmap = useAppSelector((s) => (s.systems?.roadmap ?? []).filter((r) => !r.tenantId || r.tenantId === tenantId));
+  // Roadmap: filter via system's siteId
+  const systemIds = new Set(systems.map((s) => s.id));
+  const roadmap = useAppSelector((s) =>
+    (s.systems?.roadmap ?? []).filter((r) => {
+      if (r.tenantId && r.tenantId !== tenantId) return false;
+      if (selectedSiteId && r.systemId && !systemIds.has(r.systemId)) return false;
+      return true;
+    }),
+  );
 
   const fda483Events = useAppSelector((s) =>
     (s.fda483?.items ?? []).filter((e) => {
@@ -38,9 +53,26 @@ export function useTenantData() {
     }),
   );
 
-  const evidenceDocs = useAppSelector((s) => (s.evidence?.documents ?? []).filter((d) => !d.tenantId || d.tenantId === tenantId));
+  const evidenceDocs = useAppSelector((s) =>
+    (s.evidence?.documents ?? []).filter((d) => {
+      if (d.tenantId && d.tenantId !== tenantId) return false;
+      if (d.siteId && !accessibleSiteIds.includes(d.siteId)) return false;
+      if (selectedSiteId && d.siteId && d.siteId !== selectedSiteId) return false;
+      return true;
+    }),
+  );
+
   const evidencePacks = useAppSelector((s) => (s.evidence?.packs ?? []).filter((p) => !p.tenantId || p.tenantId === tenantId));
-  const raidItems = useAppSelector((s) => (s.raid?.items ?? []).filter((r) => !r.tenantId || r.tenantId === tenantId));
+
+  const raidItems = useAppSelector((s) =>
+    (s.raid?.items ?? []).filter((r) => {
+      if (r.tenantId && r.tenantId !== tenantId) return false;
+      if (r.siteId && !accessibleSiteIds.includes(r.siteId)) return false;
+      if (selectedSiteId && r.siteId !== selectedSiteId) return false;
+      return true;
+    }),
+  );
+
   const driftAlerts = useAppSelector((s) => (s.agiDrift?.alerts ?? []).filter((a) => !a.tenantId || a.tenantId === tenantId));
   const driftMetrics = useAppSelector((s) => s.agiDrift?.metrics ?? []);
 

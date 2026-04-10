@@ -101,7 +101,7 @@ export function AGIPage() {
 
   function handleResolve() {
     if (!selectedAlert || !resolveAction.trim()) return;
-    dispatch(resolveAlert({ id: selectedAlert.id, action: resolveAction.trim() }));
+    dispatch(resolveAlert({ id: selectedAlert.id, action: resolveAction.trim(), resolvedAt: dayjs().toISOString() }));
     auditLog({ action: "AGI_DRIFT_ALERT_RESOLVED", module: "agi-console", recordId: selectedAlert.id, newValue: { action: resolveAction } });
     setResolveOpen(false); setSelectedAlert(null); setResolveAction(""); setResolvedPopup(true);
   }

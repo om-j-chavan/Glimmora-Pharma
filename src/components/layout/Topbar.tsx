@@ -1,4 +1,4 @@
-import { HelpCircle, Calendar, Clock, Globe, X, Menu } from "lucide-react";
+import { HelpCircle, Calendar, Clock, Globe, X, Menu, MapPin } from "lucide-react";
 import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -51,10 +51,11 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const { org, tenantName, allSites } = useTenantConfig();
   const companyName = org.companyName || tenantName;
   const user = useAppSelector((s) => s.auth.user);
-  const selectedSite = useAppSelector((s) => s.auth.selectedSiteId);
+  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const { role } = useRole();
-  const isSuperAdmin = role === "super_admin" || role === "customer_admin";
+  const { role, isSuperAdmin } = useRole();
+
+  const selectedSite = selectedSiteId ? allSites.find((s) => s.id === selectedSiteId) ?? null : null;
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
@@ -96,12 +97,12 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
         <DateTimeBlock />
       </div>
 
-      {/* ── Site selector (super admin, hidden below lg) ── */}
+      {/* ── Site selector — Super Admin gets dropdown; others see read-only label only when a specific site is selected ── */}
       {isSuperAdmin && allSites.length > 0 && (
         <div className="hidden lg:flex items-center gap-1.5 shrink-0" aria-label="Site filter">
           <Globe size={14} aria-hidden="true" style={{ color: "var(--text-muted)" }} />
           <select
-            value={selectedSite ?? ""}
+            value={selectedSiteId ?? ""}
             onChange={(e) => dispatch(setSelectedSite(e.target.value || null))}
             className={clsx(
               "text-[12px] font-medium border rounded-lg px-2.5 py-1.5 cursor-pointer outline-none transition-colors",
@@ -114,7 +115,7 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
               <option key={site.id} value={site.id}>{site.name}</option>
             ))}
           </select>
-          {selectedSite && (
+          {selectedSiteId && (
             <button
               type="button"
               onClick={() => dispatch(setSelectedSite(null))}
@@ -126,6 +127,16 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
               Clear
             </button>
           )}
+        </div>
+      )}
+      {!isSuperAdmin && selectedSite && (
+        <div
+          className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+          style={{ background: isDark ? "var(--bg-elevated)" : "#f1f5f9", color: "var(--text-secondary)" }}
+          aria-label={`Current site: ${selectedSite.name}`}
+        >
+          <MapPin size={12} aria-hidden="true" className="shrink-0" style={{ color: "var(--text-muted)" }} />
+          <span className="font-medium">{selectedSite.name}</span>
         </div>
       )}
 

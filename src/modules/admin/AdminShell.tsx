@@ -143,7 +143,7 @@ export function AdminShell() {
                 color: "var(--sidebar-text-muted)",
               }}
             >
-              <span>© 2025 Glimmora International</span>
+              <span>© {new Date().getFullYear()} Glimmora International</span>
               <span>v2.0</span>
             </div>
           </div>

@@ -1,19 +1,24 @@
 import type { ReadinessCard, Playbook, Simulation } from "@/store/readiness.slice";
 
 export const MOCK_READINESS_CARDS: ReadinessCard[] = [
+  // People lane
   { id: "rc-001", tenantId: "tenant-glimmora", lane: "People", bucket: "Immediate", action: "Brief QA Head and key SMEs on inspection protocol", owner: "u-002", status: "In Progress", agiRisk: "High", dueDate: "2026-03-20T00:00:00Z" },
   { id: "rc-002", tenantId: "tenant-glimmora", lane: "People", bucket: "Immediate", action: "Assign front-room and back-room roles", owner: "u-002", status: "Not Started", agiRisk: "High", dueDate: "2026-03-22T00:00:00Z" },
-  { id: "rc-003", tenantId: "tenant-glimmora", lane: "Process", bucket: "Immediate", action: "Review and update CAPA SOP \u2014 close FIND-001 gaps", owner: "u-002", status: "In Progress", agiRisk: "High", dueDate: "2026-03-25T00:00:00Z" },
-  { id: "rc-004", tenantId: "tenant-glimmora", lane: "Data", bucket: "Immediate", action: "Remediate LIMS audit trail \u2014 all 12 modules", owner: "u-005", status: "In Progress", agiRisk: "High", dueDate: "2026-03-31T00:00:00Z" },
-  { id: "rc-005", tenantId: "tenant-glimmora", lane: "Systems", bucket: "Immediate", action: "Complete LIMS Part 11 gap remediation", owner: "u-004", status: "In Progress", agiRisk: "High", dueDate: "2026-03-31T00:00:00Z" },
-  { id: "rc-006", tenantId: "tenant-glimmora", lane: "Documentation", bucket: "Immediate", action: "Compile DIL evidence kit \u2014 Chennai QC Lab", owner: "u-003", status: "Not Started", agiRisk: "High", dueDate: "2026-03-28T00:00:00Z" },
-  { id: "rc-007", tenantId: "tenant-glimmora", lane: "People", bucket: "31-60 days", action: "Run mock inspection simulation \u2014 Chennai site", owner: "u-002", status: "Not Started", agiRisk: "Medium", dueDate: "2026-04-15T00:00:00Z" },
-  { id: "rc-008", tenantId: "tenant-glimmora", lane: "Process", bucket: "31-60 days", action: "Complete ICH Q9 risk assessment updates", owner: "u-002", status: "Not Started", agiRisk: "Medium", dueDate: "2026-04-10T00:00:00Z" },
-  { id: "rc-009", tenantId: "tenant-glimmora", lane: "Systems", bucket: "31-60 days", action: "CDS e-signature validation OQ completion", owner: "u-005", status: "Not Started", agiRisk: "High", dueDate: "2026-04-15T00:00:00Z" },
-  { id: "rc-010", tenantId: "tenant-glimmora", lane: "Documentation", bucket: "31-60 days", action: "Update SOP-QC-042 and distribute for training", owner: "u-005", status: "Not Started", agiRisk: "Medium", dueDate: "2026-04-20T00:00:00Z" },
-  { id: "rc-011", tenantId: "tenant-glimmora", lane: "People", bucket: "61-90 days", action: "Leadership briefing \u2014 risk posture and communications", owner: "u-007", status: "Not Started", agiRisk: "Low", dueDate: "2026-05-15T00:00:00Z" },
-  { id: "rc-012", tenantId: "tenant-glimmora", lane: "Systems", bucket: "61-90 days", action: "MES validation project kickoff", owner: "u-004", status: "Not Started", agiRisk: "High", dueDate: "2026-06-01T00:00:00Z" },
-  { id: "rc-013", tenantId: "tenant-glimmora", lane: "Process", bucket: "61-90 days", action: "Effectiveness check \u2014 closed CAPAs from Q1", owner: "u-002", status: "Not Started", agiRisk: "Medium", dueDate: "2026-05-30T00:00:00Z" },
+  { id: "rc-003", tenantId: "tenant-glimmora", lane: "People", bucket: "31-60 days", action: "Run mock inspection simulation \u2014 Chennai site", owner: "u-002", status: "Not Started", agiRisk: "Medium", dueDate: "2026-04-15T00:00:00Z" },
+  { id: "rc-004", tenantId: "tenant-glimmora", lane: "People", bucket: "61-90 days", action: "Leadership briefing \u2014 risk posture and communications", owner: "u-007", status: "Not Started", agiRisk: "Low", dueDate: "2026-05-15T00:00:00Z" },
+  // Process lane
+  { id: "rc-005", tenantId: "tenant-glimmora", lane: "Process", bucket: "Immediate", action: "Review and update CAPA SOP \u2014 close FIND-001 gaps", owner: "u-002", status: "In Progress", agiRisk: "High", dueDate: "2026-03-25T00:00:00Z" },
+  { id: "rc-006", tenantId: "tenant-glimmora", lane: "Process", bucket: "31-60 days", action: "Complete ICH Q9 risk assessment updates", owner: "u-003", status: "Not Started", agiRisk: "Medium", dueDate: "2026-04-10T00:00:00Z" },
+  { id: "rc-007", tenantId: "tenant-glimmora", lane: "Process", bucket: "61-90 days", action: "Effectiveness check \u2014 closed CAPAs from Q1", owner: "u-004", status: "Not Started", agiRisk: "Medium", dueDate: "2026-05-30T00:00:00Z" },
+  // Data lane
+  { id: "rc-008", tenantId: "tenant-glimmora", lane: "Data", bucket: "Immediate", action: "Remediate LIMS audit trail \u2014 all 12 modules", owner: "u-005", status: "In Progress", agiRisk: "High", dueDate: "2026-03-31T00:00:00Z" },
+  // Systems lane
+  { id: "rc-009", tenantId: "tenant-glimmora", lane: "Systems", bucket: "Immediate", action: "Complete LIMS Part 11 gap remediation", owner: "u-004", status: "In Progress", agiRisk: "High", dueDate: "2026-03-31T00:00:00Z" },
+  { id: "rc-010", tenantId: "tenant-glimmora", lane: "Systems", bucket: "31-60 days", action: "CDS e-signature validation OQ completion", owner: "u-005", status: "Not Started", agiRisk: "High", dueDate: "2026-04-15T00:00:00Z" },
+  { id: "rc-011", tenantId: "tenant-glimmora", lane: "Systems", bucket: "61-90 days", action: "MES validation project kickoff", owner: "u-004", status: "Not Started", agiRisk: "High", dueDate: "2026-06-01T00:00:00Z" },
+  // Documentation lane
+  { id: "rc-012", tenantId: "tenant-glimmora", lane: "Documentation", bucket: "Immediate", action: "Compile DIL evidence kit \u2014 Chennai QC Lab", owner: "u-003", status: "Not Started", agiRisk: "High", dueDate: "2026-03-28T00:00:00Z" },
+  { id: "rc-013", tenantId: "tenant-glimmora", lane: "Documentation", bucket: "31-60 days", action: "Update SOP-QC-042 and distribute for training", owner: "u-005", status: "Not Started", agiRisk: "Medium", dueDate: "2026-04-20T00:00:00Z" },
   { id: "rc-014", tenantId: "tenant-glimmora", lane: "Documentation", bucket: "61-90 days", action: "Finalise inspection readiness pack \u2014 all sites", owner: "u-003", status: "Not Started", agiRisk: "Medium", dueDate: "2026-06-01T00:00:00Z" },
 ];
 
@@ -25,7 +30,7 @@ export const MOCK_PLAYBOOKS: Playbook[] = [
 ];
 
 export const MOCK_SIMULATIONS: Simulation[] = [
-  { id: "sim-001", tenantId: "tenant-glimmora", title: "Chennai QC Lab Mock Inspection", type: "Mock Inspection", scheduledAt: "2026-04-15T09:00:00Z", duration: 180, participants: ["u-002", "u-005", "u-003"], status: "Scheduled" },
-  { id: "sim-002", tenantId: "tenant-glimmora", title: "DIL Drill \u2014 Evidence Retrieval", type: "DIL Drill", scheduledAt: "2026-04-10T14:00:00Z", duration: 60, participants: ["u-003", "u-005"], status: "Scheduled" },
+  { id: "sim-001", tenantId: "tenant-glimmora", title: "DIL Drill \u2014 Evidence Retrieval", type: "DIL Drill", scheduledAt: "2026-04-10T19:30:00Z", duration: 60, participants: ["u-003", "u-005"], status: "Scheduled" },
+  { id: "sim-002", tenantId: "tenant-glimmora", title: "Chennai QC Lab Mock Inspection", type: "Mock Inspection", scheduledAt: "2026-04-15T14:30:00Z", duration: 180, participants: ["u-002", "u-005", "u-003"], status: "Scheduled" },
   { id: "sim-003", tenantId: "tenant-glimmora", title: "SME Q&A Practice \u2014 QC Lab", type: "SME Q&A", scheduledAt: "2026-03-28T10:00:00Z", duration: 90, participants: ["u-005"], status: "Completed", score: 78, notes: "Good factual accuracy. Work on conciseness. Avoid volunteering extra information." },
 ];

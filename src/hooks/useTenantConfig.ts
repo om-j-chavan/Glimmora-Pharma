@@ -1,5 +1,6 @@
 import { useAppSelector } from "./useAppSelector";
-import type { TenantOrgConfig, TenantSiteConfig, TenantUserConfig } from "@/store/auth.slice";
+import type { TenantOrgConfig, TenantSiteConfig, TenantUserConfig, SubscriptionPlan } from "@/store/auth.slice";
+import dayjs from "@/lib/dayjs";
 
 const DEFAULT_ORG: TenantOrgConfig = {
   companyName: "Pharma Glimmora",
@@ -29,6 +30,26 @@ export function useTenantConfig() {
     return allSites.filter((s) => userConfig.assignedSites.includes(s.id));
   })();
 
+  // ── Subscription helpers ──
+  const subscriptionPlans: SubscriptionPlan[] = tenant?.subscriptionPlans ?? [];
+  const activePlan = subscriptionPlans.find((p) => p.status === "Active") ?? null;
+
+  const daysRemaining = activePlan
+    ? Math.max(0, dayjs.utc(activePlan.endDate).diff(dayjs(), "day"))
+    : null;
+
+  const isExpired = activePlan
+    ? dayjs().isAfter(dayjs.utc(activePlan.endDate))
+    : true;
+
+  const isNearExpiry = daysRemaining !== null && daysRemaining <= 14 && daysRemaining > 0;
+
+  const maxAccounts = activePlan?.maxAccounts ?? 0;
+  const usedAccounts = users.length;
+
+  const accountsRemaining = maxAccounts === -1 ? -1 : Math.max(0, maxAccounts - usedAccounts);
+  const isAtAccountLimit = maxAccounts !== -1 && usedAccounts >= maxAccounts;
+
   return {
     tenantId: currentTenantId ?? "",
     tenantName: tenant?.name ?? "Pharma Glimmora",
@@ -38,5 +59,15 @@ export function useTenantConfig() {
     allSites,
     users,
     userConfig,
+    // subscription
+    subscriptionPlans,
+    activePlan,
+    daysRemaining,
+    isExpired,
+    isNearExpiry,
+    maxAccounts,
+    usedAccounts,
+    accountsRemaining,
+    isAtAccountLimit,
   };
 }

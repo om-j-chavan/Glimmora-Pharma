@@ -1,4 +1,3 @@
-import { useNavigate } from "react-router";
 import { Popup } from "@/components/ui/Popup";
 
 interface PlanLimitPopupProps {
@@ -11,10 +10,9 @@ interface PlanLimitPopupProps {
 }
 
 export function PlanLimitPopup({ isOpen, onClose, resource, plan, limit, count }: PlanLimitPopupProps) {
-  const navigate = useNavigate();
   const desc = count !== undefined
-    ? `Your ${plan} plan allows up to ${limit} ${resource}${limit !== 1 ? "s" : ""}. You currently have ${count}. Upgrade your plan to add more.`
-    : `Your ${plan} plan allows up to ${limit} ${resource}${limit !== 1 ? "s" : ""}. Upgrade to add more.`;
+    ? `Your ${plan} plan allows up to ${limit} ${resource}${limit !== 1 ? "s" : ""}. You currently have ${count}. Contact Pharma Glimmora to increase your limit.`
+    : `Your ${plan} plan allows up to ${limit} ${resource}${limit !== 1 ? "s" : ""}. Contact Pharma Glimmora to increase your limit.`;
 
   return (
     <Popup
@@ -24,8 +22,7 @@ export function PlanLimitPopup({ isOpen, onClose, resource, plan, limit, count }
       description={desc}
       onDismiss={onClose}
       actions={[
-        { label: "View plans", style: "primary", onClick: () => { onClose(); navigate("/subscription"); } },
-        { label: "Cancel", style: "ghost", onClick: onClose },
+        { label: "Dismiss", style: "primary", onClick: onClose },
       ]}
     />
   );

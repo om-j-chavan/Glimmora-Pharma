@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useAppDispatch } from "./useAppDispatch";
 import { useAppSelector } from "./useAppSelector";
 import { useTenantData } from "./useTenantData";
-import { usePlanLimits } from "./usePlanLimits";
 import { addNotification, type AppNotification, type NotificationType } from "@/store/notifications.slice";
 import dayjs from "@/lib/dayjs";
 
@@ -15,7 +14,6 @@ export function useNotificationEngine() {
   const { findings, capas, systems, fda483Events, raidItems } = useTenantData();
   const currentUser = useAppSelector((s) => s.auth.user);
   const existing = useAppSelector((s) => s.notifications.items);
-  const { tenantPlan, isAtLimit, isNearLimit, getCount, getLimit } = usePlanLimits();
 
   function push(n: AppNotification) {
     if (!existing.some((e) => e.id === n.id)) dispatch(addNotification(n));
@@ -100,18 +98,4 @@ export function useNotificationEngine() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raidItems.length]);
 
-  // Plan limits
-  useEffect(() => {
-    if (isNearLimit("users") && !isAtLimit("users")) {
-      const rem = getLimit("users") - getCount("users");
-      push(make("plan-users-near", "plan_limit_near", "Approaching user limit", `${rem} slot${rem !== 1 ? "s" : ""} remaining on ${tenantPlan} plan.`, "/subscription"));
-    }
-    if (isAtLimit("users")) push(make("plan-users-limit", "plan_limit_reached", "User limit reached", "Upgrade to add more team members.", "/subscription"));
-    if (isNearLimit("sites") && !isAtLimit("sites")) {
-      const rem = getLimit("sites") - getCount("sites");
-      push(make("plan-sites-near", "plan_limit_near", "Approaching site limit", `${rem} site slot${rem !== 1 ? "s" : ""} remaining.`, "/subscription"));
-    }
-    if (isAtLimit("sites")) push(make("plan-sites-limit", "plan_limit_reached", "Site limit reached", "Upgrade to add more sites.", "/subscription"));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantPlan]);
 }

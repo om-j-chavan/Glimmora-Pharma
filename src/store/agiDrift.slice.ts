@@ -46,12 +46,12 @@ const agiDriftSlice = createSlice({
       const item = state.alerts.find((a) => a.id === payload.id);
       if (item) Object.assign(item, payload.patch);
     },
-    resolveAlert(state, { payload }: PayloadAction<{ id: string; action: string }>) {
+    resolveAlert(state, { payload }: PayloadAction<{ id: string; action: string; resolvedAt: string }>) {
       const item = state.alerts.find((a) => a.id === payload.id);
       if (item) {
         item.status = "Resolved";
         item.action = payload.action;
-        item.resolvedAt = "";
+        item.resolvedAt = payload.resolvedAt;
       }
     },
   },

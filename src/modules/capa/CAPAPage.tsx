@@ -51,7 +51,7 @@ export function CAPAPage() {
   const { canSign, canCloseCapa, isViewOnly } = useRole();
 
   const { capas, findings, tenantId } = useTenantData();
-  const { org, users } = useTenantConfig();
+  const { org, users, allSites } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
@@ -181,9 +181,10 @@ export function CAPAPage() {
 
   function handleSignClose(data: { meaning: string }) {
     if (!selectedCAPA) return;
-    dispatch(closeCAPA({ id: selectedCAPA.id, closedBy: user?.id ?? "" }));
+    const now = dayjs().toISOString();
+    dispatch(closeCAPA({ id: selectedCAPA.id, closedBy: user?.id ?? "", closedAt: now }));
     if (selectedCAPA.findingId) { dispatch(closeFinding(selectedCAPA.findingId)); auditLog({ action: "FINDING_CLOSED_VIA_CAPA", module: "capa", recordId: selectedCAPA.findingId, newValue: { closedByCapaId: selectedCAPA.id } }); }
-    auditLog({ action: "CAPA_CLOSED", module: "capa", recordId: selectedCAPA.id, newValue: { closedBy: user?.id, meaning: data.meaning } });
+    auditLog({ action: "CAPA_CLOSED", module: "capa", recordId: selectedCAPA.id, newValue: { closedBy: user?.id, closedAt: now, meaning: data.meaning } });
     setSignOpen(false);
     setSignedPopup(true);
     setSelectedCAPA(null);
@@ -231,7 +232,7 @@ export function CAPAPage() {
       {activeTab === "tracker" && (
         <CAPATrackerTab
           capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
-          isDark={isDark} isViewOnly={isViewOnly} users={users} user={user}
+          isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
           timezone={timezone} dateFormat={dateFormat} canSign={canSign} canCloseCapa={canCloseCapa}
           onAddOpen={() => setAddOpen(true)} onEditOpen={() => setEditModalOpen(true)}
           onSignOpen={() => setSignOpen(true)} onSubmitForReview={handleSubmitForReview}
@@ -252,7 +253,7 @@ export function CAPAPage() {
       )}
 
       {/* Modals */}
-      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={users} isDark={isDark} />
+      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={users} sites={allSites} isDark={isDark} />
       <EditCAPAModal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} onSave={handleEditSave} capa={selectedCAPA} users={users} isDark={isDark} />
       <SignCloseModal isOpen={signOpen} onClose={() => setSignOpen(false)} onSign={handleSignClose} capa={selectedCAPA} isDark={isDark} />
 

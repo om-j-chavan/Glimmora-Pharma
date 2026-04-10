@@ -7,6 +7,7 @@ export type RAIDPriority = "Critical" | "High" | "Medium" | "Low";
 export interface RAIDItem {
   id: string;
   tenantId: string;
+  siteId: string;
   type: RAIDType;
   title: string;
   description: string;

@@ -10,11 +10,14 @@ import {
   LogIn,
   Building2,
   ChevronDown,
+  MapPin,
+  ArrowRight,
+  Check,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { setCredentials, type AuthUser } from "@/store/auth.slice";
+import { setCredentials, setActiveSite, setSelectedSite, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
@@ -51,9 +54,11 @@ const MOCK_ACCOUNTS: Record<string, { password: string; user: AuthUser }> = {
   "viewer@pharmaglimmora.com": { password: "Viewer@123", user: { id: "u-008", name: "View Only User", email: "viewer@pharmaglimmora.com", role: "viewer", gxpSignatory: false, orgId: "org-1", tenantId: "tenant-glimmora" } },
   // ABC Pharma Ltd
   "admin@abcpharma.com": { password: "Admin@123", user: { id: "u-abc-001", name: "ABC Admin", email: "admin@abcpharma.com", role: "super_admin", gxpSignatory: true, orgId: "org-2", tenantId: "tenant-abc" } },
+  "custadmin@abcpharma.com": { password: "CustAdmin@123", user: { id: "u-cust-abc", name: "ABC Customer Admin", email: "custadmin@abcpharma.com", role: "customer_admin", gxpSignatory: false, orgId: "org-2", tenantId: "tenant-abc" } },
   "qa@abcpharma.com": { password: "QaHead@123", user: { id: "u-abc-002", name: "Dr. Sunita Rao", email: "qa@abcpharma.com", role: "qa_head", gxpSignatory: true, orgId: "org-2", tenantId: "tenant-abc" } },
   // XYZ Biotech
   "admin@xyzbiotech.com": { password: "Admin@123", user: { id: "u-xyz-001", name: "XYZ Admin", email: "admin@xyzbiotech.com", role: "super_admin", gxpSignatory: true, orgId: "org-3", tenantId: "tenant-xyz" } },
+  "custadmin@xyzbiotech.com": { password: "CustAdmin@123", user: { id: "u-cust-xyz", name: "XYZ Customer Admin", email: "custadmin@xyzbiotech.com", role: "customer_admin", gxpSignatory: false, orgId: "org-3", tenantId: "tenant-xyz" } },
   "qa@xyzbiotech.com": { password: "QaHead@123", user: { id: "u-xyz-002", name: "Dr. Arjun Das", email: "qa@xyzbiotech.com", role: "qa_head", gxpSignatory: true, orgId: "org-3", tenantId: "tenant-xyz" } },
 };
 
@@ -73,6 +78,7 @@ const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
     org: "ABC Pharma Ltd",
     rows: [
       ["Super Admin", "admin@abcpharma.com", "Admin@123", "#ef4444"],
+      ["Customer Admin", "custadmin@abcpharma.com", "CustAdmin@123", "#8b6914"],
       ["QA Head", "qa@abcpharma.com", "QaHead@123", "#a78bfa"],
     ],
   },
@@ -80,6 +86,7 @@ const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
     org: "XYZ Biotech",
     rows: [
       ["Super Admin", "admin@xyzbiotech.com", "Admin@123", "#ef4444"],
+      ["Customer Admin", "custadmin@xyzbiotech.com", "CustAdmin@123", "#8b6914"],
       ["QA Head", "qa@xyzbiotech.com", "QaHead@123", "#a78bfa"],
     ],
   },
@@ -93,6 +100,11 @@ export function LoginPage() {
   const [showCreds, setShowCreds] = useState(false);
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [loadingName, setLoadingName] = useState("");
+
+  // Inline site picker step — shown when user has 2+ assigned sites
+  const [step, setStep] = useState<"login" | "site-picker">("login");
+  const [sitesForPicker, setSitesForPicker] = useState<TenantSiteConfig[]>([]);
+  const [pickerSiteId, setPickerSiteId] = useState("");
 
   // Bootstrap: ensure platform super_admin account exists
   useEffect(() => {
@@ -113,6 +125,54 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
+  /**
+   * Get the sites a user can access. allSites / customer_admin / qa_head
+   * see all active sites; others see only their assignedSites.
+   */
+  const getAccessibleSites = (user: AuthUser, tenant: Tenant | undefined): TenantSiteConfig[] => {
+    const tenantSites = tenant?.config?.sites?.filter((s) => s.status === "Active") ?? [];
+    const tenantUser = tenant?.config?.users?.find((u) => u.id === user.id);
+
+    if (user.role === "customer_admin" || tenantUser?.allSites === true) {
+      return tenantSites;
+    }
+
+    return tenantUser
+      ? tenantSites.filter((s) => tenantUser.assignedSites.includes(s.id))
+      : tenantSites;
+  };
+
+  /**
+   * Non-super-admin login: ALWAYS show the site picker so the user
+   * explicitly chooses which site they are working from today.
+   * Only skip if there are zero sites configured.
+   */
+  const finishLogin = async (
+    user: AuthUser,
+    tenant: Tenant | undefined,
+    displayName: string,
+  ) => {
+    const accessible = getAccessibleSites(user, tenant);
+
+    if (accessible.length === 0) {
+      // No sites at all — go straight to dashboard
+      dispatch(setSelectedSite(null));
+      const anySite = tenant?.config?.sites?.[0];
+      if (anySite) dispatch(setActiveSite(anySite.id));
+      setLoadingName(displayName);
+      setLoadingTenant(true);
+      await new Promise((r) => setTimeout(r, 600));
+      navigate("/");
+      return;
+    }
+
+    // Show site picker for ALL non-super-admin users
+    setLoadingTenant(false);
+    setSitesForPicker(accessible);
+    setPickerSiteId("");
+    setStep("site-picker");
+  };
+
   const onSubmit = async (data: FormValues) => {
     const key = data.email.toLowerCase().trim();
 
@@ -130,10 +190,7 @@ export function LoginPage() {
       }
 
       const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
-      setLoadingName(userTenant?.name ?? "workspace");
-      setLoadingTenant(true);
-      await new Promise((r) => setTimeout(r, 600));
-      navigate("/");
+      await finishLogin(mockAccount.user, userTenant, userTenant?.name ?? "workspace");
       return;
     }
 
@@ -162,10 +219,7 @@ export function LoginPage() {
           return;
         }
 
-        setLoadingName(tenant.name);
-        setLoadingTenant(true);
-        await new Promise((r) => setTimeout(r, 600));
-        navigate("/");
+        await finishLogin(user, tenant, tenant.name);
         return;
       }
     }
@@ -173,22 +227,35 @@ export function LoginPage() {
     setError("root", { message: "Invalid username or password" });
   };
 
+  /** Called from the inline site picker "Continue" button. */
+  const handlePickerContinue = async () => {
+    if (!pickerSiteId) return;
+    dispatch(setActiveSite(pickerSiteId));
+    dispatch(setSelectedSite(pickerSiteId));
+    setLoadingName("workspace");
+    setLoadingTenant(true);
+    await new Promise((r) => setTimeout(r, 600));
+    navigate("/");
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-white px-4">
 
       <div className="w-full max-w-[420px] pt-12 pb-10 px-10">
-        {/* Logo */}
-        <div className="flex flex-col items-start mb-8">
-          <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-5 bg-[#f0a500]">
-            <Shield className="w-7 h-7 text-white" aria-hidden="true" />
+        {/* Logo — hidden during site picker and loading */}
+        {step === "login" && !loadingTenant && (
+          <div className="flex flex-col items-start mb-8">
+            <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-5 bg-[#f0a500]">
+              <Shield className="w-7 h-7 text-white" aria-hidden="true" />
+            </div>
+            <h1 className="text-[28px] font-extrabold text-[#302d29] tracking-tight mb-1">
+              Welcome Back !
+            </h1>
+            <p className="text-[14px] text-[#7a736a]">
+              Log into your account
+            </p>
           </div>
-          <h1 className="text-[28px] font-extrabold text-[#302d29] tracking-tight mb-1">
-            Welcome Back !
-          </h1>
-          <p className="text-[14px] text-[#7a736a]">
-            Log into your account
-          </p>
-        </div>
+        )}
 
         {/* Loading tenant */}
         {loadingTenant && (
@@ -200,13 +267,78 @@ export function LoginPage() {
           </div>
         )}
 
+        {/* ── Inline site picker step ── */}
+        {step === "site-picker" && !loadingTenant && (
+          <div className="space-y-5" role="region" aria-label="Select your site">
+            {/* Logo */}
+            <div className="flex flex-col items-start mb-2">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-[#f0a500]">
+                <Shield className="w-6 h-6 text-white" aria-hidden="true" />
+              </div>
+              <h2 className="text-[20px] font-bold text-[#302d29] mb-0.5">Select your site</h2>
+              <p className="text-[13px] text-[#7a736a]">Choose the facility you are working from today.</p>
+            </div>
+
+            <div className="space-y-1.5 max-h-[280px] overflow-y-auto" role="listbox" aria-label="Available sites">
+              {sitesForPicker.map((site) => {
+                const isSelected = pickerSiteId === site.id;
+                const riskColor = site.risk === "HIGH" ? "#ef4444" : site.risk === "MEDIUM" ? "#f59e0b" : "#10b981";
+                return (
+                  <button
+                    key={site.id}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => setPickerSiteId(site.id)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all duration-150 outline-none"
+                    style={{
+                      background: isSelected ? "rgba(14,165,233,0.08)" : "transparent",
+                      border: isSelected ? "1px solid rgba(14,165,233,0.3)" : "1px solid #e8e4dd",
+                    }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-[#302d29] truncate">{site.name}</p>
+                      <p className="text-[11px] text-[#7a736a] mt-0.5 truncate">
+                        {site.location} &middot; {site.gmpScope}
+                      </p>
+                    </div>
+                    <span
+                      className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                      style={{ background: riskColor + "1a", color: riskColor }}
+                    >
+                      {site.risk}
+                    </span>
+                    <div
+                      className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ border: isSelected ? "2px solid #0ea5e9" : "2px solid #e8e4dd" }}
+                    >
+                      {isSelected && <Check className="w-2.5 h-2.5 text-[#0ea5e9]" aria-hidden="true" />}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <Button
+              variant="primary"
+              fullWidth
+              icon={ArrowRight}
+              iconPosition="right"
+              disabled={!pickerSiteId}
+              onClick={handlePickerContinue}
+            >
+              Continue
+            </Button>
+          </div>
+        )}
+
         {/* Form */}
         <form
           onSubmit={handleSubmit(onSubmit)}
           aria-label="Sign in to Pharma Glimmora"
           noValidate
           className="w-full space-y-4 mt-8"
-          style={{ display: loadingTenant ? "none" : undefined }}
+          style={{ display: loadingTenant || step === "site-picker" ? "none" : undefined }}
         >
           {/* Root error */}
           {errors.root && (
@@ -272,7 +404,7 @@ export function LoginPage() {
         </form>
 
         {/* Footer */}
-        <div className="flex items-center justify-between mt-8 pt-5 border-t border-[#e8e4dd]" style={{ display: loadingTenant ? "none" : undefined }}>
+        <div className="flex items-center justify-between mt-8 pt-5 border-t border-[#e8e4dd]" style={{ display: loadingTenant || step === "site-picker" ? "none" : undefined }}>
           <div className="flex items-center gap-1.5 text-[11px] text-[#a39e96]">
             <Shield className="w-3 h-3" aria-hidden="true" />
             21 CFR Part 11 compliant
@@ -281,7 +413,7 @@ export function LoginPage() {
         </div>
 
         {/* Dev credentials toggle */}
-        <div className="mt-4" style={{ display: loadingTenant ? "none" : undefined }}>
+        <div className="mt-4" style={{ display: loadingTenant || step === "site-picker" ? "none" : undefined }}>
           <button
             type="button"
             onClick={() => setShowCreds((v) => !v)}

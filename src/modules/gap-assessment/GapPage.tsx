@@ -222,7 +222,7 @@ export function GapPage() {
       rca: "", rcaMethod: undefined, correctiveActions: "",
       effectivenessCheck: finding.severity !== "Minor",
       evidenceLinks: [], diGate: ["p11", "annex11"].includes(finding.framework), createdAt: "",
-      tenantId: tenantId ?? "",
+      tenantId: tenantId ?? "", siteId: finding.siteId,
     }));
     auditLog({ action: "CAPA_RAISED_FROM_FINDING", module: "gap-assessment", recordId: finding.id, newValue: { capaId, findingId: finding.id } });
     setSelectedFinding((prev) => prev ? { ...prev, capaId } : null);

@@ -7,6 +7,7 @@ export type DocArea = "Manufacturing" | "QC Lab" | "Warehouse" | "Utilities" | "
 export interface EvidenceDocument {
   id: string;
   tenantId: string;
+  siteId: string;
   title: string;
   reference: string;
   type: DocType;

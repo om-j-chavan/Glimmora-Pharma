@@ -42,6 +42,8 @@ export function DashboardPage() {
   const [sevFilter, setSevFilter] = useState("");
 
   const cutoff = timeFilter === "all" ? null : dayjs().subtract(parseInt(timeFilter), "day");
+
+  // Apply ALL filters to findings
   const filteredFindings = findings.filter((f) => {
     if (siteFilter && f.siteId !== siteFilter) return false;
     if (sevFilter && f.severity !== sevFilter) return false;
@@ -49,34 +51,71 @@ export function DashboardPage() {
     return true;
   });
 
-  /* ── KPIs ── */
-  const closedCAPAs = capas.filter((c) => c.status === "Closed");
-  const openCAPAs = capas.filter((c) => c.status !== "Closed");
+  // Apply site + date filters to CAPAs
+  const filteredCAPAs = capas.filter((c) => {
+    if (siteFilter && c.siteId !== siteFilter) return false;
+    if (cutoff && c.createdAt && dayjs.utc(c.createdAt).isBefore(cutoff)) return false;
+    return true;
+  });
+
+  // Apply site filter to systems
+  const filteredSystems = systems.filter((s) => {
+    if (siteFilter && s.siteId !== siteFilter) return false;
+    return true;
+  });
+
+  /* ── KPIs — all derived from filtered data ── */
+  const closedCAPAs = filteredCAPAs.filter((c) => c.status === "Closed");
+  const openCAPAs = filteredCAPAs.filter((c) => c.status !== "Closed");
   const overdueCAPAs = openCAPAs.filter((c) => dayjs.utc(c.dueDate).isBefore(dayjs()));
   const criticalCount = filteredFindings.filter((f) => f.severity === "Critical" && f.status !== "Closed").length;
   const capaOverdueRate = openCAPAs.length === 0 ? null : Math.round((overdueCAPAs.length / openCAPAs.length) * 100);
-  const csvHighRisk = systems.filter((s) => s.riskLevel === "HIGH" || s.validationStatus === "Overdue" || s.part11Status === "Non-Compliant" || s.annex11Status === "Non-Compliant").length;
+  const csvHighRisk = filteredSystems.filter((s) => s.riskLevel === "HIGH" || s.validationStatus === "Overdue" || s.part11Status === "Non-Compliant" || s.annex11Status === "Non-Compliant").length;
   const trainingCompliance = users.length === 0 ? null : Math.round((users.filter((u) => u.status === "Active").length / users.length) * 100);
 
   const readinessScore = (() => {
-    if (findings.length === 0 && capas.length === 0) return null;
+    if (filteredFindings.length === 0 && filteredCAPAs.length === 0) return null;
     const sc: number[] = [];
-    if (capas.length > 0) { const ot = closedCAPAs.filter((c) => !dayjs.utc(c.closedAt || c.dueDate).isAfter(dayjs.utc(c.dueDate))); sc.push(closedCAPAs.length === 0 ? 50 : Math.round((ot.length / closedCAPAs.length) * 100)); }
-    if (findings.length > 0) sc.push(Math.max(0, 100 - criticalCount * 15 - findings.filter((f) => f.status !== "Closed").length * 3));
-    if (systems.length > 0) sc.push(Math.round((systems.filter((s) => s.part11Status === "Compliant" || s.part11Status === "N/A").length / systems.length) * 100));
-    return sc.length === 0 ? null : Math.round(sc.reduce((a, b) => a + b, 0) / sc.length);
+    if (filteredCAPAs.length > 0) { const ot = closedCAPAs.filter((c) => !dayjs.utc(c.closedAt || c.dueDate).isAfter(dayjs.utc(c.dueDate))); sc.push(closedCAPAs.length === 0 ? 50 : Math.round((ot.length / closedCAPAs.length) * 100)); }
+    if (filteredFindings.length > 0) sc.push(Math.max(0, 100 - criticalCount * 15 - filteredFindings.filter((f) => f.status !== "Closed").length * 3));
+    if (filteredSystems.length > 0) sc.push(Math.round((filteredSystems.filter((s) => s.part11Status === "Compliant" || s.part11Status === "N/A").length / filteredSystems.length) * 100));
+    let base = sc.length === 0 ? null : Math.round(sc.reduce((a, b) => a + b, 0) / sc.length);
+    if (base !== null && overdueCAPAs.length >= 2) base = Math.min(base, 60);
+    else if (base !== null && overdueCAPAs.length >= 1) base = Math.min(base, 75);
+    return base;
   })();
 
-  /* ── Chart data ── */
-  const trendData = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mf = findings.filter((f) => f.createdAt && dayjs.utc(f.createdAt).format("MMM YYYY") === mo.format("MMM YYYY")); m.push({ month: mo.format("MMM"), Critical: mf.filter((f) => f.severity === "Critical").length, Major: mf.filter((f) => f.severity === "Major").length, Minor: mf.filter((f) => f.severity === "Minor").length }); } return m; })();
+  function getReadinessLabel(score: number | null, overdueCapaCount: number): { label: string; color: string } {
+    if (score === null) return { label: "Log findings to calculate", color: "#64748b" };
+    if (overdueCapaCount >= 2) return { label: "Not ready", color: "#ef4444" };
+    if (overdueCapaCount >= 1) return { label: "Needs attention", color: "#f59e0b" };
+    if (score >= 95) return { label: "Inspection ready \u2713", color: "#10b981" };
+    if (score >= 80) return { label: "Nearing ready", color: "#f59e0b" };
+    if (score >= 60) return { label: "Needs attention", color: "#f59e0b" };
+    return { label: "Not ready", color: "#ef4444" };
+  }
+  const rl = getReadinessLabel(readinessScore, overdueCAPAs.length);
+
+  /* ── Chart data — uses filtered findings so site/severity/date filters apply ── */
+  const trendData = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mf = filteredFindings.filter((f) => f.createdAt && dayjs.utc(f.createdAt).format("MMM YYYY") === mo.format("MMM YYYY")); m.push({ month: mo.format("MMM"), Critical: mf.filter((f) => f.severity === "Critical").length, Major: mf.filter((f) => f.severity === "Major").length, Minor: mf.filter((f) => f.severity === "Minor").length }); } return m; })();
   const trendEmpty = trendData.every((d) => d.Critical + d.Major + d.Minor === 0);
 
-  /* ── Heatmap ── */
+  /* ── Heatmap — factors in findings, CAPAs, and systems ── */
   const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
   function getAreaScore(area: string, siteId?: string) {
     const af = filteredFindings.filter((f) => f.area === area && (!siteId || f.siteId === siteId) && f.status !== "Closed");
     const cr = af.filter((f) => f.severity === "Critical").length;
-    return { score: af.length === 0 ? 100 : Math.max(0, 100 - cr * 20 - af.length * 5), open: af.length, critical: cr };
+    const mj = af.filter((f) => f.severity === "Major").length;
+    // Overdue CAPAs linked to findings in this area+site
+    const areaCapaOverdue = overdueCAPAs.filter((c) => {
+      if (siteId && c.siteId !== siteId) return false;
+      const lf = findings.find((f) => f.id === c.findingId);
+      return lf ? lf.area === area : false;
+    }).length;
+    // High-risk systems in this site (for CSV/IT area)
+    const sysRisk = area === "CSV/IT" ? filteredSystems.filter((s) => (!siteId || s.siteId === siteId) && (s.riskLevel === "HIGH" && s.validationStatus !== "Validated")).length : 0;
+    const score = Math.max(0, 100 - cr * 30 - mj * 15 - areaCapaOverdue * 20 - sysRisk * 25);
+    return { score, open: af.length, critical: cr };
   }
   const displayedSites = siteFilter ? sites.filter((s) => s.id === siteFilter) : sites.slice(0, 4);
 
@@ -84,28 +123,32 @@ export function DashboardPage() {
   const actionPlan = (() => {
     const items: { id: string; priority: "Critical" | "Major" | "Minor"; area: string; action: string; owner: string; dueDate: string; status: string; module: string; refId: string; agiRisk: "High" | "Medium" | "Low" }[] = [];
     filteredFindings.filter((f) => f.status !== "Closed" && (f.severity === "Critical" || f.severity === "Major")).forEach((f) => items.push({ id: f.id, priority: f.severity, area: f.area, action: f.requirement.length > 60 ? f.requirement.slice(0, 60) + "..." : f.requirement, owner: f.owner, dueDate: f.targetDate ?? "", status: f.status, module: "gap-assessment", refId: f.id, agiRisk: f.severity === "Critical" ? "High" : "Medium" }));
-    overdueCAPAs.slice(0, 5).forEach((c) => items.push({ id: c.id, priority: c.risk, area: "QMS", action: c.description.length > 60 ? c.description.slice(0, 60) + "..." : c.description, owner: c.owner, dueDate: c.dueDate, status: c.status, module: "capa", refId: c.id, agiRisk: c.risk === "Critical" ? "High" : "Medium" }));
-    systems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").slice(0, 3).forEach((s) => items.push({ id: s.id, priority: "Major", area: "CSV/IT", action: `Validate ${s.name} \u2014 ${s.validationStatus}`, owner: s.owner, dueDate: s.nextReview ?? "", status: s.validationStatus, module: "csv-csa", refId: s.id, agiRisk: "High" }));
+    overdueCAPAs.slice(0, 5).forEach((c) => {
+      const linkedFinding = findings.find((f) => f.id === c.findingId);
+      const area = linkedFinding?.area ?? (c.source === "483" ? "Regulatory" : c.source === "Deviation" ? "Manufacturing" : "QMS");
+      items.push({ id: c.id, priority: c.risk, area, action: c.description.length > 60 ? c.description.slice(0, 60) + "..." : c.description, owner: c.owner, dueDate: c.dueDate, status: c.status, module: "capa", refId: c.id, agiRisk: c.risk === "Critical" ? "High" : "Medium" });
+    });
+    filteredSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").slice(0, 3).forEach((s) => items.push({ id: s.id, priority: "Major", area: "CSV/IT", action: `Validate ${s.name} \u2014 ${s.validationStatus}`, owner: s.owner, dueDate: s.nextReview ?? "", status: s.validationStatus, module: "csv-csa", refId: s.id, agiRisk: "High" }));
     const p: Record<string, number> = { Critical: 0, Major: 1, Minor: 2 };
     return items.sort((a, b) => (p[a.priority] ?? 2) - (p[b.priority] ?? 2) || (!a.dueDate ? 1 : !b.dueDate ? -1 : dayjs(a.dueDate).diff(dayjs(b.dueDate))));
   })();
 
-  /* ── AGI insights ── */
+  /* ── AGI insights — all use filtered data ── */
   const insights: { type: "warning" | "info" | "success"; text: string; action?: string; link?: string }[] = [];
-  if (agiSettings.mode !== "manual" && (findings.length > 0 || capas.length > 0)) {
+  if (agiSettings.mode !== "manual" && (filteredFindings.length > 0 || filteredCAPAs.length > 0)) {
     if (criticalCount > 0) insights.push({ type: "warning", text: `${criticalCount} critical finding${criticalCount > 1 ? "s" : ""} open \u2014 immediate attention required.`, action: "View findings", link: "/gap-assessment" });
     if (overdueCAPAs.length > 0) insights.push({ type: "warning", text: `${overdueCAPAs.length} CAPA${overdueCAPAs.length > 1 ? "s" : ""} past due. Risk of inspection finding.`, action: "View CAPAs", link: "/capa" });
-    const diOpen = capas.filter((c) => c.diGate && c.status !== "Closed").length;
+    const diOpen = filteredCAPAs.filter((c) => c.diGate && c.status !== "Closed").length;
     if (diOpen > 0) insights.push({ type: "warning", text: `${diOpen} open DI gate CAPA${diOpen > 1 ? "s" : ""}. Data integrity unresolved.`, action: "View DI issues", link: "/capa" });
-    const overdueVal = systems.filter((s) => s.validationStatus === "Overdue").length;
+    const overdueVal = filteredSystems.filter((s) => s.validationStatus === "Overdue").length;
     if (overdueVal > 0) insights.push({ type: "warning", text: `${overdueVal} system${overdueVal > 1 ? "s" : ""} with overdue validation.`, action: "View systems", link: "/csv-csa" });
-    const pending = capas.filter((c) => c.status === "Pending QA Review").length;
+    const pending = filteredCAPAs.filter((c) => c.status === "Pending QA Review").length;
     if (pending > 0) insights.push({ type: "info", text: `${pending} CAPA${pending > 1 ? "s" : ""} awaiting QA sign-off.`, action: "Review", link: "/capa" });
     if (criticalCount === 0 && overdueCAPAs.length === 0) insights.push({ type: "success", text: "No critical findings or overdue CAPAs. Maintain current trajectory." });
   }
 
-  const noData = findings.length === 0 && capas.length === 0;
-  const rsCol = readinessScore === null ? "#64748b" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444";
+  const noData = filteredFindings.length === 0 && filteredCAPAs.length === 0;
+  const rsCol = rl.color;
 
   /* ══════════════════════════════════════ */
 
@@ -133,10 +176,10 @@ export function DashboardPage() {
 
       {/* KPI cards */}
       <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-        <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={readinessScore === null ? "\u2014" : `${readinessScore}%`} sub={readinessScore === null ? "Log findings to calculate" : readinessScore >= 80 ? "Inspection ready \u2713" : readinessScore >= 60 ? "Attention required" : "High risk \u2014 action needed"} />
-        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={findings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter((f) => f.status !== "Closed").length} total open`} />
+        <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={readinessScore === null ? "\u2014" : `${readinessScore}%`} sub={rl.label} />
+        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter((f) => f.status !== "Closed").length} total open`} />
         <StatCard icon={Clock} color={capaOverdueRate === null ? "#64748b" : capaOverdueRate === 0 ? "#10b981" : capaOverdueRate <= 20 ? "#f59e0b" : "#ef4444"} label="CAPA overdue" value={capaOverdueRate === null ? "\u2014" : `${capaOverdueRate}%`} sub={openCAPAs.length === 0 ? "No open CAPAs" : `${overdueCAPAs.length} of ${openCAPAs.length} past due`} />
-        <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={systems.length === 0 ? "No systems registered" : "Overdue or non-compliant"} />
+        <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={filteredSystems.length === 0 ? "No systems registered" : "Overdue or non-compliant"} />
         <StatCard icon={GraduationCap} color={trainingCompliance === null ? "#64748b" : trainingCompliance >= 90 ? "#10b981" : trainingCompliance >= 70 ? "#f59e0b" : "#ef4444"} label="Training compliance" value={trainingCompliance === null ? "\u2014" : `${trainingCompliance}%`} sub={users.length === 0 ? "No users configured" : `${users.filter((u) => u.status === "Active").length} active users`} />
       </section>
 
@@ -152,8 +195,8 @@ export function DashboardPage() {
                 <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>No sites configured</p>
                 <button type="button" onClick={() => navigate("/settings")} className="text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer mt-1">Add sites in Settings &rarr;</button>
               </div>
-            ) : findings.length === 0 ? (
-              <div className="flex flex-col items-center py-8"><Grid3x3 className="w-10 h-10 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No findings logged. Heatmap populates after findings are logged in Gap Assessment.</p></div>
+            ) : filteredFindings.length === 0 ? (
+              <div className="flex flex-col items-center py-8"><Grid3x3 className="w-10 h-10 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No findings match current filters. Adjust filters above.</p></div>
             ) : (
               <>
                 <table className="w-full text-[11px]" aria-label="Area readiness heatmap">
@@ -196,7 +239,7 @@ export function DashboardPage() {
                 <table className="data-table" aria-label="90 day action plan"><caption className="sr-only">Priority actions due within 90 days</caption>
                   <thead><tr><th scope="col">Priority</th><th scope="col">Area</th><th scope="col">Action</th><th scope="col">Owner</th><th scope="col">Due date</th><th scope="col">Status</th><th scope="col">AGI risk</th><th scope="col"><span className="sr-only">Nav</span></th></tr></thead>
                   <tbody>{actionPlan.slice(0, 10).map((item) => (
-                    <tr key={item.id}>
+                    <tr key={item.id} className="cursor-pointer" onClick={() => { if (item.module === "gap-assessment") navigate("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") navigate("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") navigate("/csv-csa", { state: { systemId: item.refId } }); }}>
                       <td><Badge variant={item.priority === "Critical" ? "red" : item.priority === "Major" ? "amber" : "gray"}>{item.priority}</Badge></td>
                       <td><Badge variant="gray">{item.area}</Badge></td>
                       <td><p className="text-[12px]" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{item.action}</p></td>
@@ -218,12 +261,12 @@ export function DashboardPage() {
         <div className="space-y-4">
           {/* ④ AGI insights */}
           <aside aria-label="AGI insights" className="card">
-            <div className="card-header"><div className="flex items-center gap-2"><Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">AGI Insights</span></div><Badge variant={agiSettings.mode === "autonomous" ? "green" : agiSettings.mode === "manual" ? "gray" : "blue"}>{agiSettings.mode}</Badge></div>
+            <div className="card-header"><div className="flex items-center gap-2"><Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">AGI Insights</span></div>{(() => { const activeAgents = Object.values(agiSettings.agents).filter(Boolean).length; const totalAgents = Object.values(agiSettings.agents).length; if (agiSettings.mode === "manual" || activeAgents === 0) return <Badge variant="gray">inactive</Badge>; if (activeAgents === totalAgents) return <Badge variant="green">autonomous</Badge>; return <Badge variant="amber">{activeAgents}/{totalAgents} active</Badge>; })()}</div>
             <div className="card-body space-y-2">
               {agiSettings.mode === "manual" ? (
                 <><p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>AGI is in manual mode. Enable agents in Settings &rarr; AGI Policy.</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => navigate("/settings")}>Configure &rarr;</Button></>
-              ) : findings.length === 0 && capas.length === 0 ? (
-                <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No findings logged yet. Log findings in Gap Assessment to activate insights.</p>
+              ) : filteredFindings.length === 0 && filteredCAPAs.length === 0 ? (
+                <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No findings match current filters. Adjust filters to see insights.</p>
               ) : insights.slice(0, 5).map((ins, i) => (
                 <div key={i} className={clsx("flex items-start gap-2 p-2.5 rounded-lg", ins.type === "warning" ? isDark ? "bg-[rgba(245,158,11,0.06)] border border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border border-[#fde68a]" : ins.type === "success" ? isDark ? "bg-[rgba(16,185,129,0.06)] border border-[rgba(16,185,129,0.15)]" : "bg-[#f0fdf4] border border-[#a7f3d0]" : isDark ? "bg-[#071526] border border-[#1e3a5a]" : "bg-[#f8fafc] border border-[#e2e8f0]")}>
                   {ins.type === "warning" ? <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" /> : ins.type === "success" ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981] flex-shrink-0 mt-0.5" aria-hidden="true" /> : <Info className="w-3.5 h-3.5 text-[#0ea5e9] flex-shrink-0 mt-0.5" aria-hidden="true" />}
@@ -236,10 +279,10 @@ export function DashboardPage() {
           {/* ⑤ Risk signals */}
           <CardSection icon={Activity} iconColor="#ef4444" title="Risk signals">
             {/* By severity */}
-            {(["Critical", "Major", "Minor"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "Major" ? "#f59e0b" : "#64748b"; return (
+            {(["Critical", "Major", "Minor"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "Major" ? "#f59e0b" : "#64748b"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
               <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ background: dot }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{sev}</span></div>
-                <span className="text-[14px] font-bold" style={{ color: cnt > 0 && sev !== "Minor" ? dot : cnt > 0 ? "#64748b" : "#10b981" }}>{cnt}</span>
+                <span className="text-[14px] font-bold" style={{ color: valCol }}>{cnt}</span>
               </div>
             ); })}
             {/* By area */}
@@ -250,14 +293,14 @@ export function DashboardPage() {
             {/* Quick links */}
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-muted)" }}>Quick links</p>
             {[
-              { label: "Gap Assessment", path: "/gap-assessment", Icon: Search, badge: filteredFindings.filter((f) => f.status !== "Closed").length },
-              { label: "CAPA Tracker", path: "/capa", Icon: ClipboardCheck, badge: overdueCAPAs.length },
-              { label: "CSV / CSA", path: "/csv-csa", Icon: Database, badge: csvHighRisk },
-              { label: "FDA 483", path: "/fda-483", Icon: FileWarning, badge: fda483Events.filter((e) => e.status !== "Closed").length },
+              { label: "Gap Assessment", path: "/gap-assessment", Icon: Search, badge: filteredFindings.filter((f) => f.status !== "Closed").length, color: "#ef4444" },
+              { label: "CAPA Tracker", path: "/capa", Icon: ClipboardCheck, badge: openCAPAs.length, color: overdueCAPAs.length > 0 ? "#ef4444" : "#f59e0b", tip: `${openCAPAs.length} open CAPAs` },
+              { label: "CSV / CSA", path: "/csv-csa", Icon: Database, badge: csvHighRisk, color: "#f59e0b" },
+              { label: "FDA 483", path: "/fda-483", Icon: FileWarning, badge: fda483Events.filter((e) => e.status !== "Closed").length, color: "#ef4444" },
             ].map((lk) => (
-              <button key={lk.path} type="button" onClick={() => navigate(lk.path)} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.06)] transition-colors text-left">
+              <button key={lk.path} type="button" onClick={() => navigate(lk.path)} title={lk.tip} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.06)] transition-colors text-left">
                 <div className="flex items-center gap-2"><lk.Icon className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><span style={{ color: "var(--text-primary)" }}>{lk.label}</span></div>
-                {lk.badge > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#ef4444] text-white">{lk.badge}</span>}
+                {lk.badge > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ background: lk.color }}>{lk.badge}</span>}
               </button>
             ))}
           </CardSection>

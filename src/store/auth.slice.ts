@@ -45,6 +45,15 @@ export interface TenantConfig {
   users: TenantUserConfig[];
 }
 
+export interface SubscriptionPlan {
+  id: string;
+  startDate: string;
+  endDate: string;
+  maxAccounts: number;
+  status: "Active" | "Inactive";
+  createdAt: string;
+}
+
 export interface Tenant {
   id: string;
   name: string;
@@ -53,6 +62,7 @@ export interface Tenant {
   createdAt: string;
   active: boolean;
   config: TenantConfig;
+  subscriptionPlans: SubscriptionPlan[];
 }
 
 interface AuthState {
@@ -81,14 +91,20 @@ const authSlice = createSlice({
             { id: "site-gl-4", name: "Hyderabad Formulation", location: "India", gmpScope: "Formulation", risk: "HIGH", status: "Active" },
           ],
           users: [
+            { id: "u-001", name: "System Administrator", email: "admin@pharmaglimmora.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
+            { id: "u-009", name: "Customer Administrator", email: "custadmin@pharmaglimmora.com", role: "customer_admin", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
             { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
             { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", role: "regulatory_affairs", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-1", "site-gl-2"], allSites: false },
             { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", role: "csv_val_lead", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-1", "site-gl-3"], allSites: false },
             { id: "u-005", name: "Dr. Nisha Rao", email: "qc@pharmaglimmora.com", role: "qc_lab_director", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-3"], allSites: false },
             { id: "u-006", name: "Vikram Singh", email: "it@pharmaglimmora.com", role: "it_cdo", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-007", name: "Rajesh Kumar", email: "ops@pharmaglimmora.com", role: "operations_head", gxpSignatory: false, status: "Active", assignedSites: ["site-gl-1", "site-gl-4"], allSites: false },
+            { id: "u-007", name: "Suresh Kumar", email: "ops@pharmaglimmora.com", role: "operations_head", gxpSignatory: false, status: "Active", assignedSites: ["site-gl-1", "site-gl-4"], allSites: false },
+            { id: "u-008", name: "View Only User", email: "viewer@pharmaglimmora.com", role: "viewer", gxpSignatory: false, status: "Active", assignedSites: ["site-gl-1"], allSites: false },
           ],
         },
+        subscriptionPlans: [
+          { id: "sub-gl-001", startDate: "2026-01-01T00:00:00Z", endDate: "2026-12-31T00:00:00Z", maxAccounts: 15, status: "Active", createdAt: "2026-01-01T00:00:00Z" },
+        ],
       },
       {
         id: "tenant-abc", name: "ABC Pharma Ltd", plan: "professional",
@@ -101,10 +117,15 @@ const authSlice = createSlice({
             { id: "site-abc-3", name: "Ahmedabad Packaging", location: "India", gmpScope: "Packaging", risk: "LOW", status: "Active" },
           ],
           users: [
+            { id: "u-abc-001", name: "ABC Admin", email: "admin@abcpharma.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
+            { id: "u-cust-abc", name: "ABC Customer Admin", email: "custadmin@abcpharma.com", role: "customer_admin", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
             { id: "u-abc-002", name: "Dr. Sunita Rao", email: "qa@abcpharma.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
             { id: "u-abc-003", name: "Kiran Mehta", email: "csv@abcpharma.com", role: "csv_val_lead", gxpSignatory: false, status: "Active", assignedSites: ["site-abc-1"], allSites: false },
           ],
         },
+        subscriptionPlans: [
+          { id: "sub-abc-001", startDate: "2026-02-01T00:00:00Z", endDate: "2026-04-30T00:00:00Z", maxAccounts: 10, status: "Active", createdAt: "2026-02-01T00:00:00Z" },
+        ],
       },
       {
         id: "tenant-xyz", name: "XYZ Biotech", plan: "trial",
@@ -116,9 +137,14 @@ const authSlice = createSlice({
             { id: "site-xyz-2", name: "Noida Biotech Lab", location: "India", gmpScope: "Biotech", risk: "MEDIUM", status: "Active" },
           ],
           users: [
+            { id: "u-xyz-001", name: "XYZ Admin", email: "admin@xyzbiotech.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
+            { id: "u-cust-xyz", name: "XYZ Customer Admin", email: "custadmin@xyzbiotech.com", role: "customer_admin", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
             { id: "u-xyz-002", name: "Dr. Arjun Das", email: "qa@xyzbiotech.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
           ],
         },
+        subscriptionPlans: [
+          { id: "sub-xyz-001", startDate: "2026-03-01T00:00:00Z", endDate: "2026-03-15T00:00:00Z", maxAccounts: 3, status: "Active", createdAt: "2026-03-01T00:00:00Z" },
+        ],
       },
     ],
   } as AuthState,
@@ -162,6 +188,29 @@ const authSlice = createSlice({
       if (t) { const u = t.config.users.find((u) => u.id === payload.userId); if (u) Object.assign(u, payload.patch); }
     },
 
+    // Subscription plans
+    addSubscriptionPlan(state, { payload }: PayloadAction<{ tenantId: string; plan: SubscriptionPlan }>) {
+      const t = state.tenants.find((t) => t.id === payload.tenantId);
+      if (!t) return;
+      if (!t.subscriptionPlans) t.subscriptionPlans = [];
+      // If new plan is Active, deactivate previous active plans
+      if (payload.plan.status === "Active") {
+        t.subscriptionPlans.forEach((p) => { if (p.status === "Active") p.status = "Inactive"; });
+      }
+      t.subscriptionPlans.push(payload.plan);
+    },
+    updateSubscriptionPlan(state, { payload }: PayloadAction<{ tenantId: string; planId: string; patch: Partial<SubscriptionPlan> }>) {
+      const t = state.tenants.find((t) => t.id === payload.tenantId);
+      if (!t || !t.subscriptionPlans) return;
+      const plan = t.subscriptionPlans.find((p) => p.id === payload.planId);
+      if (!plan) return;
+      Object.assign(plan, payload.patch);
+      // If we just activated this plan, deactivate the others
+      if (payload.patch.status === "Active") {
+        t.subscriptionPlans.forEach((p) => { if (p.id !== plan.id && p.status === "Active") p.status = "Inactive"; });
+      }
+    },
+
     logout(state) {
       state.token = null; state.user = null; state.activeSiteId = null; state.selectedSiteId = null; state.currentTenant = null;
       try { localStorage.removeItem("glimmora-state"); } catch { /* ignore */ }
@@ -174,6 +223,7 @@ export const {
   addTenant, updateTenant,
   updateTenantOrg, addTenantSite, updateTenantSite, removeTenantSite,
   addTenantUser, updateTenantUser,
+  addSubscriptionPlan, updateSubscriptionPlan,
   logout,
 } = authSlice.actions;
 export default authSlice.reducer;

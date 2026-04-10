@@ -171,9 +171,13 @@ export function FDA483Page() {
         commitments: [],
         responseDraft: "",
         agiDraft: "",
-        inspectionDate: dayjs(data.inspectionDate).utc().toISOString(),
-        responseDeadline: dayjs(data.responseDeadline).utc().toISOString(),
-        createdAt: "",
+        inspectionDate: data.inspectionDate
+          ? dayjs(data.inspectionDate).utc().toISOString()
+          : "",
+        responseDeadline: data.responseDeadline
+          ? dayjs(data.responseDeadline).utc().toISOString()
+          : "",
+        createdAt: dayjs().toISOString(),
       }),
     );
     auditLog({
@@ -602,6 +606,7 @@ export function FDA483Page() {
               addCAPA({
                 id: capaId,
                 tenantId: tenantId ?? "",
+                siteId: liveEvent.siteId,
                 source: "483",
                 risk: selectedObs.severity,
                 owner: user?.id ?? "",

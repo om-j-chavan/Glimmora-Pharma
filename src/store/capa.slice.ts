@@ -8,6 +8,7 @@ export type CAPASource = "483" | "Internal Audit" | "Deviation" | "Complaint" | 
 export interface CAPA {
   id: string;
   tenantId: string;
+  siteId: string;
   findingId?: string;
   source: CAPASource;
   risk: CAPARisk;
@@ -46,11 +47,12 @@ const capaSlice = createSlice({
       const item = state.items.find((c) => c.id === payload.id);
       if (item) Object.assign(item, payload.patch);
     },
-    closeCAPA(state, { payload }: PayloadAction<{ id: string; closedBy: string }>) {
+    closeCAPA(state, { payload }: PayloadAction<{ id: string; closedBy: string; closedAt: string }>) {
       const item = state.items.find((c) => c.id === payload.id);
       if (item) {
         item.status = "Closed";
         item.closedBy = payload.closedBy;
+        item.closedAt = payload.closedAt;
       }
     },
     addEvidence(state, { payload }: PayloadAction<{ id: string; link: string }>) {

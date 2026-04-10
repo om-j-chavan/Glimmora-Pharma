@@ -80,7 +80,7 @@ type CardForm = z.infer<typeof cardSchema>;
 
 export function ReadinessPage() {
   const dispatch = useAppDispatch();
-  const { cards, playbooks, simulations, training } = useAppSelector((s) => s.readiness);
+  const { cards, playbooks, simulations, training, score: readinessScore, complete: completeCount, total: totalCards } = useAppSelector((s) => s.readiness);
   const { users, tenantId } = useTenantConfig();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { role } = useRole();
@@ -89,10 +89,8 @@ export function ReadinessPage() {
   const tenantPlaybooks = playbooks.filter((p) => p.tenantId === tenantId);
   const tenantSims = simulations.filter((s) => s.tenantId === tenantId);
 
-  const completeCount = tenantCards.filter((c) => c.status === "Complete").length;
   const inProgressCount = tenantCards.filter((c) => c.status === "In Progress").length;
   const overdueCount = tenantCards.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length;
-  const readinessScore = tenantCards.length === 0 ? null : Math.round((completeCount / tenantCards.length) * 100);
 
   function ownerName(id: string) { return users.find((u) => u.id === id)?.name ?? id; }
 
@@ -133,7 +131,7 @@ export function ReadinessPage() {
   }
 
   const displayLanes = laneFilter ? LANES.filter((l) => l === laneFilter) : LANES;
-  const rsCol = readinessScore === null ? "#64748b" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444";
+  const rsCol = readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444";
   const timezone = "Asia/Kolkata";
 
   /* ══════════════════════════════════════ */
@@ -143,12 +141,12 @@ export function ReadinessPage() {
       {/* Header */}
       <PageHeader
         title="Inspection Readiness Program"
-        subtitle={`${completeCount} of ${tenantCards.length} actions complete \u00b7 ${readinessScore ?? "\u2014"}% ready`}
+        subtitle={`${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready`}
         actions={
           <div className="flex items-center gap-3">
             <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
               <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span>
-              <span className="text-[20px] font-bold" style={{ color: rsCol }}>{readinessScore === null ? "\u2014" : `${readinessScore}%`}</span>
+              <span className="text-[20px] font-bold" style={{ color: rsCol }}>{`${readinessScore}%`}</span>
             </div>
             {role !== "viewer" && <Button variant="primary" size="sm" icon={Plus} onClick={() => setAddCardOpen(true)}>Add action</Button>}
           </div>
@@ -164,7 +162,7 @@ export function ReadinessPage() {
           {/* Stats */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <StatCard icon={ClipboardList} color="#0ea5e9" label="Total actions" value={String(tenantCards.length)} sub="Across all lanes" />
-            <StatCard icon={CheckCircle2} color="#10b981" label="Complete" value={String(completeCount)} sub={`${readinessScore ?? 0}% done`} />
+            <StatCard icon={CheckCircle2} color="#10b981" label="Complete" value={String(completeCount)} sub={`${readinessScore}% done`} />
             <StatCard icon={Clock} color="#f59e0b" label="In progress" value={String(inProgressCount)} sub="Currently active" />
             <StatCard icon={AlertTriangle} color={overdueCount > 0 ? "#ef4444" : "#10b981"} label="Overdue" value={String(overdueCount)} sub={overdueCount > 0 ? "Needs attention" : "On track"} />
           </div>
@@ -220,7 +218,7 @@ export function ReadinessPage() {
                                 </div>
                                 {role !== "viewer" && (
                                   <div className="mt-2 pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#f1f5f9" }}>
-                                    <select value={card.status} onChange={(e) => { dispatch(updateCard({ id: card.id, patch: { status: e.target.value as ReadinessStatus } })); auditLog({ action: "READINESS_CARD_UPDATED", module: "readiness", recordId: card.id, newValue: { status: e.target.value } }); }} className="text-[10px] w-full rounded border-none cursor-pointer bg-transparent outline-none" style={{ color: sc }} aria-label={`Status: ${card.action}`}>
+                                    <select value={card.status} onChange={(e) => { const newStatus = e.target.value as ReadinessStatus; dispatch(updateCard({ id: card.id, patch: { status: newStatus, ...(newStatus === "Complete" ? { completedAt: dayjs().toISOString() } : { completedAt: undefined }) } })); auditLog({ action: "READINESS_CARD_UPDATED", module: "readiness", recordId: card.id, newValue: { status: newStatus } }); }} className="text-[10px] w-full rounded border-none cursor-pointer bg-transparent outline-none" style={{ color: sc }} aria-label={`Status: ${card.action}`}>
                                       <option value="Not Started">Not Started</option>
                                       <option value="In Progress">In Progress</option>
                                       <option value="Complete">Complete</option>

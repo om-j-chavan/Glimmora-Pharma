@@ -59,6 +59,7 @@ export function GovernancePage() {
   const companyName = org.companyName;
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const user = useAppSelector((s) => s.auth.user);
+  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { role } = useRole();
 
   function ownerName(id: string) { return users.find((u) => u.id === id)?.name ?? id; }
@@ -91,7 +92,7 @@ export function GovernancePage() {
   const filteredRaid = raidItems.filter((r) => { if (typeFilter && r.type !== typeFilter) return false; if (statusFilter && r.status !== statusFilter) return false; if (priorityFilter && r.priority !== priorityFilter) return false; return true; });
   const raidForm = useForm<RaidForm>({ resolver: zodResolver(raidSchema), defaultValues: { type: "Risk", priority: "Medium", status: "Open" } });
 
-  function onRaidSave(data: RaidForm) { const id = crypto.randomUUID(); dispatch(addItem({ ...data, id, tenantId: tenantId ?? "", impact: data.impact ?? "", mitigation: data.mitigation ?? "", raisedBy: user?.id ?? "", dueDate: dayjs(data.dueDate).utc().toISOString(), createdAt: "" })); auditLog({ action: "RAID_ITEM_ADDED", module: "governance", recordId: id, newValue: data }); setAddRaidOpen(false); setRaidAddedPopup(true); raidForm.reset(); }
+  function onRaidSave(data: RaidForm) { const id = crypto.randomUUID(); dispatch(addItem({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", impact: data.impact ?? "", mitigation: data.mitigation ?? "", raisedBy: user?.id ?? "", dueDate: dayjs(data.dueDate).utc().toISOString(), createdAt: "" })); auditLog({ action: "RAID_ITEM_ADDED", module: "governance", recordId: id, newValue: data }); setAddRaidOpen(false); setRaidAddedPopup(true); raidForm.reset(); }
   function handleCloseRaid() { if (!selectedRaid || !closeResolution.trim()) return; dispatch(closeItem({ id: selectedRaid.id, resolution: closeResolution.trim() })); auditLog({ action: "RAID_ITEM_CLOSED", module: "governance", recordId: selectedRaid.id, newValue: { resolution: closeResolution } }); setCloseRaidOpen(false); setSelectedRaid(null); setCloseResolution(""); setRaidClosedPopup(true); }
 
   /* ── Chart data ── */

@@ -8,3 +8,5 @@ export { DataTable, type Column } from "./DataTable";
 export { StatCard } from "./StatCard";
 export { CardSection } from "./CardSection";
 export { SetupChecklist } from "./SetupChecklist";
+export { SubscriptionPlansPopup } from "./SubscriptionPlansPopup";
+export { AddSubscriptionPlanModal } from "./AddSubscriptionPlanModal";
