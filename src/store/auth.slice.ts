@@ -37,6 +37,7 @@ export interface TenantUserConfig {
   status: "Active" | "Inactive";
   assignedSites: string[];
   allSites: boolean;
+  password?: string;
 }
 
 export interface TenantConfig {

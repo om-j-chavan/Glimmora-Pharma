@@ -75,17 +75,27 @@ const roleChip: Record<string, string> = {
     "bg-(--bg-elevated) text-(--text-secondary) border border-(--bg-border)",
 };
 
-const userSchema = z.object({
-  name: z.string().min(2, "Name is required"),
-  email: z.string().email("Valid email is required"),
-  role: z.string().min(1, "Role is required"),
-  gxpSignatory: z.boolean(),
-  status: z.enum(["Active", "Inactive"]),
-  allSites: z.boolean(),
-  assignedSites: z.array(z.string()),
-});
+function makeUserSchema(mode: "add" | "edit") {
+  const base = z.object({
+    name: z.string().min(2, "Name is required"),
+    email: z.string().email("Valid email is required"),
+    role: z.string().min(1, "Role is required"),
+    gxpSignatory: z.boolean(),
+    status: z.enum(["Active", "Inactive"]),
+    allSites: z.boolean(),
+    assignedSites: z.array(z.string()),
+    password: mode === "add"
+      ? z.string().min(6, "Password must be at least 6 characters")
+      : z.string().optional().refine((v) => !v || v.length >= 6, { message: "Password must be at least 6 characters" }),
+    confirmPassword: z.string().optional(),
+  });
+  return base.refine((d) => !d.password || d.password === d.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+}
 
-type UserFormValues = z.infer<typeof userSchema>;
+type UserFormValues = z.infer<ReturnType<typeof makeUserSchema>>;
 
 const ROLE_OPTIONS_ALL = ROLES.map((r) => ({ value: r.value, label: r.label }));
 const ROLE_OPTIONS_CUSTOMER_ADMIN = ROLES.filter((r) =>
@@ -103,6 +113,7 @@ function UserForm({
   submitLabel,
   submitIcon,
   roleOptions,
+  mode = "add",
 }: {
   defaultValues: UserFormValues;
   onSubmit: (data: UserFormValues) => void;
@@ -110,6 +121,7 @@ function UserForm({
   submitLabel: string;
   submitIcon: typeof Plus;
   roleOptions: { value: string; label: string }[];
+  mode?: "add" | "edit";
 }) {
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { allSites: tenantSites } = useTenantConfig();
@@ -121,7 +133,7 @@ function UserForm({
     setValue,
     formState: { errors, isSubmitting },
   } = useForm<UserFormValues>({
-    resolver: zodResolver(userSchema),
+    resolver: zodResolver(makeUserSchema(mode)),
     defaultValues,
   });
 
@@ -199,6 +211,28 @@ function UserForm({
             width="w-full"
           />
         </div>
+      </div>
+
+      {/* Password fields */}
+      <div className="grid grid-cols-2 gap-4">
+        <Input
+          id="user-password"
+          label={mode === "edit" ? "New Password (optional)" : "Password"}
+          type="password"
+          required={mode === "add"}
+          placeholder="Min 6 characters"
+          error={errors.password?.message}
+          {...register("password")}
+        />
+        <Input
+          id="user-confirm-password"
+          label="Confirm Password"
+          type="password"
+          required={mode === "add"}
+          placeholder="Re-enter password"
+          error={errors.confirmPassword?.message}
+          {...register("confirmPassword")}
+        />
       </div>
 
       {/* GxP Signatory toggle */}
@@ -351,6 +385,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
     isAtAccountLimit,
   } = useTenantConfig();
   const { isSuperAdmin, isCustomerAdmin } = useRole();
+  const visibleUsers = users.filter((u) => u.role !== "super_admin" && u.role !== "customer_admin");
   const { isAtLimit, isNearLimit, getCount, getLimit, tenantPlan } =
     usePlanLimits();
 
@@ -385,9 +420,15 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       addTenantUser({
         tenantId,
         user: {
-          ...data,
+          name: data.name,
+          email: data.email,
+          role: data.role,
+          gxpSignatory: data.gxpSignatory,
+          status: data.status,
+          allSites: data.allSites,
           id: crypto.randomUUID(),
           assignedSites: data.allSites ? [] : data.assignedSites,
+          password: data.password,
         },
       }),
     );
@@ -402,16 +443,17 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const handleEdit = (data: UserFormValues) => {
     if (editingUser) {
-      dispatch(
-        updateTenantUser({
-          tenantId,
-          userId: editingUser.id,
-          patch: {
-            ...data,
-            assignedSites: data.allSites ? [] : data.assignedSites,
-          },
-        }),
-      );
+      const patch: Partial<TenantUserConfig> = {
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        gxpSignatory: data.gxpSignatory,
+        status: data.status,
+        allSites: data.allSites,
+        assignedSites: data.allSites ? [] : data.assignedSites,
+      };
+      if (data.password) patch.password = data.password;
+      dispatch(updateTenantUser({ tenantId, userId: editingUser.id, patch }));
     }
     setEditModal(false);
     setEditingUser(null);
@@ -441,7 +483,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             Users
           </h2>
           <span className="ml-2 text-[11px] bg-(--brand-muted) text-(--brand) px-2 py-0.5 rounded-full font-semibold">
-            {users.length}
+            {visibleUsers.length}
           </span>
         </div>
         {!readOnly && (
@@ -603,7 +645,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       )}
 
       {/* Usage bar */}
-      <PlanLimitUsageBar
+      {/* <PlanLimitUsageBar
         icon={Users}
         label="Team members"
         count={userCount}
@@ -611,7 +653,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         plan={tenantPlan}
         atLimit={atPlanLimit}
         nearLimit={nearPlanLimit}
-      />
+      /> */}
 
       {/* Table card */}
       <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
@@ -620,7 +662,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           ariaLabel="Configured platform users"
           caption="List of users with roles, site access, signatory status, and account status"
           keyFn={(u) => u.id}
-          data={users}
+          data={visibleUsers}
           emptyState={
             <EmptyState
               icon={Users}
@@ -759,6 +801,8 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             status: "Active",
             allSites: false,
             assignedSites: [],
+            password: "",
+            confirmPassword: "",
           }}
           onSubmit={handleAdd}
           onCancel={() => setAddModal(false)}
@@ -790,6 +834,8 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                 editingUser.allSites ??
                 ALL_SITES_ROLES.includes(editingUser.role),
               assignedSites: editingUser.assignedSites ?? [],
+              password: "",
+              confirmPassword: "",
             }}
             onSubmit={handleEdit}
             onCancel={() => {
@@ -799,6 +845,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             submitLabel="Save changes"
             submitIcon={Save}
             roleOptions={roleOptions}
+            mode="edit"
           />
         )}
       </Modal>
