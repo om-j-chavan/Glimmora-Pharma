@@ -19,7 +19,6 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
 import {
-  PlanLimitUsageBar,
   PlanLimitPopup,
   EmptyState,
   DataTable,
@@ -386,13 +385,12 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   } = useTenantConfig();
   const { isSuperAdmin, isCustomerAdmin } = useRole();
   const visibleUsers = users.filter((u) => u.role !== "super_admin" && u.role !== "customer_admin");
-  const { isAtLimit, isNearLimit, getCount, getLimit, tenantPlan } =
+  const { isAtLimit, getCount, getLimit, tenantPlan } =
     usePlanLimits();
 
   const userCount = getCount("users");
   const userLimit = getLimit("users");
   const atPlanLimit = isAtLimit("users");
-  const nearPlanLimit = isNearLimit("users");
 
   // Combined limit: subscription account limit OR plan limit
   const atLimit = atPlanLimit || isAtAccountLimit;
