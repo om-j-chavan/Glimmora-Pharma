@@ -8,8 +8,6 @@ import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Toggle } from "@/components/ui/Toggle";
-import { Dropdown } from "@/components/ui/Dropdown";
-
 interface AgentEntry {
   key: keyof AGISettings["agents"];
   name: string;
@@ -32,16 +30,20 @@ const modeColor: Record<string, string> = {
   manual: "text-(--card-muted)",
 };
 
-const MODE_OPTIONS = [
-  { value: "autonomous", label: "Autonomous", description: "Live alerts everywhere" },
-  { value: "assisted", label: "Assisted", description: "Review queue, no live pop-ups" },
-  { value: "manual", label: "Manual", description: "Silent monitoring, no alerts" },
-];
+
+function computeMode(agents: AGISettings["agents"]): AGISettings["mode"] {
+  const active = Object.values(agents).filter(Boolean).length;
+  const total = Object.keys(agents).length;
+  if (active === 0) return "manual";
+  if (active < total) return "assisted";
+  return "autonomous";
+}
 
 export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
   const agi = useAppSelector((s) => s.settings.agi);
   const activeAgentCount = Object.values(agi.agents).filter(Boolean).length;
+  const computedMode = computeMode(agi.agents);
   const [saved, setSaved] = useState(false);
 
   return (
@@ -52,9 +54,10 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl p-5">
           <p className="text-[11px] font-medium text-(--card-muted) mb-2">Operating Mode</p>
-          <p className={`text-2xl font-bold capitalize ${modeColor[agi.mode]}`}>
-            {agi.mode}
+          <p className={`text-2xl font-bold capitalize ${modeColor[computedMode]}`}>
+            {computedMode}
           </p>
+          <p className="text-[10px] text-(--text-muted) mt-1">Auto-calculated from agent toggles</p>
         </div>
         <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl p-5">
           <p className="text-[11px] font-medium text-(--card-muted) mb-2">Confidence Threshold</p>
@@ -78,21 +81,24 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
         </div>
 
         <div className="p-5 space-y-6">
-          {/* Mode select */}
+          {/* Mode display — auto-calculated */}
           <div>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">
               Operating Mode
             </p>
             <p className="text-[11px] text-(--text-muted) mb-2">
-              Controls how and when AGI alerts appear across all screens
+              Auto-calculated from active agents below
             </p>
-            <Dropdown
-              options={MODE_OPTIONS}
-              value={agi.mode}
-              onChange={(v) => !readOnly && dispatch(updateAGI({ mode: v as AGISettings["mode"] }))}
-              disabled={readOnly}
-              width="w-full"
-            />
+            <div className="flex items-center gap-3 rounded-lg px-4 py-2.5" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+              <span className={`text-[14px] font-bold capitalize ${modeColor[computedMode]}`}>
+                {computedMode}
+              </span>
+              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                {computedMode === "autonomous" && "— All agents active, live alerts everywhere"}
+                {computedMode === "assisted" && "— Some agents active, review queue enabled"}
+                {computedMode === "manual" && "— No agents active, silent monitoring"}
+              </span>
+            </div>
           </div>
 
           {/* Confidence slider */}
@@ -173,7 +179,10 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
       {/* Save policy button */}
       {!readOnly && (
         <div className="flex justify-end">
-          <Button icon={Save} onClick={() => setSaved(true)}>
+          <Button icon={Save} onClick={() => {
+            dispatch(updateAGI({ mode: computedMode }));
+            setSaved(true);
+          }}>
             Save policy
           </Button>
         </div>

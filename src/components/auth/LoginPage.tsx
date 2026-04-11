@@ -131,15 +131,27 @@ export function LoginPage() {
    */
   const getAccessibleSites = (user: AuthUser, tenant: Tenant | undefined): TenantSiteConfig[] => {
     const tenantSites = tenant?.config?.sites?.filter((s) => s.status === "Active") ?? [];
-    const tenantUser = tenant?.config?.users?.find((u) => u.id === user.id);
+    const tenantUser = tenant?.config?.users?.find(
+      (u) => u.id === user.id || u.email.toLowerCase() === user.email.toLowerCase(),
+    );
 
-    if (user.role === "customer_admin" || tenantUser?.allSites === true) {
+    // Super admin and customer admin always see all sites
+    if (user.role === "super_admin" || user.role === "customer_admin") {
       return tenantSites;
     }
 
-    return tenantUser
-      ? tenantSites.filter((s) => tenantUser.assignedSites.includes(s.id))
-      : tenantSites;
+    // allSites flag — see everything
+    if (tenantUser?.allSites === true) {
+      return tenantSites;
+    }
+
+    // Otherwise only show the sites assigned to this user
+    if (tenantUser && tenantUser.assignedSites.length > 0) {
+      return tenantSites.filter((s) => tenantUser.assignedSites.includes(s.id));
+    }
+
+    // No user record or no sites assigned — empty
+    return [];
   };
 
   /**
@@ -199,7 +211,7 @@ export function LoginPage() {
       const tenantUser = tenant.config.users.find(
         (u) => u.email.toLowerCase() === key || u.name.toLowerCase() === key,
       );
-      if (tenantUser && tenantUser.status === "Active") {
+      if (tenantUser && tenantUser.status === "Active" && (!tenantUser.password || tenantUser.password === data.password)) {
         const user: AuthUser = {
           id: tenantUser.id,
           name: tenantUser.name,
