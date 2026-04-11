@@ -398,7 +398,7 @@ function AccountModal({
 
   return (
     <>
-      <Modal open={open && !subModalOpen} onClose={onClose} title={mode === "create" ? "New Account" : "Edit Account"}>
+      <Modal open={open && !subModalOpen} onClose={onClose} title={mode === "create" ? "New Account" : "Edit Account"} persistent>
         <div className="space-y-5 max-h-[60vh] overflow-y-auto pr-1 pb-16">
           {/* ── ACCOUNT INFORMATION ── */}
           <div>

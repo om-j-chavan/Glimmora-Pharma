@@ -8,9 +8,10 @@ export interface ModalProps {
   title: string;
   children: ReactNode;
   className?: string;
+  persistent?: boolean;
 }
 
-export function Modal({ open, onClose, title, children, className }: ModalProps) {
+export function Modal({ open, onClose, title, children, className, persistent }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
@@ -28,7 +29,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !persistent) onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
@@ -36,7 +37,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={persistent ? undefined : onClose}>
       <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
       <div
         ref={panelRef}
