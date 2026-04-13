@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { sql, rowToTenant, type DbTenantRow } from "./_db";
+import { getSql, rowToTenant, type DbTenantRow } from "./_db";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    const sql = getSql();
     if (req.method === "GET") {
       const rows = (await sql`
         select id, name, plan, admin_email, active, created_at, config, subscription_plans

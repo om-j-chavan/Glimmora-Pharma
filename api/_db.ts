@@ -1,10 +1,18 @@
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not set");
+let cached: NeonQueryFunction<false, false> | null = null;
+
+export function getSql(): NeonQueryFunction<false, false> {
+  if (cached) return cached;
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is not set. Add it in Vercel → Project → Settings → Environment Variables and redeploy.",
+    );
+  }
+  cached = neon(url);
+  return cached;
 }
-
-export const sql = neon(process.env.DATABASE_URL);
 
 export interface DbTenantRow {
   id: string;

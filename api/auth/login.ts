@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { sql, rowToTenant, type DbTenantRow } from "../_db";
+import { getSql, rowToTenant, type DbTenantRow } from "../_db";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -8,6 +8,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    const sql = getSql();
     const { username, password } = (req.body ?? {}) as {
       username: string;
       password: string;
