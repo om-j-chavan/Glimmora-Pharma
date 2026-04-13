@@ -98,7 +98,11 @@ function SubscriptionPlansModal({
   const [editModal, setEditModal] = useState<SubPlan | null>(null);
   const [isNew, setIsNew] = useState(false);
 
-  useEffect(() => { setItems(plans); }, [plans]);
+  // Sync local items with props only when modal opens, not on every render
+  useEffect(() => {
+    if (open) setItems(plans);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const [planErrors, setPlanErrors] = useState<Record<string, string>>({});
 
@@ -355,7 +359,16 @@ function AccountModal({
   const [subModalOpen, setSubModalOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setForm(initial); }, [initial]);
+  // Only reset form when the modal transitions from closed → open, NOT on every render.
+  // Re-rendering the parent (e.g. when a subscription plan is added) was wiping form state
+  // because `initial` is a fresh object reference on every parent render.
+  useEffect(() => {
+    if (open) {
+      setForm(initial);
+      setErrors({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const set = <K extends keyof AccountFormData>(key: K, value: AccountFormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -370,8 +383,7 @@ function AccountModal({
       e.email = "Enter a valid email address";
     }
     if (mode === "create") {
-      if (!form.newPassword.trim()) e.newPassword = "Required";
-      else if (form.newPassword.length < 6) e.newPassword = "Password must be at least 6 characters";
+      if (!form.newPassword) e.newPassword = "Password is required";
       if (form.newPassword !== form.confirmPassword) e.confirmPassword = "Passwords do not match";
     }
     setErrors(e);
@@ -594,12 +606,12 @@ function AccountModal({
             zIndex: 10,
           }}
         >
-          <Button variant="secondary" size="sm" onClick={() => setSubModalOpen(true)}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setSubModalOpen(true)}>
             Subscription Plan
           </Button>
           <div className="flex gap-3">
-            <Button variant="primary" size="sm" icon={Save} onClick={handleSubmit}>Save</Button>
-            <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="primary" size="sm" icon={Save} onClick={handleSubmit}>Save</Button>
+            <Button type="button" variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           </div>
         </div>
       </Modal>
