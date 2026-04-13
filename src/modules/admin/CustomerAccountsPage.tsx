@@ -18,10 +18,11 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import {
   addTenant,
   updateTenant,
+  removeTenant,
   setTenants,
   type Tenant,
 } from "@/store/auth.slice";
-import { fetchTenants, createTenantApi, updateTenantApi } from "@/lib/tenantApi";
+import { fetchTenants, createTenantApi, updateTenantApi, deleteTenantApi } from "@/lib/tenantApi";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
@@ -638,6 +639,8 @@ export function CustomerAccountsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
@@ -759,6 +762,24 @@ export function CustomerAccountsPage() {
         console.error("[admin] failed to persist new tenant", err);
         setSyncError("Saved locally but failed to sync to the database.");
       }
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingTenant) return;
+    setDeleting(true);
+    const id = deletingTenant.id;
+    // Optimistic local removal
+    dispatch(removeTenant(id));
+    try {
+      await deleteTenantApi(id);
+      setDeletingTenant(null);
+    } catch (err) {
+      console.error("[admin] failed to delete tenant", err);
+      setSyncError("Removed locally but failed to delete from the database.");
+      setDeletingTenant(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -929,9 +950,22 @@ export function CustomerAccountsPage() {
                     </span>
                   </td>
                   <td>
-                    <Button variant="ghost" size="xs" icon={Pencil} onClick={() => openEdit(tenant)} aria-label={`Edit ${tenant.name}`}>
-                      Edit
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="xs" icon={Pencil} onClick={() => openEdit(tenant)} aria-label={`Edit ${tenant.name}`}>
+                        Edit
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => setDeletingTenant(tenant)}
+                        aria-label={`Delete ${tenant.name}`}
+                        className="p-1.5 rounded border-none cursor-pointer transition-colors"
+                        style={{ background: "transparent", color: "var(--danger)" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--danger-bg)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -960,6 +994,66 @@ export function CustomerAccountsPage() {
         initial={getFormData()}
         mode={editingTenant ? "edit" : "create"}
       />
+
+      {/* Delete confirmation modal */}
+      {deletingTenant && (
+        <Modal
+          open
+          onClose={() => !deleting && setDeletingTenant(null)}
+          title="Delete Customer Account"
+        >
+          <div className="space-y-4">
+            <div
+              className="flex items-start gap-3 p-3 rounded-lg"
+              style={{ background: "var(--danger-bg)", border: "1px solid var(--danger)" }}
+            >
+              <Trash2 className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "var(--danger)" }} aria-hidden="true" />
+              <div>
+                <p className="text-[13px] font-semibold" style={{ color: "var(--danger)" }}>
+                  This action cannot be undone
+                </p>
+                <p className="text-[12px] mt-1" style={{ color: "var(--text-secondary)" }}>
+                  All sites, users, and subscription plans for this account will be permanently deleted from the database.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                You are about to delete:
+              </p>
+              <p className="text-[15px] font-semibold mt-1" style={{ color: "var(--text-primary)" }}>
+                {deletingTenant.name}
+              </p>
+              <p className="text-[12px] font-mono mt-0.5" style={{ color: "var(--text-muted)" }}>
+                {deletingTenant.adminEmail}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setDeletingTenant(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                icon={Trash2}
+                onClick={handleDelete}
+                loading={deleting}
+              >
+                Delete Permanently
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

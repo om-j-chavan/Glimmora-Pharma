@@ -161,6 +161,9 @@ const authSlice = createSlice({
     setCurrentTenant(state, { payload }: PayloadAction<string>) { state.currentTenant = payload; },
     addTenant(state, { payload }: PayloadAction<Tenant>) { state.tenants.push(payload); },
     updateTenant(state, { payload }: PayloadAction<{ id: string; patch: Partial<Tenant> }>) { const t = state.tenants.find((t) => t.id === payload.id); if (t) Object.assign(t, payload.patch); },
+    removeTenant(state, { payload }: PayloadAction<string>) {
+      state.tenants = state.tenants.filter((t) => t.id !== payload);
+    },
     setTenants(state, { payload }: PayloadAction<Tenant[]>) {
       // Replace the entire tenants array (used when syncing from backend).
       // Preserves any seed tenant entries that the backend doesn't know about by merging by id.
@@ -229,7 +232,7 @@ const authSlice = createSlice({
 
 export const {
   setCredentials, setActiveSite, setSelectedSite, setCurrentTenant,
-  addTenant, updateTenant, setTenants,
+  addTenant, updateTenant, removeTenant, setTenants,
   updateTenantOrg, addTenantSite, updateTenantSite, removeTenantSite,
   addTenantUser, updateTenantUser,
   addSubscriptionPlan, updateSubscriptionPlan,

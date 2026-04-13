@@ -36,6 +36,16 @@ export async function updateTenantApi(
   }
 }
 
+export async function deleteTenantApi(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/tenants?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? `Failed to delete tenant: ${res.status}`);
+  }
+}
+
 export interface LoginResult {
   ok: true;
   user: {
