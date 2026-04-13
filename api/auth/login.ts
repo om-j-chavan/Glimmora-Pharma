@@ -1,5 +1,29 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getSql, rowToTenant, type DbTenantRow } from "../_db";
+import { neon } from "@neondatabase/serverless";
+
+interface DbTenantRow {
+  id: string;
+  name: string;
+  plan: "trial" | "professional" | "enterprise";
+  admin_email: string;
+  active: boolean;
+  created_at: string;
+  config: any;
+  subscription_plans: any;
+}
+
+function rowToTenant(row: DbTenantRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    plan: row.plan,
+    adminEmail: row.admin_email,
+    active: row.active,
+    createdAt: row.created_at,
+    config: row.config ?? { org: {}, sites: [], users: [] },
+    subscriptionPlans: row.subscription_plans ?? [],
+  };
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -8,7 +32,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const sql = getSql();
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      return res.status(500).json({ error: "DATABASE_URL is not set on this deployment" });
+    }
+    const sql = neon(url);
+
     const { username, password } = (req.body ?? {}) as {
       username: string;
       password: string;
