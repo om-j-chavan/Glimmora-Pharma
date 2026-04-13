@@ -18,8 +18,10 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import {
   addTenant,
   updateTenant,
+  setTenants,
   type Tenant,
 } from "@/store/auth.slice";
+import { fetchTenants, createTenantApi, updateTenantApi } from "@/lib/tenantApi";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
@@ -636,6 +638,29 @@ export function CustomerAccountsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // On mount: pull tenants from the backend so all browsers see the same data
+  useEffect(() => {
+    let cancelled = false;
+    setSyncing(true);
+    fetchTenants()
+      .then((remote) => {
+        if (cancelled) return;
+        dispatch(setTenants(remote));
+        setSyncError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[admin] tenant sync failed", err);
+        setSyncError(
+          "Could not sync customers from the database. Showing local cache only.",
+        );
+      })
+      .finally(() => { if (!cancelled) setSyncing(false); });
+    return () => { cancelled = true; };
+  }, [dispatch]);
 
   const filtered = tenants.filter(
     (t) =>
@@ -653,68 +678,87 @@ export function CustomerAccountsPage() {
     setModalOpen(true);
   };
 
-  const handleSave = (data: AccountFormData) => {
+  const handleSave = async (data: AccountFormData) => {
     if (editingTenant) {
       // Update existing admin user in the tenant's user list
       const updatedUsers = editingTenant.config.users.map((u) =>
         u.role === "customer_admin" || u.role === "super_admin"
-          ? { ...u, name: data.customerName, email: data.email, status: data.active ? "Active" as const : "Inactive" as const }
+          ? {
+              ...u,
+              name: data.customerName,
+              email: data.email,
+              username: data.username,
+              // Only overwrite password if a new one was entered
+              ...(data.newPassword ? { password: data.newPassword } : {}),
+              status: data.active ? "Active" as const : "Inactive" as const,
+            }
           : u,
       );
-      dispatch(
-        updateTenant({
-          id: editingTenant.id,
-          patch: {
-            name: data.customerName,
-            adminEmail: data.email,
-            active: data.active,
-            config: {
-              ...editingTenant.config,
-              org: {
-                ...editingTenant.config.org,
-                companyName: data.customerName,
-                timezone: data.timezone,
-              },
-              users: updatedUsers,
-            },
+      const patch: Partial<Tenant> = {
+        name: data.customerName,
+        adminEmail: data.email,
+        active: data.active,
+        config: {
+          ...editingTenant.config,
+          org: {
+            ...editingTenant.config.org,
+            companyName: data.customerName,
+            timezone: data.timezone,
           },
-        }),
-      );
+          users: updatedUsers,
+        },
+      };
+      // Optimistic local update
+      dispatch(updateTenant({ id: editingTenant.id, patch }));
+      try {
+        await updateTenantApi(editingTenant.id, patch);
+      } catch (err) {
+        console.error("[admin] failed to persist tenant update", err);
+        setSyncError("Saved locally but failed to sync to the database.");
+      }
     } else {
       const tenantId = `tenant-${Date.now()}`;
       const adminUserId = `u-ca-${Date.now()}`;
-      dispatch(
-        addTenant({
-          id: tenantId,
-          name: data.customerName,
-          plan: "enterprise",
-          adminEmail: data.email,
-          createdAt: new Date().toISOString(),
-          active: data.active,
-          subscriptionPlans: [],
-          config: {
-            org: {
-              companyName: data.customerName,
-              timezone: data.timezone,
-              dateFormat: "DD/MM/YYYY",
-              regulatoryRegion: "",
-            },
-            sites: [],
-            users: [
-              {
-                id: adminUserId,
-                name: data.customerName,
-                email: data.email,
-                role: "customer_admin",
-                gxpSignatory: true,
-                status: "Active",
-                assignedSites: [],
-                allSites: true,
-              },
-            ],
+      const newTenant: Tenant = {
+        id: tenantId,
+        name: data.customerName,
+        plan: "enterprise",
+        adminEmail: data.email,
+        createdAt: new Date().toISOString(),
+        active: data.active,
+        subscriptionPlans: [],
+        config: {
+          org: {
+            companyName: data.customerName,
+            timezone: data.timezone,
+            dateFormat: "DD/MM/YYYY",
+            regulatoryRegion: "",
           },
-        }),
-      );
+          sites: [],
+          users: [
+            {
+              id: adminUserId,
+              name: data.customerName,
+              email: data.email,
+              username: data.username,
+              password: data.newPassword,
+              role: "customer_admin",
+              gxpSignatory: true,
+              status: "Active",
+              assignedSites: [],
+              allSites: true,
+            },
+          ],
+        },
+      };
+      // Optimistic local insert
+      dispatch(addTenant(newTenant));
+      try {
+        await createTenantApi(newTenant);
+      } catch (err) {
+        console.error("[admin] failed to persist new tenant", err);
+        setSyncError("Saved locally but failed to sync to the database.");
+      }
     }
   };
 
@@ -726,7 +770,7 @@ export function CustomerAccountsPage() {
     return {
       customerCode: editingTenant.id.replace("tenant-", "GP_"),
       customerName: editingTenant.name,
-      username: admin?.email?.split("@")[0] ?? "",
+      username: admin?.username ?? admin?.email?.split("@")[0] ?? "",
       email: editingTenant.adminEmail,
       language: "English, United States",
       timezone: editingTenant.config.org.timezone,
@@ -754,6 +798,26 @@ export function CustomerAccountsPage() {
           New Account
         </Button>
       </div>
+
+      {/* Sync status banner */}
+      {syncing && (
+        <div
+          role="status"
+          className="mb-4 px-3 py-2 rounded-lg text-[12px]"
+          style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "1px solid var(--brand-border)" }}
+        >
+          Syncing customers from database…
+        </div>
+      )}
+      {syncError && (
+        <div
+          role="alert"
+          className="mb-4 px-3 py-2 rounded-lg text-[12px]"
+          style={{ background: "var(--warning-bg)", color: "var(--warning)", border: "1px solid var(--warning)" }}
+        >
+          {syncError}
+        </div>
+      )}
 
       {/* Search */}
       <div className="mb-4 max-w-sm">

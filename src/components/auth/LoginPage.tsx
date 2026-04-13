@@ -16,7 +16,8 @@ import {
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { setCredentials, setActiveSite, setSelectedSite, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
+import { setCredentials, setActiveSite, setSelectedSite, setTenants, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
+import { loginApi } from "@/lib/tenantApi";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
@@ -205,10 +206,37 @@ export function LoginPage() {
       return;
     }
 
-    // 2. Check dynamically created tenant users (username or email match)
+    // 2. Try the backend API (Neon) — handles cross-browser sync
+    try {
+      const apiResult = await loginApi(data.email.trim(), data.password);
+      if (apiResult) {
+        const user = apiResult.user as AuthUser;
+        // Refresh local tenant cache with the authoritative one from the server
+        dispatch(setTenants([apiResult.tenant]));
+        dispatch(setCredentials({ token: "api-token-" + Date.now(), user }));
+
+        if (user.role === "super_admin") {
+          setLoadingName("Platform Admin");
+          setLoadingTenant(true);
+          await new Promise((r) => setTimeout(r, 600));
+          navigate("/admin");
+          return;
+        }
+
+        await finishLogin(user, apiResult.tenant, apiResult.tenant.name);
+        return;
+      }
+    } catch (err) {
+      console.warn("[login] API unreachable, falling back to local cache", err);
+    }
+
+    // 3. Fallback: check the local Redux cache (for offline / seed data)
     for (const tenant of tenants) {
       const tenantUser = tenant.config.users.find(
-        (u) => u.email.toLowerCase() === key || u.name.toLowerCase() === key,
+        (u) =>
+          u.username?.toLowerCase() === key ||
+          u.email.toLowerCase() === key ||
+          u.name.toLowerCase() === key,
       );
       if (tenantUser && tenantUser.status === "Active" && (!tenantUser.password || tenantUser.password === data.password)) {
         const user: AuthUser = {
