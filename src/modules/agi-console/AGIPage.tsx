@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
 import {
-  Bot, BookOpen, Shield, Activity, Settings, AlertTriangle, Plus,
+  Bot, BookOpen, Shield, Activity, Settings, AlertTriangle,
   ClipboardCheck, Search, Database, FileWarning, FolderOpen, TrendingUp,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
@@ -14,7 +14,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addAlert, resolveAlert, type DriftAlert, type DriftSeverity, type DriftStatus, type DriftType } from "@/store/agiDrift.slice";
+import { addAlert, resolveAlert, type DriftAlert, type DriftSeverity, type DriftType } from "@/store/agiDrift.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -61,7 +61,6 @@ export function AGIPage() {
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
 
   function ownerName(id: string) { return users.find((u) => u.id === id)?.name ?? id; }

@@ -40,8 +40,8 @@ export function AddSubscriptionPlanModal({ isOpen, onClose, onSave }: AddSubscri
     control,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+  } = useForm({
+    resolver: zodResolver(schema) as any,
     defaultValues: {
       startDate: dayjs().format("YYYY-MM-DD"),
       endDate: dayjs().add(1, "year").format("YYYY-MM-DD"),
@@ -67,7 +67,7 @@ export function AddSubscriptionPlanModal({ isOpen, onClose, onSave }: AddSubscri
 
   return (
     <Modal open={isOpen} onClose={handleClose} title="New subscription plan">
-      <form onSubmit={handleSubmit(submit)} noValidate className="space-y-4">
+      <form onSubmit={handleSubmit(submit as any)} noValidate className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           {/* Start date */}
           <div>

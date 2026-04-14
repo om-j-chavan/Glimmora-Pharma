@@ -15,7 +15,6 @@ import type { UserConfig } from "@/store/settings.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
-import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
 

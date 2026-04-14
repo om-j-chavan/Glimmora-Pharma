@@ -8,7 +8,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useTenantData } from "@/hooks/useTenantData";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
-import { PlanLimitUsageBar, PlanLimitPopup, EmptyState, DataTable, type Column } from "@/components/shared";
+import { PlanLimitUsageBar, PlanLimitPopup, EmptyState, DataTable } from "@/components/shared";
 import { addTenantSite, updateTenantSite, removeTenantSite, type TenantSiteConfig } from "@/store/auth.slice";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
@@ -120,7 +120,7 @@ function SiteForm({
 export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
   const { allSites: sites, tenantId } = useTenantConfig();
-  const { findings, systems } = useTenantData();
+  useTenantData();
   const { isAtLimit, isNearLimit, getCount, getLimit, tenantPlan } = usePlanLimits();
 
   const siteCount = getCount("sites");

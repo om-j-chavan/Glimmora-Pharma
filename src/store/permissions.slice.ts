@@ -15,8 +15,8 @@ const DEFAULT_MATRIX: PermissionMatrix = {
   qc_lab_director:    { dashboard: "readonly", gap: "full", capa: "limited", csv: "full", fda483: "readonly", evidence: "full", agi: "readonly", governance: "readonly", settings: "none" },
   regulatory_affairs: { dashboard: "readonly", gap: "full", capa: "limited", csv: "readonly", fda483: "full", evidence: "full", agi: "readonly", governance: "full", settings: "none" },
   csv_val_lead:       { dashboard: "readonly", gap: "full", capa: "limited", csv: "full", fda483: "readonly", evidence: "full", agi: "limited", governance: "readonly", settings: "none" },
-  it_cdo:             { dashboard: "readonly", gap: "readonly", capa: "readonly", csv: "full", fda483: "none", evidence: "readonly", agi: "full", governance: "readonly", settings: "none" },
-  operations_head:    { dashboard: "full", gap: "readonly", capa: "none", csv: "readonly", fda483: "readonly", evidence: "readonly", agi: "readonly", governance: "full", settings: "none" },
+  it_cdo:             { dashboard: "readonly", gap: "readonly", capa: "readonly", csv: "full", fda483: "readonly", evidence: "readonly", agi: "full", governance: "readonly", settings: "none" },
+  operations_head:    { dashboard: "full", gap: "readonly", capa: "limited", csv: "readonly", fda483: "readonly", evidence: "readonly", agi: "readonly", governance: "full", settings: "none" },
   viewer:             { dashboard: "readonly", gap: "readonly", capa: "readonly", csv: "readonly", fda483: "readonly", evidence: "readonly", agi: "readonly", governance: "readonly", settings: "none" },
 };
 

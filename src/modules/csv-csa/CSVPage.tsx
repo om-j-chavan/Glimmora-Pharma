@@ -189,7 +189,7 @@ export function CSVPage() {
   }
 
   function onActivitySave(data: ActivityForm) {
-    const newAct: RoadmapActivity = { ...data, id: crypto.randomUUID(), startDate: dayjs(data.startDate).utc().toISOString(), endDate: dayjs(data.endDate).utc().toISOString() };
+    const newAct: RoadmapActivity = { ...data, id: crypto.randomUUID(), startDate: dayjs(data.startDate).utc().toISOString(), endDate: dayjs(data.endDate).utc().toISOString(), tenantId: tenantId ?? "" };
     dispatch(addActivity({ ...newAct, tenantId: tenantId ?? "" }));
     auditLog({ action: "ROADMAP_ACTIVITY_ADDED", module: "csv-csa", recordId: newAct.id, newValue: newAct });
     setAddActivityOpen(false); setActivityAddedPopup(true);
@@ -318,6 +318,29 @@ export function CSVPage() {
         />
       </div>
 
+<<<<<<< HEAD
+=======
+      {/* ═══════════ DETAIL TAB ═══════════ */}
+      <div role="tabpanel" id="panel-detail" aria-labelledby="tab-detail" tabIndex={0} hidden={activeTab !== "detail"}>
+        <SystemDetailTab
+          selectedSystem={selectedSystem} systems={systems} roadmap={roadmap}
+          findings={findings} capas={capas as any}
+          sites={sites} users={users} timezone={timezone} dateFormat={dateFormat}
+          isDark={isDark} isViewOnly={isViewOnly} role={role}
+          showPart11={showPart11} showAnnex11={showAnnex11} showGAMP5={showGAMP5}
+          detailTab={detailTab} onDetailTabChange={setDetailTab}
+          onBack={() => { setSelectedSystem(null); setActiveTab("inventory"); }}
+          onEdit={() => setEditOpen(true)}
+          onGoToInventory={() => setActiveTab("inventory")}
+          onNavigateSettings={() => navigate("/settings")}
+          onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
+          onNavigateCapa={(cid) => navigate("/capa", { state: { openCapaId: cid } })}
+          onSaveRiskFactors={handleSaveRiskFactors}
+          onSavePlannedActions={handleSavePlannedActions}
+        />
+      </div>
+
+>>>>>>> 9a7d4075e3c69e02adb8fe56b026deb16b12065c
       {/* ═══════════ ROADMAP TAB ═══════════ */}
       <div role="tabpanel" id="panel-roadmap" aria-labelledby="tab-roadmap" tabIndex={0} hidden={activeTab !== "roadmap"}>
         <CSVRoadmapTab

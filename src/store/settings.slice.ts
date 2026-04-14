@@ -37,15 +37,15 @@ interface SettingsState {
 
 const initialState: SettingsState = {
   frameworks: {
-    p210: false,
-    p11: false,
-    annex11: false,
-    annex15: false,
-    ichq9: false,
-    ichq10: false,
-    gamp5: false,
-    who: false,
-    mhra: false,
+    p210: true,
+    p11: true,
+    annex11: true,
+    annex15: true,
+    ichq9: true,
+    ichq10: true,
+    gamp5: true,
+    who: true,
+    mhra: true,
   },
   agi: {
     mode: "autonomous",
@@ -56,8 +56,8 @@ const initialState: SettingsState = {
       fda483: true,
       batch: true,
       drift: true,
-      regulatory: false,
-      supplier: false,
+      regulatory: true,
+      supplier: true,
     },
   },
 };

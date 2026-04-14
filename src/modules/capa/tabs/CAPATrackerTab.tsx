@@ -1,8 +1,8 @@
 import { useState } from "react";
 import {
-  ClipboardCheck, Plus, Search, ChevronRight, X, Link2, Pencil,
+  ClipboardCheck, Plus, Search, ChevronRight, Link2, Pencil,
   AlertCircle, AlertTriangle, CheckCircle2, TrendingUp, FileText,
-  ShieldCheck, Send, Shield,
+  ShieldCheck, Send,
 } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";

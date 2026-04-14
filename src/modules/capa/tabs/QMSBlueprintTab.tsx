@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { ChevronRight } from "lucide-react";
 import clsx from "clsx";
-import type { CAPA, CAPARisk } from "@/store/capa.slice";
+import type { CAPA } from "@/store/capa.slice";
 import { Badge } from "@/components/ui/Badge";
 
 interface LifecycleStep {
@@ -24,7 +24,6 @@ interface QMSProcess {
 }
 
 interface QMSBlueprintTabProps {
-  capas: CAPA[];
   openCAPAs: CAPA[];
   noRCACount: number;
   pendingReviewCount: number;
@@ -38,7 +37,7 @@ interface QMSBlueprintTabProps {
 }
 
 export function QMSBlueprintTab({
-  capas, openCAPAs, noRCACount, pendingReviewCount, isDark,
+  openCAPAs, noRCACount, pendingReviewCount, isDark,
   selectedStep, onSelectStep, lifecycleSteps, qmsProcesses,
   stepHasProblem, getProcessMetrics,
 }: QMSBlueprintTabProps) {

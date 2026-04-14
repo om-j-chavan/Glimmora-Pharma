@@ -38,6 +38,7 @@ export interface TenantUserConfig {
   assignedSites: string[];
   allSites: boolean;
   password?: string;
+  username?: string;
 }
 
 export interface TenantConfig {
@@ -93,7 +94,7 @@ const authSlice = createSlice({
           ],
           users: [
             { id: "u-001", name: "System Administrator", email: "admin@pharmaglimmora.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-009", name: "Customer Administrator", email: "custadmin@pharmaglimmora.com", role: "customer_admin", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
+            { id: "u-009", name: "Customer Administrator", email: "custadmin@pharmaglimmora.com", role: "customer_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
             { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
             { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", role: "regulatory_affairs", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-1", "site-gl-2"], allSites: false },
             { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", role: "csv_val_lead", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-1", "site-gl-3"], allSites: false },
@@ -119,7 +120,7 @@ const authSlice = createSlice({
           ],
           users: [
             { id: "u-abc-001", name: "ABC Admin", email: "admin@abcpharma.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-cust-abc", name: "ABC Customer Admin", email: "custadmin@abcpharma.com", role: "customer_admin", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
+            { id: "u-cust-abc", name: "ABC Customer Admin", email: "custadmin@abcpharma.com", role: "customer_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
             { id: "u-abc-002", name: "Dr. Sunita Rao", email: "qa@abcpharma.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
             { id: "u-abc-003", name: "Kiran Mehta", email: "csv@abcpharma.com", role: "csv_val_lead", gxpSignatory: false, status: "Active", assignedSites: ["site-abc-1"], allSites: false },
           ],
@@ -139,7 +140,7 @@ const authSlice = createSlice({
           ],
           users: [
             { id: "u-xyz-001", name: "XYZ Admin", email: "admin@xyzbiotech.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-cust-xyz", name: "XYZ Customer Admin", email: "custadmin@xyzbiotech.com", role: "customer_admin", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
+            { id: "u-cust-xyz", name: "XYZ Customer Admin", email: "custadmin@xyzbiotech.com", role: "customer_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
             { id: "u-xyz-002", name: "Dr. Arjun Das", email: "qa@xyzbiotech.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
           ],
         },
@@ -160,6 +161,16 @@ const authSlice = createSlice({
     setCurrentTenant(state, { payload }: PayloadAction<string>) { state.currentTenant = payload; },
     addTenant(state, { payload }: PayloadAction<Tenant>) { state.tenants.push(payload); },
     updateTenant(state, { payload }: PayloadAction<{ id: string; patch: Partial<Tenant> }>) { const t = state.tenants.find((t) => t.id === payload.id); if (t) Object.assign(t, payload.patch); },
+    removeTenant(state, { payload }: PayloadAction<string>) {
+      state.tenants = state.tenants.filter((t) => t.id !== payload);
+    },
+    setTenants(state, { payload }: PayloadAction<Tenant[]>) {
+      // Replace the entire tenants array (used when syncing from backend).
+      // Preserves any seed tenant entries that the backend doesn't know about by merging by id.
+      const incomingIds = new Set(payload.map((t) => t.id));
+      const localOnly = state.tenants.filter((t) => !incomingIds.has(t.id));
+      state.tenants = [...payload, ...localOnly];
+    },
 
     // Per-tenant org
     updateTenantOrg(state, { payload }: PayloadAction<{ tenantId: string; patch: Partial<TenantOrgConfig> }>) {
@@ -221,7 +232,7 @@ const authSlice = createSlice({
 
 export const {
   setCredentials, setActiveSite, setSelectedSite, setCurrentTenant,
-  addTenant, updateTenant,
+  addTenant, updateTenant, removeTenant, setTenants,
   updateTenantOrg, addTenantSite, updateTenantSite, removeTenantSite,
   addTenantUser, updateTenantUser,
   addSubscriptionPlan, updateSubscriptionPlan,

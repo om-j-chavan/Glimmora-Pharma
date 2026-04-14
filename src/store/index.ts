@@ -1,4 +1,4 @@
-import { configureStore } from "@reduxjs/toolkit";
+import { configureStore, combineReducers } from "@reduxjs/toolkit";
 import authReducer from "./auth.slice";
 import settingsReducer from "./settings.slice";
 import themeReducer from "./theme.slice";
@@ -14,27 +14,27 @@ import notificationsReducer from "./notifications.slice";
 import readinessReducer from "./readiness.slice";
 import { loadPersistedState, persistMiddleware } from "./persistence";
 
-const persisted = loadPersistedState();
+const rootReducer = combineReducers({
+  auth: authReducer,
+  settings: settingsReducer,
+  theme: themeReducer,
+  findings: findingsReducer,
+  capa: capaReducer,
+  systems: systemsReducer,
+  fda483: fda483Reducer,
+  evidence: evidenceReducer,
+  agiDrift: agiDriftReducer,
+  raid: raidReducer,
+  permissions: permissionsReducer,
+  notifications: notificationsReducer,
+  readiness: readinessReducer,
+});
 
 export const store = configureStore({
-  reducer: {
-    auth: authReducer,
-    settings: settingsReducer,
-    theme: themeReducer,
-    findings: findingsReducer,
-    capa: capaReducer,
-    systems: systemsReducer,
-    fda483: fda483Reducer,
-    evidence: evidenceReducer,
-    agiDrift: agiDriftReducer,
-    raid: raidReducer,
-    permissions: permissionsReducer,
-    notifications: notificationsReducer,
-    readiness: readinessReducer,
-  },
-  preloadedState: persisted,
-  middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(persistMiddleware),
+  reducer: rootReducer,
+  preloadedState: loadPersistedState() as ReturnType<typeof rootReducer> | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  middleware: ((gDM: any) => gDM({ serializableCheck: false }).concat(persistMiddleware)) as any,
 });
 
 export type RootState = ReturnType<typeof store.getState>;

@@ -4,7 +4,6 @@ import {
   GitBranch, FileText, ArrowRight,
 } from "lucide-react";
 import type { EvidenceDocument, DocArea } from "@/store/evidence.slice";
-import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 
 const DOC_AREAS: DocArea[] = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT", "Regulatory", "Training", "HR"];

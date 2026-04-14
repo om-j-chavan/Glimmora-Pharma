@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router";
-import clsx from "clsx";
 import { BarChart3, ClipboardList, FolderOpen, Plus } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
@@ -25,7 +24,7 @@ import { Popup } from "@/components/ui/Popup";
 import { GapSummaryTab } from "./tabs/GapSummaryTab";
 import { GapRegisterTab } from "./tabs/GapRegisterTab";
 import { GapEvidenceTab } from "./tabs/GapEvidenceTab";
-import { AddFindingModal, type FindingForm } from "./modals/AddFindingModal";
+import { AddFindingModal } from "./modals/AddFindingModal";
 import { EvidenceLinkModal } from "./modals/EvidenceLinkModal";
 
 /* ── Constants ── */

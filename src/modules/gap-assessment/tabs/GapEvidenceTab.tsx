@@ -53,7 +53,7 @@ export function GapEvidenceTab({
     <div role="tabpanel" id="panel-evidence" aria-labelledby="tab-evidence" tabIndex={0}>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>Evidence index</h2>
-        <Button variant="primary" size="sm" icon={() => <span className="w-4 h-4" aria-hidden="true">↓</span>} onClick={onExport}>Export evidence pack</Button>
+        <Button variant="primary" size="sm" onClick={onExport}>Export evidence pack</Button>
       </div>
 
       {allEvidenceRows.length === 0 ? (

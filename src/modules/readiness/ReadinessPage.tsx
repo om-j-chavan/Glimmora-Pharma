@@ -12,7 +12,7 @@ import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { useTenantData } from "@/hooks/useTenantData";
+
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import {
@@ -41,7 +41,7 @@ const TABS = [
   { id: "governance", label: "Governance", Icon: Shield },
   { id: "playbooks", label: "Playbooks", Icon: BookOpen },
   { id: "training", label: "Training", Icon: GraduationCap },
-] as const;
+];
 type TabId = (typeof TABS)[number]["id"];
 
 const LANE_OPTIONS = LANES.map((l) => ({ value: l, label: l }));
@@ -117,11 +117,10 @@ export function ReadinessPage() {
   }
 
   const simSchema = z.object({ title: z.string().min(3, "Title required"), type: z.enum(["Mock Inspection", "DIL Drill", "SME Q&A", "Leadership Briefing"]), scheduledAt: z.string().min(1, "Date required"), duration: z.coerce.number().min(15, "Min 15 min"), participants: z.array(z.string()).min(1, "Select at least one") });
-  type SimForm = z.infer<typeof simSchema>;
-  const { control: simCtl, handleSubmit: simSubmit, reset: simReset, watch: simWatch, setValue: simSetValue, formState: { errors: simErrors } } = useForm<SimForm>({ resolver: zodResolver(simSchema), defaultValues: { title: "", type: "Mock Inspection", scheduledAt: "", duration: 90, participants: [] } });
+  const { control: simCtl, handleSubmit: simSubmit, reset: simReset, watch: simWatch, setValue: simSetValue, formState: { errors: simErrors } } = useForm({ resolver: zodResolver(simSchema) as any, defaultValues: { title: "", type: "Mock Inspection" as const, scheduledAt: "", duration: 90, participants: [] as string[] } });
   const watchParticipants = simWatch("participants") ?? [];
 
-  function onSimSave(data: SimForm) {
+  function onSimSave(data: any) {
     const id = crypto.randomUUID();
     dispatch(addSimulation({ ...data, id, status: "Scheduled", tenantId: tenantId ?? "", scheduledAt: dayjs(data.scheduledAt).utc().toISOString() }));
     auditLog({ action: "SIMULATION_SCHEDULED", module: "readiness", recordId: id, newValue: data });

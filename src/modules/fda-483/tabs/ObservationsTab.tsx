@@ -14,7 +14,6 @@ import type {
   EventStatus,
   Observation,
   ObservationSeverity,
-  Commitment,
 } from "@/store/fda483.slice";
 import type { CAPA } from "@/store/capa.slice";
 import { Button } from "@/components/ui/Button";

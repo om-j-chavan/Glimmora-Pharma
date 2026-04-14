@@ -5,9 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
 import {
-  FolderOpen, Package, Plus, Download, Eye,
-  FileText, ClipboardList, Shield, CheckSquare, BarChart3, GitBranch,
-  Award, BookOpen, File, ClipboardCheck,
+  FolderOpen, Package, Plus, Download, ClipboardCheck,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -29,9 +27,6 @@ import { DILStatusTab } from "./tabs/DILStatusTab";
 
 /* ── Constants ── */
 
-type LucideIcon = React.ComponentType<{ className?: string; style?: React.CSSProperties; "aria-hidden"?: boolean | "true" | "false" }>;
-
-const DOC_TYPE_ICONS: Record<DocType, LucideIcon> = { SOP: FileText, Record: ClipboardList, "Audit Trail": Shield, Validation: CheckSquare, Report: BarChart3, Protocol: GitBranch, Certificate: Award, Policy: BookOpen, Other: File };
 const DOC_TYPES: DocType[] = ["SOP", "Record", "Audit Trail", "Validation", "Report", "Protocol", "Certificate", "Policy", "Other"];
 const DOC_AREAS: DocArea[] = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT", "Regulatory", "Training", "HR"];
 const DOC_STATUSES: DocStatus[] = ["Current", "Draft", "Superseded", "Missing", "Under Review"];
@@ -78,19 +73,19 @@ export function EvidencePage() {
     const docs: EvidenceDocument[] = [...evidence.documents];
     findings.forEach((f) => {
       if (f.evidenceLink?.trim() && !docs.find((d) => d.reference === f.evidenceLink)) {
-        docs.push({ id: `finding-${f.id}`, title: f.requirement, reference: f.evidenceLink, type: "Record", area: (f.area as DocArea) || "QMS", findingId: f.id, version: "1.0", status: f.status === "Closed" ? "Current" : "Under Review", author: f.owner, effectiveDate: f.createdAt, tags: [f.framework, f.severity].filter(Boolean), complianceTags: [f.framework], createdAt: f.createdAt });
+        docs.push({ id: `finding-${f.id}`, title: f.requirement, reference: f.evidenceLink, type: "Record", area: (f.area as DocArea) || "QMS", findingId: f.id, version: "1.0", status: f.status === "Closed" ? "Current" : "Under Review", author: f.owner, effectiveDate: f.createdAt, tags: [f.framework, f.severity].filter(Boolean), complianceTags: [f.framework], createdAt: f.createdAt, tenantId: f.tenantId ?? "", siteId: "" });
       }
     });
     capas.forEach((c) => {
       c.evidenceLinks.forEach((link, i) => {
         if (!docs.find((d) => d.reference === link)) {
-          docs.push({ id: `capa-${c.id}-${i}`, title: `${c.id} \u2014 Evidence ${i + 1}`, reference: link, type: "Record", area: "QMS", capaId: c.id, version: "1.0", status: c.status === "Closed" ? "Current" : "Under Review", author: c.owner, effectiveDate: c.createdAt, tags: ["CAPA", c.source], complianceTags: [c.source], createdAt: c.createdAt });
+          docs.push({ id: `capa-${c.id}-${i}`, title: `${c.id} \u2014 Evidence ${i + 1}`, reference: link, type: "Record", area: "QMS", capaId: c.id, version: "1.0", status: c.status === "Closed" ? "Current" : "Under Review", author: c.owner, effectiveDate: c.createdAt, tags: ["CAPA", c.source], complianceTags: [c.source], createdAt: c.createdAt, tenantId: c.tenantId ?? "", siteId: "" });
         }
       });
     });
     fda483Events.forEach((e) => {
       if (e.responseDraft?.trim() && !docs.find((d) => d.eventId === e.id)) {
-        docs.push({ id: `event-${e.id}`, title: `${e.referenceNumber} \u2014 Response Draft`, reference: e.referenceNumber, type: "Record", area: "Regulatory", eventId: e.id, version: "1.0", status: e.status === "Response Submitted" ? "Current" : "Draft", author: "", effectiveDate: e.createdAt, tags: [e.type, e.agency], complianceTags: [e.type], createdAt: e.createdAt });
+        docs.push({ id: `event-${e.id}`, title: `${e.referenceNumber} \u2014 Response Draft`, reference: e.referenceNumber, type: "Record", area: "Regulatory", eventId: e.id, version: "1.0", status: e.status === "Response Submitted" ? "Current" : "Draft", author: "", effectiveDate: e.createdAt, tags: [e.type, e.agency], complianceTags: [e.type], createdAt: e.createdAt, tenantId: e.tenantId ?? "", siteId: "" });
       }
     });
     return docs;

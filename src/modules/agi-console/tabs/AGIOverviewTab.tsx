@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import {
-  Sparkles, Zap, ShieldCheck, Activity, AlertCircle,
-  TrendingUp, CheckSquare, Ban, X,
+  Sparkles, Zap, ShieldCheck, Activity,
+  Ban, X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 

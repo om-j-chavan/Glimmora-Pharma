@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Badge } from "@/components/ui/Badge";
+
 
 interface CardSectionProps {
   icon: LucideIcon;

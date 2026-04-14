@@ -2,7 +2,7 @@ import clsx from "clsx";
 import {
   FolderOpen, Plus, Search, Filter, LayoutGrid, List,
   FileText, ClipboardList, Shield, CheckSquare, BarChart3, GitBranch,
-  Award, BookOpen, File, ClipboardCheck, FileWarning, X,
+  Award, BookOpen, File, ClipboardCheck, FileWarning,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { EvidenceDocument, DocType, DocArea, DocStatus } from "@/store/evidence.slice";

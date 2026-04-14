@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router";
 import {
   Plus,
   Pencil,
@@ -17,8 +18,11 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import {
   addTenant,
   updateTenant,
+  removeTenant,
+  setTenants,
   type Tenant,
 } from "@/store/auth.slice";
+import { fetchTenants, createTenantApi, updateTenantApi, deleteTenantApi } from "@/lib/tenantApi";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
@@ -97,7 +101,11 @@ function SubscriptionPlansModal({
   const [editModal, setEditModal] = useState<SubPlan | null>(null);
   const [isNew, setIsNew] = useState(false);
 
-  useEffect(() => { setItems(plans); }, [plans]);
+  // Sync local items with props only when modal opens, not on every render
+  useEffect(() => {
+    if (open) setItems(plans);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const [planErrors, setPlanErrors] = useState<Record<string, string>>({});
 
@@ -354,7 +362,16 @@ function AccountModal({
   const [subModalOpen, setSubModalOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { setForm(initial); }, [initial]);
+  // Only reset form when the modal transitions from closed → open, NOT on every render.
+  // Re-rendering the parent (e.g. when a subscription plan is added) was wiping form state
+  // because `initial` is a fresh object reference on every parent render.
+  useEffect(() => {
+    if (open) {
+      setForm(initial);
+      setErrors({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const set = <K extends keyof AccountFormData>(key: K, value: AccountFormData[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -369,8 +386,7 @@ function AccountModal({
       e.email = "Enter a valid email address";
     }
     if (mode === "create") {
-      if (!form.newPassword.trim()) e.newPassword = "Required";
-      else if (form.newPassword.length < 6) e.newPassword = "Password must be at least 6 characters";
+      if (!form.newPassword) e.newPassword = "Password is required";
       if (form.newPassword !== form.confirmPassword) e.confirmPassword = "Passwords do not match";
     }
     setErrors(e);
@@ -398,7 +414,7 @@ function AccountModal({
 
   return (
     <>
-      <Modal open={open && !subModalOpen} onClose={onClose} title={mode === "create" ? "New Account" : "Edit Account"}>
+      <Modal open={open && !subModalOpen} onClose={onClose} title={mode === "create" ? "New Account" : "Edit Account"} persistent>
         <div className="space-y-5 max-h-[60vh] overflow-y-auto pr-1 pb-16">
           {/* ── ACCOUNT INFORMATION ── */}
           <div>
@@ -593,12 +609,12 @@ function AccountModal({
             zIndex: 10,
           }}
         >
-          <Button variant="secondary" size="sm" onClick={() => setSubModalOpen(true)}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setSubModalOpen(true)}>
             Subscription Plan
           </Button>
           <div className="flex gap-3">
-            <Button variant="primary" size="sm" icon={Save} onClick={handleSubmit}>Save</Button>
-            <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="primary" size="sm" icon={Save} onClick={handleSubmit}>Save</Button>
+            <Button type="button" variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           </div>
         </div>
       </Modal>
@@ -623,6 +639,31 @@ export function CustomerAccountsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // On mount: pull tenants from the backend so all browsers see the same data
+  useEffect(() => {
+    let cancelled = false;
+    setSyncing(true);
+    fetchTenants()
+      .then((remote) => {
+        if (cancelled) return;
+        dispatch(setTenants(remote));
+        setSyncError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[admin] tenant sync failed", err);
+        setSyncError(
+          "Could not sync customers from the database. Showing local cache only.",
+        );
+      })
+      .finally(() => { if (!cancelled) setSyncing(false); });
+    return () => { cancelled = true; };
+  }, [dispatch]);
 
   const filtered = tenants.filter(
     (t) =>
@@ -640,67 +681,105 @@ export function CustomerAccountsPage() {
     setModalOpen(true);
   };
 
-  const handleSave = (data: AccountFormData) => {
+  const handleSave = async (data: AccountFormData) => {
     if (editingTenant) {
       // Update existing admin user in the tenant's user list
       const updatedUsers = editingTenant.config.users.map((u) =>
         u.role === "customer_admin" || u.role === "super_admin"
-          ? { ...u, name: data.customerName, email: data.email, status: data.active ? "Active" as const : "Inactive" as const }
+          ? {
+              ...u,
+              name: data.customerName,
+              email: data.email,
+              username: data.username,
+              // Only overwrite password if a new one was entered
+              ...(data.newPassword ? { password: data.newPassword } : {}),
+              status: data.active ? "Active" as const : "Inactive" as const,
+            }
           : u,
       );
-      dispatch(
-        updateTenant({
-          id: editingTenant.id,
-          patch: {
-            name: data.customerName,
-            adminEmail: data.email,
-            active: data.active,
-            config: {
-              ...editingTenant.config,
-              org: {
-                ...editingTenant.config.org,
-                companyName: data.customerName,
-                timezone: data.timezone,
-              },
-              users: updatedUsers,
-            },
+      const patch: Partial<Tenant> = {
+        name: data.customerName,
+        adminEmail: data.email,
+        active: data.active,
+        config: {
+          ...editingTenant.config,
+          org: {
+            ...editingTenant.config.org,
+            companyName: data.customerName,
+            timezone: data.timezone,
           },
-        }),
-      );
+          users: updatedUsers,
+        },
+      };
+      // Optimistic local update
+      dispatch(updateTenant({ id: editingTenant.id, patch }));
+      try {
+        await updateTenantApi(editingTenant.id, patch);
+      } catch (err) {
+        console.error("[admin] failed to persist tenant update", err);
+        setSyncError("Saved locally but failed to sync to the database.");
+      }
     } else {
       const tenantId = `tenant-${Date.now()}`;
       const adminUserId = `u-ca-${Date.now()}`;
-      dispatch(
-        addTenant({
-          id: tenantId,
-          name: data.customerName,
-          plan: "enterprise",
-          adminEmail: data.email,
-          createdAt: new Date().toISOString(),
-          active: data.active,
-          config: {
-            org: {
-              companyName: data.customerName,
-              timezone: data.timezone,
-              dateFormat: "DD/MM/YYYY",
-              regulatoryRegion: "",
-            },
-            sites: [],
-            users: [
-              {
-                id: adminUserId,
-                name: data.customerName,
-                email: data.email,
-                role: "customer_admin",
-                gxpSignatory: true,
-                status: "Active",
-                assignedSites: [],
-                allSites: true,
-              },
-            ],
+      const newTenant: Tenant = {
+        id: tenantId,
+        name: data.customerName,
+        plan: "enterprise",
+        adminEmail: data.email,
+        createdAt: new Date().toISOString(),
+        active: data.active,
+        subscriptionPlans: [],
+        config: {
+          org: {
+            companyName: data.customerName,
+            timezone: data.timezone,
+            dateFormat: "DD/MM/YYYY",
+            regulatoryRegion: "",
           },
-        }),
-      );
+          sites: [],
+          users: [
+            {
+              id: adminUserId,
+              name: data.customerName,
+              email: data.email,
+              username: data.username,
+              password: data.newPassword,
+              role: "customer_admin",
+              gxpSignatory: true,
+              status: "Active",
+              assignedSites: [],
+              allSites: true,
+            },
+          ],
+        },
+      };
+      // Optimistic local insert
+      dispatch(addTenant(newTenant));
+      try {
+        await createTenantApi(newTenant);
+      } catch (err) {
+        console.error("[admin] failed to persist new tenant", err);
+        setSyncError("Saved locally but failed to sync to the database.");
+      }
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingTenant) return;
+    setDeleting(true);
+    const id = deletingTenant.id;
+    // Optimistic local removal
+    dispatch(removeTenant(id));
+    try {
+      await deleteTenantApi(id);
+      setDeletingTenant(null);
+    } catch (err) {
+      console.error("[admin] failed to delete tenant", err);
+      setSyncError("Removed locally but failed to delete from the database.");
+      setDeletingTenant(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -712,7 +791,7 @@ export function CustomerAccountsPage() {
     return {
       customerCode: editingTenant.id.replace("tenant-", "GP_"),
       customerName: editingTenant.name,
-      username: admin?.email?.split("@")[0] ?? "",
+      username: admin?.username ?? admin?.email?.split("@")[0] ?? "",
       email: editingTenant.adminEmail,
       language: "English, United States",
       timezone: editingTenant.config.org.timezone,
@@ -740,6 +819,26 @@ export function CustomerAccountsPage() {
           New Account
         </Button>
       </div>
+
+      {/* Sync status banner */}
+      {syncing && (
+        <div
+          role="status"
+          className="mb-4 px-3 py-2 rounded-lg text-[12px]"
+          style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "1px solid var(--brand-border)" }}
+        >
+          Syncing customers from database…
+        </div>
+      )}
+      {syncError && (
+        <div
+          role="alert"
+          className="mb-4 px-3 py-2 rounded-lg text-[12px]"
+          style={{ background: "var(--warning-bg)", color: "var(--warning)", border: "1px solid var(--warning)" }}
+        >
+          {syncError}
+        </div>
+      )}
 
       {/* Search */}
       <div className="mb-4 max-w-sm">
@@ -824,10 +923,14 @@ export function CustomerAccountsPage() {
               {filtered.map((tenant) => (
                 <tr key={tenant.id}>
                   <td>
-                    <div className="flex items-center gap-2">
+                    <Link
+                      to={`/admin/customer/${tenant.id}`}
+                      className="flex items-center gap-2 hover:underline"
+                      style={{ color: "var(--brand)" }}
+                    >
                       <Building2 className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                      <span className="font-medium" style={{ color: "var(--brand)" }}>{tenant.name}</span>
-                    </div>
+                      <span className="font-medium">{tenant.name}</span>
+                    </Link>
                   </td>
                   <td>
                     <span className="text-[12px] font-mono" style={{ color: "var(--text-secondary)" }}>
@@ -847,9 +950,22 @@ export function CustomerAccountsPage() {
                     </span>
                   </td>
                   <td>
-                    <Button variant="ghost" size="xs" icon={Pencil} onClick={() => openEdit(tenant)} aria-label={`Edit ${tenant.name}`}>
-                      Edit
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="xs" icon={Pencil} onClick={() => openEdit(tenant)} aria-label={`Edit ${tenant.name}`}>
+                        Edit
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => setDeletingTenant(tenant)}
+                        aria-label={`Delete ${tenant.name}`}
+                        className="p-1.5 rounded border-none cursor-pointer transition-colors"
+                        style={{ background: "transparent", color: "var(--danger)" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--danger-bg)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -878,6 +994,66 @@ export function CustomerAccountsPage() {
         initial={getFormData()}
         mode={editingTenant ? "edit" : "create"}
       />
+
+      {/* Delete confirmation modal */}
+      {deletingTenant && (
+        <Modal
+          open
+          onClose={() => !deleting && setDeletingTenant(null)}
+          title="Delete Customer Account"
+        >
+          <div className="space-y-4">
+            <div
+              className="flex items-start gap-3 p-3 rounded-lg"
+              style={{ background: "var(--danger-bg)", border: "1px solid var(--danger)" }}
+            >
+              <Trash2 className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "var(--danger)" }} aria-hidden="true" />
+              <div>
+                <p className="text-[13px] font-semibold" style={{ color: "var(--danger)" }}>
+                  This action cannot be undone
+                </p>
+                <p className="text-[12px] mt-1" style={{ color: "var(--text-secondary)" }}>
+                  All sites, users, and subscription plans for this account will be permanently deleted from the database.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                You are about to delete:
+              </p>
+              <p className="text-[15px] font-semibold mt-1" style={{ color: "var(--text-primary)" }}>
+                {deletingTenant.name}
+              </p>
+              <p className="text-[12px] font-mono mt-0.5" style={{ color: "var(--text-muted)" }}>
+                {deletingTenant.adminEmail}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setDeletingTenant(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                icon={Trash2}
+                onClick={handleDelete}
+                loading={deleting}
+              >
+                Delete Permanently
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

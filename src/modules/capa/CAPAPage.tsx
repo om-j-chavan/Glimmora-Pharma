@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router";
 import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
-  AlertTriangle, CheckCircle2, TrendingUp, Clock, Wrench, Shield, MessageSquare,
+  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -52,7 +52,11 @@ export function CAPAPage() {
   const dispatch = useAppDispatch();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
 
+<<<<<<< HEAD
   const { capas, findings, fda483Events, tenantId } = useTenantData();
+=======
+  const { capas, tenantId } = useTenantData();
+>>>>>>> 9a7d4075e3c69e02adb8fe56b026deb16b12065c
   const { org, users, allSites } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
@@ -248,7 +252,7 @@ export function CAPAPage() {
       {/* Tab panels */}
       {activeTab === "blueprint" && (
         <QMSBlueprintTab
-          capas={capas} openCAPAs={openCAPAs} noRCACount={noRCACount} pendingReviewCount={pendingReviewCount}
+          openCAPAs={openCAPAs} noRCACount={noRCACount} pendingReviewCount={pendingReviewCount}
           isDark={isDark} selectedStep={selectedStep} onSelectStep={setSelectedStep}
           lifecycleSteps={LIFECYCLE_STEPS} qmsProcesses={QMS_PROCESSES}
           stepHasProblem={stepHasProblem} getProcessMetrics={getProcessMetrics}

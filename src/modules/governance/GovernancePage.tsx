@@ -11,7 +11,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addItem, closeItem, type RAIDItem, type RAIDType, type RAIDStatus, type RAIDPriority } from "@/store/raid.slice";
+import { addItem, closeItem, type RAIDItem, type RAIDType, type RAIDPriority } from "@/store/raid.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
