@@ -9,6 +9,7 @@ import { useNotificationEngine } from "@/hooks/useNotificationEngine";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { logout } from "@/store/auth.slice";
+import { logout as nextAuthLogout } from "@/lib/authClient";
 import { Button } from "@/components/ui/Button";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
@@ -105,7 +106,8 @@ export function AppShell() {
             <Button
               variant="ghost"
               fullWidth
-              onClick={() => {
+              onClick={async () => {
+                try { await nextAuthLogout(); } catch { /* ignore */ }
                 dispatch(logout());
                 window.location.href = "/login";
               }}

@@ -18,6 +18,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { setCredentials, setActiveSite, setSelectedSite, setTenants, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
 import { loginApi } from "@/lib/tenantApi";
+import { login as nextAuthLogin } from "@/lib/authClient";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
@@ -187,6 +188,19 @@ export function LoginPage() {
 
   const onSubmit = async (data: FormValues) => {
     const key = data.email.toLowerCase().trim();
+
+    // 0. Establish a real next-auth session (real JWT, HttpOnly cookie).
+    //    We do this BEFORE the legacy Redux flow so the session cookie is in
+    //    place by the time API calls go out. If next-auth rejects, fall back
+    //    to the legacy paths so dev/demo flows keep working.
+    try {
+      const result = await nextAuthLogin(data.email.trim(), data.password);
+      if (!result.ok) {
+        console.warn("[login] next-auth rejected credentials:", result.error);
+      }
+    } catch (err) {
+      console.warn("[login] next-auth signIn failed", err);
+    }
 
     // 1. Check static mock accounts first
     const mockAccount = MOCK_ACCOUNTS[key];
