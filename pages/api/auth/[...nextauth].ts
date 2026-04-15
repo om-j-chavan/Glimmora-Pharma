@@ -187,9 +187,13 @@ export const authOptions: NextAuthOptions = {
       return session;
     },
   },
-  pages: {
-    signIn: "/login",
-  },
+  // NOTE: `pages.signIn` intentionally NOT set. Our custom login page is a
+  // react-router route served by the Next.js catch-all `[[...all]].tsx`, so
+  // Next.js doesn't see /login as a real top-level page. Setting
+  // `pages.signIn: "/login"` caused next-auth to build redirects with
+  // callbackUrl=/login which left users stranded on /api/auth/signin. We
+  // handle redirects to /login ourselves via next.config.mjs rewrites and
+  // the LoginPage component.
 };
 
 export default NextAuth(authOptions);
