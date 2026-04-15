@@ -14,6 +14,7 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { useRole } from "@/hooks/useRole";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
@@ -32,7 +33,6 @@ export function DashboardPage() {
   const companyName = org.companyName;
   const tenants = useAppSelector((s) => s.auth.tenants);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-<<<<<<< HEAD
   const { role } = useRole();
   const isAdmin = role === "super_admin" || role === "customer_admin";
 
@@ -41,8 +41,6 @@ export function DashboardPage() {
   const visibleSites = selectedSiteId
     ? sites.filter((s) => s.id === selectedSiteId)
     : sites;
-=======
->>>>>>> 9a7d4075e3c69e02adb8fe56b026deb16b12065c
 
   const currentTenant = tenants.find((t) => t.id === tenantId);
   function ownerName(id: string) { return users.find((u) => u.id === id)?.name ?? id; }

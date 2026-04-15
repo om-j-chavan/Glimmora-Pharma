@@ -87,6 +87,7 @@ export function CSVPage() {
   const [noSitesOpen, setNoSitesOpen] = useState(false);
   const [raiseCapaOpen, setRaiseCapaOpen] = useState(false);
   const [capaRaisedPopup, setCapaRaisedPopup] = useState(false);
+  const [remediationSaved, setRemediationSaved] = useState(false);
 
   const location = useLocation();
   useEffect(() => {
@@ -154,9 +155,6 @@ export function CSVPage() {
       plannedActions: data.plannedActions ?? "",
       lastValidated: data.lastValidated ? dayjs(data.lastValidated).utc().toISOString() : "",
       nextReview: data.nextReview ? dayjs(data.nextReview).utc().toISOString() : "",
-      remediationCapaId: data.remediationCapaId?.trim() || undefined,
-      remediationTargetDate: data.remediationTargetDate?.trim() ? dayjs(data.remediationTargetDate).utc().toISOString() : undefined,
-      remediationNotes: data.remediationNotes?.trim() || undefined,
       createdAt: "", tenantId: tenantId ?? "",
     }));
     auditLog({ action: "SYSTEM_ADDED", module: "csv-csa", recordId: id, newValue: data });
@@ -180,9 +178,6 @@ export function CSVPage() {
       riskFactors: data.riskFactors ?? "", plannedActions: data.plannedActions ?? "",
       lastValidated: data.lastValidated?.trim() ? dayjs(data.lastValidated).utc().toISOString() : "",
       nextReview: data.nextReview?.trim() ? dayjs(data.nextReview).utc().toISOString() : "",
-      remediationCapaId: data.remediationCapaId?.trim() || undefined,
-      remediationTargetDate: data.remediationTargetDate?.trim() ? dayjs(data.remediationTargetDate).utc().toISOString() : undefined,
-      remediationNotes: data.remediationNotes?.trim() || undefined,
     } }));
     auditLog({ action: "SYSTEM_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: data });
     setEditOpen(false); setEditSavedPopup(true);
@@ -245,6 +240,18 @@ export function CSVPage() {
     if (!selectedSystem) return;
     dispatch(updateSystem({ id: selectedSystem.id, patch }));
     auditLog({ action: "SYSTEM_RISK_CLASSIFICATION_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: patch });
+  }
+
+  function handleSaveRemediation(patch: { remediationCapaId?: string; remediationTargetDate?: string; remediationNotes?: string }) {
+    if (!selectedSystem) return;
+    const normalized = {
+      remediationCapaId: patch.remediationCapaId?.trim() || undefined,
+      remediationTargetDate: patch.remediationTargetDate?.trim() ? dayjs(patch.remediationTargetDate).utc().toISOString() : undefined,
+      remediationNotes: patch.remediationNotes?.trim() || undefined,
+    };
+    dispatch(updateSystem({ id: selectedSystem.id, patch: normalized }));
+    auditLog({ action: "SYSTEM_REMEDIATION_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: normalized });
+    setRemediationSaved(true);
   }
 
   function handleRaiseCapa(data: CAPAForm) {
@@ -318,29 +325,6 @@ export function CSVPage() {
         />
       </div>
 
-<<<<<<< HEAD
-=======
-      {/* ═══════════ DETAIL TAB ═══════════ */}
-      <div role="tabpanel" id="panel-detail" aria-labelledby="tab-detail" tabIndex={0} hidden={activeTab !== "detail"}>
-        <SystemDetailTab
-          selectedSystem={selectedSystem} systems={systems} roadmap={roadmap}
-          findings={findings} capas={capas as any}
-          sites={sites} users={users} timezone={timezone} dateFormat={dateFormat}
-          isDark={isDark} isViewOnly={isViewOnly} role={role}
-          showPart11={showPart11} showAnnex11={showAnnex11} showGAMP5={showGAMP5}
-          detailTab={detailTab} onDetailTabChange={setDetailTab}
-          onBack={() => { setSelectedSystem(null); setActiveTab("inventory"); }}
-          onEdit={() => setEditOpen(true)}
-          onGoToInventory={() => setActiveTab("inventory")}
-          onNavigateSettings={() => navigate("/settings")}
-          onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
-          onNavigateCapa={(cid) => navigate("/capa", { state: { openCapaId: cid } })}
-          onSaveRiskFactors={handleSaveRiskFactors}
-          onSavePlannedActions={handleSavePlannedActions}
-        />
-      </div>
-
->>>>>>> 9a7d4075e3c69e02adb8fe56b026deb16b12065c
       {/* ═══════════ ROADMAP TAB ═══════════ */}
       <div role="tabpanel" id="panel-roadmap" aria-labelledby="tab-roadmap" tabIndex={0} hidden={activeTab !== "roadmap"}>
         <CSVRoadmapTab
@@ -396,6 +380,7 @@ export function CSVPage() {
                 onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
                 onNavigateCapa={(cid) => navigate("/capa", { state: { openCapaId: cid } })}
                 onRaiseCapa={() => setRaiseCapaOpen(true)}
+                onSaveRemediation={handleSaveRemediation}
                 onSaveRiskFactors={handleSaveRiskFactors}
                 onSavePlannedActions={handleSavePlannedActions}
                 onSaveStage={handleSaveStage}
@@ -433,6 +418,7 @@ export function CSVPage() {
       <Popup isOpen={removePopup} variant="confirmation" title="Remove this system?" description="The system will be removed from the inventory. Existing findings and CAPAs are not affected." onDismiss={() => { setRemovePopup(false); setSystemToRemove(null); }} actions={[{ label: "Cancel", style: "ghost", onClick: () => { setRemovePopup(false); setSystemToRemove(null); } }, { label: "Yes, remove", style: "primary", onClick: () => { if (systemToRemove) dispatch(removeSystem(systemToRemove)); if (selectedSystem?.id === systemToRemove) setSelectedSystemId(null); setRemovePopup(false); setSystemToRemove(null); } }]} />
       <Popup isOpen={activityAddedPopup} variant="success" title="Activity added" description="Roadmap activity added. It will appear in the system's Validation tab and CSV Roadmap timeline." onDismiss={() => setActivityAddedPopup(false)} />
       <Popup isOpen={capaRaisedPopup} variant="success" title="CAPA raised" description="CAPA created and linked to this system. Track it in the CAPA Tracker." onDismiss={() => setCapaRaisedPopup(false)} />
+      <Popup isOpen={remediationSaved} variant="success" title="Remediation details saved" description="Visible in the DI &amp; Audit Trail tab and inspector review." onDismiss={() => setRemediationSaved(false)} />
       <NoSitesPopup isOpen={noSitesOpen} onClose={() => setNoSitesOpen(false)} feature="CSV / CSA" />
     </main>
   );

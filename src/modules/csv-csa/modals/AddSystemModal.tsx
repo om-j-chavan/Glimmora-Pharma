@@ -40,14 +40,7 @@ const systemSchema = z.object({
   owner: z.string().min(1, "Owner required"),
   lastValidated: z.string().optional(),
   nextReview: z.string().optional(),
-  remediationCapaId: z.string().optional(),
-  remediationTargetDate: z.string().optional(),
-  remediationNotes: z.string().optional(),
-}).refine((data) => {
-  const needsRemediation = data.part11Status === "Non-Compliant" || data.annex11Status === "Non-Compliant";
-  if (needsRemediation && !data.remediationCapaId?.trim()) return false;
-  return true;
-}, { message: "Remediation CAPA required for non-compliant systems", path: ["remediationCapaId"] });
+});
 export type SystemForm = z.infer<typeof systemSchema>;
 
 /* ── Props ── */
@@ -78,9 +71,6 @@ export function AddSystemModal({ open, sites, users, onSave, onClose, lockedSite
   const { register, control, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = form;
   const activeSites = sites.filter((s) => s.status === "Active");
   const activeUsers = users.filter((u) => u.status === "Active");
-  const watchPart11 = watch("part11Status");
-  const watchAnnex11 = watch("annex11Status");
-  const showRemediation = watchPart11 === "Non-Compliant" || watchAnnex11 === "Non-Compliant";
 
   // Smart defaults: when GxP Relevance changes, pre-fill the 4 risk classification
   // dropdowns. User can override any individually after this runs.
@@ -263,28 +253,6 @@ export function AddSystemModal({ open, sites, users, onSave, onClose, lockedSite
             <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Appears in Validation tab and CSV Roadmap</p>
           </div>
         </div>
-
-        {/* Section 5 — Remediation (only when Part 11 or Annex 11 non-compliant) */}
-        {showRemediation && (
-          <>
-            {sec("#ef4444", "Remediation (non-compliant)")}
-            <div className="grid grid-cols-2 gap-3 mb-2">
-              <div>
-                <label htmlFor="rem-capa" className={lbl} style={{ color: "var(--text-muted)" }}>Remediation CAPA <span aria-hidden="true">*</span></label>
-                <input id="rem-capa" type="text" className="input text-[12px]" placeholder="e.g. CAPA-0042" {...register("remediationCapaId")} />
-                {errors.remediationCapaId && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{errors.remediationCapaId.message}</p>}
-              </div>
-              <div>
-                <label htmlFor="rem-target" className={lbl} style={{ color: "var(--text-muted)" }}>Remediation target date</label>
-                <input id="rem-target" type="date" className="input text-[12px]" {...register("remediationTargetDate")} />
-              </div>
-              <div className="col-span-2">
-                <label htmlFor="rem-notes" className={lbl} style={{ color: "var(--text-muted)" }}>Remediation notes</label>
-                <textarea id="rem-notes" rows={3} className="input text-[12px] resize-none" placeholder="Describe remediation actions in progress..." {...register("remediationNotes")} />
-              </div>
-            </div>
-          </>
-        )}
 
         <div className="flex justify-end gap-2 pt-4">
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>

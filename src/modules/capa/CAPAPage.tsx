@@ -52,11 +52,7 @@ export function CAPAPage() {
   const dispatch = useAppDispatch();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
 
-<<<<<<< HEAD
-  const { capas, findings, fda483Events, tenantId } = useTenantData();
-=======
-  const { capas, tenantId } = useTenantData();
->>>>>>> 9a7d4075e3c69e02adb8fe56b026deb16b12065c
+  const { capas, fda483Events, tenantId } = useTenantData();
   const { org, users, allSites } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;

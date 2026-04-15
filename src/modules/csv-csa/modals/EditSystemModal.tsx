@@ -40,15 +40,7 @@ const systemSchema = z.object({
   owner: z.string().min(1, "Owner required"),
   lastValidated: z.string().optional(),
   nextReview: z.string().optional(),
-  remediationCapaId: z.string().optional(),
-  remediationTargetDate: z.string().optional(),
-  remediationNotes: z.string().optional(),
-}).refine((data) => {
-  // CAPA ID required when either framework is non-compliant
-  const needsRemediation = data.part11Status === "Non-Compliant" || data.annex11Status === "Non-Compliant";
-  if (needsRemediation && !data.remediationCapaId?.trim()) return false;
-  return true;
-}, { message: "Remediation CAPA required for non-compliant systems", path: ["remediationCapaId"] });
+});
 export type SystemForm = z.infer<typeof systemSchema>;
 
 /* ── Props ── */
@@ -84,18 +76,12 @@ export function EditSystemModal({ open, system, sites, users, onSave, onClose }:
         plannedActions: system.plannedActions, owner: system.owner,
         lastValidated: system.lastValidated ? dayjs.utc(system.lastValidated).format("YYYY-MM-DD") : "",
         nextReview: system.nextReview ? dayjs.utc(system.nextReview).format("YYYY-MM-DD") : "",
-        remediationCapaId: system.remediationCapaId ?? "",
-        remediationTargetDate: system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "",
-        remediationNotes: system.remediationNotes ?? "",
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, system]);
 
-  const { register, control, handleSubmit, watch, formState: { errors, isSubmitting } } = form;
-  const watchPart11 = watch("part11Status");
-  const watchAnnex11 = watch("annex11Status");
-  const showRemediation = watchPart11 === "Non-Compliant" || watchAnnex11 === "Non-Compliant";
+  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = form;
   const activeSites = sites.filter((s) => s.status === "Active");
   const activeUsers = users.filter((u) => u.status === "Active");
 
@@ -251,28 +237,6 @@ export function EditSystemModal({ open, system, sites, users, onSave, onClose }:
             <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Appears in Validation tab and CSV Roadmap</p>
           </div>
         </div>
-
-        {/* Section 5 — Remediation (only when Part 11 or Annex 11 non-compliant) */}
-        {showRemediation && (
-          <>
-            {sec("#ef4444", "Remediation (non-compliant)")}
-            <div className="grid grid-cols-2 gap-3 mb-2">
-              <div>
-                <label htmlFor="rem-capa" className={lbl} style={{ color: "var(--text-muted)" }}>Remediation CAPA <span aria-hidden="true">*</span></label>
-                <input id="rem-capa" type="text" className="input text-[12px]" placeholder="e.g. CAPA-0042" {...register("remediationCapaId")} />
-                {errors.remediationCapaId && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{errors.remediationCapaId.message}</p>}
-              </div>
-              <div>
-                <label htmlFor="rem-target" className={lbl} style={{ color: "var(--text-muted)" }}>Remediation target date</label>
-                <input id="rem-target" type="date" className="input text-[12px]" {...register("remediationTargetDate")} />
-              </div>
-              <div className="col-span-2">
-                <label htmlFor="rem-notes" className={lbl} style={{ color: "var(--text-muted)" }}>Remediation notes</label>
-                <textarea id="rem-notes" rows={3} className="input text-[12px] resize-none" placeholder="Describe remediation actions in progress..." {...register("remediationNotes")} />
-              </div>
-            </div>
-          </>
-        )}
 
         <div className="flex justify-end gap-2 pt-4">
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>

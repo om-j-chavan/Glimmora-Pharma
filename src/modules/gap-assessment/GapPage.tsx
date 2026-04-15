@@ -24,7 +24,7 @@ import { Popup } from "@/components/ui/Popup";
 import { GapSummaryTab } from "./tabs/GapSummaryTab";
 import { GapRegisterTab } from "./tabs/GapRegisterTab";
 import { GapEvidenceTab } from "./tabs/GapEvidenceTab";
-import { AddFindingModal } from "./modals/AddFindingModal";
+import { AddFindingModal, type FindingForm } from "./modals/AddFindingModal";
 import { EvidenceLinkModal } from "./modals/EvidenceLinkModal";
 
 /* ── Constants ── */
@@ -255,8 +255,6 @@ export function GapPage() {
   }
 
   function toggleArea(a: string) { setExpandedAreas((p) => { const n = new Set(p); n.has(a) ? n.delete(a) : n.add(a); return n; }); }
-
-  type FindingForm = { siteId: string; area: string; requirement: string; framework: string; severity: "Critical" | "Major" | "Minor"; status: "Open" | "In Progress" | "Closed"; owner: string; targetDate: string; evidenceLink?: string };
 
   /* ══════════════════════════════════════ */
 

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -49,6 +50,16 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, users, systems
     resolver: zodResolver(findingSchema),
     defaultValues: { severity: "Major", status: "Open", siteId: lockedSiteId ?? "" },
   });
+
+  // Smart default: auto-select Part 11 framework when the user picks CSV/IT area
+  // (only if Part 11 is active for the tenant and framework not already set).
+  const watchArea = watch("area");
+  const watchFramework = watch("framework");
+  useEffect(() => {
+    if (watchArea === "CSV/IT" && !watchFramework && activeFrameworks.includes("p11")) {
+      setValue("framework", "p11", { shouldValidate: true });
+    }
+  }, [watchArea, watchFramework, activeFrameworks, setValue]);
 
   function onSubmit(data: FindingForm) {
     onSave(data);

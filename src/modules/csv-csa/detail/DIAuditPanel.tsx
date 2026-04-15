@@ -1,33 +1,12 @@
+import { useState } from "react";
 import clsx from "clsx";
-import { ShieldAlert, AlertCircle, CheckCircle2, Search, ClipboardCheck, Plus, Wrench } from "lucide-react";
+import { ShieldAlert, AlertCircle, CheckCircle2, Search, ClipboardCheck, Plus, Wrench, Pencil, X, Save } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { GxPSystem } from "@/store/systems.slice";
+import type { Finding } from "@/store/findings.slice";
+import type { CAPA } from "@/store/capa.slice";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-
-/* ── Types ── */
-
-interface Finding {
-  id: string;
-  requirement: string;
-  severity: string;
-  status: string;
-  area: string;
-  framework: string;
-  siteId: string;
-  linkedSystemId?: string;
-  linkedSystemName?: string;
-}
-
-interface CAPA {
-  id: string;
-  description: string;
-  status: string;
-  findingId: string;
-  diGate?: boolean;
-  linkedSystemId?: string;
-  linkedSystemName?: string;
-}
 
 /* ── Props ── */
 
@@ -40,9 +19,37 @@ export interface DIAuditPanelProps {
   onNavigateGap: (findingId: string) => void;
   onNavigateCapa: (capaId: string) => void;
   onRaiseCapa: () => void;
+  onSaveRemediation: (patch: { remediationCapaId?: string; remediationTargetDate?: string; remediationNotes?: string }) => void;
 }
 
-export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigateGap, onNavigateCapa, onRaiseCapa }: DIAuditPanelProps) {
+export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigateGap, onNavigateCapa, onRaiseCapa, onSaveRemediation }: DIAuditPanelProps) {
+  const [editingRem, setEditingRem] = useState(false);
+  const [remCapaId, setRemCapaId] = useState(system.remediationCapaId ?? "");
+  const [remTargetDate, setRemTargetDate] = useState(
+    system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "",
+  );
+  const [remNotes, setRemNotes] = useState(system.remediationNotes ?? "");
+
+  // Reset local form state when the drawer switches to a different system
+  const [prevId, setPrevId] = useState(system.id);
+  if (system.id !== prevId) {
+    setPrevId(system.id);
+    setEditingRem(false);
+    setRemCapaId(system.remediationCapaId ?? "");
+    setRemTargetDate(system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "");
+    setRemNotes(system.remediationNotes ?? "");
+  }
+
+  const saveRem = () => {
+    onSaveRemediation({ remediationCapaId: remCapaId, remediationTargetDate: remTargetDate, remediationNotes: remNotes });
+    setEditingRem(false);
+  };
+  const cancelRem = () => {
+    setRemCapaId(system.remediationCapaId ?? "");
+    setRemTargetDate(system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "");
+    setRemNotes(system.remediationNotes ?? "");
+    setEditingRem(false);
+  };
   const p11 = system.part11Status;
   const a11 = system.annex11Status;
   // Audit trail status — derived from BOTH Part 11 and Annex 11 (either triggers non-compliant)
@@ -89,7 +96,17 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
 
   return (
     <div className="space-y-4">
-      <div className="card"><div className="card-header"><div className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-[#ef4444]" aria-hidden="true" /><span className="card-title">Data integrity status</span></div></div><div className="card-body space-y-2">
+      <div className="card"><div className="card-header"><div className="flex items-center gap-2"><ShieldAlert className="w-4 h-4 text-[#ef4444]" aria-hidden="true" /><span className="card-title">Data integrity status</span></div>{role !== "viewer" && (
+        <button
+          type="button"
+          onClick={() => { if (editingRem) cancelRem(); else setEditingRem(true); }}
+          aria-label={editingRem ? "Cancel editing remediation" : "Edit remediation details"}
+          className={clsx("ml-auto flex items-center gap-1.5 text-[11px] border-none bg-transparent cursor-pointer", editingRem ? "text-[#64748b]" : "text-[#0ea5e9] hover:opacity-80")}
+        >
+          {editingRem ? <X className="w-3.5 h-3.5" aria-hidden="true" /> : <Pencil className="w-3.5 h-3.5" aria-hidden="true" />}
+          <span>{editingRem ? "Cancel" : "Edit"}</span>
+        </button>
+      )}</div><div className="card-body space-y-2">
         {statusPanel(isBad, isAmber,
           isBad ? <AlertCircle className="w-4 h-4 text-[#ef4444] flex-shrink-0 mt-0.5" aria-hidden="true" /> : isAmber ? <AlertCircle className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" /> : <CheckCircle2 className="w-4 h-4 text-[#10b981] flex-shrink-0 mt-0.5" aria-hidden="true" />,
           isBad ? "Audit trail non-compliant" : isAmber ? "Audit trail remediation in progress" : isGood ? "Audit trail compliant" : "Audit trail status not applicable",
@@ -105,7 +122,35 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
           openDIGateCAPAs.length > 0 ? `DI gate open \u2014 ${openDIGateCAPAs.length} CAPA(s) pending` : "DI gate cleared",
           openDIGateCAPAs.length > 0 ? "Data integrity review must complete before closure" : "No open data integrity issues for this system"
         )}
-        {(system.remediationCapaId || system.remediationNotes) && (
+        {editingRem ? (
+          <div
+            className="p-3 rounded-lg space-y-3"
+            style={{ background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)" }}
+          >
+            <div className="flex items-center gap-2">
+              <Wrench className="w-4 h-4 shrink-0" style={{ color: "#854f0b" }} aria-hidden="true" />
+              <span className="text-[12px] font-semibold" style={{ color: "#854f0b" }}>Remediation details</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="rem-capa-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Remediation CAPA</label>
+                <input id="rem-capa-inline" type="text" value={remCapaId} onChange={(e) => setRemCapaId(e.target.value)} className="input text-[11px]" placeholder="e.g. CAPA-0042" />
+              </div>
+              <div>
+                <label htmlFor="rem-target-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Target date</label>
+                <input id="rem-target-inline" type="date" value={remTargetDate} onChange={(e) => setRemTargetDate(e.target.value)} className="input text-[11px]" />
+              </div>
+              <div className="col-span-2">
+                <label htmlFor="rem-notes-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Notes</label>
+                <textarea id="rem-notes-inline" rows={3} value={remNotes} onChange={(e) => setRemNotes(e.target.value)} className="input text-[11px] resize-none w-full" placeholder="Describe remediation actions in progress..." />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="xs" type="button" onClick={cancelRem}>Cancel</Button>
+              <Button variant="primary" size="xs" icon={Save} type="button" onClick={saveRem}>Save</Button>
+            </div>
+          </div>
+        ) : (system.remediationCapaId || system.remediationNotes) ? (
           <div
             className="flex items-start gap-2 p-3 rounded-lg"
             style={{ background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)" }}
@@ -129,7 +174,7 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
               )}
             </div>
           </div>
-        )}
+        ) : null}
       </div></div>
 
       <div className="card"><div className="card-header"><div className="flex items-center gap-2"><Search className="w-4 h-4 text-[#a78bfa]" aria-hidden="true" /><span className="card-title">Linked findings</span>{linkedFindings.length > 0 && <Badge variant={linkedFindings.some((f) => f.severity === "Critical") ? "red" : "amber"}>{linkedFindings.length}</Badge>}</div></div><div className="card-body">
