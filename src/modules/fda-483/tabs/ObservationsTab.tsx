@@ -1,5 +1,4 @@
 import { useNavigate } from "react-router";
-import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import {
   ClipboardList,
@@ -45,7 +44,7 @@ function eventStatusBadge(s: EventStatus) {
 function obsSevBadge(s: ObservationSeverity) {
   return (
     <Badge
-      variant={s === "Critical" ? "red" : s === "Major" ? "amber" : "gray"}
+      variant={s === "Critical" ? "red" : s === "High" ? "amber" : "green"}
     >
       {s}
     </Badge>
@@ -91,7 +90,6 @@ export interface ObservationsTabProps {
   onAddObservation: () => void;
   onEditObservation: (obs: Observation) => void;
   onAddCommitment: () => void;
-  onGoToResponse: () => void;
 }
 
 export function ObservationsTab({
@@ -107,7 +105,6 @@ export function ObservationsTab({
   onAddObservation,
   onEditObservation,
   onAddCommitment,
-  onGoToResponse,
 }: ObservationsTabProps) {
   // Lock levels:
   //  fullyLocked = Response Submitted or Closed → everything read-only
@@ -115,12 +112,6 @@ export function ObservationsTab({
   const fullyLocked = liveEvent?.status === "Response Submitted" || liveEvent?.status === "Closed";
   const hasLinkedCapa = (liveEvent?.observations ?? []).some((o) => !!o.capaId);
 
-  // Step 2 checklist — all must be true to proceed to Response
-  const obsCount = liveEvent?.observations.length ?? 0;
-  const allRcaComplete = obsCount > 0 && (liveEvent?.observations ?? []).every((o) => !!o.rootCause?.trim());
-  const allCapaLinked = obsCount > 0 && (liveEvent?.observations ?? []).every((o) => !!o.capaId);
-  const hasCommitment = (liveEvent?.commitments.length ?? 0) > 0 && (liveEvent?.commitments ?? []).every((c) => !!c.dueDate);
-  const step2Done = allRcaComplete && allCapaLinked && hasCommitment;
   const navigate = useNavigate();
 
   if (!liveEvent) {
@@ -222,55 +213,6 @@ export function ObservationsTab({
           </div>
         </div>
       </div>
-
-      {/* Step 2 guidance banner + checklist */}
-      {!fullyLocked && (
-        <div
-          className={clsx(
-            "p-3 rounded-xl mb-4 border",
-            isDark ? "bg-[rgba(14,165,233,0.08)] border-[rgba(14,165,233,0.25)]" : "bg-[#eff6ff] border-[#bfdbfe]",
-          )}
-          role="status"
-        >
-          <div className="flex items-start gap-2 mb-2">
-            <ClipboardList className="w-4 h-4 mt-0.5 shrink-0 text-[#0ea5e9]" aria-hidden="true" />
-            <div className="flex-1">
-              <p className="text-[12px] font-semibold text-[#0ea5e9]">Step 2 of 3 &mdash; Observations &amp; commitments</p>
-              <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                Confirm RCA and CAPA links, then add commitments with due dates for each observation.
-              </p>
-            </div>
-          </div>
-          <div className="space-y-1 mt-2 ml-6">
-            {[
-              { done: allRcaComplete, label: "RCA complete for all observations" },
-              { done: allCapaLinked, label: "CAPA linked for all observations" },
-              { done: hasCommitment, label: "Commitment added with due date" },
-            ].map((c, i) => (
-              <div key={i} className="flex items-center gap-2 text-[11px]">
-                {c.done ? (
-                  <ClipboardCheck className="w-3.5 h-3.5 shrink-0 text-[#10b981]" aria-hidden="true" />
-                ) : (
-                  <div className="w-3.5 h-3.5 rounded-full border-2 shrink-0" style={{ borderColor: "#64748b" }} aria-hidden="true" />
-                )}
-                <span style={{ color: c.done ? "var(--text-primary)" : "var(--text-muted)" }}>{c.label}</span>
-              </div>
-            ))}
-          </div>
-          {step2Done && (
-            <div className="mt-3 ml-6">
-              <Button variant="primary" size="sm" onClick={onGoToResponse}>
-                Go to Response &rarr;
-              </Button>
-            </div>
-          )}
-          {!step2Done && role !== "viewer" && (
-            <p className="text-[10px] mt-2 ml-6" style={{ color: "var(--text-muted)" }}>
-              Complete all observations first to proceed to Response.
-            </p>
-          )}
-        </div>
-      )}
 
       {/* Lock banner — event submitted/closed (21 CFR Part 11) */}
       {fullyLocked && (
@@ -608,9 +550,9 @@ export function ObservationsTab({
                     variant={
                       c.risk === "Critical"
                         ? "red"
-                        : c.risk === "Major"
+                        : c.risk === "High"
                           ? "amber"
-                          : "gray"
+                          : "green"
                     }
                   >
                     {c.risk}

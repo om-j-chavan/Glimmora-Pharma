@@ -1,3 +1,4 @@
+import { useState } from "react";
 import clsx from "clsx";
 import {
   FileText,
@@ -5,44 +6,21 @@ import {
   CheckCircle2,
   Bot,
   Sparkles,
-  ArrowRight,
   Pencil,
-  X,
   Save,
   ShieldCheck,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type {
   FDA483Event,
-  EventType,
   EventStatus,
 } from "@/store/fda483.slice";
 import type { CAPA } from "@/store/capa.slice";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 
 /* ── Helpers ── */
-
-function eventTypeBadge(t: EventType) {
-  const m: Record<EventType, "red" | "amber" | "blue"> = {
-    "FDA 483": "red",
-    "Warning Letter": "red",
-    "EMA Inspection": "amber",
-    "MHRA Inspection": "amber",
-    "WHO Inspection": "blue",
-  };
-  return <Badge variant={m[t]}>{t}</Badge>;
-}
-
-function eventStatusBadge(s: EventStatus) {
-  const m: Record<EventStatus, "blue" | "red" | "amber" | "green"> = {
-    Open: "blue",
-    "Response Due": "red",
-    "Response Submitted": "amber",
-    Closed: "green",
-  };
-  return <Badge variant={m[s]}>{s}</Badge>;
-}
 
 function daysLeft(d: string) {
   return dayjs.utc(d).diff(dayjs(), "day");
@@ -90,18 +68,20 @@ export function ResponseTab({
   timezone,
   dateFormat,
   responseText,
-  editingResponse,
   canSubmit,
   ownerName,
   onGoToEvents,
   onResponseTextChange,
-  onEditResponseToggle,
   onCancelEdit,
   onSaveDraft,
   onUseAGIDraft,
   onGenerateAGIDraft,
   onSignSubmit,
 }: ResponseTabProps) {
+  // Local UI state for modals
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [agiModalOpen, setAgiModalOpen] = useState(false);
+  const [agiLoading, setAgiLoading] = useState(false);
   if (!liveEvent) {
     return (
       <div className="card p-8 text-center">
@@ -260,97 +240,6 @@ export function ResponseTab({
         </div>
       )}
 
-      {/* Step 3 guidance banner — hidden when submitted */}
-      {!isSubmitted && (
-        <div
-          className={clsx(
-            "flex items-start gap-2 p-3 rounded-xl mb-4 border",
-            isDark ? "bg-[rgba(139,92,246,0.08)] border-[rgba(139,92,246,0.25)]" : "bg-[#f5f3ff] border-[#c4b5fd]",
-          )}
-          role="status"
-        >
-          <FileText className="w-4 h-4 mt-0.5 shrink-0 text-[#8b5cf6]" aria-hidden="true" />
-          <div className="flex-1">
-            <p className="text-[12px] font-semibold text-[#8b5cf6]">Step 3 of 3 &mdash; Draft and submit your FDA response</p>
-            <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
-              Review the readiness checklist below, write your response (or use the AGI draft), then sign and submit.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Blocking warning if prior steps incomplete */}
-      {!canSubmit && !isSubmitted && (
-        <div
-          className={clsx(
-            "flex items-start gap-2 p-3 rounded-xl mb-4 border",
-            isDark ? "bg-[rgba(245,158,11,0.08)] border-[rgba(245,158,11,0.25)]" : "bg-[#fffbeb] border-[#fde68a]",
-          )}
-          role="alert"
-        >
-          <span aria-hidden="true" className="text-[14px]">&#9888;&#65039;</span>
-          <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-            Complete the <strong>RCA Workspace</strong> and <strong>Observations</strong> steps before drafting and submitting your response.
-          </p>
-        </div>
-      )}
-
-      {/* Status bar */}
-      <div
-        className={clsx(
-          "flex items-center justify-between p-4 rounded-xl mb-4 border flex-wrap gap-3",
-          isDark
-            ? "bg-[#0a1f38] border-[#1e3a5a]"
-            : "bg-[#f8fafc] border-[#e2e8f0]",
-        )}
-      >
-        <div className="flex items-center gap-2 flex-wrap">
-          {eventTypeBadge(liveEvent.type)}
-          <span className="font-mono text-[12px] text-[#0ea5e9]">
-            {liveEvent.referenceNumber}
-          </span>
-          {eventStatusBadge(getEffectiveStatus(liveEvent))}
-        </div>
-        <div className="text-right">
-          <p
-            className="text-[11px]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            Response deadline
-          </p>
-          {(() => {
-            const d = daysLeft(liveEvent.responseDeadline);
-            return (
-              <p
-                className={clsx(
-                  "text-[15px] font-bold",
-                  d <= 0
-                    ? "text-[#ef4444]"
-                    : d <= 5
-                      ? "text-[#f59e0b]"
-                      : "text-[#10b981]",
-                )}
-              >
-                {d < 0
-                  ? `${Math.abs(d)} days overdue`
-                  : d === 0
-                    ? "Due today"
-                    : `${d} days remaining`}
-              </p>
-            );
-          })()}
-          <p
-            className="text-[11px]"
-            style={{ color: "var(--text-muted)" }}
-          >
-            {dayjs
-              .utc(liveEvent.responseDeadline)
-              .tz(timezone)
-              .format(dateFormat)}
-          </p>
-        </div>
-      </div>
-
       {/* Response readiness */}
       <div className="card mb-4">
         <div className="card-header">
@@ -406,150 +295,47 @@ export function ResponseTab({
         </div>
       </div>
 
-      {/* AGI draft panel — hidden when submitted */}
-      {!isSubmitted && agiMode !== "manual" && agiAgent && (
-        <div className="agi-panel mb-4" role="status" aria-live="polite">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Bot
-                className="w-4 h-4 text-[#6366f1]"
-                aria-hidden="true"
-              />
-              <span
-                className="text-[12px] font-semibold"
-                style={{ color: "var(--text-primary)" }}
-              >
-                AGI Response Draft
-              </span>
-            </div>
-            {liveEvent.agiDraft && (
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={ArrowRight}
-                onClick={onUseAGIDraft}
-              >
-                Use this draft
-              </Button>
-            )}
-          </div>
-          {liveEvent.agiDraft ? (
-            <p
-              className="text-[12px] leading-relaxed whitespace-pre-wrap"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {liveEvent.agiDraft}
-            </p>
-          ) : (
-            <div>
-              <p
-                className="text-[12px]"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                AGI can generate a response draft based on observations
-                and linked CAPAs.
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon={Sparkles}
-                className="mt-2"
-                onClick={onGenerateAGIDraft}
-              >
-                Generate AGI draft
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Response editor */}
+      {/* Response draft card */}
       <div className="card">
         <div className="card-header">
           <div className="flex items-center gap-2">
-            <FileText
-              className="w-4 h-4 text-[#0ea5e9]"
-              aria-hidden="true"
-            />
+            <FileText className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" />
             <span className="card-title">Response draft</span>
           </div>
-          {isSubmitted ? (
-            <Badge variant="green">Submitted &#10003;</Badge>
-          ) : (
-            role !== "viewer" && getEffectiveStatus(liveEvent) !== "Closed" && (
-              <button
-                type="button"
-                onClick={onEditResponseToggle}
-                className="ml-auto flex items-center gap-1.5 text-[11px] border-none bg-transparent cursor-pointer"
-                style={{ color: editingResponse ? "#64748b" : "#0ea5e9" }}
-                aria-label={
-                  editingResponse ? "Cancel editing" : "Edit response"
-                }
-              >
-                {editingResponse ? (
-                  <X className="w-3.5 h-3.5" aria-hidden="true" />
-                ) : (
-                  <Pencil className="w-3.5 h-3.5" aria-hidden="true" />
-                )}
-                {editingResponse ? "Cancel" : "Edit"}
-              </button>
-            )
-          )}
+          {isSubmitted && <Badge variant="green">Submitted &#10003;</Badge>}
         </div>
-        <div className="card-body">
-          {editingResponse && !isSubmitted ? (
-            <div className="space-y-3">
-              <textarea
-                rows={14}
-                className="input resize-none w-full text-[12px] font-mono"
-                value={responseText}
-                onChange={(e) => onResponseTextChange(e.target.value)}
-                placeholder="Write or paste your regulatory response here..."
-                aria-label="Response draft editor"
-              />
-              <div className="flex items-center justify-between">
-                <span
-                  className="text-[10px]"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {responseText.length} characters
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    type="button"
-                    onClick={onCancelEdit}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={Save}
-                    type="button"
-                    onClick={onSaveDraft}
-                  >
-                    Save draft
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : liveEvent.responseDraft ? (
-            <p
-              className="text-[12px] leading-relaxed whitespace-pre-wrap"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              {liveEvent.responseDraft}
-            </p>
+        <div className="card-body space-y-3">
+          {liveEvent.responseDraft?.trim() ? (
+            <>
+              <p className="text-[12px] leading-relaxed whitespace-pre-wrap line-clamp-2" style={{ color: "var(--text-secondary)" }}>
+                {liveEvent.responseDraft}
+              </p>
+              <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                {liveEvent.responseDraft.length} characters &middot; Draft saved
+              </p>
+            </>
           ) : (
-            <p
-              className="text-[11px] italic"
-              style={{ color: "var(--text-muted)" }}
-            >
-              No response draft yet. Click Edit above or use the AGI
-              draft.
+            <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>
+              No draft yet. Use Edit Draft to write one, or AGI Draft to generate from your observations and CAPAs.
             </p>
+          )}
+          {!isSubmitted && role !== "viewer" && getEffectiveStatus(liveEvent) !== "Closed" && (
+            <div className="flex gap-2 pt-1">
+              <Button variant="secondary" size="sm" icon={Pencil} onClick={() => { onResponseTextChange(liveEvent.responseDraft ?? ""); setEditModalOpen(true); }}>
+                Edit Draft
+              </Button>
+              {agiMode !== "manual" && agiAgent && (
+                <Button variant="ghost" size="sm" icon={Bot} onClick={() => {
+                  setAgiModalOpen(true);
+                  if (!liveEvent.agiDraft) {
+                    setAgiLoading(true);
+                    setTimeout(() => { onGenerateAGIDraft(); setAgiLoading(false); }, 2000);
+                  }
+                }}>
+                  AGI Draft
+                </Button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -580,6 +366,65 @@ export function ResponseTab({
             </p>
           </div>
         )}
+
+      {/* ── Edit Draft Modal ── */}
+      <Modal open={editModalOpen} onClose={() => { onCancelEdit(); setEditModalOpen(false); }} title="Response Draft">
+        <div className="space-y-4">
+          <div className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            <p><span style={{ color: "var(--text-muted)" }}>Reference:</span> <span className="font-mono" style={{ color: "var(--text-primary)" }}>{liveEvent.referenceNumber}</span></p>
+            <p className="mt-0.5"><span style={{ color: "var(--text-muted)" }}>Event:</span> {liveEvent.type} &middot; {liveEvent.agency}</p>
+          </div>
+          <textarea
+            rows={14}
+            className="input resize-none w-full text-[12px] font-mono"
+            value={responseText}
+            onChange={(e) => onResponseTextChange(e.target.value)}
+            placeholder={"Write your formal response here.\nInclude:\n- Acknowledgement of observation\n- Root cause identified\n- Corrective actions taken\n- Preventive measures\n- Target completion dates"}
+            aria-label="Response draft editor"
+          />
+          <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{responseText.length} characters</p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" size="sm" onClick={() => { onCancelEdit(); setEditModalOpen(false); }}>Cancel</Button>
+            <Button variant="primary" size="sm" icon={Save} onClick={() => { onSaveDraft(); setEditModalOpen(false); }}>Save Draft</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── AGI Draft Modal ── */}
+      <Modal open={agiModalOpen} onClose={() => setAgiModalOpen(false)} title="AGI Response Draft">
+        <div className="space-y-3">
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>AI-generated draft based on your observations and RCA.</p>
+          {agiLoading ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-3" role="status" aria-live="polite">
+              <div className="w-8 h-8 rounded-full border-2 border-[#6366f1] border-t-transparent animate-spin" aria-hidden="true" />
+              <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>Generating response draft...</p>
+            </div>
+          ) : liveEvent.agiDraft ? (
+            <>
+              <div className="p-3 rounded-lg agi-panel">
+                <div className="flex items-center gap-2 mb-2">
+                  <Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" />
+                  <span className="text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>Generated draft</span>
+                </div>
+                <p className="text-[12px] leading-relaxed whitespace-pre-wrap max-h-[320px] overflow-y-auto" style={{ color: "var(--text-secondary)" }}>
+                  {liveEvent.agiDraft}
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="ghost" size="sm" onClick={() => setAgiModalOpen(false)}>Cancel</Button>
+                <Button variant="secondary" size="sm" icon={Pencil} onClick={() => {
+                  onResponseTextChange(liveEvent.agiDraft ?? "");
+                  setAgiModalOpen(false);
+                  setEditModalOpen(true);
+                }}>Edit this draft</Button>
+                <Button variant="primary" size="sm" icon={Sparkles} onClick={() => { onUseAGIDraft(); setAgiModalOpen(false); }}>Use this draft</Button>
+              </div>
+            </>
+          ) : (
+            <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No draft available. Click Generate to create one from observations and CAPAs.</p>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }

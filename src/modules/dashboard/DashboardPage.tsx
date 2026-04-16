@@ -107,15 +107,15 @@ export function DashboardPage() {
   const rl = getReadinessLabel(readinessScore, overdueCAPAs.length);
 
   /* ── Chart data — uses filtered findings so site/severity/date filters apply ── */
-  const trendData = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mf = filteredFindings.filter((f) => f.createdAt && dayjs.utc(f.createdAt).format("MMM YYYY") === mo.format("MMM YYYY")); m.push({ month: mo.format("MMM"), Critical: mf.filter((f) => f.severity === "Critical").length, Major: mf.filter((f) => f.severity === "Major").length, Minor: mf.filter((f) => f.severity === "Minor").length }); } return m; })();
-  const trendEmpty = trendData.every((d) => d.Critical + d.Major + d.Minor === 0);
+  const trendData = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mf = filteredFindings.filter((f) => f.createdAt && dayjs.utc(f.createdAt).format("MMM YYYY") === mo.format("MMM YYYY")); m.push({ month: mo.format("MMM"), Critical: mf.filter((f) => f.severity === "Critical").length, High: mf.filter((f) => f.severity === "High").length, Low: mf.filter((f) => f.severity === "Low").length }); } return m; })();
+  const trendEmpty = trendData.every((d) => d.Critical + d.High + d.Low === 0);
 
   /* ── Heatmap — factors in findings, CAPAs, and systems ── */
   const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
   function getAreaScore(area: string, siteId?: string) {
     const af = filteredFindings.filter((f) => f.area === area && (!siteId || f.siteId === siteId) && f.status !== "Closed");
     const cr = af.filter((f) => f.severity === "Critical").length;
-    const mj = af.filter((f) => f.severity === "Major").length;
+    const mj = af.filter((f) => f.severity === "High").length;
     // Overdue CAPAs linked to findings in this area+site
     const areaCapaOverdue = overdueCAPAs.filter((c) => {
       if (siteId && c.siteId !== siteId) return false;
@@ -131,20 +131,20 @@ export function DashboardPage() {
 
   /* ── Action plan ── */
   const actionPlan = (() => {
-    const items: { id: string; priority: "Critical" | "Major" | "Minor"; area: string; action: string; owner: string; dueDate: string; status: string; module: string; refId: string; agiRisk: "High" | "Medium" | "Low" }[] = [];
-    filteredFindings.filter((f) => f.status !== "Closed" && (f.severity === "Critical" || f.severity === "Major")).forEach((f) => items.push({ id: f.id, priority: f.severity, area: f.area, action: f.requirement.length > 60 ? f.requirement.slice(0, 60) + "..." : f.requirement, owner: f.owner, dueDate: f.targetDate ?? "", status: f.status, module: "gap-assessment", refId: f.id, agiRisk: f.severity === "Critical" ? "High" : "Medium" }));
+    const items: { id: string; priority: "Critical" | "High" | "Low"; area: string; action: string; owner: string; dueDate: string; status: string; module: string; refId: string; agiRisk: "High" | "Medium" | "Low" }[] = [];
+    filteredFindings.filter((f) => f.status !== "Closed" && (f.severity === "Critical" || f.severity === "High")).forEach((f) => items.push({ id: f.id, priority: f.severity, area: f.area, action: f.requirement.length > 60 ? f.requirement.slice(0, 60) + "..." : f.requirement, owner: f.owner, dueDate: f.targetDate ?? "", status: f.status, module: "gap-assessment", refId: f.id, agiRisk: f.severity === "Critical" ? "High" : "Medium" }));
     overdueCAPAs.slice(0, 5).forEach((c) => {
       const linkedFinding = findings.find((f) => f.id === c.findingId);
       const area = linkedFinding?.area ?? (c.source === "483" ? "Regulatory" : c.source === "Deviation" ? "Manufacturing" : "QMS");
       items.push({ id: c.id, priority: c.risk, area, action: c.description.length > 60 ? c.description.slice(0, 60) + "..." : c.description, owner: c.owner, dueDate: c.dueDate, status: c.status, module: "capa", refId: c.id, agiRisk: c.risk === "Critical" ? "High" : "Medium" });
     });
-    filteredSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").slice(0, 3).forEach((s) => items.push({ id: s.id, priority: "Major", area: "CSV/IT", action: `Validate ${s.name} \u2014 ${s.validationStatus}`, owner: s.owner, dueDate: s.nextReview ?? "", status: s.validationStatus, module: "csv-csa", refId: s.id, agiRisk: "High" }));
+    filteredSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").slice(0, 3).forEach((s) => items.push({ id: s.id, priority: "High", area: "CSV/IT", action: `Validate ${s.name} \u2014 ${s.validationStatus}`, owner: s.owner, dueDate: s.nextReview ?? "", status: s.validationStatus, module: "csv-csa", refId: s.id, agiRisk: "High" }));
     // CSV roadmap activities (non-complete, within 90 days)
     roadmap.filter((a) => a.status !== "Complete" && dayjs.utc(a.endDate).diff(dayjs(), "day") <= 90).forEach((a) => {
       const sys = systems.find((s) => s.id === a.systemId);
-      items.push({ id: a.id, priority: "Major", area: "CSV/IT", action: `${a.title}${sys ? ` \u2014 ${sys.name}` : ""}`, owner: a.owner, dueDate: a.endDate, status: a.status, module: "csv-csa", refId: a.systemId ?? a.id, agiRisk: "High" });
+      items.push({ id: a.id, priority: "High", area: "CSV/IT", action: `${a.title}${sys ? ` \u2014 ${sys.name}` : ""}`, owner: a.owner, dueDate: a.endDate, status: a.status, module: "csv-csa", refId: a.systemId ?? a.id, agiRisk: "High" });
     });
-    const p: Record<string, number> = { Critical: 0, Major: 1, Minor: 2 };
+    const p: Record<string, number> = { Critical: 0, High: 1, Low: 2 };
     return items.sort((a, b) => (p[a.priority] ?? 2) - (p[b.priority] ?? 2) || (!a.dueDate ? 1 : !b.dueDate ? -1 : dayjs(a.dueDate).diff(dayjs(b.dueDate))));
   })();
 
@@ -184,7 +184,7 @@ export function DashboardPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <Dropdown value={timeFilter} onChange={setTimeFilter} width="w-36" options={[{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "60", label: "Last 60 days" }, { value: "90", label: "Last 90 days" }, { value: "all", label: "All time" }]} />
           {isAdmin && <Dropdown placeholder="All sites" value={siteFilter} onChange={setSiteFilter} width="w-36" options={[{ value: "", label: "All sites" }, ...visibleSites.map((s) => ({ value: s.id, label: s.name }))]} />}
-          <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-32" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />
+          <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-32" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Low", label: "Low" }]} />
           {(siteFilter || sevFilter) && <Button variant="ghost" size="sm" onClick={() => { setSiteFilter(""); setSevFilter(""); }}>Clear</Button>}
         </div>
       </header>
@@ -244,7 +244,7 @@ export function DashboardPage() {
               <div className="flex flex-col items-center py-8"><BarChart3 className="w-8 h-8 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No findings logged yet</p></div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={trendData} barSize={14} barGap={2}><CartesianGrid {...chartDefaults.cartesianGrid} /><XAxis dataKey="month" {...chartDefaults.xAxis} /><YAxis {...chartDefaults.yAxis} allowDecimals={false} /><Tooltip {...chartDefaults.tooltip} /><Legend iconType="circle" iconSize={8} formatter={(v: string) => <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{v}</span>} /><Bar dataKey="Critical" name="Critical" fill="#ef4444" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Major" name="Major" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Minor" name="Minor" fill="#64748b" stackId="a" radius={[3, 3, 0, 0]} /></BarChart>
+                <BarChart data={trendData} barSize={14} barGap={2}><CartesianGrid {...chartDefaults.cartesianGrid} /><XAxis dataKey="month" {...chartDefaults.xAxis} /><YAxis {...chartDefaults.yAxis} allowDecimals={false} /><Tooltip {...chartDefaults.tooltip} /><Legend iconType="circle" iconSize={8} formatter={(v: string) => <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{v}</span>} /><Bar dataKey="Critical" name="Critical" fill="#ef4444" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="High" name="High" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Low" name="Low" fill="#10b981" stackId="a" radius={[3, 3, 0, 0]} /></BarChart>
               </ResponsiveContainer>
             )}
           </CardSection>
@@ -259,7 +259,7 @@ export function DashboardPage() {
                   <thead><tr><th scope="col">Priority</th><th scope="col">Area</th><th scope="col">Action</th><th scope="col">Owner</th><th scope="col">Due date</th><th scope="col">Status</th><th scope="col">AGI risk</th><th scope="col"><span className="sr-only">Nav</span></th></tr></thead>
                   <tbody>{actionPlan.slice(0, 10).map((item) => (
                     <tr key={item.id} className="cursor-pointer" onClick={() => { if (item.module === "gap-assessment") navigate("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") navigate("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") navigate("/csv-csa", { state: { systemId: item.refId } }); }}>
-                      <td><Badge variant={item.priority === "Critical" ? "red" : item.priority === "Major" ? "amber" : "gray"}>{item.priority}</Badge></td>
+                      <td><Badge variant={item.priority === "Critical" ? "red" : item.priority === "High" ? "amber" : "green"}>{item.priority}</Badge></td>
                       <td><Badge variant="gray">{item.area}</Badge></td>
                       <td><p className="text-[12px]" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{item.action}</p></td>
                       <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(item.owner)}</td>
@@ -298,7 +298,7 @@ export function DashboardPage() {
           {/* ⑤ Risk signals */}
           <CardSection icon={Activity} iconColor="#ef4444" title="Risk signals">
             {/* By severity */}
-            {(["Critical", "Major", "Minor"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "Major" ? "#f59e0b" : "#64748b"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
+            {(["Critical", "High", "Low"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "High" ? "#f59e0b" : "#10b981"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
               <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ background: dot }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{sev}</span></div>
                 <span className="text-[14px] font-bold" style={{ color: valCol }}>{cnt}</span>

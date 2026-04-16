@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import {
   MapPin,
@@ -41,9 +41,17 @@ const riskStyles = {
 export function SitePicker() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const user = useAppSelector((s) => s.auth.user);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { sites } = useTenantConfig();
   const activeSites = sites.filter((s) => s.status === "Active");
+
+  // Guard: admin roles should never land here — redirect to dashboard
+  useEffect(() => {
+    if (user?.role === "super_admin" || user?.role === "customer_admin") {
+      navigate("/", { replace: true });
+    }
+  }, [user, navigate]);
   const [selectedSite, setSelectedSite] = useState<(typeof sites)[number] | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 

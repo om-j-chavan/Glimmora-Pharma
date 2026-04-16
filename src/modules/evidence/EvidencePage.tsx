@@ -3,9 +3,8 @@ import { useNavigate } from "react-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import clsx from "clsx";
 import {
-  FolderOpen, Package, Plus, Download, ClipboardCheck,
+  Package, Plus, Download,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -17,24 +16,16 @@ import { addDocument, addPack, updatePack, type EvidenceDocument, type EvidenceP
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
-import { Badge } from "@/components/ui/Badge";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 
 import { DocumentLibraryTab } from "./tabs/DocumentLibraryTab";
-import { PackBuilderTab } from "./tabs/PackBuilderTab";
-import { DILStatusTab } from "./tabs/DILStatusTab";
 
 /* ── Constants ── */
 
 const DOC_TYPES: DocType[] = ["SOP", "Record", "Audit Trail", "Validation", "Report", "Protocol", "Certificate", "Policy", "Other"];
 const DOC_AREAS: DocArea[] = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT", "Regulatory", "Training", "HR"];
 const DOC_STATUSES: DocStatus[] = ["Current", "Draft", "Superseded", "Missing", "Under Review"];
-
-function docStatusBadge(s: DocStatus) {
-  const m: Record<DocStatus, "green" | "blue" | "gray" | "red" | "amber"> = { Current: "green", Draft: "blue", Superseded: "gray", Missing: "red", "Under Review": "amber" };
-  return <Badge variant={m[s]}>{s}</Badge>;
-}
 
 /* ── Schemas ── */
 
@@ -49,8 +40,6 @@ const docSchema = z.object({
 });
 type DocForm = z.infer<typeof docSchema>;
 
-const packSchema = z.object({ name: z.string().min(2, "Name required"), purpose: z.string().min(5, "Purpose required") });
-type PackForm = z.infer<typeof packSchema>;
 
 /* ══════════════════════════════════════ */
 
@@ -92,8 +81,7 @@ export function EvidencePage() {
   }
 
   /* ── State ── */
-  const [activeTab, setActiveTab] = useState<"library" | "builder" | "dil">("library");
-  const [previewPack, setPreviewPack] = useState<EvidencePack | null>(null);
+  const [packNameInput, setPackNameInput] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [search, setSearch] = useState("");
   const [areaFilter, setAreaFilter] = useState("");
@@ -105,10 +93,6 @@ export function EvidencePage() {
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
   const [addDocOpen, setAddDocOpen] = useState(false);
   const [addedPopup, setAddedPopup] = useState(false);
-  const [buildPackOpen, setBuildPackOpen] = useState(false);
-  const [packSavedPopup, setPackSavedPopup] = useState(false);
-  const [justCreatedPack, setJustCreatedPack] = useState<EvidencePack | null>(null);
-  const [exporting, setExporting] = useState(false);
 
   const allDocs = getAllDocuments();
 
@@ -159,7 +143,6 @@ export function EvidencePage() {
 
   /* ── Forms ── */
   const docForm = useForm<DocForm>({ resolver: zodResolver(docSchema), defaultValues: { type: "SOP", area: "QMS", status: "Current", version: "1.0" } });
-  const packForm = useForm<PackForm>({ resolver: zodResolver(packSchema) });
 
   function onDocSave(data: DocForm) {
     const id = crypto.randomUUID();
@@ -168,16 +151,9 @@ export function EvidencePage() {
     if (data.type === "Audit Trail") complianceTags.push("ALCOA+");
     if (data.type === "Validation") complianceTags.push("GAMP 5");
     const tagsList = data.tags ? data.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
-    dispatch(addDocument({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", complianceTags, tags: tagsList, effectiveDate: dayjs(data.effectiveDate).utc().toISOString(), expiryDate: data.expiryDate ? dayjs(data.expiryDate).utc().toISOString() : undefined, systemId: data.systemId || undefined, findingId: data.findingId || undefined, capaId: data.capaId || undefined, url: data.url || undefined, createdAt: "" }));
+    dispatch(addDocument({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", complianceTags, tags: tagsList, effectiveDate: dayjs(data.effectiveDate).utc().toISOString(), expiryDate: data.expiryDate ? dayjs(data.expiryDate).utc().toISOString() : undefined, systemId: data.systemId || undefined, findingId: data.findingId || undefined, capaId: data.capaId || undefined, url: data.url || undefined, version: data.version || "v1.0", createdAt: new Date().toISOString() }));
     auditLog({ action: "EVIDENCE_DOCUMENT_ADDED", module: "evidence", recordId: id, newValue: data });
     setAddDocOpen(false); setAddedPopup(true); docForm.reset();
-  }
-
-  function onPackSave(data: PackForm) {
-    const newPack: EvidencePack = { id: crypto.randomUUID(), tenantId: tenantId ?? "", name: data.name, purpose: data.purpose, documentIds: [...selectedDocs], createdBy: user?.id ?? "", createdAt: dayjs().toISOString() };
-    dispatch(addPack(newPack));
-    auditLog({ action: "EVIDENCE_PACK_CREATED", module: "evidence", recordId: newPack.id, newValue: data });
-    setBuildPackOpen(false); setSelectedDocs(new Set()); packForm.reset(); setJustCreatedPack(newPack);
   }
 
   const lbl = "text-[11px] font-semibold uppercase tracking-wider block mb-1";
@@ -193,33 +169,40 @@ export function EvidencePage() {
           <p className="page-subtitle mt-1">{allDocs.length === 0 ? "No documents yet" : `${allDocs.length} documents \u00b7 ${currentCount} current \u00b7 ${missingCount} missing`}</p>
         </div>
         <div className="flex gap-2">
-          {selectedDocs.size > 0 && <Button variant="secondary" icon={Package} onClick={() => setBuildPackOpen(true)}>Build pack ({selectedDocs.size})</Button>}
           {role !== "viewer" && <Button variant="primary" icon={Plus} onClick={() => setAddDocOpen(true)}>Add document</Button>}
         </div>
       </header>
 
-      {/* Tabs */}
-      <div role="tablist" aria-label="Evidence sections" className="flex gap-1 border-b border-(--bg-border)">
-        {([{ id: "library" as const, label: "Document Library", Icon: FolderOpen }, { id: "builder" as const, label: "Evidence Pack Builder", Icon: Package }, { id: "dil" as const, label: "DIL Status Board", Icon: ClipboardCheck }]).map((t) => (
-          <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={activeTab === t.id} aria-controls={`panel-${t.id}`} onClick={() => setActiveTab(t.id)}
-            className={clsx("inline-flex items-center gap-2 px-4 py-2.5 text-[12px] font-semibold border-b-2 -mb-px transition-colors bg-transparent border-x-0 border-t-0 cursor-pointer outline-none", activeTab === t.id ? "border-b-(--brand) text-(--brand)" : "border-b-transparent text-(--text-muted) hover:text-(--text-secondary)")}>
-            <t.Icon className="w-3.5 h-3.5" aria-hidden="true" />{t.label}
-          </button>
-        ))}
-      </div>
+      {/* Document Library — main view (no tabs) */}
+      <DocumentLibraryTab allDocs={allDocs} filteredDocs={filteredDocs} search={search} setSearch={setSearch} areaFilter={areaFilter} setAreaFilter={setAreaFilter} typeFilter={typeFilter} setTypeFilter={setTypeFilter} systemFilter={systemFilter} setSystemFilter={setSystemFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} anyFilter={anyFilter} clearFilters={clearFilters} viewMode={viewMode} setViewMode={setViewMode} selectedDocs={selectedDocs} toggleDocSelection={toggleDocSelection} setSelectedDocs={setSelectedDocs} systems={systems} isDark={isDark} role={role} timezone={timezone} dateFormat={dateFormat} onAddDocOpen={() => setAddDocOpen(true)} onNavigate={navigate} />
 
-      {/* Tab panels */}
-      <div role="tabpanel" id="panel-library" aria-labelledby="tab-library" tabIndex={0} hidden={activeTab !== "library"}>
-        <DocumentLibraryTab allDocs={allDocs} filteredDocs={filteredDocs} search={search} setSearch={setSearch} areaFilter={areaFilter} setAreaFilter={setAreaFilter} typeFilter={typeFilter} setTypeFilter={setTypeFilter} systemFilter={systemFilter} setSystemFilter={setSystemFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} anyFilter={anyFilter} clearFilters={clearFilters} viewMode={viewMode} setViewMode={setViewMode} selectedDocs={selectedDocs} toggleDocSelection={toggleDocSelection} setSelectedDocs={setSelectedDocs} systems={systems} isDark={isDark} role={role} timezone={timezone} dateFormat={dateFormat} onAddDocOpen={() => setAddDocOpen(true)} onNavigate={navigate} />
-      </div>
-
-      <div role="tabpanel" id="panel-builder" aria-labelledby="tab-builder" tabIndex={0} hidden={activeTab !== "builder"}>
-        <PackBuilderTab allDocs={allDocs} packs={evidence.packs} selectedDocs={selectedDocs} toggleDocSelection={toggleDocSelection} isDark={isDark} onBuildPackOpen={() => setBuildPackOpen(true)} onPreviewPack={setPreviewPack} onExportPack={exportPack} onSwitchToLibrary={() => setActiveTab("library")} />
-      </div>
-
-      <div role="tabpanel" id="panel-dil" aria-labelledby="tab-dil" tabIndex={0} hidden={activeTab !== "dil"}>
-        <DILStatusTab allDocs={allDocs} currentCount={currentCount} missingCount={missingCount} findings={findings} isDark={isDark} />
-      </div>
+      {/* Floating selection bar */}
+      {selectedDocs.size > 0 && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 px-5 py-3 rounded-xl shadow-lg"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}
+          role="status"
+        >
+          <Package className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" />
+          <span className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{selectedDocs.size} document{selectedDocs.size !== 1 ? "s" : ""} selected</span>
+          <input
+            type="text"
+            value={packNameInput}
+            onChange={(e) => setPackNameInput(e.target.value)}
+            placeholder="Pack name..."
+            className="input text-[12px] w-48"
+          />
+          <Button variant="ghost" size="sm" onClick={() => { setSelectedDocs(new Set()); setPackNameInput(""); }}>Clear</Button>
+          <Button variant="primary" size="sm" icon={Download} onClick={() => {
+            const packName = packNameInput.trim() || `Evidence Pack ${dayjs().format("DD MMM YYYY")}`;
+            const newPack: EvidencePack = { id: crypto.randomUUID(), tenantId: tenantId ?? "", name: packName, purpose: "", documentIds: [...selectedDocs], createdBy: user?.id ?? "", createdAt: dayjs().toISOString() };
+            dispatch(addPack(newPack));
+            exportPack(newPack);
+            auditLog({ action: "EVIDENCE_PACK_EXPORTED", module: "evidence", recordId: newPack.id, newValue: { name: packName, count: selectedDocs.size } });
+            setSelectedDocs(new Set()); setPackNameInput(""); setAddedPopup(true);
+          }}>Export Pack</Button>
+        </div>
+      )}
 
       {/* Add Document Modal */}
       <Modal open={addDocOpen} onClose={() => setAddDocOpen(false)} title="Add document">
@@ -244,56 +227,8 @@ export function EvidencePage() {
         </form>
       </Modal>
 
-      {/* Build Pack Modal */}
-      <Modal open={buildPackOpen} onClose={() => setBuildPackOpen(false)} title="Build evidence pack">
-        <form onSubmit={packForm.handleSubmit(onPackSave)} noValidate className="space-y-4">
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{selectedDocs.size} document{selectedDocs.size !== 1 ? "s" : ""} selected for this pack.</p>
-          <div><label htmlFor="pack-name" className={lbl} style={{ color: "var(--text-muted)" }}>Pack name *</label><input id="pack-name" className="input text-[12px]" placeholder="e.g. FDA 483 Response — Mumbai Site" {...packForm.register("name")} />{packForm.formState.errors.name && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{packForm.formState.errors.name.message}</p>}</div>
-          <div><label htmlFor="pack-purpose" className={lbl} style={{ color: "var(--text-muted)" }}>Purpose *</label><textarea id="pack-purpose" rows={3} className="input text-[12px] resize-none" placeholder="Describe the purpose of this evidence pack..." {...packForm.register("purpose")} />{packForm.formState.errors.purpose && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{packForm.formState.errors.purpose.message}</p>}</div>
-          <div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => setBuildPackOpen(false)}>Cancel</Button><Button variant="primary" type="submit" icon={Package} loading={packForm.formState.isSubmitting}>Create pack</Button></div>
-        </form>
-      </Modal>
-
       {/* Popups */}
-      <Popup isOpen={addedPopup} variant="success" title="Document added" description="Added to the evidence library. Select it to include in an evidence pack." onDismiss={() => setAddedPopup(false)} />
-      <Popup isOpen={packSavedPopup} variant="success" title="Evidence pack created" description="Pack created with selected documents. View it in the Evidence Pack Builder tab." onDismiss={() => setPackSavedPopup(false)} />
-      <Popup isOpen={justCreatedPack !== null} variant="success" title="Evidence pack created" description={`${justCreatedPack?.documentIds.length ?? 0} documents saved. Export now to download the HTML report.`} onDismiss={() => setJustCreatedPack(null)} actions={[{ label: "Export now", style: "primary", onClick: () => { if (justCreatedPack) exportPack(justCreatedPack); setJustCreatedPack(null); } }, { label: "Later", style: "ghost", onClick: () => setJustCreatedPack(null) }]} />
-
-      {/* Floating selection bar */}
-      {selectedDocs.size > 0 && (
-        <div className={clsx("fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-lg", isDark ? "bg-[#0a1f38] border border-[#1e3a5a]" : "bg-white border border-[#e2e8f0]")} style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.15)" }} role="status" aria-live="polite">
-          <Package className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" />
-          <span className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{selectedDocs.size} document{selectedDocs.size !== 1 ? "s" : ""} selected</span>
-          <Button variant="primary" size="sm" icon={Package} onClick={() => { setActiveTab("builder"); setBuildPackOpen(true); }}>Build evidence pack</Button>
-          <Button variant="ghost" size="sm" onClick={() => setSelectedDocs(new Set())}>Clear</Button>
-        </div>
-      )}
-
-      {/* Pack preview modal */}
-      <Modal open={previewPack !== null} onClose={() => setPreviewPack(null)} title={previewPack?.name ?? "Pack preview"}>
-        {previewPack && (
-          <>
-            <div className="grid grid-cols-2 gap-3 mb-4 text-[12px]">
-              {([["Purpose", previewPack.purpose], ["Documents", String(previewPack.documentIds.length)], ["Created by", users.find((u) => u.id === previewPack.createdBy)?.name ?? previewPack.createdBy], ["Exported", previewPack.exportedAt ? "Yes" : "Not yet"]] as const).map(([l, v]) => (
-                <div key={l}><span className="text-[10px] uppercase tracking-wider font-semibold block mb-0.5" style={{ color: "var(--text-muted)" }}>{l}</span><span style={{ color: "var(--text-primary)" }}>{v}</span></div>
-              ))}
-            </div>
-            <h3 className="text-[12px] font-semibold mb-2" style={{ color: "var(--text-primary)" }}>Documents</h3>
-            <div className="space-y-0 max-h-[300px] overflow-y-auto">
-              {previewPack.documentIds.map((id) => { const doc = allDocs.find((d) => d.id === id); if (!doc) return null; return (
-                <div key={id} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
-                  <div><p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{doc.title}</p><p className="font-mono text-[10px]" style={{ color: "var(--text-muted)" }}>{doc.reference} &middot; v{doc.version}</p></div>
-                  {docStatusBadge(doc.status)}
-                </div>
-              ); })}
-            </div>
-            <div className="flex justify-end gap-2 mt-4">
-              <Button variant="ghost" type="button" onClick={() => setPreviewPack(null)}>Close</Button>
-              <Button variant="primary" icon={Download} loading={exporting} onClick={() => { setExporting(true); setTimeout(() => { exportPack(previewPack); setExporting(false); setPreviewPack(null); }, 300); }}>Export pack</Button>
-            </div>
-          </>
-        )}
-      </Modal>
+      <Popup isOpen={addedPopup} variant="success" title={selectedDocs.size === 0 ? "Document added" : "Evidence pack exported"} description={selectedDocs.size === 0 ? "Added to the evidence library." : "Pack exported successfully."} onDismiss={() => setAddedPopup(false)} />
     </main>
   );
 }

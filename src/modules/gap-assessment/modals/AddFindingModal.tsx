@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Plus } from "lucide-react";
-import type { FindingSeverity, FindingStatus } from "@/store/findings.slice";
+import type { FindingSeverity } from "@/store/findings.slice";
 import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import type { GxPSystem } from "@/store/systems.slice";
 import { Button } from "@/components/ui/Button";
@@ -23,14 +23,14 @@ const findingSchema = z.object({
   area: z.string().min(1, "Area required"),
   requirement: z.string().min(5, "Requirement required"),
   framework: z.string().min(1, "Framework required"),
-  severity: z.enum(["Critical", "Major", "Minor"]),
-  status: z.enum(["Open", "In Progress", "Closed"]),
+  severity: z.enum(["Critical", "High", "Low"]),
   owner: z.string().min(1, "Owner required"),
   targetDate: z.string().min(1, "Target date required"),
   evidenceLink: z.string().optional(),
   rootCause: z.string().optional(),
   linkedSystemId: z.string().optional(),
   linkedSystemName: z.string().optional(),
+  raiseCapaImmediately: z.boolean().optional(),
 });
 type FindingForm = z.infer<typeof findingSchema>;
 
@@ -48,7 +48,7 @@ interface AddFindingModalProps {
 export function AddFindingModal({ isOpen, onClose, onSave, sites, users, systems, activeFrameworks, lockedSiteId }: AddFindingModalProps) {
   const { register: reg, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } = useForm<FindingForm>({
     resolver: zodResolver(findingSchema),
-    defaultValues: { severity: "Major", status: "Open", siteId: lockedSiteId ?? "" },
+    defaultValues: { severity: "High", siteId: lockedSiteId ?? "", raiseCapaImmediately: false },
   });
 
   // Smart default: auto-select Part 11 framework when the user picks CSV/IT area
@@ -101,15 +101,14 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, users, systems
             <input id="f-req" type="text" className="input text-[12px]" placeholder="e.g. Annex 11 §11 — Audit trail completeness" {...reg("requirement")} />
             {errors.requirement && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.requirement.message}</p>}
           </div>
-          <div>
+          <div className="col-span-2">
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Severity <span className="text-(--danger)">*</span></p>
-            <Dropdown value={watch("severity") ?? "Major"} onChange={(v) => setValue("severity", v as FindingSeverity)} width="w-full"
-              options={[{ value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const }, { value: "Major", label: "Major", badge: "M", badgeVariant: "amber" as const }, { value: "Minor", label: "Minor" }]} />
-          </div>
-          <div>
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Status</p>
-            <Dropdown value={watch("status") ?? "Open"} onChange={(v) => setValue("status", v as FindingStatus)} width="w-full"
-              options={[{ value: "Open", label: "Open" }, { value: "In Progress", label: "In Progress" }, { value: "Closed", label: "Closed" }]} />
+            <Dropdown value={watch("severity") ?? "High"} onChange={(v) => setValue("severity", v as FindingSeverity)} width="w-full"
+              options={[
+                { value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const },
+                { value: "High", label: "High", badge: "H", badgeVariant: "amber" as const },
+                { value: "Low", label: "Low", badge: "L", badgeVariant: "green" as const },
+              ]} />
           </div>
           <div>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Owner <span className="text-(--danger)">*</span></p>
@@ -153,6 +152,15 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, users, systems
           <div className="col-span-2">
             <label htmlFor="f-rootcause" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Root Cause Analysis <span className="text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span></label>
             <textarea id="f-rootcause" rows={3} className="input text-[12px] resize-none" placeholder="What is the likely root cause of this gap?&#10;Can be updated later in CAPA Tracker." {...reg("rootCause")} />
+          </div>
+          <div className="col-span-2 pt-1">
+            <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: "var(--text-primary)" }}>
+              <input type="checkbox" className="w-4 h-4 cursor-pointer accent-(--brand)" {...reg("raiseCapaImmediately")} />
+              <span>Raise CAPA immediately</span>
+            </label>
+            <p className="text-[10px] mt-1 ml-6" style={{ color: "var(--text-muted)" }}>
+              A linked CAPA will be created automatically and appear in the CAPA Tracker.
+            </p>
           </div>
         </div>
         <div className="flex justify-end gap-3 pt-2">

@@ -1,37 +1,30 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
-import { BarChart3, AlertTriangle, FileDown } from "lucide-react";
+import { BarChart3, AlertTriangle, Download, BarChart2, Shield } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addItem, closeItem, type RAIDItem, type RAIDType, type RAIDPriority } from "@/store/raid.slice";
+import { addItem, closeItem, removeItem, updateItem, type RAIDItem } from "@/store/raid.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
-import { Badge } from "@/components/ui/Badge";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 
 import { KPIScorecardTab } from "./tabs/KPIScorecardTab";
 import { RAIDTab } from "./tabs/RAIDTab";
-import { ReportsTab } from "./tabs/ReportsTab";
 
-/* ── Helpers ── */
-function raidTypeBadge(t: RAIDType) { const m: Record<RAIDType, "red" | "blue" | "amber" | "green"> = { Risk: "red", Action: "blue", Issue: "amber", Decision: "green" }; return <Badge variant={m[t]}>{t}</Badge>; }
-function priorityBadge(p: RAIDPriority) { const m: Record<RAIDPriority, "red" | "amber" | "blue" | "gray"> = { Critical: "red", High: "amber", Medium: "blue", Low: "gray" }; return <Badge variant={m[p]}>{p}</Badge>; }
-
-type TabId = "kpis" | "raid" | "reports";
+type TabId = "kpis" | "raid";
 const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
   { id: "kpis", label: "KPIs & Scorecards", Icon: BarChart3 },
   { id: "raid", label: "RAID & Risks", Icon: AlertTriangle },
-  { id: "reports", label: "Reports & Exports", Icon: FileDown },
 ];
 
 const raidSchema = z.object({
@@ -39,7 +32,6 @@ const raidSchema = z.object({
   title: z.string().min(3, "Title required"),
   description: z.string().min(5, "Description required"),
   priority: z.enum(["Critical", "High", "Medium", "Low"]),
-  status: z.enum(["Open", "In Progress", "Closed", "Escalated"]),
   owner: z.string().min(1, "Owner required"),
   dueDate: z.string().min(1, "Due date required"),
   impact: z.string().optional(),
@@ -84,21 +76,66 @@ export function GovernancePage() {
   /* ── State ── */
   const [activeTab, setActiveTab] = useState<TabId>("kpis");
   const [addRaidOpen, setAddRaidOpen] = useState(false);
+  const [editingRaid, setEditingRaid] = useState<RAIDItem | null>(null);
   const [closeRaidOpen, setCloseRaidOpen] = useState(false);
   const [selectedRaid, setSelectedRaid] = useState<RAIDItem | null>(null);
-  const [closeResolution, setCloseResolution] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [raidAddedPopup, setRaidAddedPopup] = useState(false);
   const [raidClosedPopup, setRaidClosedPopup] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [reportGeneratedPopup, setReportGeneratedPopup] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [exportMenuOpen]);
 
   const anyRaidFilter = !!(typeFilter || statusFilter || priorityFilter);
   const filteredRaid = raidItems.filter((r) => { if (typeFilter && r.type !== typeFilter) return false; if (statusFilter && r.status !== statusFilter) return false; if (priorityFilter && r.priority !== priorityFilter) return false; return true; });
-  const raidForm = useForm<RaidForm>({ resolver: zodResolver(raidSchema), defaultValues: { type: "Risk", priority: "Medium", status: "Open" } });
+  const raidForm = useForm<RaidForm>({ resolver: zodResolver(raidSchema), defaultValues: { type: "Risk", priority: "Medium" } });
 
-  function onRaidSave(data: RaidForm) { const id = crypto.randomUUID(); dispatch(addItem({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", impact: data.impact ?? "", mitigation: data.mitigation ?? "", raisedBy: user?.id ?? "", dueDate: dayjs(data.dueDate).utc().toISOString(), createdAt: "" })); auditLog({ action: "RAID_ITEM_ADDED", module: "governance", recordId: id, newValue: data }); setAddRaidOpen(false); setRaidAddedPopup(true); raidForm.reset(); }
-  function handleCloseRaid() { if (!selectedRaid || !closeResolution.trim()) return; dispatch(closeItem({ id: selectedRaid.id, resolution: closeResolution.trim() })); auditLog({ action: "RAID_ITEM_CLOSED", module: "governance", recordId: selectedRaid.id, newValue: { resolution: closeResolution } }); setCloseRaidOpen(false); setSelectedRaid(null); setCloseResolution(""); setRaidClosedPopup(true); }
+  function onRaidSave(data: RaidForm) {
+    if (editingRaid) {
+      dispatch(updateItem({ id: editingRaid.id, patch: { ...data, dueDate: dayjs(data.dueDate).utc().toISOString(), impact: data.impact ?? "", mitigation: data.mitigation ?? "" } }));
+      auditLog({ action: "RAID_ITEM_UPDATED", module: "governance", recordId: editingRaid.id, newValue: data });
+      setEditingRaid(null);
+    } else {
+      const id = crypto.randomUUID();
+      dispatch(addItem({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", status: "Open", impact: data.impact ?? "", mitigation: data.mitigation ?? "", raisedBy: user?.id ?? "", dueDate: dayjs(data.dueDate).utc().toISOString(), createdAt: "" }));
+      auditLog({ action: "RAID_ITEM_ADDED", module: "governance", recordId: id, newValue: data });
+    }
+    setAddRaidOpen(false); setRaidAddedPopup(true); raidForm.reset();
+  }
+
+  function handleDeleteRaid(item: RAIDItem) {
+    dispatch(removeItem(item.id));
+    auditLog({ action: "RAID_ITEM_DELETED", module: "governance", recordId: item.id, oldValue: item });
+  }
+
+  function handleEditRaid(item: RAIDItem) {
+    setEditingRaid(item);
+    raidForm.reset({
+      type: item.type,
+      title: item.title,
+      description: item.description,
+      priority: item.priority,
+      owner: item.owner,
+      dueDate: dayjs.utc(item.dueDate).format("YYYY-MM-DD"),
+      impact: item.impact ?? "",
+      mitigation: item.mitigation ?? "",
+    });
+    setAddRaidOpen(true);
+  }
+  function handleCloseRaid() { if (!selectedRaid) return; dispatch(closeItem({ id: selectedRaid.id, resolution: "" })); auditLog({ action: "RAID_ITEM_CLOSED", module: "governance", recordId: selectedRaid.id }); setCloseRaidOpen(false); setSelectedRaid(null); setRaidClosedPopup(true); }
 
   /* ── Chart data ── */
   const capaTrend = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mc = capas.filter((c) => c.status === "Closed" && c.closedAt && dayjs.utc(c.closedAt).format("MMM YYYY") === mo.format("MMM YYYY")); const ot = mc.filter((c) => !dayjs.utc(c.closedAt).isAfter(dayjs.utc(c.dueDate))).length; m.push({ month: mo.format("MMM"), onTime: ot, late: mc.length - ot }); } return m; })();
@@ -142,7 +179,45 @@ export function GovernancePage() {
       {/* Header */}
       <header className="flex items-start justify-between flex-wrap gap-4">
         <div><h1 className="page-title">Governance &amp; KPIs</h1><p className="page-subtitle mt-1">{visibleSites.length} sites &middot; {capas.length} CAPAs &middot; {findings.length} findings &middot; {raidItems.length} RAID items</p></div>
-        <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span><span className="text-[20px] font-bold" style={{ color: noData ? "var(--text-muted)" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444" }}>{noData ? "\u2014" : `${readinessScore}%`}</span></div>
+        <div className="flex items-center gap-2">
+          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span><span className="text-[20px] font-bold" style={{ color: noData ? "var(--text-muted)" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444" }}>{noData ? "\u2014" : `${readinessScore}%`}</span></div>
+          <div className="relative" ref={exportMenuRef}>
+            <Button
+              variant="secondary"
+              icon={Download}
+              onClick={() => setExportMenuOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={exportMenuOpen}
+            >
+              Export Reports
+            </Button>
+            {exportMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-1 z-20 min-w-60 rounded-lg py-1 shadow-lg"
+                style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}
+              >
+                {[
+                  { label: "Monthly Quality KPI Report", Icon: BarChart2, onClick: exportMonthly },
+                  { label: "RAID Log Export", Icon: AlertTriangle, onClick: exportRAID },
+                  { label: "Inspection Readiness Pack", Icon: Shield, onClick: exportReadiness },
+                ].map((opt) => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { opt.onClick(); setExportMenuOpen(false); setReportGeneratedPopup(true); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    <opt.Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </header>
 
       {/* Tabs */}
@@ -156,15 +231,11 @@ export function GovernancePage() {
       </div>
 
       <div role="tabpanel" id="panel-raid" aria-labelledby="tab-raid" tabIndex={0} hidden={activeTab !== "raid"}>
-        <RAIDTab raidItems={raidItems} filteredRaid={filteredRaid} typeFilter={typeFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} anyRaidFilter={anyRaidFilter} role={role} timezone={timezone} dateFormat={dateFormat} ownerName={ownerName} onAddRaidOpen={() => setAddRaidOpen(true)} onCloseRaid={(item) => { setSelectedRaid(item); setCloseResolution(""); setCloseRaidOpen(true); }} />
-      </div>
-
-      <div role="tabpanel" id="panel-reports" aria-labelledby="tab-reports" tabIndex={0} hidden={activeTab !== "reports"}>
-        <ReportsTab raidItemsCount={raidItems.length} openRaidCount={raidItems.filter((r) => r.status !== "Closed").length} readinessScore={readinessScore} sitesCount={visibleSites.length} noData={noData} exportMonthly={exportMonthly} exportRAID={exportRAID} exportReadiness={exportReadiness} />
+        <RAIDTab raidItems={raidItems} filteredRaid={filteredRaid} typeFilter={typeFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} anyRaidFilter={anyRaidFilter} role={role} currentUserId={user?.id ?? ""} timezone={timezone} dateFormat={dateFormat} ownerName={ownerName} onAddRaidOpen={() => { setEditingRaid(null); raidForm.reset({ type: "Risk", priority: "Medium" }); setAddRaidOpen(true); }} onCloseRaid={(item) => { setSelectedRaid(item); setCloseRaidOpen(true); }} onEditRaid={handleEditRaid} onDeleteRaid={handleDeleteRaid} />
       </div>
 
       {/* Add RAID Modal */}
-      <Modal open={addRaidOpen} onClose={() => setAddRaidOpen(false)} title="Add RAID item">
+      <Modal open={addRaidOpen} onClose={() => { setAddRaidOpen(false); setEditingRaid(null); }} title={editingRaid ? "Edit RAID item" : "Add RAID item"}>
         <form onSubmit={raidForm.handleSubmit(onRaidSave)} noValidate className="space-y-4"><div className="grid grid-cols-2 gap-3">
           <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Type *</label><Controller name="type" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Risk", "Action", "Issue", "Decision"].map((t) => ({ value: t, label: t }))} />} /></div>
           <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Priority *</label><Controller name="priority" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Critical", "High", "Medium", "Low"].map((p) => ({ value: p, label: p }))} />} /></div>
@@ -172,20 +243,28 @@ export function GovernancePage() {
           <div className="col-span-2"><label htmlFor="raid-desc" className={lbl} style={{ color: "var(--text-muted)" }}>Description *</label><textarea id="raid-desc" rows={2} className="input text-[12px] resize-none" {...raidForm.register("description")} />{raidForm.formState.errors.description && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.description.message}</p>}</div>
           <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} /></div>
           <div><label htmlFor="raid-due" className={lbl} style={{ color: "var(--text-muted)" }}>Due date *</label><input id="raid-due" type="date" className="input text-[12px]" {...raidForm.register("dueDate")} /></div>
-          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Status</label><Controller name="status" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Open", "In Progress", "Escalated"].map((s) => ({ value: s, label: s }))} />} /></div>
           <div className="col-span-2"><label htmlFor="raid-impact" className={lbl} style={{ color: "var(--text-muted)" }}>Impact (optional)</label><input id="raid-impact" className="input text-[12px]" placeholder="Business or compliance impact" {...raidForm.register("impact")} /></div>
           <div className="col-span-2"><label htmlFor="raid-mitig" className={lbl} style={{ color: "var(--text-muted)" }}>Mitigation (optional)</label><input id="raid-mitig" className="input text-[12px]" placeholder="How is this being mitigated?" {...raidForm.register("mitigation")} /></div>
-        </div><div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => setAddRaidOpen(false)}>Cancel</Button><Button variant="primary" type="submit" loading={raidForm.formState.isSubmitting}>Add item</Button></div></form>
+        </div><div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => { setAddRaidOpen(false); setEditingRaid(null); }}>Cancel</Button><Button variant="primary" type="submit" loading={raidForm.formState.isSubmitting}>{editingRaid ? "Save changes" : "Add item"}</Button></div></form>
       </Modal>
 
-      {/* Close RAID Modal */}
-      <Modal open={closeRaidOpen} onClose={() => { setCloseRaidOpen(false); setSelectedRaid(null); }} title="Close RAID item">
-        {selectedRaid && (<><div className={clsx("rounded-lg p-3 mb-4", isDark ? "bg-[#071526] border border-[#1e3a5a]" : "bg-[#f8fafc] border border-[#e2e8f0]")}><div className="flex items-center gap-2 mb-1">{raidTypeBadge(selectedRaid.type)}{priorityBadge(selectedRaid.priority)}</div><p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{selectedRaid.title}</p></div><label htmlFor="raid-resolution" className={lbl} style={{ color: "var(--text-muted)" }}>Resolution *</label><textarea id="raid-resolution" rows={3} className="input text-[12px] resize-none" placeholder="Describe how this was resolved..." value={closeResolution} onChange={(e) => setCloseResolution(e.target.value)} /><div className="flex justify-end gap-2 mt-4"><Button variant="ghost" type="button" onClick={() => { setCloseRaidOpen(false); setSelectedRaid(null); }}>Cancel</Button><Button variant="primary" disabled={!closeResolution.trim()} onClick={handleCloseRaid}>Close item</Button></div></>)}
-      </Modal>
+      {/* Close RAID confirmation */}
+      <Popup
+        isOpen={closeRaidOpen}
+        variant="confirmation"
+        title="Mark this item as closed?"
+        description={selectedRaid ? selectedRaid.title : ""}
+        onDismiss={() => { setCloseRaidOpen(false); setSelectedRaid(null); }}
+        actions={[
+          { label: "Cancel", style: "ghost", onClick: () => { setCloseRaidOpen(false); setSelectedRaid(null); } },
+          { label: "Confirm", style: "primary", onClick: handleCloseRaid },
+        ]}
+      />
 
       {/* Popups */}
       <Popup isOpen={raidAddedPopup} variant="success" title="RAID item added" description="Added to the governance log." onDismiss={() => setRaidAddedPopup(false)} />
       <Popup isOpen={raidClosedPopup} variant="success" title="RAID item closed" description="Resolution recorded." onDismiss={() => setRaidClosedPopup(false)} />
+      <Popup isOpen={reportGeneratedPopup} variant="success" title="Report generated \u2705" description="Exported successfully." onDismiss={() => setReportGeneratedPopup(false)} />
     </main>
   );
 }

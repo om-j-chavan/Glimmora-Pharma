@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { GitBranch, Plus } from "lucide-react";
+import { GitBranch, Plus, Check } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { GxPSystem, RiskLevel, RoadmapActivity } from "@/store/systems.slice";
 import type { UserConfig } from "@/store/settings.slice";
@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/Badge";
 /* ── Helpers ── */
 
 const ACTIVITY_COLORS: Record<string, string> = {
-  IQ: "#0ea5e9", OQ: "#6366f1", PQ: "#10b981", PV: "#f59e0b",
-  UAT: "#a78bfa", "Risk Assessment": "#ef4444", "Periodic Review": "#64748b",
+  URS: "#0ea5e9", FS: "#6366f1", DS: "#a78bfa",
+  IQ: "#0ea5e9", OQ: "#f59e0b", PQ: "#10b981", RTR: "#10b981",
+  "Risk Assessment": "#ef4444", "Periodic Review": "#64748b",
 };
 
 function riskBadge(r: RiskLevel) {
@@ -54,13 +55,14 @@ export interface CSVRoadmapTabProps {
   onClearRoadmapFilters: () => void;
   onAddActivityOpen: () => void;
   onGoToInventory: () => void;
+  onCompleteActivity: (activityId: string) => void;
 }
 
 export function CSVRoadmapTab({
   systems, roadmap, roadmapGrouped, users, isDark, role,
   rmSysFilter, rmTypeFilter, rmStatusFilter,
   onRmSysFilterChange, onRmTypeFilterChange, onRmStatusFilterChange,
-  onClearRoadmapFilters, onAddActivityOpen, onGoToInventory,
+  onClearRoadmapFilters, onAddActivityOpen, onGoToInventory, onCompleteActivity,
 }: CSVRoadmapTabProps) {
   return (
     <>
@@ -97,7 +99,7 @@ export function CSVRoadmapTab({
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap mb-4">
         <Dropdown placeholder="All systems" value={rmSysFilter} onChange={onRmSysFilterChange} width="w-48" options={[{ value: "", label: "All systems" }, ...systems.map((s) => ({ value: s.id, label: s.name.split(" \u2014 ")[0] || s.name }))]} />
-        <Dropdown placeholder="All types" value={rmTypeFilter} onChange={onRmTypeFilterChange} width="w-40" options={[{ value: "", label: "All types" }, ...["IQ", "OQ", "PQ", "PV", "UAT", "Risk Assessment", "Periodic Review"].map((t) => ({ value: t, label: t }))]} />
+        <Dropdown placeholder="All types" value={rmTypeFilter} onChange={onRmTypeFilterChange} width="w-40" options={[{ value: "", label: "All types" }, ...["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR", "Risk Assessment", "Periodic Review"].map((t) => ({ value: t, label: t }))]} />
         <Dropdown placeholder="All statuses" value={rmStatusFilter} onChange={onRmStatusFilterChange} width="w-36" options={[{ value: "", label: "All statuses" }, { value: "Planned", label: "Planned" }, { value: "In Progress", label: "In Progress" }, { value: "Complete", label: "Complete" }, { value: "Overdue", label: "Overdue" }]} />
       </div>
 
@@ -148,6 +150,17 @@ export function CSVRoadmapTab({
                         </div>
                         {actStatusBadge(a.status)}
                         <span className="text-[11px] flex-shrink-0" style={{ color: "var(--text-secondary)" }}>{ownerName(a.owner, users)}</span>
+                        {role !== "viewer" && a.status !== "Complete" && (
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            icon={Check}
+                            onClick={() => onCompleteActivity(a.id)}
+                            aria-label={`Mark ${a.title} complete`}
+                          >
+                            Complete
+                          </Button>
+                        )}
                       </div>
                       <div className={clsx("h-1 rounded-full mt-2", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}>
                         <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: a.status === "Overdue" ? "#ef4444" : a.status === "Complete" ? "#10b981" : a.status === "In Progress" ? "#f59e0b" : "#0ea5e9" }} />

@@ -8,6 +8,7 @@ import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import type { Finding, FindingSeverity, FindingStatus } from "@/store/findings.slice";
 import { editFinding } from "@/store/findings.slice";
 import type { CAPA } from "@/store/capa.slice";
@@ -27,7 +28,7 @@ const FRAMEWORK_LABELS: Record<string, string> = {
 };
 
 function severityBadge(s: FindingSeverity) {
-  const m: Record<string, string> = { Critical: "badge badge-red", Major: "badge badge-amber", Minor: "badge badge-gray" };
+  const m: Record<FindingSeverity, string> = { Critical: "badge badge-red", High: "badge badge-amber", Low: "badge badge-green" };
   return <span className={m[s]}>{s}</span>;
 }
 function statusBadge(s: FindingStatus) {
@@ -68,7 +69,6 @@ interface GapRegisterTabProps {
   renderFilters: (compact?: boolean) => ReactNode;
   onAddOpen: () => void;
   onRaiseCapa: (finding: Finding) => void;
-  onStatusUpdate: (id: string, status: FindingStatus) => void;
   onNavigateCapa: (capaId: string) => void;
 }
 
@@ -76,11 +76,15 @@ export function GapRegisterTab({
   filteredFindings, findingsTotal, selectedFinding, onSelectFinding,
   isDark, isViewOnly, users, timezone, dateFormat, capas,
   agiMode, agiCapa, isAnyFilterActive, renderFilters,
-  onAddOpen, onRaiseCapa, onStatusUpdate, onNavigateCapa,
+  onAddOpen, onRaiseCapa, onNavigateCapa,
 }: GapRegisterTabProps) {
   const dispatch = useAppDispatch();
   const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
+  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
+  const { sites: accessibleSites } = useTenantConfig();
+  const showSiteColumn = !selectedSiteId && accessibleSites.length > 1;
+  const siteName = (id: string) => accessibleSites.find((s) => s.id === id)?.name ?? id;
   const [searchQuery, setSearchQuery] = useState("");
 
   // Edit state
@@ -202,24 +206,46 @@ export function GapRegisterTab({
           <table className="data-table" aria-label="GxP/GMP findings register">
             <caption className="sr-only">List of all GxP/GMP findings with severity, status and target dates</caption>
             <thead><tr>
-              <th scope="col">ID</th><th scope="col">Area</th><th scope="col">Requirement</th>
+              <th scope="col">ID</th>
+              {showSiteColumn && <th scope="col">Site</th>}
+              <th scope="col">Area</th><th scope="col">Requirement</th>
               <th scope="col">Framework</th><th scope="col">Severity</th><th scope="col">Status</th>
+              <th scope="col">CAPA</th>
               <th scope="col">Owner</th><th scope="col">Target date</th><th scope="col">Evidence</th>
               <th scope="col"><span className="sr-only">Open</span></th>
             </tr></thead>
             <tbody>
-              {displayed.map((f) => (
+              {displayed.map((f) => {
+                // Reverse lookup in case finding.capaId hasn't been updated but a CAPA references it
+                const linkedCapa = capas.find((c) => c.id === f.capaId) ?? capas.find((c) => c.findingId === f.id);
+                return (
                 <tr key={f.id} onClick={() => onSelectFinding(f)} className="cursor-pointer" aria-selected={selectedFinding?.id === f.id}
                   style={selectedFinding?.id === f.id ? { background: isDark ? "#0c2f5a" : "#eff6ff" } : {}}>
                   <th scope="row">
                     <div className="font-mono text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>{f.id}</div>
-                    {f.capaId && <div className="flex items-center gap-1 mt-0.5"><Link2 className="w-3 h-3 text-[#0ea5e9]" aria-hidden="true" /><span className="text-[10px] text-[#0ea5e9]">{f.capaId}</span></div>}
                   </th>
+                  {showSiteColumn && <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{siteName(f.siteId)}</td>}
                   <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{f.area}</td>
                   <td><span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{f.requirement}</span></td>
                   <td><span className="badge badge-blue text-[10px]">{FRAMEWORK_LABELS[f.framework] ?? f.framework}</span></td>
                   <td>{severityBadge(f.severity)}</td>
                   <td>{statusBadge(f.status)}</td>
+                  <td className="whitespace-nowrap">
+                    {linkedCapa ? (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onNavigateCapa(linkedCapa.id); }}
+                        className="flex items-center gap-1.5 bg-transparent border-none p-0 cursor-pointer hover:underline"
+                        aria-label={`Open ${linkedCapa.id}`}
+                      >
+                        <Link2 className="w-3 h-3 text-[#0ea5e9]" aria-hidden="true" />
+                        <span className="font-mono text-[11px] font-semibold text-[#0ea5e9]">{linkedCapa.id}</span>
+                        {capaStatusBadge(linkedCapa.status)}
+                      </button>
+                    ) : (
+                      <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>
+                    )}
+                  </td>
                   <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{ownerName(f.owner)}</td>
                   <td className="whitespace-nowrap">
                     <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(f.targetDate).tz(timezone).format(dateFormat)}</div>
@@ -228,7 +254,8 @@ export function GapRegisterTab({
                   <td>{f.evidenceLink ? <span className="text-[11px] text-[#0ea5e9]">{f.evidenceLink}</span> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>}</td>
                   <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View detail for ${f.id}`} /></td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -238,6 +265,19 @@ export function GapRegisterTab({
       <Modal open={!!selectedFinding} onClose={() => { setIsEditing(false); onSelectFinding(null); }} title={selectedFinding?.id ?? "Finding Detail"}>
         {selectedFinding && (
           <div className="space-y-4">
+            {/* Breadcrumb */}
+            <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-[13px] -mt-1">
+              <button
+                type="button"
+                onClick={() => { setIsEditing(false); onSelectFinding(null); }}
+                className="bg-transparent border-none cursor-pointer p-0 hover:underline"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Gap Assessment &amp; Findings
+              </button>
+              <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>&rsaquo;</span>
+              <span className="font-mono font-medium" style={{ color: "var(--text-primary)" }}>{selectedFinding.id}</span>
+            </nav>
             {/* Header: badges + edit/save buttons */}
             <div className="flex items-center justify-between">
               <div className="flex gap-2 flex-wrap">{severityBadge(selectedFinding.severity)}{statusBadge(selectedFinding.status)}</div>
@@ -419,12 +459,59 @@ export function GapRegisterTab({
               );
             })()}
 
-            {/* ── Status update ── */}
-            {!isEditing && !isViewOnly && selectedFinding.status !== "Closed" && (
-              <div>
-                <p className={LABEL}>Update status</p>
-                <Dropdown value={selectedFinding.status} onChange={(val) => onStatusUpdate(selectedFinding.id, val as FindingStatus)}
-                  options={[{ value: "Open", label: "Open" }, { value: "In Progress", label: "In Progress" }, { value: "Closed", label: "Closed" }]} width="w-full" />
+            {/* ── Timeline ── */}
+            {!isEditing && (
+              <div className="pt-4 border-t border-(--bg-border)">
+                <p className={LABEL}>Timeline</p>
+                <div className="space-y-2.5 text-[11px]">
+                  {selectedFinding.createdAt && (
+                    <div className="flex items-start gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "var(--brand)" }} />
+                      <div>
+                        <p className="font-medium" style={{ color: "var(--text-primary)" }}>Created</p>
+                        <p style={{ color: "var(--text-muted)" }}>
+                          {ownerName(selectedFinding.owner)} &mdash; {dayjs.utc(selectedFinding.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {selectedFinding.capaId && (() => {
+                    const linkedCapa = capas.find((c) => c.id === selectedFinding.capaId) ?? capas.find((c) => c.findingId === selectedFinding.id);
+                    return linkedCapa ? (
+                      <div className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#f59e0b" }} />
+                        <div>
+                          <p className="font-medium" style={{ color: "var(--text-primary)" }}>CAPA raised &mdash; {linkedCapa.id}</p>
+                          <p style={{ color: "var(--text-muted)" }}>
+                            {ownerName(linkedCapa.owner)} &mdash; {linkedCapa.createdAt ? dayjs.utc(linkedCapa.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A") : "\u2014"}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+                  {selectedFinding.editHistory && selectedFinding.editHistory.length > 0 && (() => {
+                    const last = selectedFinding.editHistory[selectedFinding.editHistory.length - 1];
+                    return (
+                      <div className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#10b981" }} />
+                        <div>
+                          <p className="font-medium" style={{ color: "var(--text-primary)" }}>Last updated</p>
+                          <p style={{ color: "var(--text-muted)" }}>
+                            {ownerName(last.editedBy)} &mdash; {dayjs.utc(last.editedAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {!selectedFinding.createdAt && !selectedFinding.editHistory?.length && (
+                    <p style={{ color: "var(--text-muted)" }}>&mdash;</p>
+                  )}
+                </div>
+                {selectedFinding.linkedSystemName && (
+                  <p className="text-[11px] mt-3" style={{ color: "var(--text-muted)" }}>
+                    Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
+                  </p>
+                )}
               </div>
             )}
 

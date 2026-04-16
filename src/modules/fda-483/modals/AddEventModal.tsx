@@ -211,33 +211,6 @@ export function AddEventModal({ open, onClose, onSave, sites, lockedSiteId }: Ad
             </div>
           )}
 
-          {/* Status */}
-          <div>
-            <label
-              className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Status <span className="text-(--danger)" aria-hidden="true">*</span>
-            </label>
-            <Controller
-              name="status"
-              control={form.control}
-              render={({ field }) => (
-                <Dropdown
-                  value={field.value}
-                  onChange={field.onChange}
-                  width="w-full"
-                  options={[
-                    "Open",
-                    "Response Due",
-                    "Response Submitted",
-                    "Closed",
-                  ].map((s) => ({ value: s, label: s }))}
-                />
-              )}
-            />
-          </div>
-
           {/* Inspection date */}
           <div>
             <label

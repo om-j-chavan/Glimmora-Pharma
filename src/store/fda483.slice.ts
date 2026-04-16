@@ -2,7 +2,7 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 export type EventType = "FDA 483" | "Warning Letter" | "EMA Inspection" | "MHRA Inspection" | "WHO Inspection";
 export type EventStatus = "Open" | "Response Due" | "Response Submitted" | "Closed";
-export type ObservationSeverity = "Critical" | "Major" | "Minor";
+export type ObservationSeverity = "Critical" | "High" | "Low";
 export type RCAMethod = "5 Why" | "Fishbone" | "Fault Tree" | "Barrier Analysis";
 
 export interface Observation {

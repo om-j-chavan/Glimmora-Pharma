@@ -19,7 +19,10 @@ export function makeRoleLoader(path: string) {
   return function roleLoader() {
     const { token, user, activeSiteId } = store.getState().auth;
     if (!token || !user) return redirect("/login");
-    if (!activeSiteId) return redirect("/site-picker");
+    // Super admin and customer admin have all-sites access — never require a specific site
+    if (!activeSiteId && user.role !== "super_admin" && user.role !== "customer_admin") {
+      return redirect("/login");
+    }
 
     const matrix = store.getState().permissions?.matrix;
     if (matrix) {

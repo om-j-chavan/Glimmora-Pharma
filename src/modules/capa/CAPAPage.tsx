@@ -14,7 +14,7 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   addCAPA, updateCAPA, closeCAPA,
-  type CAPA, type CAPAStatus, type RCAMethod,
+  type CAPA, type RCAMethod,
 } from "@/store/capa.slice";
 import { closeFinding } from "@/store/findings.slice";
 import { updateObservation } from "@/store/fda483.slice";
@@ -108,14 +108,14 @@ export function CAPAPage() {
     }
     return months;
   }, [capas]);
-  const hasTrendData = riskSignalData.some((d) => d["483"] + d["Internal Audit"] + d.Deviation + d["Gap Assessment"] > 0);
+  const hasTrendData = capas.length > 0;
 
   const statusDonut = useMemo(() =>
     ([
-      { name: "Open", value: capas.filter((c) => c.status === "Open").length, fill: "#0ea5e9" },
-      { name: "In Progress", value: capas.filter((c) => c.status === "In Progress").length, fill: "#f59e0b" },
+      { name: "Open", value: capas.filter((c) => c.status === "Open").length, fill: "#3B82F6" },
+      { name: "In Progress", value: capas.filter((c) => c.status === "In Progress").length, fill: "#F59E0B" },
       { name: "Pending QA", value: capas.filter((c) => c.status === "Pending QA Review").length, fill: "#6366f1" },
-      { name: "Closed", value: capas.filter((c) => c.status === "Closed").length, fill: "#10b981" },
+      { name: "Closed", value: capas.filter((c) => c.status === "Closed").length, fill: "#0F6E56" },
     ] as const).filter((d) => d.value > 0),
   [capas]);
 
@@ -216,11 +216,6 @@ export function CAPAPage() {
     setSelectedCAPA(null);
   }
 
-  function handleStatusUpdate(id: string, status: CAPAStatus) {
-    dispatch(updateCAPA({ id, patch: { status } }));
-    auditLog({ action: "CAPA_STATUS_UPDATED", module: "capa", recordId: id, oldValue: selectedCAPA?.status, newValue: status });
-  }
-
   /* ══════════════════════════════════════ */
 
   return (
@@ -262,7 +257,6 @@ export function CAPAPage() {
           timezone={timezone} dateFormat={dateFormat} canSign={canSign} canCloseCapa={canCloseCapa}
           onAddOpen={() => setAddOpen(true)} onEditOpen={() => setEditModalOpen(true)}
           onSignOpen={() => setSignOpen(true)} onSubmitForReview={handleSubmitForReview}
-          onStatusUpdate={handleStatusUpdate}
           onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
           onNavigateCapa={() => navigate("/gap-assessment")}
         />

@@ -12,7 +12,7 @@ import { Modal } from "@/components/ui/Modal";
 
 const capaSchema = z.object({
   source: z.enum(["483", "Internal Audit", "Deviation", "Complaint", "OOS", "Change Control", "Gap Assessment"]),
-  risk: z.enum(["Critical", "Major", "Minor"]),
+  risk: z.enum(["Critical", "High", "Low"]),
   owner: z.string().min(1, "Owner required"),
   siteId: z.string().min(1, "Site required"),
   dueDate: z.string().min(1, "Due date required"),
@@ -41,12 +41,12 @@ interface AddCAPAModalProps {
 export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, isDark, lockedSiteId, defaultDescription, defaultSource, defaultDiGate, defaultRisk }: AddCAPAModalProps) {
   const { register: reg, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<CAPAForm>({
     resolver: zodResolver(capaSchema),
-    defaultValues: { source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "Major", siteId: lockedSiteId ?? "", effectivenessCheck: true, diGate: defaultDiGate ?? false, description: defaultDescription ?? "" },
+    defaultValues: { source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "High", siteId: lockedSiteId ?? "", effectivenessCheck: true, diGate: defaultDiGate ?? false, description: defaultDescription ?? "" },
   });
 
   useEffect(() => {
     if (isOpen) {
-      reset({ source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "Major", siteId: lockedSiteId ?? "", effectivenessCheck: true, diGate: defaultDiGate ?? false, description: defaultDescription ?? "", owner: "", dueDate: "" });
+      reset({ source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "High", siteId: lockedSiteId ?? "", effectivenessCheck: true, diGate: defaultDiGate ?? false, description: defaultDescription ?? "", owner: "", dueDate: "" });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, defaultSource, defaultRisk, defaultDiGate, defaultDescription, lockedSiteId]);
@@ -66,7 +66,7 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, isDark, lo
       <form onSubmit={handleSubmit(onSubmit)} aria-label="Create new CAPA" className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Source <span className="text-(--danger)">*</span></p><Controller name="source" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "483", label: "FDA 483" }, { value: "Internal Audit", label: "Internal Audit" }, { value: "Deviation", label: "Deviation" }, { value: "Complaint", label: "Complaint" }, { value: "OOS", label: "OOS" }, { value: "Change Control", label: "Change Control" }, { value: "Gap Assessment", label: "Gap Assessment" }]} />} /></div>
-          <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Risk <span className="text-(--danger)">*</span></p><Controller name="risk" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />} /></div>
+          <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Risk <span className="text-(--danger)">*</span></p><Controller name="risk" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Low", label: "Low" }]} />} /></div>
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Owner <span className="text-(--danger)">*</span></p><Controller name="owner" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} />{errors.owner && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.owner.message}</p>}</div>
           {/* Site — hidden for non-admin (auto-assigned from login), visible dropdown for admin */}
           {!lockedSiteId && (

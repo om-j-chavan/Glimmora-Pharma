@@ -12,8 +12,9 @@ import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
-  addSystem, updateSystem, removeSystem, addActivity,
-  type GxPSystem, type RoadmapActivity,
+  addSystem, updateSystem, removeSystem, addActivity, updateActivity,
+  type GxPSystem, type RoadmapActivity, type ValidationStageKey, type ValidationStage,
+  VALIDATION_STAGE_LABELS, VALIDATION_STAGE_KEYS,
 } from "@/store/systems.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
@@ -24,8 +25,6 @@ import { CSVRoadmapTab } from "./tabs/CSVRoadmapTab";
 import { AddSystemModal, type SystemForm } from "./modals/AddSystemModal";
 import { EditSystemModal, type SystemForm as EditSystemForm } from "./modals/EditSystemModal";
 import { AddActivityModal, type ActivityForm } from "./modals/AddActivityModal";
-import { AddCAPAModal, type CAPAForm } from "@/modules/capa/modals/AddCAPAModal";
-import { addCAPA } from "@/store/capa.slice";
 
 /* ── Constants ── */
 
@@ -85,9 +84,9 @@ export function CSVPage() {
   const [riskFactorsSaved, setRiskFactorsSaved] = useState(false);
   const [actionsSaved, setActionsSaved] = useState(false);
   const [noSitesOpen, setNoSitesOpen] = useState(false);
-  const [raiseCapaOpen, setRaiseCapaOpen] = useState(false);
-  const [capaRaisedPopup, setCapaRaisedPopup] = useState(false);
   const [remediationSaved, setRemediationSaved] = useState(false);
+  const [roadmapSynced, setRoadmapSynced] = useState("");
+  const [autoRoadmapPrompt, setAutoRoadmapPrompt] = useState<{ systemId: string; stageKey: ValidationStageKey } | null>(null);
 
   const location = useLocation();
   useEffect(() => {
@@ -204,13 +203,13 @@ export function CSVPage() {
     setActionsSaved(true);
   }
 
-  function handleSaveStage(stage: import("@/store/systems.slice").ValidationStage) {
+  function handleSaveStage(stage: ValidationStage) {
     if (!selectedSystem) return;
     const existing = selectedSystem.validationStages ?? [];
     // Replace or append; preserve order based on VALIDATION_STAGE_KEYS
     const others = existing.filter((s) => s.key !== stage.key);
     const merged = [...others, stage];
-    const ORDER = ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"];
+    const ORDER = VALIDATION_STAGE_KEYS;
     merged.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
 
     // Auto-update validationStatus based on aggregate stage state
@@ -218,7 +217,7 @@ export function CSVPage() {
       && merged.every((s) => s.status === "complete" || s.status === "skipped");
     const anyProgress = merged.some((s) => s.status === "complete" || s.status === "in-progress");
 
-    const patch: Partial<import("@/store/systems.slice").GxPSystem> = { validationStages: merged };
+    const patch: Partial<GxPSystem> = { validationStages: merged };
     if (allDone) {
       patch.validationStatus = "Validated";
       patch.lastValidated = dayjs().utc().toISOString();
@@ -228,6 +227,71 @@ export function CSVPage() {
 
     dispatch(updateSystem({ id: selectedSystem.id, patch }));
     auditLog({ action: "SYSTEM_VALIDATION_STAGE_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: stage });
+
+    // Bidirectional sync with CSV Roadmap
+    if (stage.status === "complete") {
+      const matchingActivity = roadmap.find((a) => a.systemId === selectedSystem.id && a.type === stage.key);
+      if (matchingActivity && matchingActivity.status !== "Complete") {
+        dispatch(updateActivity({ id: matchingActivity.id, patch: { status: "Complete" } }));
+        setRoadmapSynced(`${stage.key} roadmap activity marked Complete.`);
+      }
+    } else if (stage.status === "in-progress") {
+      const matchingActivity = roadmap.find((a) => a.systemId === selectedSystem.id && a.type === stage.key);
+      if (!matchingActivity) {
+        setAutoRoadmapPrompt({ systemId: selectedSystem.id, stageKey: stage.key });
+      }
+    }
+  }
+
+  function handleConfirmAutoRoadmap() {
+    if (!autoRoadmapPrompt) return;
+    const sys = systems.find((s) => s.id === autoRoadmapPrompt.systemId);
+    if (!sys) { setAutoRoadmapPrompt(null); return; }
+    const shortName = autoRoadmapPrompt.stageKey;
+    const newAct: RoadmapActivity = {
+      id: crypto.randomUUID(),
+      tenantId: tenantId ?? "",
+      systemId: sys.id,
+      title: `${sys.name} ${shortName} execution`,
+      type: shortName,
+      status: "In Progress",
+      startDate: dayjs().utc().toISOString(),
+      endDate: dayjs().add(30, "day").utc().toISOString(),
+      owner: sys.owner,
+    };
+    dispatch(addActivity(newAct));
+    auditLog({ action: "ROADMAP_ACTIVITY_ADDED", module: "csv-csa", recordId: newAct.id, newValue: newAct });
+    setAutoRoadmapPrompt(null);
+    setRoadmapSynced(`${shortName} added to CSV Roadmap.`);
+  }
+
+  function handleCompleteActivity(activityId: string) {
+    const activity = roadmap.find((a) => a.id === activityId);
+    if (!activity) return;
+    dispatch(updateActivity({ id: activityId, patch: { status: "Complete" } }));
+    auditLog({ action: "ROADMAP_ACTIVITY_COMPLETED", module: "csv-csa", recordId: activityId });
+
+    // Sync the matching validation stage
+    const sys = systems.find((s) => s.id === activity.systemId);
+    if (!sys) return;
+    const isStageKey = (VALIDATION_STAGE_KEYS as readonly string[]).includes(activity.type);
+    if (!isStageKey) return;
+    const stageKey = activity.type as ValidationStageKey;
+    const existing = sys.validationStages ?? [];
+    const current = existing.find((s) => s.key === stageKey);
+    if (current?.status === "complete") return;
+    const patchedStage: ValidationStage = { ...current, key: stageKey, status: "complete", date: dayjs().utc().toISOString() };
+    const merged = [...existing.filter((s) => s.key !== stageKey), patchedStage];
+    merged.sort((a, b) => VALIDATION_STAGE_KEYS.indexOf(a.key) - VALIDATION_STAGE_KEYS.indexOf(b.key));
+    const allDone = merged.length >= VALIDATION_STAGE_KEYS.length
+      && merged.every((s) => s.status === "complete" || s.status === "skipped");
+    const patch: Partial<GxPSystem> = { validationStages: merged };
+    if (allDone) {
+      patch.validationStatus = "Validated";
+      patch.lastValidated = dayjs().utc().toISOString();
+    }
+    dispatch(updateSystem({ id: sys.id, patch }));
+    setRoadmapSynced(`${VALIDATION_STAGE_LABELS[stageKey]} stage marked Complete in Validation.`);
   }
 
   function handleSaveNextReview(iso: string) {
@@ -242,10 +306,9 @@ export function CSVPage() {
     auditLog({ action: "SYSTEM_RISK_CLASSIFICATION_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: patch });
   }
 
-  function handleSaveRemediation(patch: { remediationCapaId?: string; remediationTargetDate?: string; remediationNotes?: string }) {
+  function handleSaveRemediation(patch: { remediationTargetDate?: string; remediationNotes?: string }) {
     if (!selectedSystem) return;
     const normalized = {
-      remediationCapaId: patch.remediationCapaId?.trim() || undefined,
       remediationTargetDate: patch.remediationTargetDate?.trim() ? dayjs(patch.remediationTargetDate).utc().toISOString() : undefined,
       remediationNotes: patch.remediationNotes?.trim() || undefined,
     };
@@ -253,33 +316,6 @@ export function CSVPage() {
     auditLog({ action: "SYSTEM_REMEDIATION_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: normalized });
     setRemediationSaved(true);
   }
-
-  function handleRaiseCapa(data: CAPAForm) {
-    const newId = `CAPA-${String(Date.now()).slice(-4)}`;
-    dispatch(addCAPA({
-      ...data,
-      id: newId,
-      tenantId: tenantId ?? "",
-      evidenceLinks: [],
-      status: "Open",
-      createdAt: "",
-      rcaMethod: data.rcaMethod,
-      rca: undefined,
-      correctiveActions: undefined,
-      findingId: data.findingId || undefined,
-    }));
-    auditLog({ action: "CAPA_CREATED", module: "csv-csa", recordId: newId, newValue: { ...data, linkedSystemId: selectedSystem?.id } });
-    setRaiseCapaOpen(false);
-    setCapaRaisedPopup(true);
-  }
-
-  const raiseCapaDefaults = selectedSystem ? {
-    description: `CSV/CSA remediation for ${selectedSystem.name} (${selectedSystem.vendor} v${selectedSystem.version}) \u2014 address Part 11 / Annex 11 gap.`,
-    source: "Gap Assessment" as const,
-    diGate: true,
-    risk: (selectedSystem.riskLevel === "HIGH" ? "Critical" : selectedSystem.riskLevel === "MEDIUM" ? "Major" : "Minor") as "Critical" | "Major" | "Minor",
-    siteId: selectedSystem.siteId,
-  } : null;
 
   /* ══════════════════════════════════════ */
 
@@ -335,6 +371,7 @@ export function CSVPage() {
           onClearRoadmapFilters={() => { setRmSysFilter(""); setRmTypeFilter(""); setRmStatusFilter(""); }}
           onAddActivityOpen={() => setAddActivityOpen(true)}
           onGoToInventory={() => setActiveTab("inventory")}
+          onCompleteActivity={handleCompleteActivity}
         />
       </div>
 
@@ -366,6 +403,19 @@ export function CSVPage() {
             </button>
             {/* Drawer content — scrollable */}
             <div className="flex-1 overflow-y-auto p-5">
+              {/* Breadcrumb */}
+              <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-[13px] mb-3">
+                <button
+                  type="button"
+                  onClick={() => { setDetailDrawerOpen(false); setSelectedSystem(null); }}
+                  className="bg-transparent border-none cursor-pointer p-0 hover:underline"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  CSV / CSA
+                </button>
+                <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>&rsaquo;</span>
+                <span className="font-medium truncate" style={{ color: "var(--text-primary)" }}>{selectedSystem.name}</span>
+              </nav>
               <SystemDetailTab
                 selectedSystem={selectedSystem} systems={systems} roadmap={roadmap}
                 findings={findings} capas={capas}
@@ -379,7 +429,6 @@ export function CSVPage() {
                 onNavigateSettings={() => navigate("/settings")}
                 onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
                 onNavigateCapa={(cid) => navigate("/capa", { state: { openCapaId: cid } })}
-                onRaiseCapa={() => setRaiseCapaOpen(true)}
                 onSaveRemediation={handleSaveRemediation}
                 onSaveRiskFactors={handleSaveRiskFactors}
                 onSavePlannedActions={handleSavePlannedActions}
@@ -396,19 +445,6 @@ export function CSVPage() {
       <AddSystemModal open={addOpen} sites={sites} users={complianceUsers} onSave={onAddSave} onClose={() => setAddOpen(false)} lockedSiteId={selectedSiteId} />
       <EditSystemModal open={editOpen} system={selectedSystem} sites={sites} users={complianceUsers} onSave={onEditSave} onClose={() => setEditOpen(false)} />
       <AddActivityModal open={addActivityOpen} systems={systems} users={users} onSave={onActivitySave} onClose={() => setAddActivityOpen(false)} />
-      <AddCAPAModal
-        isOpen={raiseCapaOpen}
-        onClose={() => setRaiseCapaOpen(false)}
-        onSave={handleRaiseCapa}
-        users={complianceUsers}
-        sites={sites}
-        isDark={isDark}
-        lockedSiteId={raiseCapaDefaults?.siteId ?? selectedSiteId}
-        defaultDescription={raiseCapaDefaults?.description}
-        defaultSource={raiseCapaDefaults?.source}
-        defaultDiGate={raiseCapaDefaults?.diGate}
-        defaultRisk={raiseCapaDefaults?.risk}
-      />
 
       {/* ── Popups ── */}
       <Popup isOpen={addedPopup} variant="success" title="System added" description="Added to the inventory. Part 11 / Annex 11 columns appear based on active frameworks in Settings." onDismiss={() => setAddedPopup(false)} />
@@ -417,8 +453,19 @@ export function CSVPage() {
       <Popup isOpen={actionsSaved} variant="success" title="Planned actions saved" description="Validation plan updated." onDismiss={() => setActionsSaved(false)} />
       <Popup isOpen={removePopup} variant="confirmation" title="Remove this system?" description="The system will be removed from the inventory. Existing findings and CAPAs are not affected." onDismiss={() => { setRemovePopup(false); setSystemToRemove(null); }} actions={[{ label: "Cancel", style: "ghost", onClick: () => { setRemovePopup(false); setSystemToRemove(null); } }, { label: "Yes, remove", style: "primary", onClick: () => { if (systemToRemove) dispatch(removeSystem(systemToRemove)); if (selectedSystem?.id === systemToRemove) setSelectedSystemId(null); setRemovePopup(false); setSystemToRemove(null); } }]} />
       <Popup isOpen={activityAddedPopup} variant="success" title="Activity added" description="Roadmap activity added. It will appear in the system's Validation tab and CSV Roadmap timeline." onDismiss={() => setActivityAddedPopup(false)} />
-      <Popup isOpen={capaRaisedPopup} variant="success" title="CAPA raised" description="CAPA created and linked to this system. Track it in the CAPA Tracker." onDismiss={() => setCapaRaisedPopup(false)} />
       <Popup isOpen={remediationSaved} variant="success" title="Remediation details saved" description="Visible in the DI &amp; Audit Trail tab and inspector review." onDismiss={() => setRemediationSaved(false)} />
+      <Popup isOpen={!!roadmapSynced} variant="success" title="Roadmap synced" description={roadmapSynced} onDismiss={() => setRoadmapSynced("")} />
+      <Popup
+        isOpen={!!autoRoadmapPrompt}
+        variant="confirmation"
+        title={autoRoadmapPrompt ? `Add ${autoRoadmapPrompt.stageKey} to CSV Roadmap?` : ""}
+        description={autoRoadmapPrompt ? `Create a roadmap activity for ${VALIDATION_STAGE_LABELS[autoRoadmapPrompt.stageKey]} so it shows up in the validation schedule.` : ""}
+        onDismiss={() => setAutoRoadmapPrompt(null)}
+        actions={[
+          { label: "Skip", style: "ghost", onClick: () => setAutoRoadmapPrompt(null) },
+          { label: "Add to roadmap", style: "primary", onClick: handleConfirmAutoRoadmap },
+        ]}
+      />
       <NoSitesPopup isOpen={noSitesOpen} onClose={() => setNoSitesOpen(false)} feature="CSV / CSA" />
     </main>
   );

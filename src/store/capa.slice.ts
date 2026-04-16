@@ -1,6 +1,6 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
-export type CAPARisk = "Critical" | "Major" | "Minor";
+export type CAPARisk = "Critical" | "High" | "Low";
 export type CAPAStatus = "Open" | "In Progress" | "Pending QA Review" | "Closed";
 export type RCAMethod = "5 Why" | "Fishbone" | "Fault Tree" | "Other";
 export type CAPASource = "483" | "Internal Audit" | "Deviation" | "Complaint" | "OOS" | "Change Control" | "Gap Assessment";

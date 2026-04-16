@@ -6,7 +6,6 @@ import {
   ClipboardList,
   Plus,
   ChevronRight,
-  X,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type {
@@ -60,11 +59,11 @@ interface Site {
 export interface EventsTabProps {
   events: FDA483Event[];
   filteredEvents: FDA483Event[];
-  selectedEvent: FDA483Event | null;
   openCount: number;
   dueCount: number;
   closedCount: number;
   typeFilter: string;
+  agencyFilter: string;
   statusFilter: string;
   siteFilter: string;
   anyFilter: boolean;
@@ -74,10 +73,11 @@ export interface EventsTabProps {
   isDark: boolean;
   role: string;
   onTypeFilterChange: (v: string) => void;
+  onAgencyFilterChange: (v: string) => void;
   onStatusFilterChange: (v: string) => void;
   onSiteFilterChange: (v: string) => void;
   onClearFilters: () => void;
-  onSelectEvent: (e: FDA483Event | null) => void;
+  onOpenEvent: (e: FDA483Event) => void;
   onAddEvent: () => void;
   computeReadiness: (e: FDA483Event) => number;
 }
@@ -85,11 +85,11 @@ export interface EventsTabProps {
 export function EventsTab({
   events,
   filteredEvents,
-  selectedEvent,
   openCount,
   dueCount,
   closedCount,
   typeFilter,
+  agencyFilter,
   statusFilter,
   siteFilter,
   anyFilter,
@@ -99,10 +99,11 @@ export function EventsTab({
   isDark,
   role,
   onTypeFilterChange,
+  onAgencyFilterChange,
   onStatusFilterChange,
   onSiteFilterChange,
   onClearFilters,
-  onSelectEvent,
+  onOpenEvent,
   onAddEvent,
   computeReadiness,
 }: EventsTabProps) {
@@ -202,6 +203,16 @@ export function EventsTab({
           ]}
         />
         <Dropdown
+          placeholder="All agencies"
+          value={agencyFilter}
+          onChange={onAgencyFilterChange}
+          width="w-36"
+          options={[
+            { value: "", label: "All agencies" },
+            ...["FDA", "EMA", "MHRA", "WHO"].map((a) => ({ value: a, label: a })),
+          ]}
+        />
+        <Dropdown
           placeholder="All statuses"
           value={statusFilter}
           onChange={onStatusFilterChange}
@@ -283,22 +294,25 @@ export function EventsTab({
         <div className="space-y-3">
           {filteredEvents.map((ev) => {
             const days = daysLeft(ev.responseDeadline);
-            const isOverdue = days < 0;
-            const isUrgent = days >= 0 && days <= 5;
+            const effectiveStatus = getEffectiveStatus(ev);
+            const isClosed = effectiveStatus === "Closed" || effectiveStatus === "Response Submitted";
+            const isOverdue = !isClosed && days < 0;
+            const isUrgent = !isClosed && days >= 0 && days <= 5;
+            const obsCount = ev.observations.length;
+            const capaCount = ev.observations.filter((o) => !!o.capaId).length;
+            const rcaDone = ev.observations.filter((o) => !!o.rootCause?.trim()).length;
             return (
               <div
                 key={ev.id}
                 className={clsx(
                   "card cursor-pointer transition-all duration-150 hover:border-[#0ea5e9]",
-                  selectedEvent?.id === ev.id &&
-                    (isDark
-                      ? "border-[#0ea5e9] bg-[#071e38]"
-                      : "border-[#0ea5e9] bg-[#eff6ff]"),
+                  isDark ? "hover:bg-[#071e38]" : "hover:bg-[#eff6ff]",
                 )}
-                onClick={() => onSelectEvent(ev)}
+                onClick={() => onOpenEvent(ev)}
                 role="button"
-                aria-expanded={selectedEvent?.id === ev.id}
-                aria-label={`${ev.type} ${ev.referenceNumber}`}
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenEvent(ev); } }}
+                aria-label={`Open ${ev.type} ${ev.referenceNumber}`}
               >
                 <div className="card-body">
                   {/* Top */}
@@ -310,23 +324,33 @@ export function EventsTab({
                         {ev.referenceNumber}
                       </span>
                     </div>
-                    <div
-                      className={clsx(
-                        "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium",
-                        isOverdue
-                          ? "bg-[rgba(239,68,68,0.12)] text-[#ef4444]"
-                          : isUrgent
-                            ? "bg-[rgba(245,158,11,0.12)] text-[#f59e0b]"
-                            : "bg-[rgba(16,185,129,0.12)] text-[#10b981]",
-                      )}
-                    >
-                      <Clock className="w-3 h-3" aria-hidden="true" />
-                      {isOverdue
-                        ? `${Math.abs(days)} days overdue`
-                        : days === 0
-                          ? "Due today"
-                          : `${days} days remaining`}
-                    </div>
+                    {isClosed ? (
+                      <div
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
+                        style={{ background: "rgba(16,185,129,0.12)", color: "#10b981" }}
+                      >
+                        <Clock className="w-3 h-3" aria-hidden="true" />
+                        {effectiveStatus === "Closed" ? "Closed" : "Submitted"}
+                      </div>
+                    ) : (
+                      <div
+                        className={clsx(
+                          "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium",
+                          isOverdue
+                            ? "bg-[rgba(239,68,68,0.12)] text-[#ef4444]"
+                            : isUrgent
+                              ? "bg-[rgba(245,158,11,0.12)] text-[#f59e0b]"
+                              : "bg-[rgba(16,185,129,0.12)] text-[#10b981]",
+                        )}
+                      >
+                        <Clock className="w-3 h-3" aria-hidden="true" />
+                        {isOverdue
+                          ? `${Math.abs(days)} days overdue`
+                          : days === 0
+                            ? "Due today"
+                            : `${days} days remaining`}
+                      </div>
+                    )}
                   </div>
                   {/* Info row */}
                   <div
@@ -360,35 +384,58 @@ export function EventsTab({
                       </div>
                     );
                   })()}
-                  {/* Open / Close action */}
+                  {/* Counts row */}
+                  <div className="flex items-center gap-4 mt-3 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                    <span>
+                      <span style={{ color: "var(--text-muted)" }}>Observations:</span>{" "}
+                      <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{obsCount}</span>
+                    </span>
+                    <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>|</span>
+                    <span>
+                      <span style={{ color: "var(--text-muted)" }}>CAPAs:</span>{" "}
+                      <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{capaCount}</span>
+                    </span>
+                    <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>|</span>
+                    <span>
+                      <span style={{ color: "var(--text-muted)" }}>RCA:</span>{" "}
+                      <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{rcaDone}/{obsCount}</span>
+                    </span>
+                  </div>
+                  {/* Mini step indicator */}
+                  {(() => {
+                    const rcaState = obsCount === 0 ? "none" : rcaDone === obsCount ? "done" : rcaDone > 0 ? "progress" : "none";
+                    const respDone = ev.status === "Response Submitted" || ev.status === "Closed";
+                    const miniSteps: { label: string; icon: string; color: string }[] = [
+                      { label: "Event", icon: "\u2713", color: "#10b981" },
+                      { label: "Observations", icon: obsCount > 0 ? "\u2713" : "\u25CB", color: obsCount > 0 ? "#10b981" : "#64748b" },
+                      { label: "RCA", icon: rcaState === "done" ? "\u2713" : rcaState === "progress" ? "\u21BB" : "\u25CB", color: rcaState === "done" ? "#10b981" : rcaState === "progress" ? "#f59e0b" : "#64748b" },
+                      { label: "Response", icon: respDone ? "\u2713" : "\u25CB", color: respDone ? "#10b981" : "#64748b" },
+                    ];
+                    return (
+                      <div className="flex items-center gap-3 mt-2 text-[10px]">
+                        {miniSteps.map((s, idx) => (
+                          <span key={idx} className="flex items-center gap-1" style={{ color: s.color }}>
+                            <span aria-hidden="true">{s.icon}</span>
+                            <span>{s.label}</span>
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {/* Open event action */}
                   <div className="flex justify-end gap-2 mt-3">
-                    {selectedEvent?.id === ev.id ? (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        icon={X}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectEvent(null);
-                        }}
-                        aria-label="Deselect event"
-                      >
-                        Deselect
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        icon={ChevronRight}
-                        iconPosition="right"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectEvent(ev);
-                        }}
-                      >
-                        Open event
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      icon={ChevronRight}
+                      iconPosition="right"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenEvent(ev);
+                      }}
+                    >
+                      Open event
+                    </Button>
                   </div>
                 </div>
               </div>

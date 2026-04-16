@@ -12,7 +12,7 @@ const obsSchema = z.object({
   text: z.string().min(5, "Observation text required"),
   area: z.string().optional(),
   regulation: z.string().optional(),
-  severity: z.enum(["Critical", "Major", "Minor"]),
+  severity: z.enum(["Critical", "High", "Low"]),
   status: z.enum(["Open", "RCA In Progress", "Response Drafted", "Closed"]),
 });
 
@@ -35,7 +35,7 @@ export function AddObservationModal({
 }: AddObservationModalProps) {
   const form = useForm({
     resolver: zodResolver(obsSchema),
-    defaultValues: { number: defaultNumber, text: "", area: "", regulation: "", severity: "Major" as const, status: "Open" as const },
+    defaultValues: { number: defaultNumber, text: "", area: "", regulation: "", severity: "High" as const, status: "Open" as const },
   });
 
   useEffect(() => {
@@ -52,7 +52,7 @@ export function AddObservationModal({
       } else {
         form.reset({
           number: defaultNumber,
-          severity: "Major",
+          severity: "High",
           status: "Open",
         });
       }
@@ -115,8 +115,8 @@ export function AddObservationModal({
                   width="w-full"
                   options={[
                     { value: "Critical", label: "Critical" },
-                    { value: "Major", label: "Major" },
-                    { value: "Minor", label: "Minor" },
+                    { value: "High", label: "High" },
+                    { value: "Low", label: "Low" },
                   ]}
                 />
               )}

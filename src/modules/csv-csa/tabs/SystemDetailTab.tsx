@@ -83,8 +83,7 @@ export interface SystemDetailTabProps {
   onNavigateSettings: () => void;
   onNavigateGap: (findingId: string) => void;
   onNavigateCapa: (capaId: string) => void;
-  onRaiseCapa: () => void;
-  onSaveRemediation: (patch: { remediationCapaId?: string; remediationTargetDate?: string; remediationNotes?: string }) => void;
+  onSaveRemediation: (patch: { remediationTargetDate?: string; remediationNotes?: string }) => void;
   onSaveRiskFactors: (text: string) => void;
   onSavePlannedActions: (text: string) => void;
   onSaveStage: (stage: import("@/store/systems.slice").ValidationStage) => void;
@@ -98,7 +97,7 @@ export function SystemDetailTab({
   isViewOnly, role, showPart11, showAnnex11, showGAMP5,
   detailTab, onDetailTabChange,
   onBack, onEdit, onGoToInventory,
-  onNavigateSettings, onNavigateGap, onNavigateCapa, onRaiseCapa, onSaveRemediation,
+  onNavigateSettings, onNavigateGap, onNavigateCapa, onSaveRemediation,
   onSaveRiskFactors, onSavePlannedActions, onSaveStage, onSaveNextReview, onSaveRiskClassification,
 }: SystemDetailTabProps) {
   if (!selectedSystem) {
@@ -183,7 +182,7 @@ export function SystemDetailTab({
       <div role="tabpanel" id="dpanel-di" aria-labelledby="dtab-di" tabIndex={0} hidden={detailTab !== "di"}>
         <DIAuditPanel
           system={selectedSystem} findings={findings} capas={capas} isDark={isDark} role={role}
-          onNavigateGap={onNavigateGap} onNavigateCapa={onNavigateCapa} onRaiseCapa={onRaiseCapa}
+          onNavigateGap={onNavigateGap} onNavigateCapa={onNavigateCapa}
           onSaveRemediation={onSaveRemediation}
         />
       </div>

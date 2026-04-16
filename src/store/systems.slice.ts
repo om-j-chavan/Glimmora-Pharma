@@ -68,7 +68,7 @@ export interface RoadmapActivity {
   tenantId: string;
   systemId: string;
   title: string;
-  type: "IQ" | "OQ" | "PQ" | "PV" | "UAT" | "Risk Assessment" | "Periodic Review";
+  type: "URS" | "FS" | "DS" | "IQ" | "OQ" | "PQ" | "RTR" | "Risk Assessment" | "Periodic Review";
   status: "Planned" | "In Progress" | "Complete" | "Overdue";
   startDate: string;
   endDate: string;

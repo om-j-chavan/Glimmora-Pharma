@@ -107,23 +107,6 @@ export function RCATab({
 
   return (
     <>
-      {/* Step 1 guidance banner */}
-      <div
-        className={clsx(
-          "flex items-start gap-2 p-3 rounded-xl mb-4 border",
-          isDark ? "bg-[rgba(99,102,241,0.08)] border-[rgba(99,102,241,0.25)]" : "bg-[#eef2ff] border-[#c7d2fe]",
-        )}
-        role="status"
-      >
-        <GitBranch className="w-4 h-4 mt-0.5 shrink-0 text-[#6366f1]" aria-hidden="true" />
-        <div>
-          <p className="text-[12px] font-semibold text-[#6366f1]">Step 1 of 3 &mdash; Complete RCA first</p>
-          <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
-            Fill root cause analysis and raise CAPA for each observation before drafting your response.
-          </p>
-        </div>
-      </div>
-
       {/* Observation selector */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <label

@@ -16,7 +16,7 @@ const editSchema = z.object({
   description: z.string().min(5, "Description required"),
   owner: z.string().min(1, "Owner required"),
   dueDate: z.string().min(1, "Due date required"),
-  risk: z.enum(["Critical", "Major", "Minor"]),
+  risk: z.enum(["Critical", "High", "Low"]),
   rcaMethod: z.enum(["5 Why", "Fishbone", "Fault Tree", "Other"]).optional(),
   rca: z.string().optional(),
   correctiveActions: z.string().optional(),
@@ -76,7 +76,7 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users, isDark }: 
           </div>
           <div>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Risk <span className="text-(--danger)">*</span></p>
-            <Controller name="risk" control={form.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />} />
+            <Controller name="risk" control={form.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Low", label: "Low" }]} />} />
           </div>
           <div>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Owner <span className="text-(--danger)">*</span></p>

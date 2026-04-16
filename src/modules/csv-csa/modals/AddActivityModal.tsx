@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,7 +14,7 @@ import { Modal } from "@/components/ui/Modal";
 const activitySchema = z.object({
   systemId: z.string().min(1, "System required"),
   title: z.string().min(3, "Title required"),
-  type: z.enum(["IQ", "OQ", "PQ", "PV", "UAT", "Risk Assessment", "Periodic Review"]),
+  type: z.enum(["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR", "Risk Assessment", "Periodic Review"]),
   status: z.enum(["Planned", "In Progress", "Complete", "Overdue"]),
   startDate: z.string().min(1, "Start date required"),
   endDate: z.string().min(1, "End date required"),
@@ -31,8 +32,32 @@ export interface AddActivityModalProps {
   onClose: () => void;
 }
 
+const ALL_TYPE_OPTIONS = [
+  { value: "URS", label: "URS \u2014 User Requirement Specification" },
+  { value: "FS", label: "FS \u2014 Functional Specification" },
+  { value: "DS", label: "DS \u2014 Design Specification" },
+  { value: "IQ", label: "IQ \u2014 Installation Qualification" },
+  { value: "OQ", label: "OQ \u2014 Operational Qualification" },
+  { value: "PQ", label: "PQ \u2014 Performance Qualification" },
+  { value: "RTR", label: "RTR \u2014 Release to Production" },
+  { value: "Risk Assessment", label: "Risk Assessment" },
+  { value: "Periodic Review", label: "Periodic Review" },
+] as const;
+
 export function AddActivityModal({ open, systems, users, onSave, onClose }: AddActivityModalProps) {
   const form = useForm<ActivityForm>({ resolver: zodResolver(activitySchema), defaultValues: { status: "Planned" } });
+
+  const watchSystemId = form.watch("systemId");
+  const typeOptions = useMemo(() => {
+    const sys = systems.find((s) => s.id === watchSystemId);
+    if (!sys) return ALL_TYPE_OPTIONS;
+    const completedKeys = new Set(
+      (sys.validationStages ?? [])
+        .filter((s) => s.status === "complete" || s.status === "skipped")
+        .map((s) => s.key as string),
+    );
+    return ALL_TYPE_OPTIONS.filter((o) => !completedKeys.has(o.value));
+  }, [systems, watchSystemId]);
 
   function handleSave(data: ActivityForm) {
     onSave(data);
@@ -58,16 +83,13 @@ export function AddActivityModal({ open, systems, users, onSave, onClose }: AddA
           <div>
             <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Activity type *</label>
             <Controller name="type" control={form.control} render={({ field }) => (
-              <Dropdown value={field.value} onChange={field.onChange} placeholder="Select type..." width="w-full" options={[
-                { value: "IQ", label: "IQ \u2014 Installation Qualification" },
-                { value: "OQ", label: "OQ \u2014 Operational Qualification" },
-                { value: "PQ", label: "PQ \u2014 Performance Qualification" },
-                { value: "PV", label: "PV \u2014 Process Validation" },
-                { value: "UAT", label: "UAT \u2014 User Acceptance Testing" },
-                { value: "Risk Assessment", label: "Risk Assessment" },
-                { value: "Periodic Review", label: "Periodic Review" },
-              ]} />
+              <Dropdown value={field.value} onChange={field.onChange} placeholder={watchSystemId ? "Select type..." : "Select system first..."} width="w-full" options={typeOptions.map((o) => ({ value: o.value, label: o.label }))} />
             )} />
+            {watchSystemId && typeOptions.length < ALL_TYPE_OPTIONS.length && (
+              <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+                Stages already complete or skipped are hidden.
+              </p>
+            )}
           </div>
           <div>
             <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Status *</label>

@@ -701,6 +701,14 @@ export function CustomerAccountsPage() {
         name: data.customerName,
         adminEmail: data.email,
         active: data.active,
+        subscriptionPlans: data.subscriptionPlans.map((sp) => ({
+          id: sp.id,
+          startDate: sp.startDate,
+          endDate: sp.expiryDate,
+          maxAccounts: sp.maxAccounts,
+          status: sp.status,
+          createdAt: new Date().toISOString(),
+        })),
         config: {
           ...editingTenant.config,
           org: {
@@ -729,7 +737,14 @@ export function CustomerAccountsPage() {
         adminEmail: data.email,
         createdAt: new Date().toISOString(),
         active: data.active,
-        subscriptionPlans: [],
+        subscriptionPlans: data.subscriptionPlans.map((sp) => ({
+          id: sp.id,
+          startDate: sp.startDate,
+          endDate: sp.expiryDate,
+          maxAccounts: sp.maxAccounts,
+          status: sp.status,
+          createdAt: new Date().toISOString(),
+        })),
         config: {
           org: {
             companyName: data.customerName,
@@ -798,7 +813,13 @@ export function CustomerAccountsPage() {
       active: editingTenant.active,
       newPassword: "",
       confirmPassword: "",
-      subscriptionPlans: [],
+      subscriptionPlans: (editingTenant.subscriptionPlans ?? []).map((sp) => ({
+        id: sp.id,
+        startDate: sp.startDate,
+        expiryDate: sp.endDate,
+        maxAccounts: sp.maxAccounts,
+        status: sp.status,
+      })),
       logoFile: null,
     };
   };

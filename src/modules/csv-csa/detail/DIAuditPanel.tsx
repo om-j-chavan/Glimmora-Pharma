@@ -1,6 +1,6 @@
 import { useState } from "react";
 import clsx from "clsx";
-import { ShieldAlert, AlertCircle, CheckCircle2, Search, ClipboardCheck, Plus, Wrench, Pencil, X, Save } from "lucide-react";
+import { ShieldAlert, AlertCircle, CheckCircle2, Search, ClipboardCheck, Wrench, Pencil, X, Save } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { GxPSystem } from "@/store/systems.slice";
 import type { Finding } from "@/store/findings.slice";
@@ -18,13 +18,11 @@ export interface DIAuditPanelProps {
   role: string;
   onNavigateGap: (findingId: string) => void;
   onNavigateCapa: (capaId: string) => void;
-  onRaiseCapa: () => void;
-  onSaveRemediation: (patch: { remediationCapaId?: string; remediationTargetDate?: string; remediationNotes?: string }) => void;
+  onSaveRemediation: (patch: { remediationTargetDate?: string; remediationNotes?: string }) => void;
 }
 
-export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigateGap, onNavigateCapa, onRaiseCapa, onSaveRemediation }: DIAuditPanelProps) {
+export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigateGap, onNavigateCapa, onSaveRemediation }: DIAuditPanelProps) {
   const [editingRem, setEditingRem] = useState(false);
-  const [remCapaId, setRemCapaId] = useState(system.remediationCapaId ?? "");
   const [remTargetDate, setRemTargetDate] = useState(
     system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "",
   );
@@ -35,17 +33,15 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
   if (system.id !== prevId) {
     setPrevId(system.id);
     setEditingRem(false);
-    setRemCapaId(system.remediationCapaId ?? "");
     setRemTargetDate(system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "");
     setRemNotes(system.remediationNotes ?? "");
   }
 
   const saveRem = () => {
-    onSaveRemediation({ remediationCapaId: remCapaId, remediationTargetDate: remTargetDate, remediationNotes: remNotes });
+    onSaveRemediation({ remediationTargetDate: remTargetDate, remediationNotes: remNotes });
     setEditingRem(false);
   };
   const cancelRem = () => {
-    setRemCapaId(system.remediationCapaId ?? "");
     setRemTargetDate(system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "");
     setRemNotes(system.remediationNotes ?? "");
     setEditingRem(false);
@@ -131,17 +127,16 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
               <Wrench className="w-4 h-4 shrink-0" style={{ color: "#854f0b" }} aria-hidden="true" />
               <span className="text-[12px] font-semibold" style={{ color: "#854f0b" }}>Remediation details</span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+              Linked CAPAs are derived automatically from Gap Assessment findings tied to this system.
+            </p>
+            <div className="grid grid-cols-1 gap-3">
               <div>
-                <label htmlFor="rem-capa-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Remediation CAPA</label>
-                <input id="rem-capa-inline" type="text" value={remCapaId} onChange={(e) => setRemCapaId(e.target.value)} className="input text-[11px]" placeholder="e.g. CAPA-0042" />
-              </div>
-              <div>
-                <label htmlFor="rem-target-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Target date</label>
+                <label htmlFor="rem-target-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Target date (optional)</label>
                 <input id="rem-target-inline" type="date" value={remTargetDate} onChange={(e) => setRemTargetDate(e.target.value)} className="input text-[11px]" />
               </div>
-              <div className="col-span-2">
-                <label htmlFor="rem-notes-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Notes</label>
+              <div>
+                <label htmlFor="rem-notes-inline" className="text-[10px] block mb-1" style={{ color: "var(--text-muted)" }}>Notes (optional)</label>
                 <textarea id="rem-notes-inline" rows={3} value={remNotes} onChange={(e) => setRemNotes(e.target.value)} className="input text-[11px] resize-none w-full" placeholder="Describe remediation actions in progress..." />
               </div>
             </div>
@@ -150,7 +145,7 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
               <Button variant="primary" size="xs" icon={Save} type="button" onClick={saveRem}>Save</Button>
             </div>
           </div>
-        ) : (system.remediationCapaId || system.remediationNotes) ? (
+        ) : (system.remediationTargetDate || system.remediationNotes) ? (
           <div
             className="flex items-start gap-2 p-3 rounded-lg"
             style={{ background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)" }}
@@ -159,11 +154,6 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
             <Wrench className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#854f0b" }} aria-hidden="true" />
             <div className="flex-1 text-[12px]">
               <p className="font-semibold mb-1" style={{ color: "#854f0b" }}>Remediation in progress</p>
-              {system.remediationCapaId && (
-                <p style={{ color: "var(--text-primary)" }}>
-                  <span className="font-medium">CAPA:</span> <span className="font-mono">{system.remediationCapaId}</span>
-                </p>
-              )}
               {system.remediationTargetDate && (
                 <p style={{ color: "var(--text-primary)" }}>
                   <span className="font-medium">Target:</span> {dayjs.utc(system.remediationTargetDate).format("DD/MM/YYYY")}
@@ -189,7 +179,7 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
                 <span className="text-[11px] truncate" style={{ color: "var(--text-secondary)" }}>{f.requirement}</span>
               </div>
               <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-                <Badge variant={f.severity === "Critical" ? "red" : f.severity === "Major" ? "amber" : "gray"}>{f.severity}</Badge>
+                <Badge variant={f.severity === "Critical" ? "red" : f.severity === "High" ? "amber" : "green"}>{f.severity}</Badge>
                 <Badge variant={f.status === "Closed" ? "green" : f.status === "In Progress" ? "amber" : "blue"}>{f.status}</Badge>
               </div>
             </div>
@@ -197,9 +187,9 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
         )}
       </div></div>
 
-      <div className="card"><div className="card-header"><div className="flex items-center gap-2"><ClipboardCheck className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" /><span className="card-title">Linked CAPAs</span>{linkedCAPAs.length > 0 && <Badge variant={linkedCAPAs.some((c) => c.status !== "Closed" && c.diGate) ? "red" : "blue"}>{linkedCAPAs.length}</Badge>}</div>{role !== "viewer" && <Button variant="ghost" size="xs" icon={Plus} onClick={onRaiseCapa}>Raise CAPA</Button>}</div><div className="card-body">
+      <div className="card"><div className="card-header"><div className="flex items-center gap-2"><ClipboardCheck className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" /><span className="card-title">Linked CAPAs</span>{linkedCAPAs.length > 0 && <Badge variant={linkedCAPAs.some((c) => c.status !== "Closed" && c.diGate) ? "red" : "blue"}>{linkedCAPAs.length}</Badge>}</div></div><div className="card-body">
         {linkedCAPAs.length === 0 ? (
-          <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No CAPAs linked to CSV/IT findings yet. Raise a CAPA from a Gap Assessment finding to see it tracked here.</p>
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>No CAPAs linked yet. Go to Gap Assessment &rarr; finding &rarr; Raise CAPA to create one. It will appear here automatically.</p>
         ) : (
           <div className="space-y-2">{linkedCAPAs.map((c) => (
             <div key={c.id} onClick={() => onNavigateCapa(c.id)} role="button" aria-label={`Open ${c.id} in CAPA Tracker`}

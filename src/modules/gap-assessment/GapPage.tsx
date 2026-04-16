@@ -13,7 +13,7 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   addFinding, updateFinding,
-  type Finding, type FindingStatus,
+  type Finding,
 } from "@/store/findings.slice";
 import { addCAPA } from "@/store/capa.slice";
 import { auditLog } from "@/lib/audit";
@@ -44,8 +44,8 @@ const AREA_OPTIONS = [{ value: "", label: "All areas" }, ...AREAS.map((a) => ({ 
 const SEVERITY_OPTIONS = [
   { value: "", label: "All severities" },
   { value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const },
-  { value: "Major", label: "Major", badge: "M", badgeVariant: "amber" as const },
-  { value: "Minor", label: "Minor" },
+  { value: "High", label: "High", badge: "H", badgeVariant: "amber" as const },
+  { value: "Low", label: "Low", badge: "L", badgeVariant: "green" as const },
 ];
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -149,19 +149,19 @@ export function GapPage() {
 
   /* ── Computed ── */
   const criticalCount = baseFindings.filter((f) => f.severity === "Critical").length;
-  const majorCount = baseFindings.filter((f) => f.severity === "Major").length;
-  const minorCount = baseFindings.filter((f) => f.severity === "Minor").length;
+  const highCount = baseFindings.filter((f) => f.severity === "High").length;
+  const lowCount = baseFindings.filter((f) => f.severity === "Low").length;
   const openCount = baseFindings.filter((f) => f.status !== "Closed").length;
   const closedCount = baseFindings.filter((f) => f.status === "Closed").length;
   const overdueCount = baseFindings.filter((f) => f.status !== "Closed" && dayjs.utc(f.targetDate).isBefore(dayjs())).length;
 
   const topDrivers = useMemo(() => {
-    const map: Record<string, { count: number; critical: number; major: number }> = {};
+    const map: Record<string, { count: number; critical: number; high: number }> = {};
     baseFindings.filter((f) => f.status !== "Closed").forEach((f) => {
-      if (!map[f.area]) map[f.area] = { count: 0, critical: 0, major: 0 };
+      if (!map[f.area]) map[f.area] = { count: 0, critical: 0, high: 0 };
       map[f.area].count++;
       if (f.severity === "Critical") map[f.area].critical++;
-      if (f.severity === "Major") map[f.area].major++;
+      if (f.severity === "High") map[f.area].high++;
     });
     return Object.entries(map).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.count - a.count).slice(0, 5);
   }, [baseFindings]);
@@ -169,10 +169,10 @@ export function GapPage() {
   const severityData = useMemo(
     () => [
       { name: "Critical", value: criticalCount, fill: "#ef4444" },
-      { name: "Major", value: majorCount, fill: "#f59e0b" },
-      { name: "Minor", value: minorCount, fill: "#10b981" },
+      { name: "High", value: highCount, fill: "#f59e0b" },
+      { name: "Low", value: lowCount, fill: "#10b981" },
     ].filter((d) => d.value > 0),
-    [criticalCount, majorCount, minorCount],
+    [criticalCount, highCount, lowCount],
   );
 
   /* ── Evidence data ── */
@@ -222,8 +222,8 @@ export function GapPage() {
       risk: finding.severity, owner: finding.owner, dueDate: finding.targetDate,
       status: "Open", description: finding.requirement,
       rca: finding.rootCause ?? "", rcaMethod: undefined, correctiveActions: "",
-      effectivenessCheck: finding.severity !== "Minor",
-      evidenceLinks: [], diGate: ["p11", "annex11"].includes(finding.framework), createdAt: "",
+      effectivenessCheck: finding.severity !== "Low",
+      evidenceLinks: [], diGate: ["p11", "annex11"].includes(finding.framework), createdAt: new Date().toISOString(),
       tenantId: tenantId ?? "", siteId: finding.siteId,
       linkedSystemId: finding.linkedSystemId,
       linkedSystemName: finding.linkedSystemName,
@@ -235,17 +235,26 @@ export function GapPage() {
   }
 
   function handleAddFinding(data: FindingForm) {
-    const nf = { ...data, id: `FIND-${String(findings.length + 1).padStart(3, "0")}`, evidenceLink: data.evidenceLink ?? "", rootCause: data.rootCause ?? "", createdAt: "", capaId: undefined, agiSummary: undefined, tenantId: tenantId ?? "" };
+    const { raiseCapaImmediately, ...rest } = data;
+    const nf: Finding = {
+      ...rest,
+      id: `FIND-${String(findings.length + 1).padStart(3, "0")}`,
+      status: "Open",
+      evidenceLink: rest.evidenceLink ?? "",
+      rootCause: rest.rootCause ?? "",
+      createdAt: new Date().toISOString(),
+      capaId: undefined,
+      agiSummary: undefined,
+      tenantId: tenantId ?? "",
+    };
     dispatch(addFinding(nf));
     auditLog({ action: "FINDING_CREATED", module: "gap-assessment", recordId: nf.id, newValue: nf });
     setAddOpen(false);
     setAddedPopup(true);
-  }
-
-  function handleStatusUpdate(id: string, status: FindingStatus) {
-    dispatch(updateFinding({ id, patch: { status } }));
-    auditLog({ action: "FINDING_STATUS_UPDATED", module: "gap-assessment", recordId: id, oldValue: selectedFinding?.status, newValue: status });
-    setSelectedFinding((prev) => prev ? { ...prev, status } : null);
+    if (raiseCapaImmediately) {
+      // Auto-raise CAPA linked to the new finding
+      handleRaiseCapa(nf);
+    }
   }
 
   function handleLinkEvidence(findingId: string, evidenceLink: string) {
@@ -274,10 +283,16 @@ export function GapPage() {
       {activeTab === "summary" && (
         <GapSummaryTab
           findingsTotal={findings.length} baseCount={baseFindings.length}
-          criticalCount={criticalCount} majorCount={majorCount} minorCount={minorCount}
+          criticalCount={criticalCount} highCount={highCount} lowCount={lowCount}
           openCount={openCount} closedCount={closedCount} overdueCount={overdueCount}
           topDrivers={topDrivers} severityData={severityData} isDark={isDark}
           renderFilters={renderFilters}
+          lastClosedFinding={(() => {
+            const closed = baseFindings.filter((f) => f.status === "Closed");
+            if (closed.length === 0) return null;
+            const latest = closed.reduce((a, b) => (dayjs(a.createdAt).isAfter(b.createdAt) ? a : b));
+            return { id: latest.id, closedAt: latest.createdAt ? dayjs.utc(latest.createdAt).format("DD MMM YYYY") : undefined };
+          })()}
         />
       )}
 
@@ -290,7 +305,6 @@ export function GapPage() {
           agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
           renderFilters={renderFilters}
           onAddOpen={() => setAddOpen(true)} onRaiseCapa={handleRaiseCapa}
-          onStatusUpdate={handleStatusUpdate}
           onNavigateCapa={(capaId) => navigate("/capa", { state: { openCapaId: capaId } })}
         />
       )}

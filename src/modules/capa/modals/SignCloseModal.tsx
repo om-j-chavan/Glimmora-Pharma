@@ -8,7 +8,7 @@ import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 
-const RISK_VARIANT: Record<CAPARisk, "red" | "amber" | "gray"> = { Critical: "red", Major: "amber", Minor: "gray" };
+const RISK_VARIANT: Record<CAPARisk, "red" | "amber" | "green"> = { Critical: "red", High: "amber", Low: "green" };
 const STATUS_VARIANT: Record<CAPAStatus, "blue" | "amber" | "purple" | "green"> = { Open: "blue", "In Progress": "amber", "Pending QA Review": "purple", Closed: "green" };
 
 interface SignCloseModalProps {

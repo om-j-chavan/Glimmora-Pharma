@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import {
-  BarChart3, ClipboardList, AlertCircle, AlertTriangle, Info, Clock, Filter,
+  BarChart3, ClipboardList, AlertCircle, AlertTriangle, Info, Clock, Filter, CheckCircle2,
 } from "lucide-react";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -13,20 +13,21 @@ interface GapSummaryTabProps {
   findingsTotal: number;
   baseCount: number;
   criticalCount: number;
-  majorCount: number;
-  minorCount: number;
+  highCount: number;
+  lowCount: number;
   openCount: number;
   closedCount: number;
   overdueCount: number;
-  topDrivers: { name: string; count: number; critical: number; major: number }[];
+  topDrivers: { name: string; count: number; critical: number; high: number }[];
   severityData: { name: string; value: number; fill: string }[];
   isDark: boolean;
   renderFilters: (compact?: boolean) => ReactNode;
+  lastClosedFinding?: { id: string; closedAt?: string } | null;
 }
 
 export function GapSummaryTab({
-  findingsTotal, baseCount, criticalCount, majorCount, minorCount,
-  openCount, closedCount, overdueCount, topDrivers, severityData, isDark, renderFilters,
+  findingsTotal, baseCount, criticalCount, highCount, lowCount,
+  openCount, closedCount, overdueCount, topDrivers, severityData, isDark, renderFilters, lastClosedFinding,
 }: GapSummaryTabProps) {
   return (
     <div role="tabpanel" id="panel-summary" aria-labelledby="tab-summary" tabIndex={0}>
@@ -43,8 +44,8 @@ export function GapSummaryTab({
         {[
           { icon: ClipboardList, iconCls: "text-[#0ea5e9]", label: "Total findings", value: baseCount, color: "", sub: findingsTotal === 0 ? "Log your first finding to get started" : `${openCount} open \u00b7 ${closedCount} closed` },
           { icon: AlertCircle, iconCls: "text-[#ef4444]", label: "Critical", value: criticalCount, color: "text-[#ef4444]", sub: criticalCount > 0 ? "Immediate action required" : "None" },
-          { icon: AlertTriangle, iconCls: "text-[#f59e0b]", label: "Major", value: majorCount, color: "text-[#f59e0b]", sub: "Prompt attention needed" },
-          { icon: Info, iconCls: "text-[#10b981]", label: "Minor", value: minorCount, color: "text-[#10b981]", sub: "Low inspection risk" },
+          { icon: AlertTriangle, iconCls: "text-[#f59e0b]", label: "High", value: highCount, color: "text-[#f59e0b]", sub: "Prompt attention needed" },
+          { icon: Info, iconCls: "text-[#10b981]", label: "Low", value: lowCount, color: "text-[#10b981]", sub: "Low inspection risk" },
           { icon: Clock, iconCls: overdueCount > 0 ? "text-[#ef4444]" : "text-[#10b981]", label: "Overdue", value: overdueCount, color: overdueCount > 0 ? "text-[#ef4444]" : "text-[#10b981]", sub: overdueCount > 0 ? "Past target date" : "All on track" },
         ].map((tile) => (
           <div key={tile.label} className="stat-card" role="region" aria-label={tile.label}>
@@ -64,10 +65,23 @@ export function GapSummaryTab({
           <div className="card-header"><h2 id="drivers-title" className="card-title">Top 5 risk drivers</h2></div>
           <div className="card-body">
             {topDrivers.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-2">
-                <BarChart3 className="w-8 h-8 text-[#334155]" aria-hidden="true" />
-                <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>No open findings</p>
-              </div>
+              baseCount > 0 && openCount === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
+                  <CheckCircle2 className="w-10 h-10 text-[#10b981]" aria-hidden="true" />
+                  <p className="text-[13px] font-semibold" style={{ color: "#10b981" }}>All findings resolved</p>
+                  {lastClosedFinding && (
+                    <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                      Last closed: {lastClosedFinding.id}
+                      {lastClosedFinding.closedAt ? ` \u00b7 ${lastClosedFinding.closedAt}` : ""}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-10 gap-2">
+                  <BarChart3 className="w-8 h-8 text-[#334155]" aria-hidden="true" />
+                  <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>No open findings yet</p>
+                </div>
+              )
             ) : (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={topDrivers} layout="vertical" barSize={10}>
@@ -76,7 +90,7 @@ export function GapSummaryTab({
                   <YAxis type="category" dataKey="name" width={110} tick={{ fill: "var(--text-secondary)", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip {...chartDefaults.tooltip} />
                   <Bar dataKey="critical" name="Critical" stackId="a" fill="#ef4444" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="major" name="Major" stackId="a" fill="#f59e0b" radius={[0, 3, 3, 0]} />
+                  <Bar dataKey="high" name="High" stackId="a" fill="#f59e0b" radius={[0, 3, 3, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}

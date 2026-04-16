@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   ClipboardCheck, Plus, Search, ChevronRight, Link2, Pencil,
   AlertCircle, AlertTriangle, CheckCircle2, TrendingUp, FileText,
@@ -15,13 +16,13 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 
 /* ── Helpers ── */
-const RISK_VARIANT: Record<CAPARisk, "red" | "amber" | "gray"> = { Critical: "red", Major: "amber", Minor: "gray" };
+const RISK_VARIANT: Record<CAPARisk, "red" | "amber" | "green"> = { Critical: "red", High: "amber", Low: "green" };
 const STATUS_VARIANT: Record<CAPAStatus, "blue" | "amber" | "purple" | "green"> = { Open: "blue", "In Progress": "amber", "Pending QA Review": "purple", Closed: "green" };
 function riskBadge(r: CAPARisk) { return <Badge variant={RISK_VARIANT[r]}>{r}</Badge>; }
 function capaStatusBadge(s: CAPAStatus) { return <Badge variant={STATUS_VARIANT[s]}>{s}</Badge>; }
 function ownerName(uid: string, users: UserConfig[]) { return users.find((u) => u.id === uid)?.name ?? uid; }
-function riskLevel(r: CAPARisk): string { return r === "Critical" ? "High" : r === "Major" ? "Medium" : "Low"; }
-function riskVariant(r: CAPARisk): "red" | "amber" | "green" { return r === "Critical" ? "red" : r === "Major" ? "amber" : "green"; }
+function riskLevel(r: CAPARisk): string { return r === "Critical" ? "Critical" : r === "High" ? "High" : "Low"; }
+function riskVariant(r: CAPARisk): "red" | "amber" | "green" { return r === "Critical" ? "red" : r === "High" ? "amber" : "green"; }
 
 interface SiteOption {
   id: string;
@@ -46,7 +47,6 @@ interface CAPATrackerTabProps {
   onEditOpen: () => void;
   onSignOpen: () => void;
   onSubmitForReview: (id: string) => void;
-  onStatusUpdate: (id: string, status: CAPAStatus) => void;
   onNavigateGap: (findingId: string) => void;
   onNavigateCapa: () => void;
 }
@@ -56,8 +56,11 @@ export function CAPATrackerTab({
   isDark, isViewOnly, users, user, sites, timezone, dateFormat,
   canSign, canCloseCapa,
   onAddOpen, onEditOpen, onSignOpen, onSubmitForReview,
-  onStatusUpdate, onNavigateGap, onNavigateCapa,
+  onNavigateGap, onNavigateCapa,
 }: CAPATrackerTabProps) {
+  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
+  const showSiteColumn = !selectedSiteId && sites.length > 1;
+  const siteName = (id: string) => sites.find((s) => s.id === id)?.name ?? id;
   const [search, setSearch] = useState("");
   const [siteFilter, setSiteFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -86,7 +89,7 @@ export function CAPATrackerTab({
         </div>
         <Dropdown placeholder="All sites" value={siteFilter} onChange={setSiteFilter} width="w-40" options={[{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]} />
         <Dropdown placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} width="w-44" options={[{ value: "", label: "All statuses" }, { value: "Open", label: "Open" }, { value: "In Progress", label: "In Progress" }, { value: "Pending QA Review", label: "Pending QA Review" }, { value: "Closed", label: "Closed" }]} />
-        <Dropdown placeholder="All risks" value={riskFilter} onChange={setRiskFilter} width="w-32" options={[{ value: "", label: "All risks" }, { value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />
+        <Dropdown placeholder="All risks" value={riskFilter} onChange={setRiskFilter} width="w-32" options={[{ value: "", label: "All risks" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Low", label: "Low" }]} />
         <Dropdown placeholder="All sources" value={sourceFilter} onChange={setSourceFilter} width="w-40" options={[{ value: "", label: "All sources" }, { value: "483", label: "483" }, { value: "Internal Audit", label: "Internal Audit" }, { value: "Deviation", label: "Deviation" }, { value: "Complaint", label: "Complaint" }, { value: "OOS", label: "OOS" }, { value: "Change Control", label: "Change Control" }, { value: "Gap Assessment", label: "Gap Assessment" }]} />
         {anyFilterActive && <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>}
         {!isViewOnly && <Button variant="primary" size="sm" icon={Plus} onClick={onAddOpen}>New CAPA</Button>}
@@ -117,9 +120,11 @@ export function CAPATrackerTab({
           <table className="data-table" aria-label="CAPA register">
             <caption className="sr-only">Corrective and preventive actions with RCA, status and closure tracking</caption>
             <thead><tr>
-              <th scope="col">CAPA ID</th><th scope="col">Source</th><th scope="col">Description</th>
+              <th scope="col">CAPA ID</th>
+              {showSiteColumn && <th scope="col">Site</th>}
+              <th scope="col">Source</th><th scope="col">Description</th>
               <th scope="col">Risk</th><th scope="col">Status</th><th scope="col">Owner</th>
-              <th scope="col">Due date</th><th scope="col">Eff.</th><th scope="col"><span className="sr-only">Open</span></th>
+              <th scope="col">Due date</th><th scope="col" title="Effectiveness check \u2014 90-day recurrence review">Eff.</th><th scope="col"><span className="sr-only">Open</span></th>
             </tr></thead>
             <tbody>
               {displayed.map((c) => (
@@ -129,6 +134,7 @@ export function CAPATrackerTab({
                     <div className="font-mono text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>{c.id}</div>
                     {c.findingId && <div className="flex items-center gap-1 mt-0.5"><Link2 className="w-3 h-3 text-[#0ea5e9]" aria-hidden="true" /><span className="text-[10px] text-[#0ea5e9]">{c.findingId}</span></div>}
                   </th>
+                  {showSiteColumn && <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{siteName(c.siteId)}</td>}
                   <td><Badge variant="gray">{c.source}</Badge></td>
                   <td><span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{c.description}</span></td>
                   <td>{riskBadge(c.risk)}</td>
@@ -151,6 +157,19 @@ export function CAPATrackerTab({
       <Modal open={!!selectedCAPA} onClose={() => onSelectCAPA(null)} title={selectedCAPA?.id ?? "CAPA Detail"}>
         {selectedCAPA && (
           <div className="space-y-4">
+            {/* Breadcrumb */}
+            <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-[13px] -mt-1">
+              <button
+                type="button"
+                onClick={() => onSelectCAPA(null)}
+                className="bg-transparent border-none cursor-pointer p-0 hover:underline"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                QMS &amp; CAPA Tracker
+              </button>
+              <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>&rsaquo;</span>
+              <span className="font-mono font-medium" style={{ color: "var(--text-primary)" }}>{selectedCAPA.id}</span>
+            </nav>
             {/* Header actions */}
             <div className="flex items-center justify-between">
               <div className="flex gap-2 flex-wrap">{capaStatusBadge(selectedCAPA.status)}{riskBadge(selectedCAPA.risk)}</div>
@@ -214,19 +233,19 @@ export function CAPATrackerTab({
               {selectedCAPA.correctiveActions && <><h4 className="text-[11px] font-semibold uppercase tracking-wider mt-3 mb-1" style={{ color: "var(--text-muted)" }}>Corrective actions</h4><p className="text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{selectedCAPA.correctiveActions}</p></>}
             </section>
 
-            {/* DI Gate */}
-            {(() => {
-              const diOpen = selectedCAPA.diGate && selectedCAPA.diGateStatus !== "cleared";
-              const diCleared = selectedCAPA.diGate && selectedCAPA.diGateStatus === "cleared";
+            {/* DI Gate — only shown for CSV/IT-related CAPAs (diGate set at creation from Part 11/Annex 11 framework) */}
+            {selectedCAPA.diGate && (() => {
+              const diOpen = selectedCAPA.diGateStatus !== "cleared";
+              const diCleared = selectedCAPA.diGateStatus === "cleared";
               return (
                 <div className={clsx("flex items-start gap-2 p-3 rounded-lg text-[12px] border", diOpen ? (isDark ? "bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.2)]" : "bg-[#fef2f2] border-[#fca5a5]") : (isDark ? "bg-[rgba(16,185,129,0.08)] border-[rgba(16,185,129,0.2)]" : "bg-[#f0fdf4] border-[#a7f3d0]"))}>
                   {diOpen ? <AlertCircle className="w-4 h-4 text-[#ef4444] shrink-0 mt-0.5" aria-hidden="true" /> : <CheckCircle2 className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" aria-hidden="true" />}
                   <div className="flex-1 min-w-0">
                     <span className="font-semibold block" style={{ color: diOpen ? "#ef4444" : "#10b981" }}>
-                      {diOpen ? "DI gate required" : diCleared ? "DI gate cleared" : "DI gate not required"}
+                      {diOpen ? "DI gate required" : "DI gate cleared"}
                     </span>
                     <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
-                      {diOpen ? "Data integrity review must be completed before QA can close — use Edit to clear" : diCleared ? "CAPA can proceed to QA review" : "No data integrity issues identified"}
+                      {diOpen ? "Data integrity review must be completed before QA can close — use Edit to clear" : "CAPA can proceed to QA review"}
                     </p>
                     {diCleared && (
                       <div className="mt-2 space-y-0.5 text-[11px]" style={{ color: "var(--text-secondary)" }}>
@@ -284,15 +303,6 @@ export function CAPATrackerTab({
             {/* Sign & Close */}
             {canSign && canCloseCapa && selectedCAPA.status === "Pending QA Review" && (
               <Button variant="primary" icon={ShieldCheck} fullWidth onClick={onSignOpen}>Sign &amp; Close CAPA</Button>
-            )}
-
-            {/* Status update */}
-            {!isViewOnly && selectedCAPA.status !== "Closed" && selectedCAPA.status !== "Pending QA Review" && (
-              <div>
-                <p className="text-[11px] mb-1.5" style={{ color: "var(--text-muted)" }}>Update status</p>
-                <Dropdown value={selectedCAPA.status} onChange={(val) => onStatusUpdate(selectedCAPA.id, val as CAPAStatus)}
-                  width="w-full" options={[{ value: "Open", label: "Open" }, { value: "In Progress", label: "In Progress" }]} />
-              </div>
             )}
           </div>
         )}

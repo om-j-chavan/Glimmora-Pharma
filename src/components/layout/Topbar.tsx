@@ -1,11 +1,14 @@
 import { Calendar, Clock, Menu, MapPin } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole, ROLE_LABELS } from "@/hooks/useRole";
 import type { UserRole } from "@/hooks/useRole";
+import { setActiveSite, setSelectedSite } from "@/store/auth.slice";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { ColorThemePicker } from "@/components/ui/ColorThemePicker";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { NotificationBell } from "./NotificationBell";
 import dayjs from "@/lib/dayjs";
 
@@ -44,14 +47,28 @@ function DateTimeBlock() {
 }
 
 export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
-  const { org, tenantName, allSites } = useTenantConfig();
+  const { org, tenantName, allSites, sites: accessibleSites } = useTenantConfig();
   const companyName = org.companyName || tenantName;
+  const dispatch = useAppDispatch();
   const user = useAppSelector((s) => s.auth.user);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { role } = useRole();
 
   const selectedSite = selectedSiteId ? allSites.find((s) => s.id === selectedSiteId) ?? null : null;
+  // Fall back: if no site selected yet but the user has at least one accessible site, show the first one.
+  const displaySite = selectedSite ?? accessibleSites[0] ?? null;
+  const multipleSites = accessibleSites.length > 1;
+
+  const handleSiteSwitch = (id: string) => {
+    if (id === "") {
+      // "All Sites" chosen — clear the filter but keep an active fallback site
+      dispatch(setSelectedSite(null));
+      return;
+    }
+    dispatch(setActiveSite(id));
+    dispatch(setSelectedSite(id));
+  };
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
@@ -93,15 +110,30 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
         <DateTimeBlock />
       </div>
 
-      {/* ── Site display — read-only for all roles ── */}
-      <div
-        className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] shrink-0"
-        style={{ background: isDark ? "var(--bg-elevated)" : "#f1f5f9", color: "var(--text-secondary)" }}
-        aria-label={selectedSite ? `Current site: ${selectedSite.name}` : "All sites"}
-      >
-        <MapPin size={12} aria-hidden="true" className="shrink-0" style={{ color: "var(--text-muted)" }} />
-        <span className="font-medium">{selectedSite ? selectedSite.name : "All sites"}</span>
-      </div>
+      {/* ── Site switcher ── */}
+      {multipleSites ? (
+        <div className="hidden lg:flex items-center gap-1.5 shrink-0" aria-label="Switch active site">
+          <MapPin size={12} aria-hidden="true" className="shrink-0" style={{ color: "var(--text-muted)" }} />
+          <Dropdown
+            value={selectedSiteId ?? ""}
+            onChange={handleSiteSwitch}
+            width="w-48"
+            options={[
+              { value: "", label: "\uD83C\uDF10 All Sites" },
+              ...accessibleSites.map((s) => ({ value: s.id, label: s.name })),
+            ]}
+          />
+        </div>
+      ) : displaySite ? (
+        <div
+          className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] shrink-0"
+          style={{ background: isDark ? "var(--bg-elevated)" : "#f1f5f9", color: "var(--text-secondary)" }}
+          aria-label={`Current site: ${displaySite.name}`}
+        >
+          <MapPin size={12} aria-hidden="true" className="shrink-0" style={{ color: "var(--text-muted)" }} />
+          <span className="font-medium">{displaySite.name}</span>
+        </div>
+      ) : null}
 
       {/* ── Spacer ── */}
       <div className="flex-1 min-w-0" />

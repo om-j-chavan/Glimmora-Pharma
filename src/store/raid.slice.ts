@@ -50,8 +50,11 @@ const raidSlice = createSlice({
         item.closedAt = "";
       }
     },
+    removeItem(state, { payload }: PayloadAction<string>) {
+      state.items = state.items.filter((r) => r.id !== payload);
+    },
   },
 });
 
-export const { addItem, updateItem, closeItem } = raidSlice.actions;
+export const { addItem, updateItem, closeItem, removeItem } = raidSlice.actions;
 export default raidSlice.reducer;

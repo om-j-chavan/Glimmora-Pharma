@@ -93,6 +93,7 @@ export function FDA483Page() {
   const [selectedEvent, setSelectedEvent] = useState<FDA483Event | null>(null);
   const [currentStep, setCurrentStep] = useState<Step>(1);
   const [typeFilter, setTypeFilter] = useState("");
+  const [agencyFilter, setAgencyFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [siteFilter, setSiteFilter] = useState("");
   const [addEventOpen, setAddEventOpen] = useState(false);
@@ -135,6 +136,16 @@ export function FDA483Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEvent?.id]);
 
+  // Auto-select the first observation whenever the selected one disappears
+  // (e.g. user just added the first observation, or deleted the selected one).
+  useEffect(() => {
+    if (!liveEvent) return;
+    const exists = liveEvent.observations.some((o) => o.id === selectedObsId);
+    if (!exists && liveEvent.observations.length > 0) {
+      setSelectedObsId(liveEvent.observations[0].id);
+    }
+  }, [liveEvent, selectedObsId]);
+
   useEffect(() => {
     if (selectedObs?.rcaMethod === "5 Why" && selectedObs.rootCause) {
       const lines = selectedObs.rootCause.split("\n");
@@ -158,16 +169,16 @@ export function FDA483Page() {
   const dueCount = events.filter((e) => getEffectiveStatus(e) === "Response Due").length;
   const closedCount = events.filter((e) => getEffectiveStatus(e) === "Closed").length;
   const urgentEvents = events.filter((e) => getEffectiveStatus(e) === "Response Due" && daysLeft(e.responseDeadline) >= 0 && daysLeft(e.responseDeadline) <= 5);
-  const anyFilter = !!(typeFilter || statusFilter || siteFilter);
+  const anyFilter = !!(typeFilter || agencyFilter || statusFilter || siteFilter);
   const filteredEvents = events.filter((e) => {
     if (typeFilter && e.type !== typeFilter) return false;
+    if (agencyFilter && e.agency !== agencyFilter) return false;
     if (statusFilter && getEffectiveStatus(e) !== statusFilter) return false;
     if (siteFilter && e.siteId !== siteFilter) return false;
     return true;
   });
 
-  /* ── Step workflow status (new order: Event → Observations → RCA → Response) ── */
-  const hasEvent = !!liveEvent;
+  /* ── Workflow status flags used by child components ── */
   const hasObservations = !!liveEvent && liveEvent.observations.length > 0;
   const hasRcaAndCapa = hasObservations
     && liveEvent.observations.every((o) => o.rootCause?.trim() && !!o.capaId);
@@ -271,6 +282,7 @@ export function FDA483Page() {
   }
   function clearFilters() {
     setTypeFilter("");
+    setAgencyFilter("");
     setStatusFilter("");
     setSiteFilter("");
   }
@@ -347,69 +359,36 @@ export function FDA483Page() {
       )}
 
 
-      {/* ═══════════ RESPONSE SUMMARY TAB ═══════════ */}
-      {/* ═══════════ STEP INDICATOR (display only) ═══════════ */}
-      {(() => {
-        const steps = [
-          { n: 1 as Step, label: "Event",        complete: hasSubmitted || (hasEvent && currentStep > 1) },
-          { n: 2 as Step, label: "Observations", complete: hasSubmitted || (hasObservations && currentStep > 2) },
-          { n: 3 as Step, label: "RCA",          complete: hasSubmitted || (hasRcaAndCapa && currentStep > 3) },
-          { n: 4 as Step, label: "Response",     complete: hasSubmitted },
-        ];
-        return (
-          <div
-            className={clsx("flex items-center gap-2 p-3 rounded-xl border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}
-            role="progressbar"
-            aria-label={`Workflow step ${currentStep} of 4`}
-            aria-valuenow={currentStep}
-            aria-valuemin={1}
-            aria-valuemax={4}
+      {/* ═══════════ Breadcrumb — only in event detail view ═══════════ */}
+      {currentStep > 1 && liveEvent && (
+        <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-[12px]">
+          <button
+            type="button"
+            onClick={resetWorkflow}
+            className="bg-transparent border-none cursor-pointer p-0 hover:underline"
+            style={{ color: "var(--brand)" }}
           >
-            {steps.map((s, i) => {
-              const isActive = currentStep === s.n;
-              const color = s.complete ? "#10b981" : isActive ? "#0ea5e9" : "#64748b";
-              return (
-                <div key={s.n} className="flex items-center gap-2 flex-1 min-w-0">
-                  <div className="flex items-center gap-2 min-w-0" aria-current={isActive ? "step" : undefined}>
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[11px] font-bold"
-                      style={{
-                        background: s.complete ? color : "transparent",
-                        border: `2px solid ${color}`,
-                        color: s.complete ? "#fff" : color,
-                      }}
-                      aria-hidden="true"
-                    >
-                      {s.complete ? "\u2713" : s.n}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Step {s.n}</p>
-                      <p className="text-[12px] font-semibold truncate" style={{ color }}>{s.label}</p>
-                    </div>
-                  </div>
-                  {i < steps.length - 1 && (
-                    <div className="flex-1 h-px" style={{ background: s.complete ? "#10b981" : "var(--bg-border)" }} aria-hidden="true" />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
+            FDA 483 &amp; Regulatory Events
+          </button>
+          <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>&rsaquo;</span>
+          <span className="font-mono font-semibold" style={{ color: "var(--text-primary)" }}>{liveEvent.referenceNumber}</span>
+        </nav>
+      )}
 
-      {/* ═══════════ STEP CONTENT ═══════════ */}
+
+      {/* ═══════════ CONTENT ═══════════ */}
       <div>
-        {/* STEP 1 — Events list */}
-        {currentStep === 1 && (
+        {/* MAIN LIST VIEW — shown when no event is selected */}
+        {!liveEvent && (
           <>
             <EventsTab
               events={events}
               filteredEvents={filteredEvents}
-              selectedEvent={selectedEvent}
               openCount={openCount}
               dueCount={dueCount}
               closedCount={closedCount}
               typeFilter={typeFilter}
+              agencyFilter={agencyFilter}
               statusFilter={statusFilter}
               siteFilter={siteFilter}
               anyFilter={anyFilter}
@@ -419,15 +398,16 @@ export function FDA483Page() {
               isDark={isDark}
               role={role}
               onTypeFilterChange={setTypeFilter}
+              onAgencyFilterChange={setAgencyFilter}
               onStatusFilterChange={setStatusFilter}
               onSiteFilterChange={setSiteFilter}
               onClearFilters={clearFilters}
-              onSelectEvent={selectEvent}
+              onOpenEvent={(e) => { selectEvent(e); setCurrentStep(2); }}
               onAddEvent={() => setAddEventOpen(true)}
               computeReadiness={computeReadiness}
             />
-            <div className="flex justify-end pt-4">
-              {hasSubmitted ? (
+            {hasSubmitted && (
+              <div className="flex justify-end pt-4">
                 <div
                   className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium"
                   style={{ background: "var(--success-bg)", color: "var(--success)" }}
@@ -436,25 +416,32 @@ export function FDA483Page() {
                   <span aria-hidden="true">&#10003;</span>
                   Response submitted &mdash; no further action required
                 </div>
-              ) : (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={!liveEvent}
-                  onClick={() => setCurrentStep(2)}
-                  title={liveEvent ? "" : "Select an event first"}
-                >
-                  Next: Observations &rarr;
-                </Button>
-              )}
-            </div>
+              </div>
+            )}
           </>
         )}
 
-                {/* STEP 3 — RCA Workspace */}
-                {currentStep === 3 && liveEvent && (
-                  <>
-                    <RCATab
+        {/* EVENT DETAIL — single combined view */}
+        {liveEvent && (
+          <div className="space-y-6">
+            {/* Section 1 & 3 & 4 — Observations / Commitments / CAPA set (inside ObservationsTab) */}
+            <ObservationsTab
+              liveEvent={liveEvent}
+              capas={capas}
+              sites={sites}
+              timezone={timezone}
+              dateFormat={dateFormat}
+              isDark={isDark}
+              role={role}
+              ownerName={ownerName}
+              onGoToEvents={resetWorkflow}
+              onAddObservation={() => { setEditingObs(null); setAddObsOpen(true); }}
+              onEditObservation={(obs) => { setEditingObs(obs); setAddObsOpen(true); }}
+              onAddCommitment={() => setAddCommitOpen(true)}
+            />
+
+            {/* Section 2 — Root Cause Analysis */}
+            <RCATab
                       liveEvent={liveEvent}
                       selectedObs={selectedObs}
                       selectedObsId={selectedObsId}
@@ -516,42 +503,9 @@ export function FDA483Page() {
                         setCapaRaisedPopup(true);
                       }}
                     />
-                    <div className="flex justify-between pt-4">
-                      <Button variant="secondary" size="sm" onClick={() => setCurrentStep(2)}>&larr; Back</Button>
-                      <Button variant="primary" size="sm" disabled={!hasRcaAndCapa} onClick={() => setCurrentStep(4)} title={hasRcaAndCapa ? "" : "Save RCA and raise CAPA for every observation first"}>Next: Response &rarr;</Button>
-                    </div>
-                  </>
-                )}
 
-                {/* STEP 2 — Observations */}
-                {currentStep === 2 && liveEvent && (
-                  <>
-                    <ObservationsTab
-                      liveEvent={liveEvent}
-                      capas={capas}
-                      sites={sites}
-                      timezone={timezone}
-                      dateFormat={dateFormat}
-                      isDark={isDark}
-                      role={role}
-                      ownerName={ownerName}
-                      onGoToEvents={resetWorkflow}
-                      onAddObservation={() => { setEditingObs(null); setAddObsOpen(true); }}
-                      onEditObservation={(obs) => { setEditingObs(obs); setAddObsOpen(true); }}
-                      onAddCommitment={() => setAddCommitOpen(true)}
-                      onGoToResponse={() => setCurrentStep(3)}
-                    />
-                    <div className="flex justify-between pt-4">
-                      <Button variant="secondary" size="sm" onClick={() => setCurrentStep(1)}>&larr; Back</Button>
-                      <Button variant="primary" size="sm" disabled={!hasObservations} onClick={() => setCurrentStep(3)} title={hasObservations ? "" : "Add at least one observation before proceeding to RCA"}>Next: RCA &rarr;</Button>
-                    </div>
-                  </>
-                )}
-
-                {/* STEP 4 — Response */}
-                {currentStep === 4 && liveEvent && (
-                  <>
-                    <ResponseTab
+            {/* Section 5 — Response */}
+            <ResponseTab
           liveEvent={liveEvent}
           capas={capas}
           isDark={isDark}
@@ -625,12 +579,14 @@ export function FDA483Page() {
             );
           }}
           onSignSubmit={() => setSignOpen(true)}
-                    />
-                    <div className="flex justify-start pt-4">
-                      <Button variant="secondary" size="sm" onClick={() => setCurrentStep(3)}>&larr; Back</Button>
-                    </div>
-                  </>
-                )}
+            />
+
+            {/* Back to events list */}
+            <div className="flex justify-start pt-4">
+              <Button variant="secondary" size="sm" onClick={resetWorkflow}>&larr; Back to FDA 483 Events</Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Modals ── */}

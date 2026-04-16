@@ -10,8 +10,6 @@ import {
   LogIn,
   Building2,
   ChevronDown,
-  ArrowRight,
-  Check,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -101,10 +99,6 @@ export function LoginPage() {
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [loadingName, setLoadingName] = useState("");
 
-  // Inline site picker step — shown when user has 2+ assigned sites
-  const [step, setStep] = useState<"login" | "site-picker">("login");
-  const [sitesForPicker, setSitesForPicker] = useState<TenantSiteConfig[]>([]);
-  const [pickerSiteId, setPickerSiteId] = useState("");
 
   // Bootstrap: ensure platform super_admin account exists
   useEffect(() => {
@@ -155,9 +149,9 @@ export function LoginPage() {
   };
 
   /**
-   * Non-super-admin login: ALWAYS show the site picker so the user
-   * explicitly chooses which site they are working from today.
-   * Only skip if there are zero sites configured.
+   * Non-super-admin login: auto-select the first accessible site and go
+   * directly to the dashboard. Users with multiple sites can switch via
+   * the site dropdown in the topbar header.
    */
   const finishLogin = async (
     user: AuthUser,
@@ -167,22 +161,25 @@ export function LoginPage() {
     const accessible = getAccessibleSites(user, tenant);
 
     if (accessible.length === 0) {
-      // No sites at all — go straight to dashboard
+      // No sites at all — go straight to dashboard with no site filter
       dispatch(setSelectedSite(null));
       const anySite = tenant?.config?.sites?.[0];
       if (anySite) dispatch(setActiveSite(anySite.id));
-      setLoadingName(displayName);
-      setLoadingTenant(true);
-      await new Promise((r) => setTimeout(r, 600));
-      navigate("/");
-      return;
+    } else if (accessible.length === 1) {
+      // Exactly one site — auto-select it (no switcher will be shown)
+      const only = accessible[0];
+      dispatch(setActiveSite(only.id));
+      dispatch(setSelectedSite(only.id));
+    } else {
+      // Multiple sites — default to "All Sites" and keep first as the active fallback
+      dispatch(setActiveSite(accessible[0].id));
+      dispatch(setSelectedSite(null));
     }
 
-    // Show site picker for ALL non-super-admin users
-    setLoadingTenant(false);
-    setSitesForPicker(accessible);
-    setPickerSiteId("");
-    setStep("site-picker");
+    setLoadingName(displayName);
+    setLoadingTenant(true);
+    await new Promise((r) => setTimeout(r, 600));
+    navigate("/");
   };
 
   const onSubmit = async (data: FormValues) => {
@@ -202,8 +199,10 @@ export function LoginPage() {
       }
 
       if (mockAccount.user.role === "customer_admin") {
-        dispatch(setSelectedSite(null));
         const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
+        const firstSite = userTenant?.config?.sites?.[0];
+        if (firstSite) dispatch(setActiveSite(firstSite.id));
+        dispatch(setSelectedSite(null));
         setLoadingName(userTenant?.name ?? "workspace");
         setLoadingTenant(true);
         await new Promise((r) => setTimeout(r, 600));
@@ -269,6 +268,8 @@ export function LoginPage() {
         }
 
         if (user.role === "customer_admin") {
+          const firstSite = tenant.config?.sites?.[0];
+          if (firstSite) dispatch(setActiveSite(firstSite.id));
           dispatch(setSelectedSite(null));
           setLoadingName(tenant.name);
           setLoadingTenant(true);
@@ -285,23 +286,12 @@ export function LoginPage() {
     setError("root", { message: "Invalid username or password" });
   };
 
-  /** Called from the inline site picker "Continue" button. */
-  const handlePickerContinue = async () => {
-    if (!pickerSiteId) return;
-    dispatch(setActiveSite(pickerSiteId));
-    dispatch(setSelectedSite(pickerSiteId));
-    setLoadingName("workspace");
-    setLoadingTenant(true);
-    await new Promise((r) => setTimeout(r, 600));
-    navigate("/");
-  };
-
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-white px-4">
 
       <div className="w-full max-w-[420px] pt-12 pb-10 px-10">
-        {/* Logo — hidden during site picker and loading */}
-        {step === "login" && !loadingTenant && (
+        {/* Logo — hidden during loading */}
+        {!loadingTenant && (
           <div className="flex flex-col items-start mb-8">
             <div className="w-14 h-14 rounded-xl flex items-center justify-center mb-5 bg-[#f0a500]">
               <Shield className="w-7 h-7 text-white" aria-hidden="true" />
@@ -325,78 +315,13 @@ export function LoginPage() {
           </div>
         )}
 
-        {/* ── Inline site picker step ── */}
-        {step === "site-picker" && !loadingTenant && (
-          <div className="space-y-5" role="region" aria-label="Select your site">
-            {/* Logo */}
-            <div className="flex flex-col items-start mb-2">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-[#f0a500]">
-                <Shield className="w-6 h-6 text-white" aria-hidden="true" />
-              </div>
-              <h2 className="text-[20px] font-bold text-[#302d29] mb-0.5">Select your site</h2>
-              <p className="text-[13px] text-[#7a736a]">Choose the facility you are working from today.</p>
-            </div>
-
-            <div className="space-y-1.5 max-h-[280px] overflow-y-auto" role="listbox" aria-label="Available sites">
-              {sitesForPicker.map((site) => {
-                const isSelected = pickerSiteId === site.id;
-                const riskColor = site.risk === "HIGH" ? "#ef4444" : site.risk === "MEDIUM" ? "#f59e0b" : "#10b981";
-                return (
-                  <button
-                    key={site.id}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onClick={() => setPickerSiteId(site.id)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all duration-150 outline-none"
-                    style={{
-                      background: isSelected ? "rgba(14,165,233,0.08)" : "transparent",
-                      border: isSelected ? "1px solid rgba(14,165,233,0.3)" : "1px solid #e8e4dd",
-                    }}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-[#302d29] truncate">{site.name}</p>
-                      <p className="text-[11px] text-[#7a736a] mt-0.5 truncate">
-                        {site.location} &middot; {site.gmpScope}
-                      </p>
-                    </div>
-                    <span
-                      className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                      style={{ background: riskColor + "1a", color: riskColor }}
-                    >
-                      {site.risk}
-                    </span>
-                    <div
-                      className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
-                      style={{ border: isSelected ? "2px solid #0ea5e9" : "2px solid #e8e4dd" }}
-                    >
-                      {isSelected && <Check className="w-2.5 h-2.5 text-[#0ea5e9]" aria-hidden="true" />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <Button
-              variant="primary"
-              fullWidth
-              icon={ArrowRight}
-              iconPosition="right"
-              disabled={!pickerSiteId}
-              onClick={handlePickerContinue}
-            >
-              Continue
-            </Button>
-          </div>
-        )}
-
         {/* Form */}
         <form
           onSubmit={handleSubmit(onSubmit)}
           aria-label="Sign in to Pharma Glimmora"
           noValidate
           className="w-full space-y-4 mt-8"
-          style={{ display: loadingTenant || step === "site-picker" ? "none" : undefined }}
+          style={{ display: loadingTenant ? "none" : undefined }}
         >
           {/* Root error */}
           {errors.root && (
@@ -462,7 +387,7 @@ export function LoginPage() {
         </form>
 
         {/* Footer */}
-        <div className="flex items-center justify-between mt-8 pt-5 border-t border-[#e8e4dd]" style={{ display: loadingTenant || step === "site-picker" ? "none" : undefined }}>
+        <div className="flex items-center justify-between mt-8 pt-5 border-t border-[#e8e4dd]" style={{ display: loadingTenant ? "none" : undefined }}>
           <div className="flex items-center gap-1.5 text-[11px] text-[#a39e96]">
             <Shield className="w-3 h-3" aria-hidden="true" />
             21 CFR Part 11 compliant
@@ -471,7 +396,7 @@ export function LoginPage() {
         </div>
 
         {/* Dev credentials toggle */}
-        <div className="mt-4" style={{ display: loadingTenant || step === "site-picker" ? "none" : undefined }}>
+        <div className="mt-4" style={{ display: loadingTenant ? "none" : undefined }}>
           <button
             type="button"
             onClick={() => setShowCreds((v) => !v)}
