@@ -11,7 +11,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addItem, closeItem, removeItem, updateItem, type RAIDItem } from "@/store/raid.slice";
+import { addItem, closeItem, removeItem, updateItem, reopenItem, type RAIDItem } from "@/store/raid.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -70,7 +70,7 @@ export function GovernancePage() {
   const overdueCommitments = fda483.reduce((sum, e) => sum + e.commitments.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length, 0);
   const repeatObservationRisk = fda483.reduce((sum, e) => sum + e.observations.filter((o) => o.status !== "Closed").length, 0);
   const auditTrailCoverage = systems.length === 0 ? 0 : Math.round((systems.filter((s) => s.part11Status === "Compliant" || s.part11Status === "N/A").length / systems.length) * 100);
-  const readinessScore = (() => { const sc: number[] = []; if (capas.length > 0) sc.push(capaTimeliness); if (systems.length > 0) sc.push(auditTrailCoverage); const oc = findings.filter((f) => f.severity === "Critical" && f.status !== "Closed").length; sc.push(findings.length === 0 ? 100 : Math.round((1 - oc / Math.max(1, findings.length)) * 100)); return sc.length === 0 ? 0 : Math.round(sc.reduce((a, b) => a + b, 0) / sc.length); })();
+  const readinessScore = useAppSelector((s) => s.readiness.score);
   const noData = capas.length === 0 && findings.length === 0;
 
   /* ── State ── */
@@ -78,6 +78,9 @@ export function GovernancePage() {
   const [addRaidOpen, setAddRaidOpen] = useState(false);
   const [editingRaid, setEditingRaid] = useState<RAIDItem | null>(null);
   const [closeRaidOpen, setCloseRaidOpen] = useState(false);
+  const [reopenRaidOpen, setReopenRaidOpen] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenedPopup, setReopenedPopup] = useState(false);
   const [selectedRaid, setSelectedRaid] = useState<RAIDItem | null>(null);
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -100,7 +103,14 @@ export function GovernancePage() {
   }, [exportMenuOpen]);
 
   const anyRaidFilter = !!(typeFilter || statusFilter || priorityFilter);
-  const filteredRaid = raidItems.filter((r) => { if (typeFilter && r.type !== typeFilter) return false; if (statusFilter && r.status !== statusFilter) return false; if (priorityFilter && r.priority !== priorityFilter) return false; return true; });
+  const filteredRaid = raidItems.filter((r) => {
+    // Default view: hide Closed items unless explicitly filtered in
+    if (!statusFilter && r.status === "Closed") return false;
+    if (typeFilter && r.type !== typeFilter) return false;
+    if (statusFilter && r.status !== statusFilter) return false;
+    if (priorityFilter && r.priority !== priorityFilter) return false;
+    return true;
+  });
   const raidForm = useForm<RaidForm>({ resolver: zodResolver(raidSchema), defaultValues: { type: "Risk", priority: "Medium" } });
 
   function onRaidSave(data: RaidForm) {
@@ -136,6 +146,16 @@ export function GovernancePage() {
     setAddRaidOpen(true);
   }
   function handleCloseRaid() { if (!selectedRaid) return; dispatch(closeItem({ id: selectedRaid.id, resolution: "" })); auditLog({ action: "RAID_ITEM_CLOSED", module: "governance", recordId: selectedRaid.id }); setCloseRaidOpen(false); setSelectedRaid(null); setRaidClosedPopup(true); }
+
+  function handleReopenRaid() {
+    if (!selectedRaid || !reopenReason.trim()) return;
+    dispatch(reopenItem({ id: selectedRaid.id, reopenedBy: user?.id ?? "", reason: reopenReason.trim() }));
+    auditLog({ action: "RAID_ITEM_REOPENED", module: "governance", recordId: selectedRaid.id, newValue: { reason: reopenReason.trim() } });
+    setReopenRaidOpen(false);
+    setSelectedRaid(null);
+    setReopenReason("");
+    setReopenedPopup(true);
+  }
 
   /* ── Chart data ── */
   const capaTrend = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mc = capas.filter((c) => c.status === "Closed" && c.closedAt && dayjs.utc(c.closedAt).format("MMM YYYY") === mo.format("MMM YYYY")); const ot = mc.filter((c) => !dayjs.utc(c.closedAt).isAfter(dayjs.utc(c.dueDate))).length; m.push({ month: mo.format("MMM"), onTime: ot, late: mc.length - ot }); } return m; })();
@@ -231,7 +251,7 @@ export function GovernancePage() {
       </div>
 
       <div role="tabpanel" id="panel-raid" aria-labelledby="tab-raid" tabIndex={0} hidden={activeTab !== "raid"}>
-        <RAIDTab raidItems={raidItems} filteredRaid={filteredRaid} typeFilter={typeFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} anyRaidFilter={anyRaidFilter} role={role} currentUserId={user?.id ?? ""} timezone={timezone} dateFormat={dateFormat} ownerName={ownerName} onAddRaidOpen={() => { setEditingRaid(null); raidForm.reset({ type: "Risk", priority: "Medium" }); setAddRaidOpen(true); }} onCloseRaid={(item) => { setSelectedRaid(item); setCloseRaidOpen(true); }} onEditRaid={handleEditRaid} onDeleteRaid={handleDeleteRaid} />
+        <RAIDTab raidItems={raidItems} filteredRaid={filteredRaid} typeFilter={typeFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} anyRaidFilter={anyRaidFilter} role={role} currentUserId={user?.id ?? ""} timezone={timezone} dateFormat={dateFormat} ownerName={ownerName} onAddRaidOpen={() => { setEditingRaid(null); raidForm.reset({ type: "Risk", priority: "Medium" }); setAddRaidOpen(true); }} onCloseRaid={(item) => { setSelectedRaid(item); setCloseRaidOpen(true); }} onEditRaid={handleEditRaid} onDeleteRaid={handleDeleteRaid} onReopenRaid={(item) => { setSelectedRaid(item); setReopenReason(""); setReopenRaidOpen(true); }} />
       </div>
 
       {/* Add RAID Modal */}
@@ -261,9 +281,34 @@ export function GovernancePage() {
         ]}
       />
 
+      {/* Reopen RAID modal */}
+      <Modal open={reopenRaidOpen} onClose={() => { setReopenRaidOpen(false); setSelectedRaid(null); setReopenReason(""); }} title="Reopen RAID item?">
+        {selectedRaid && (
+          <div className="space-y-4">
+            <p className="text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>{selectedRaid.title}</p>
+            <div>
+              <label htmlFor="raid-reopen-reason" className={lbl} style={{ color: "var(--text-muted)" }}>Reason <span aria-hidden="true">*</span></label>
+              <textarea
+                id="raid-reopen-reason"
+                rows={3}
+                className="input text-[12px] resize-none w-full"
+                placeholder="Why is this being reopened?"
+                value={reopenReason}
+                onChange={(e) => setReopenReason(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="ghost" type="button" onClick={() => { setReopenRaidOpen(false); setSelectedRaid(null); setReopenReason(""); }}>Cancel</Button>
+              <Button variant="primary" type="button" disabled={!reopenReason.trim()} onClick={handleReopenRaid}>Reopen item</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* Popups */}
       <Popup isOpen={raidAddedPopup} variant="success" title="RAID item added" description="Added to the governance log." onDismiss={() => setRaidAddedPopup(false)} />
       <Popup isOpen={raidClosedPopup} variant="success" title="RAID item closed" description="Resolution recorded." onDismiss={() => setRaidClosedPopup(false)} />
+      <Popup isOpen={reopenedPopup} variant="success" title="RAID item reopened \u2705" description="The item is back in the active list." onDismiss={() => setReopenedPopup(false)} />
       <Popup isOpen={reportGeneratedPopup} variant="success" title="Report generated \u2705" description="Exported successfully." onDismiss={() => setReportGeneratedPopup(false)} />
     </main>
   );

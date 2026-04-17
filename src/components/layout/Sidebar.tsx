@@ -6,7 +6,6 @@ import {
   ClipboardList,
   Monitor,
   Map,
-  Bot,
   FileText,
   Building2,
   BarChart3,
@@ -67,7 +66,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Intelligence",
     icon: Cpu,
     items: [
-      { path: "agi-console", label: "AGI Console", icon: Bot },
       { path: "governance",  label: "Governance",  icon: BarChart3 },
     ],
   },

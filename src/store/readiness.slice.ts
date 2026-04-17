@@ -7,11 +7,18 @@ export type ReadinessStatus = "Not Started" | "In Progress" | "Complete" | "Over
 export type AGIRiskScore = "High" | "Medium" | "Low";
 export type PlaybookType = "Front Room" | "Back Room" | "SME" | "DIL Handling";
 export type SimulationStatus = "Scheduled" | "In Progress" | "Completed" | "Cancelled";
+export type SimulationType = "Mock Inspection" | "DIL Drill" | "SME Q&A" | "QA Workshop" | "Back Room Drill" | "Leadership Briefing" | "SME Practice";
 
 export interface ReadinessCard {
   id: string; lane: ReadinessLane; bucket: ReadinessBucket; action: string; owner: string;
   status: ReadinessStatus; agiRisk: AGIRiskScore; dueDate: string; notes?: string; tenantId: string;
   completedAt?: string;
+  completedBy?: string;
+  completedRole?: string;
+  linkedSimulationType?: SimulationType | null;
+  showSuggestion?: boolean;
+  suggestionText?: string;
+  suggestionDismissed?: boolean;
 }
 
 export interface PlaybookStep { id: string; order: number; action: string; do: string[]; dont: string[]; }
@@ -22,7 +29,7 @@ export interface Playbook {
 }
 
 export interface Simulation {
-  id: string; title: string; type: "Mock Inspection" | "DIL Drill" | "SME Q&A" | "QA Workshop" | "Back Room Drill" | "Leadership Briefing" | "SME Practice";
+  id: string; title: string; type: SimulationType;
   scheduledAt: string; duration: number; participants: string[];
   status: SimulationStatus; score?: number; notes?: string; tenantId: string;
 }
@@ -39,7 +46,7 @@ interface ReadinessState {
   total: number;
 }
 
-import { MOCK_READINESS_CARDS, MOCK_PLAYBOOKS, MOCK_SIMULATIONS } from "@/mock";
+import { MOCK_READINESS_CARDS, MOCK_PLAYBOOKS, MOCK_SIMULATIONS, MOCK_TRAINING_RECORDS } from "@/mock";
 
 function calcScore(cards: ReadinessCard[]) {
   if (cards.length === 0) return { score: 0, complete: 0, total: 0 };
@@ -63,7 +70,7 @@ const initialState: ReadinessState = {
   cards: MOCK_READINESS_CARDS,
   playbooks: MOCK_PLAYBOOKS,
   simulations: MOCK_SIMULATIONS,
-  training: [],
+  training: MOCK_TRAINING_RECORDS,
   score: init.score,
   complete: init.complete,
   total: init.total,
@@ -94,8 +101,11 @@ const readinessSlice = createSlice({
     addSimulation(state, { payload }: PayloadAction<Simulation>) { state.simulations.push(payload); },
     updateSimulation(state, { payload }: PayloadAction<{ id: string; patch: Partial<Simulation> }>) { const s = state.simulations.find((x) => x.id === payload.id); if (s) Object.assign(s, payload.patch); },
     addTraining(state, { payload }: PayloadAction<TrainingRecord>) { state.training.push(payload); },
+    removeTraining(state, { payload }: PayloadAction<{ userId: string; module: string; tenantId: string }>) {
+      state.training = state.training.filter((t) => !(t.userId === payload.userId && t.module === payload.module && t.tenantId === payload.tenantId));
+    },
   },
 });
 
-export const { addCard, updateCard, removeCard, addPlaybook, updatePlaybook, addSimulation, updateSimulation, addTraining } = readinessSlice.actions;
+export const { addCard, updateCard, removeCard, addPlaybook, updatePlaybook, addSimulation, updateSimulation, addTraining, removeTraining } = readinessSlice.actions;
 export default readinessSlice.reducer;

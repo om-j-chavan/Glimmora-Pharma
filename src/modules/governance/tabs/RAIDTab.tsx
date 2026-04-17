@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import dayjs from "@/lib/dayjs";
-import { AlertTriangle, Plus, MoreVertical, Pencil, CheckCircle2, Trash2, Eye } from "lucide-react";
+import { AlertTriangle, Plus, MoreVertical, Pencil, CheckCircle2, Trash2, Eye, RotateCcw } from "lucide-react";
 import type { RAIDItem, RAIDType, RAIDStatus, RAIDPriority } from "@/store/raid.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -29,13 +29,14 @@ export interface RAIDTabProps {
   onCloseRaid: (item: RAIDItem) => void;
   onEditRaid: (item: RAIDItem) => void;
   onDeleteRaid: (item: RAIDItem) => void;
+  onReopenRaid: (item: RAIDItem) => void;
 }
 
 export function RAIDTab({
   raidItems, filteredRaid, typeFilter, setTypeFilter, statusFilter,
   setStatusFilter, priorityFilter, setPriorityFilter, anyRaidFilter,
   role, currentUserId, timezone, dateFormat, ownerName, onAddRaidOpen, onCloseRaid,
-  onEditRaid, onDeleteRaid,
+  onEditRaid, onDeleteRaid, onReopenRaid,
 }: RAIDTabProps) {
   // ── Role-based permissions ──
   const isAdmin = role === "customer_admin" || role === "super_admin";
@@ -45,7 +46,8 @@ export function RAIDTab({
   const isOwner = (r: RAIDItem) => !!currentUserId && r.owner === currentUserId;
   const canEditItem = (r: RAIDItem) => isAdmin || isQAHead || isOwner(r);
   const canCloseItem = (r: RAIDItem) => r.status !== "Closed" && (isAdmin || isQAHead || isOwner(r));
-  const hasAnyAction = (r: RAIDItem) => canEditItem(r) || canCloseItem(r) || canDeleteAny;
+  const canReopenItem = (r: RAIDItem) => r.status === "Closed" && (isAdmin || isQAHead || isOwner(r));
+  const hasAnyAction = (r: RAIDItem) => canEditItem(r) || canCloseItem(r) || canReopenItem(r) || canDeleteAny;
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -129,6 +131,17 @@ export function RAIDTab({
                           style={{ color: "var(--text-primary)" }}
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Close
+                        </button>
+                      )}
+                      {canReopenItem(r) && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setOpenMenu(null); onReopenRaid(r); }}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
+                          style={{ color: "var(--text-primary)" }}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Reopen
                         </button>
                       )}
                       {canDeleteAny && (

@@ -74,7 +74,6 @@ export function DashboardPage() {
   });
 
   /* ── KPIs — all derived from filtered data ── */
-  const closedCAPAs = filteredCAPAs.filter((c) => c.status === "Closed");
   const openCAPAs = filteredCAPAs.filter((c) => c.status !== "Closed");
   const overdueCAPAs = openCAPAs.filter((c) => dayjs.utc(c.dueDate).isBefore(dayjs()));
   const criticalCount = filteredFindings.filter((f) => f.severity === "Critical" && f.status !== "Closed").length;
@@ -83,17 +82,7 @@ export function DashboardPage() {
   const csvHighRisk = filteredSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").length;
   const trainingCompliance = users.length === 0 ? null : Math.round((users.filter((u) => u.status === "Active").length / users.length) * 100);
 
-  const readinessScore = (() => {
-    if (filteredFindings.length === 0 && filteredCAPAs.length === 0) return null;
-    const sc: number[] = [];
-    if (filteredCAPAs.length > 0) { const ot = closedCAPAs.filter((c) => !dayjs.utc(c.closedAt || c.dueDate).isAfter(dayjs.utc(c.dueDate))); sc.push(closedCAPAs.length === 0 ? 50 : Math.round((ot.length / closedCAPAs.length) * 100)); }
-    if (filteredFindings.length > 0) sc.push(Math.max(0, 100 - criticalCount * 15 - filteredFindings.filter((f) => f.status !== "Closed").length * 3));
-    if (filteredSystems.length > 0) sc.push(Math.round((filteredSystems.filter((s) => s.part11Status === "Compliant" || s.part11Status === "N/A").length / filteredSystems.length) * 100));
-    let base = sc.length === 0 ? null : Math.round(sc.reduce((a, b) => a + b, 0) / sc.length);
-    if (base !== null && overdueCAPAs.length >= 2) base = Math.min(base, 60);
-    else if (base !== null && overdueCAPAs.length >= 1) base = Math.min(base, 75);
-    return base;
-  })();
+  const readinessScore = useAppSelector((s) => s.readiness.score);
 
   function getReadinessLabel(score: number | null, overdueCapaCount: number): { label: string; color: string } {
     if (score === null) return { label: "Log findings to calculate", color: "#64748b" };
@@ -194,7 +183,7 @@ export function DashboardPage() {
 
       {/* KPI cards */}
       <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-        <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={readinessScore === null ? "\u2014" : `${readinessScore}%`} sub={rl.label} />
+        <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={`${readinessScore}%`} sub={rl.label} />
         <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter((f) => f.status !== "Closed").length} total open`} />
         <StatCard icon={Clock} color={capaOverdueRate === null ? "#64748b" : capaOverdueRate === 0 ? "#10b981" : capaOverdueRate <= 20 ? "#f59e0b" : "#ef4444"} label="CAPA overdue" value={capaOverdueRate === null ? "\u2014" : `${capaOverdueRate}%`} sub={openCAPAs.length === 0 ? "No open CAPAs" : `${overdueCAPAs.length} of ${openCAPAs.length} past due`} />
         <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={filteredSystems.length === 0 ? "No systems registered" : "HIGH risk, not yet validated"} />
