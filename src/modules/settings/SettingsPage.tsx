@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Building2, MapPin, Users, BookOpen, Bot, Shield } from "lucide-react";
+import { Building2, MapPin, Users, BookOpen, Bot } from "lucide-react";
 import { OrgTab } from "./tabs/OrgTab";
 import { SitesTab } from "./tabs/SitesTab";
 import { UsersTab } from "./tabs/UsersTab";
 import { FrameworksTab } from "./tabs/FrameworksTab";
 import { AGIPolicyTab } from "./tabs/AGIPolicyTab";
-import { PermissionsTab } from "./tabs/PermissionsTab";
+// Permissions tab hidden — to re-enable, also uncomment the TABS entry + panel below.
+// import { Shield } from "lucide-react";
+// import { PermissionsTab } from "./tabs/PermissionsTab";
 import { useRole } from "@/hooks/useRole";
 
 const TABS = [
@@ -14,7 +16,9 @@ const TABS = [
   { id: "users", label: "Users & Roles", icon: Users },
   { id: "frameworks", label: "Frameworks", icon: BookOpen },
   { id: "agi", label: "AGI Policy", icon: Bot },
-  { id: "permissions", label: "Permissions", icon: Shield },
+  // Permissions tab hidden from UI but retained in code for future use.
+  // To re-enable: uncomment the line below.
+  // { id: "permissions", label: "Permissions", icon: Shield },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -69,7 +73,8 @@ export function SettingsPage() {
             {tab.id === "users" && <UsersTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
             {tab.id === "frameworks" && <FrameworksTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
             {tab.id === "agi" && <AGIPolicyTab readOnly={role !== "super_admin" && role !== "customer_admin" && role !== "it_cdo"} />}
-            {tab.id === "permissions" && <PermissionsTab />}
+            {/* Permissions panel hidden — re-enable the tab entry above to restore. */}
+            {/* {tab.id === "permissions" && <PermissionsTab />} */}
           </section>
         ))}
       </div>
