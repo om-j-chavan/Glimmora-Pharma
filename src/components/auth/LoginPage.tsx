@@ -192,6 +192,14 @@ export function LoginPage() {
     try {
       const result = await nextAuthLogin(data.email.trim(), data.password);
       if (!result.ok) {
+        // Surface specific auth errors back to the form (subscription, etc.)
+        if (result.error && result.error.includes("SUBSCRIPTION_INACTIVE")) {
+          setError("root", {
+            message:
+              "Your subscription has expired or no active plan is configured. Please contact your administrator.",
+          });
+          return;
+        }
         console.warn("[login] next-auth rejected credentials:", result.error);
       }
     } catch (err) {

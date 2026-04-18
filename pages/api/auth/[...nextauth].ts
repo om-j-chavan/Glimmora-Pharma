@@ -1,6 +1,7 @@
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { neon } from "@neondatabase/serverless";
+import { isTenantEffectivelyActive } from "@/lib/tenantStatus";
 
 /**
  * NextAuth configuration — in-app authentication.
@@ -60,9 +61,8 @@ async function findTenantUser(
   const key = username.toLowerCase().trim();
 
   const rows = (await sql`
-    select id, name, plan, admin_email, active, config
+    select id, name, plan, admin_email, active, config, subscription_plans
     from tenants
-    where active = true
   `) as Array<{
     id: string;
     name: string;
@@ -70,6 +70,8 @@ async function findTenantUser(
     admin_email: string;
     active: boolean;
     config: { users?: Array<Record<string, unknown>> };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    subscription_plans: any[] | null;
   }>;
 
   for (const row of rows) {
@@ -83,6 +85,18 @@ async function findTenantUser(
         (typeof u.name === "string" && u.name.toLowerCase() === key);
       if (!matches) continue;
       if (typeof u.password === "string" && u.password !== password) continue;
+
+      // Subscription gate — block login when the tenant has no active or
+      // non-expired subscription. Throwing a tagged error lets next-auth
+      // surface a clear message back to the login UI.
+      const tenantShape = {
+        active: row.active,
+        subscriptionPlans: row.subscription_plans ?? [],
+      };
+      if (!isTenantEffectivelyActive(tenantShape)) {
+        throw new Error("SUBSCRIPTION_INACTIVE");
+      }
+
       return {
         id: String(u.id ?? ""),
         name: String(u.name ?? ""),

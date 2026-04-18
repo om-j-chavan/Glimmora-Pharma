@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { neon } from "@neondatabase/serverless";
+import { isTenantEffectivelyActive, getInactiveReason } from "@/lib/tenantStatus";
 
 /**
  * Legacy login endpoint — used by the existing React Router SPA login
@@ -85,6 +86,15 @@ export default async function handler(
             (u.name && u.name.toLowerCase() === key)),
       );
       if (match && (!match.password || match.password === password)) {
+        // Subscription gate — block login when the tenant has no active or
+        // non-expired subscription plan, regardless of the user's own
+        // per-record status.
+        if (!isTenantEffectivelyActive(tenant)) {
+          return res.status(403).json({
+            error: getInactiveReason(tenant) ?? "Account is inactive.",
+            reason: "SUBSCRIPTION_INACTIVE",
+          });
+        }
         return res.status(200).json({
           ok: true,
           user: {
