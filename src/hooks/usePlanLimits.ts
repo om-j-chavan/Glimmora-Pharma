@@ -8,13 +8,13 @@ const PLAN_LIMITS: Record<string, { sites: number; users: number; findings: numb
 };
 
 export function usePlanLimits() {
-  const { tenantPlan, allSites, users } = useTenantConfig();
+  const { tenantPlan, allSitesIncludingInactive, users } = useTenantConfig();
   const { findings, systems } = useTenantData();
 
   const limits = PLAN_LIMITS[tenantPlan] ?? PLAN_LIMITS.trial;
 
   const counts = {
-    sites: allSites.length,
+    sites: allSitesIncludingInactive.length,
     users: users.length,
     findings: findings.length,
     systems: systems.length,

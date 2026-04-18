@@ -16,8 +16,13 @@ export function useTenantConfig() {
   const tenant = tenants.find((t) => t.id === currentTenantId);
   const config = tenant?.config;
 
-  const allSites = (config?.sites ?? []) as TenantSiteConfig[];
+  const rawSites = (config?.sites ?? []) as TenantSiteConfig[];
   const users = (config?.users ?? []) as TenantUserConfig[];
+
+  // Inactive sites are hidden from every consumer EXCEPT Settings → Sites
+  // (which uses allSitesIncludingInactive to still show and re-enable them).
+  const allSites = rawSites.filter((s) => s.status === "Active");
+  const allSitesIncludingInactive = rawSites;
 
   const userConfig = users.find((u) => u.id === currentUser?.id);
 
@@ -57,6 +62,7 @@ export function useTenantConfig() {
     org: config?.org ?? DEFAULT_ORG,
     sites: accessibleSites,
     allSites,
+    allSitesIncludingInactive,
     users,
     userConfig,
     // subscription

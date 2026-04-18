@@ -491,7 +491,7 @@ Click "Reports & Exports" tab
 | Tab | Who | What |
 |---|---|---|
 | Org & Sites | super_admin | Tenant name, contact, site list, site metadata |
-| Sites | super_admin | Add/edit/remove sites, GMP scope, country, risk level |
+| Sites | super_admin | Add/edit/remove sites, GMP scope, country, risk level. Inactive sites remain listed here so they can be re-activated, but are hidden from every other dropdown, heatmap, and picker across the app. |
 | Users & Roles | super_admin | Add/invite users, assign roles, set GxP signatory flag |
 | Regulatory Frameworks | super_admin | Toggle which regulations apply (21 CFR 210/211, Part 11, Annex 11/15, ICH Q9/Q10, WHO GMP) |
 | AGI Policy | super_admin, it_cdo | AGI mode (Autonomous / Assisted / Manual), agent-by-agent toggles, logging, retention |
