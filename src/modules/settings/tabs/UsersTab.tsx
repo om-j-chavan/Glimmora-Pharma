@@ -84,8 +84,8 @@ function makeUserSchema(mode: "add" | "edit") {
     allSites: z.boolean(),
     assignedSites: z.array(z.string()),
     password: mode === "add"
-      ? z.string().min(6, "Password must be at least 6 characters")
-      : z.string().optional().refine((v) => !v || v.length >= 6, { message: "Password must be at least 6 characters" }),
+      ? z.string().min(1, "Password is required")
+      : z.string().optional(),
     confirmPassword: z.string().optional(),
   });
   return base.refine((d) => !d.password || d.password === d.confirmPassword, {
@@ -219,7 +219,7 @@ function UserForm({
           label={mode === "edit" ? "New Password (optional)" : "Password"}
           type="password"
           required={mode === "add"}
-          placeholder="Min 6 characters"
+          placeholder="Enter password"
           error={errors.password?.message}
           {...register("password")}
         />
