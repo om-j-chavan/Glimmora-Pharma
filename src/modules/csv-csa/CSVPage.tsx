@@ -49,9 +49,7 @@ export function CSVPage() {
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const frameworks = useAppSelector((s) => s.settings.frameworks);
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
+  const frameworks = useAppSelector((s) => s.settings.frameworks);  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { hasSites } = useSetupStatus();
 
   const showPart11 = frameworks.p11;
@@ -330,7 +328,7 @@ export function CSVPage() {
 
       {/* Framework banner */}
       {!showPart11 && !showAnnex11 && !showGAMP5 && (
-        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
+        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", "bg-(--warning-bg) border-(--warning)")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1">
             <p className="text-[12px] font-medium text-[#f59e0b]">No compliance frameworks active</p>
@@ -348,8 +346,7 @@ export function CSVPage() {
         <SystemInventoryTab
           systems={systems} filteredSystems={filteredSystems}
           highRisk={highRisk} valOverdue={valOverdue} nonCompliant={nonCompliant}
-          sites={sites} users={users} timezone={timezone} dateFormat={dateFormat}
-          isDark={isDark} showPart11={showPart11} showAnnex11={showAnnex11} showGAMP5={showGAMP5}
+          sites={sites} users={users} timezone={timezone} dateFormat={dateFormat} showPart11={showPart11} showAnnex11={showAnnex11} showGAMP5={showGAMP5}
           isViewOnly={isViewOnly} role={role}
           siteFilter={siteFilter} typeFilter={typeFilter} riskFilter={riskFilter} valFilter={valFilter} searchQ={searchQ} anyFilter={anyFilter}
           onSiteFilterChange={setSiteFilter} onTypeFilterChange={setTypeFilter} onRiskFilterChange={setRiskFilter} onValFilterChange={setValFilter} onSearchChange={setSearchQ}
@@ -364,8 +361,7 @@ export function CSVPage() {
       {/* ═══════════ ROADMAP TAB ═══════════ */}
       <div role="tabpanel" id="panel-roadmap" aria-labelledby="tab-roadmap" tabIndex={0} hidden={activeTab !== "roadmap"}>
         <CSVRoadmapTab
-          systems={systems} roadmap={roadmap} roadmapGrouped={roadmapGrouped} users={users}
-          isDark={isDark} role={role}
+          systems={systems} roadmap={roadmap} roadmapGrouped={roadmapGrouped} users={users} role={role}
           rmSysFilter={rmSysFilter} rmTypeFilter={rmTypeFilter} rmStatusFilter={rmStatusFilter}
           onRmSysFilterChange={setRmSysFilter} onRmTypeFilterChange={setRmTypeFilter} onRmStatusFilterChange={setRmStatusFilter}
           onClearRoadmapFilters={() => { setRmSysFilter(""); setRmTypeFilter(""); setRmStatusFilter(""); }}
@@ -419,8 +415,7 @@ export function CSVPage() {
               <SystemDetailTab
                 selectedSystem={selectedSystem} systems={systems} roadmap={roadmap}
                 findings={findings as any} capas={capas as any}
-                sites={sites} users={users} timezone={timezone} dateFormat={dateFormat}
-                isDark={isDark} isViewOnly={isViewOnly} role={role}
+                sites={sites} users={users} timezone={timezone} dateFormat={dateFormat} isViewOnly={isViewOnly} role={role}
                 showPart11={showPart11} showAnnex11={showAnnex11} showGAMP5={showGAMP5}
                 detailTab={detailTab} onDetailTabChange={setDetailTab}
                 onBack={() => { setDetailDrawerOpen(false); setSelectedSystem(null); }}

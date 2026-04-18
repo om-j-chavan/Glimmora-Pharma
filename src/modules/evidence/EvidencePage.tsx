@@ -52,9 +52,7 @@ export function EvidencePage() {
   const { org, users } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const companyName = org.companyName;
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const user = useAppSelector((s) => s.auth.user);
+  const companyName = org.companyName;  const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
 
   /* ── Aggregate documents ── */
@@ -174,7 +172,7 @@ export function EvidencePage() {
       </header>
 
       {/* Document Library — main view (no tabs) */}
-      <DocumentLibraryTab allDocs={allDocs} filteredDocs={filteredDocs} search={search} setSearch={setSearch} areaFilter={areaFilter} setAreaFilter={setAreaFilter} typeFilter={typeFilter} setTypeFilter={setTypeFilter} systemFilter={systemFilter} setSystemFilter={setSystemFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} anyFilter={anyFilter} clearFilters={clearFilters} viewMode={viewMode} setViewMode={setViewMode} selectedDocs={selectedDocs} toggleDocSelection={toggleDocSelection} setSelectedDocs={setSelectedDocs} systems={systems} isDark={isDark} role={role} timezone={timezone} dateFormat={dateFormat} onAddDocOpen={() => setAddDocOpen(true)} onNavigate={navigate} />
+      <DocumentLibraryTab allDocs={allDocs} filteredDocs={filteredDocs} search={search} setSearch={setSearch} areaFilter={areaFilter} setAreaFilter={setAreaFilter} typeFilter={typeFilter} setTypeFilter={setTypeFilter} systemFilter={systemFilter} setSystemFilter={setSystemFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} anyFilter={anyFilter} clearFilters={clearFilters} viewMode={viewMode} setViewMode={setViewMode} selectedDocs={selectedDocs} toggleDocSelection={toggleDocSelection} setSelectedDocs={setSelectedDocs} systems={systems} role={role} timezone={timezone} dateFormat={dateFormat} onAddDocOpen={() => setAddDocOpen(true)} onNavigate={navigate} />
 
       {/* Floating selection bar */}
       {selectedDocs.size > 0 && (

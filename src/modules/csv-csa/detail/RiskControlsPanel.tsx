@@ -28,9 +28,7 @@ export interface RiskClassificationPatch {
 }
 
 export interface RiskControlsPanelProps {
-  system: GxPSystem;
-  isDark: boolean;
-  role: string;
+  system: GxPSystem;  role: string;
   showPart11: boolean;
   showAnnex11: boolean;
   showGAMP5: boolean;
@@ -40,7 +38,7 @@ export interface RiskControlsPanelProps {
 }
 
 export function RiskControlsPanel({
-  system, isDark, role, showPart11, showAnnex11, showGAMP5,
+  system, role, showPart11, showAnnex11, showGAMP5,
   onNavigateSettings, onSaveRiskFactors, onSaveRiskClassification,
 }: RiskControlsPanelProps) {
   // Default fallback based on GxP relevance for systems that don't yet have risk fields set
@@ -120,7 +118,7 @@ export function RiskControlsPanel({
         </div>
         <div className="card-body space-y-0">
           {classificationRows.map((r, i, arr) => (
-            <div key={r.key} className={clsx("flex justify-between items-center py-3", i < arr.length - 1 && "border-b")} style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
+            <div key={r.key} className={clsx("flex justify-between items-center py-3", i < arr.length - 1 && "border-b")} style={{ borderColor: "var(--bg-border)" }}>
               <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>{r.label}</span>
               {editingRiskClass ? (
                 <select
@@ -180,7 +178,7 @@ export function RiskControlsPanel({
           ) : system.riskFactors?.trim() ? (
             <p className="text-[13px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{system.riskFactors}</p>
           ) : (
-            <div className={clsx("flex items-start gap-2 p-3 rounded-lg", isDark ? "bg-[rgba(245,158,11,0.06)] border border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border border-[#fde68a]")}>
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-(--warning-bg) border border-(--warning)">
               <AlertTriangle className="w-4 h-4 text-[#f59e0b] flex-shrink-0" aria-hidden="true" />
               <div>
                 <p className="text-[12px] font-medium text-[#f59e0b]">Risk factors not documented</p>
@@ -194,21 +192,21 @@ export function RiskControlsPanel({
         <div className="card"><div className="card-header"><div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10b981]" aria-hidden="true" /><span className="card-title">Compliance status</span></div></div><div className="card-body">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             {showPart11 && (
-              <div className={clsx("rounded-lg p-3 border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+              <div className={clsx("rounded-lg p-3 border", "bg-(--bg-surface) border-(--bg-border)")}>
                 <span className="text-[11px] font-semibold uppercase tracking-wider block mb-2" style={{ color: "var(--text-muted)" }}>21 CFR Part 11</span>
                 {complianceBadge(system.part11Status)}
                 <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>{system.part11Status === "Compliant" ? "Audit trail and e-sig validated" : system.part11Status === "Non-Compliant" ? "Remediation required \u2014 raise CAPA" : system.part11Status === "In Progress" ? "Remediation in progress" : "Not applicable for this system"}</p>
               </div>
             )}
             {showAnnex11 && (
-              <div className={clsx("rounded-lg p-3 border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+              <div className={clsx("rounded-lg p-3 border", "bg-(--bg-surface) border-(--bg-border)")}>
                 <span className="text-[11px] font-semibold uppercase tracking-wider block mb-2" style={{ color: "var(--text-muted)" }}>EU GMP Annex 11</span>
                 {complianceBadge(system.annex11Status)}
                 <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>{system.annex11Status === "Compliant" ? "Computerised system validated" : system.annex11Status === "Non-Compliant" ? "Lifecycle validation required" : system.annex11Status === "In Progress" ? "Validation in progress" : "Not applicable"}</p>
               </div>
             )}
             {showGAMP5 && (
-              <div className={clsx("rounded-lg p-3 border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+              <div className={clsx("rounded-lg p-3 border", "bg-(--bg-surface) border-(--bg-border)")}>
                 <span className="text-[11px] font-semibold uppercase tracking-wider block mb-2" style={{ color: "var(--text-muted)" }}>GAMP 5 Category</span>
                 {gampBadge(system.gamp5Category)}
                 <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>{system.gamp5Category === "5" ? "Custom software \u2014 full IQ/OQ/PQ required" : system.gamp5Category === "4" ? "Configured software \u2014 configured items tested" : system.gamp5Category === "3" ? "Non-configured \u2014 standard testing applies" : "Infrastructure \u2014 minimal testing required"}</p>
@@ -217,7 +215,7 @@ export function RiskControlsPanel({
           </div>
         </div></div>
       ) : (
-        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
+        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", "bg-(--warning-bg) border-(--warning)")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1">
             <p className="text-[12px] font-medium text-[#f59e0b]">No compliance frameworks active</p>

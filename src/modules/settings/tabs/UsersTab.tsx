@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
@@ -121,9 +120,7 @@ function UserForm({
   submitIcon: typeof Plus;
   roleOptions: { value: string; label: string }[];
   mode?: "add" | "edit";
-}) {
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const { allSites: tenantSites } = useTenantConfig();
+}) {  const { allSites: tenantSites } = useTenantConfig();
 
   const {
     register,
@@ -250,9 +247,7 @@ function UserForm({
         <div
           className={clsx(
             "flex items-center justify-between p-3 rounded-lg border",
-            isDark
-              ? "bg-[#071526] border-[#1e3a5a]"
-              : "bg-[#f8fafc] border-[#e2e8f0]",
+            "bg-(--bg-surface) border-(--bg-border)",
           )}
         >
           <div>
@@ -303,12 +298,8 @@ function UserForm({
                     className={clsx(
                       "flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-colors",
                       watchSites.includes(site.id)
-                        ? isDark
-                          ? "bg-[rgba(14,165,233,0.08)] border-[#0ea5e9]"
-                          : "bg-[#eff6ff] border-[#0ea5e9]"
-                        : isDark
-                          ? "bg-[#071526] border-[#1e3a5a]"
-                          : "bg-[#f8fafc] border-[#e2e8f0]",
+                        ? "bg-(--brand-muted) border-[#0ea5e9]"
+                        : "bg-(--bg-surface) border-(--bg-border)",
                     )}
                   >
                     <input
@@ -370,9 +361,7 @@ function UserForm({
 }
 
 export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
-  const dispatch = useAppDispatch();
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const {
+  const dispatch = useAppDispatch();  const {
     users,
     tenantId,
     activePlan,
@@ -508,16 +497,10 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         className={clsx(
           "flex items-center justify-between p-3 rounded-xl border",
           isExpired
-            ? isDark
-              ? "bg-[rgba(239,68,68,0.06)] border-[rgba(239,68,68,0.2)]"
-              : "bg-[#fef2f2] border-[#fca5a5]"
+            ? "bg-(--danger-bg) border-(--danger)"
             : isNearExpiry
-              ? isDark
-                ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.2)]"
-                : "bg-[#fffbeb] border-[#fde68a]"
-              : isDark
-                ? "bg-[#071526] border-[#1e3a5a]"
-                : "bg-[#f8fafc] border-[#e2e8f0]",
+              ? "bg-(--warning-bg) border-(--warning)"
+              : "bg-(--bg-surface) border-(--bg-border)",
         )}
       >
         <div className="flex-1 min-w-0">
@@ -574,7 +557,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                 <div
                   className={clsx(
                     "h-1.5 rounded-full",
-                    isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]",
+                    "bg-(--bg-border)",
                   )}
                   role="progressbar"
                   aria-valuenow={Math.round((usedAccounts / maxAccounts) * 100)}
@@ -624,9 +607,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           role="alert"
           className={clsx(
             "rounded-xl p-3 border",
-            isDark
-              ? "bg-[rgba(239,68,68,0.06)] border-[rgba(239,68,68,0.2)]"
-              : "bg-[#fef2f2] border-[#fca5a5]",
+            "bg-(--danger-bg) border-(--danger)",
           )}
         >
           <p className="text-[12px] font-medium text-[#ef4444]">

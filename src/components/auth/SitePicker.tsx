@@ -19,21 +19,21 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 
 const riskStyles = {
   HIGH: {
-    iconBg: "bg-[rgba(239,68,68,0.12)]",
+    iconBg: "bg-(--danger-bg)",
     iconColor: "text-[#ef4444]",
-    badgeBg: "bg-[rgba(239,68,68,0.12)]",
+    badgeBg: "bg-(--danger-bg)",
     badgeColor: "text-[#ef4444]",
   },
   MEDIUM: {
-    iconBg: "bg-[rgba(245,158,11,0.12)]",
+    iconBg: "bg-(--warning-bg)",
     iconColor: "text-[#f59e0b]",
-    badgeBg: "bg-[rgba(245,158,11,0.12)]",
+    badgeBg: "bg-(--warning-bg)",
     badgeColor: "text-[#f59e0b]",
   },
   LOW: {
-    iconBg: "bg-[rgba(16,185,129,0.12)]",
+    iconBg: "bg-(--success-bg)",
     iconColor: "text-[#10b981]",
-    badgeBg: "bg-[rgba(16,185,129,0.12)]",
+    badgeBg: "bg-(--success-bg)",
     badgeColor: "text-[#10b981]",
   },
 };

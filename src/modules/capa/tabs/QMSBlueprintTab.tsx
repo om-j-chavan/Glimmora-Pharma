@@ -26,9 +26,7 @@ interface QMSProcess {
 interface QMSBlueprintTabProps {
   openCAPAs: CAPA[];
   noRCACount: number;
-  pendingReviewCount: number;
-  isDark: boolean;
-  selectedStep: number | null;
+  pendingReviewCount: number;  selectedStep: number | null;
   onSelectStep: (step: number | null) => void;
   lifecycleSteps: LifecycleStep[];
   qmsProcesses: QMSProcess[];
@@ -37,7 +35,7 @@ interface QMSBlueprintTabProps {
 }
 
 export function QMSBlueprintTab({
-  openCAPAs, noRCACount, pendingReviewCount, isDark,
+  openCAPAs, noRCACount, pendingReviewCount,
   selectedStep, onSelectStep, lifecycleSteps, qmsProcesses,
   stepHasProblem, getProcessMetrics,
 }: QMSBlueprintTabProps) {
@@ -56,10 +54,9 @@ export function QMSBlueprintTab({
           <div key={step.step} className="flex items-stretch">
             <button type="button" role="button" aria-expanded={selectedStep === step.step}
               onClick={() => onSelectStep(selectedStep === step.step ? null : step.step)}
-              className={clsx("flex-shrink-0 w-[148px] rounded-xl overflow-hidden border-t-2 p-3 text-left bg-transparent outline-none cursor-pointer transition-all duration-150",
-                isDark ? "border border-[#1e3a5a]" : "border border-[#e2e8f0]",
+              className={clsx("flex-shrink-0 w-[148px] rounded-xl overflow-hidden border-t-2 p-3 text-left bg-transparent outline-none cursor-pointer transition-all duration-150 border border-(--bg-border)",
                 selectedStep === step.step && "ring-2 ring-offset-1")}
-              style={{ borderTopColor: step.color, background: isDark ? "#0a1f38" : "#ffffff", ...(selectedStep === step.step ? { boxShadow: `0 0 0 2px ${step.color}` } : {}) }}>
+              style={{ borderTopColor: step.color, background: "var(--bg-elevated)", ...(selectedStep === step.step ? { boxShadow: `0 0 0 2px ${step.color}` } : {}) }}>
               <div className="flex items-center justify-between mb-2">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: step.color + "18" }}>
                   <step.Icon className="w-4 h-4" style={{ color: step.color }} aria-hidden="true" />
@@ -72,7 +69,7 @@ export function QMSBlueprintTab({
               <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{step.label}</p>
               <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{step.desc}</p>
             </button>
-            {i < lifecycleSteps.length - 1 && <div className="flex-shrink-0 self-center mx-0.5" aria-hidden="true"><ChevronRight className="w-4 h-4" style={{ color: "#1e3a5a" }} /></div>}
+            {i < lifecycleSteps.length - 1 && <div className="flex-shrink-0 self-center mx-0.5" aria-hidden="true"><ChevronRight className="w-4 h-4" style={{ color: "var(--bg-border)" }} /></div>}
           </div>
         ))}
       </div>
@@ -109,7 +106,7 @@ export function QMSBlueprintTab({
               </div>
               <div className="card-body space-y-3">
                 <div><p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: "#10b981" }}>Target state</p><p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{proc.targetState}</p></div>
-                <div className="border-t" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }} />
+                <div className="border-t" style={{ borderColor: "var(--bg-border)" }} />
                 <div><p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: "#f59e0b" }}>Current gap</p><p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{proc.currentGap}</p></div>
                 {hasData ? (
                   <div className="flex gap-6 pt-2">

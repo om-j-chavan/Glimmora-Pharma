@@ -33,9 +33,7 @@ interface CAPATrackerTabProps {
   capas: CAPA[];
   filteredCAPAs: CAPA[];
   selectedCAPA: CAPA | null;
-  onSelectCAPA: (c: CAPA | null) => void;
-  isDark: boolean;
-  isViewOnly: boolean;
+  onSelectCAPA: (c: CAPA | null) => void;  isViewOnly: boolean;
   users: UserConfig[];
   user: AuthUser | null;
   sites: SiteOption[];
@@ -52,8 +50,7 @@ interface CAPATrackerTabProps {
 }
 
 export function CAPATrackerTab({
-  capas, filteredCAPAs, selectedCAPA, onSelectCAPA,
-  isDark, isViewOnly, users, user, sites, timezone, dateFormat,
+  capas, filteredCAPAs, selectedCAPA, onSelectCAPA, isViewOnly, users, user, sites, timezone, dateFormat,
   canSign, canCloseCapa,
   onAddOpen, onEditOpen, onSignOpen, onSubmitForReview,
   onNavigateGap, onNavigateCapa,
@@ -128,7 +125,7 @@ export function CAPATrackerTab({
             <tbody>
               {displayed.map((c) => (
                 <tr key={c.id} onClick={() => onSelectCAPA(c)} className="cursor-pointer" aria-selected={selectedCAPA?.id === c.id}
-                  style={selectedCAPA?.id === c.id ? { background: isDark ? "#0c2f5a" : "#eff6ff" } : {}}>
+                  style={selectedCAPA?.id === c.id ? { background: "var(--brand-muted)" } : {}}>
                   <th scope="row">
                     <div className="font-mono text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>{c.id}</div>
                     {c.findingId && <div className="flex items-center gap-1 mt-0.5"><Link2 className="w-3 h-3 text-[#0ea5e9]" aria-hidden="true" /><span className="text-[10px] text-[#0ea5e9]">{c.findingId}</span></div>}
@@ -191,7 +188,7 @@ export function CAPATrackerTab({
                 { label: "Product quality impact", variant: riskVariant(selectedCAPA.risk), text: riskLevel(selectedCAPA.risk) },
                 { label: "Regulatory exposure", variant: (selectedCAPA.diGate ? "red" : riskVariant(selectedCAPA.risk)) as "red" | "amber" | "green", text: selectedCAPA.diGate ? "High" : riskLevel(selectedCAPA.risk) },
               ].map((row) => (
-                <div key={row.label} className={clsx("flex justify-between items-center py-2 border-b")} style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
+                <div key={row.label} className={clsx("flex justify-between items-center py-2 border-b")} style={{ borderColor: "var(--bg-border)" }}>
                   <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{row.label}</span>
                   <Badge variant={row.variant}>{row.text}</Badge>
                 </div>
@@ -221,7 +218,7 @@ export function CAPATrackerTab({
               {selectedCAPA.rca ? (
                 <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{selectedCAPA.rca}</p>
               ) : (
-                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ background: isDark ? "rgba(245,158,11,0.06)" : "#fffbeb", border: isDark ? "1px solid rgba(245,158,11,0.2)" : "1px solid #fde68a" }}>
+                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ background: "var(--warning-bg)", border: "1px solid var(--warning)" }}>
                   <AlertTriangle className="w-4 h-4 text-[#f59e0b] shrink-0 mt-0.5" aria-hidden="true" />
                   <div>
                     <p className="text-[12px] font-medium text-[#f59e0b]">RCA not yet documented</p>
@@ -237,7 +234,7 @@ export function CAPATrackerTab({
               const diOpen = selectedCAPA.diGateStatus !== "cleared";
               const diCleared = selectedCAPA.diGateStatus === "cleared";
               return (
-                <div className={clsx("flex items-start gap-2 p-3 rounded-lg text-[12px] border", diOpen ? (isDark ? "bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.2)]" : "bg-[#fef2f2] border-[#fca5a5]") : (isDark ? "bg-[rgba(16,185,129,0.08)] border-[rgba(16,185,129,0.2)]" : "bg-[#f0fdf4] border-[#a7f3d0]"))}>
+                <div className={clsx("flex items-start gap-2 p-3 rounded-lg text-[12px] border", diOpen ? "bg-(--danger-bg) border-(--danger)" : "bg-(--success-bg) border-(--success)")}>
                   {diOpen ? <AlertCircle className="w-4 h-4 text-[#ef4444] shrink-0 mt-0.5" aria-hidden="true" /> : <CheckCircle2 className="w-4 h-4 text-[#10b981] shrink-0 mt-0.5" aria-hidden="true" />}
                   <div className="flex-1 min-w-0">
                     <span className="font-semibold block" style={{ color: diOpen ? "#ef4444" : "#10b981" }}>
@@ -289,7 +286,7 @@ export function CAPATrackerTab({
               (selectedCAPA.rca?.trim().length ?? 0) > 0 ? (
                 <Button variant="secondary" icon={Send} fullWidth onClick={() => onSubmitForReview(selectedCAPA.id)}>Submit for QA review</Button>
               ) : (
-                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ background: isDark ? "rgba(245,158,11,0.06)" : "#fffbeb", border: isDark ? "1px solid rgba(245,158,11,0.2)" : "1px solid #fde68a" }}>
+                <div className="flex items-start gap-2 p-3 rounded-lg" style={{ background: "var(--warning-bg)", border: "1px solid var(--warning)" }}>
                   <AlertTriangle className="w-4 h-4 text-[#f59e0b] shrink-0 mt-0.5" aria-hidden="true" />
                   <div>
                     <p className="text-[12px] font-medium text-[#f59e0b]">RCA required to submit</p>

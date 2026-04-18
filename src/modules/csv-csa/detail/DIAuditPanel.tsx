@@ -13,15 +13,13 @@ import { Button } from "@/components/ui/Button";
 export interface DIAuditPanelProps {
   system: GxPSystem;
   findings: Finding[];
-  capas: CAPA[];
-  isDark: boolean;
-  role: string;
+  capas: CAPA[];  role: string;
   onNavigateGap: (findingId: string) => void;
   onNavigateCapa: (capaId: string) => void;
   onSaveRemediation: (patch: { remediationTargetDate?: string; remediationNotes?: string }) => void;
 }
 
-export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigateGap, onNavigateCapa, onSaveRemediation }: DIAuditPanelProps) {
+export function DIAuditPanel({ system, findings, capas, role, onNavigateGap, onNavigateCapa, onSaveRemediation }: DIAuditPanelProps) {
   const [editingRem, setEditingRem] = useState(false);
   const [remTargetDate, setRemTargetDate] = useState(
     system.remediationTargetDate ? dayjs.utc(system.remediationTargetDate).format("YYYY-MM-DD") : "",
@@ -77,8 +75,8 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
   const openDIGateCAPAs = linkedCAPAs.filter((c) => c.diGate && c.status !== "Closed");
 
   function statusPanel(isBadS: boolean, isAmberS: boolean, icon: React.ReactNode, label: string, desc: string) {
-    const bg = isBadS ? "rgba(239,68,68,0.08)" : isAmberS ? "rgba(245,158,11,0.08)" : "rgba(16,185,129,0.08)";
-    const border = isBadS ? "rgba(239,68,68,0.2)" : isAmberS ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.2)";
+    const bg = isBadS ? "var(--danger-bg)" : isAmberS ? "var(--warning-bg)" : "var(--success-bg)";
+    const border = isBadS ? "var(--danger-bg)" : isAmberS ? "var(--warning-bg)" : "var(--success-bg)";
     return (
       <div className="flex items-start gap-2 p-3 rounded-lg text-[12px]" style={{ background: bg, border: `1px solid ${border}` }}>
         {icon}
@@ -121,7 +119,7 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
         {editingRem ? (
           <div
             className="p-3 rounded-lg space-y-3"
-            style={{ background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)" }}
+            style={{ background: "var(--warning-bg)", border: "1px solid rgba(245,158,11,0.35)" }}
           >
             <div className="flex items-center gap-2">
               <Wrench className="w-4 h-4 shrink-0" style={{ color: "#854f0b" }} aria-hidden="true" />
@@ -148,7 +146,7 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
         ) : (system.remediationTargetDate || system.remediationNotes) ? (
           <div
             className="flex items-start gap-2 p-3 rounded-lg"
-            style={{ background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)" }}
+            style={{ background: "var(--warning-bg)", border: "1px solid rgba(245,158,11,0.35)" }}
             role="status"
           >
             <Wrench className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#854f0b" }} aria-hidden="true" />
@@ -173,7 +171,7 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
         ) : (
           <div className="space-y-2">{linkedFindings.map((f) => (
             <div key={f.id} onClick={() => onNavigateGap(f.id)} role="button" aria-label={`Open finding ${f.id} in Gap Assessment`}
-              className={clsx("flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors hover:border-[#0ea5e9]", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+              className={clsx("flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors hover:border-[#0ea5e9]", "bg-(--bg-surface) border-(--bg-border)")}>
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <span className="font-mono text-[11px] font-semibold text-[#0ea5e9] flex-shrink-0">{f.id}</span>
                 <span className="text-[11px] truncate" style={{ color: "var(--text-secondary)" }}>{f.requirement}</span>
@@ -193,7 +191,7 @@ export function DIAuditPanel({ system, findings, capas, isDark, role, onNavigate
         ) : (
           <div className="space-y-2">{linkedCAPAs.map((c) => (
             <div key={c.id} onClick={() => onNavigateCapa(c.id)} role="button" aria-label={`Open ${c.id} in CAPA Tracker`}
-              className={clsx("flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors hover:border-[#0ea5e9]", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+              className={clsx("flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors hover:border-[#0ea5e9]", "bg-(--bg-surface) border-(--bg-border)")}>
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <span className="font-mono text-[11px] font-semibold text-[#0ea5e9] flex-shrink-0">{c.id}</span>
                 <span className="text-[11px] truncate" style={{ color: "var(--text-secondary)" }}>{c.description}</span>

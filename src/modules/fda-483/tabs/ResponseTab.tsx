@@ -35,9 +35,7 @@ function getEffectiveStatus(e: FDA483Event): EventStatus {
 
 export interface ResponseTabProps {
   liveEvent: FDA483Event | null;
-  capas: CAPA[];
-  isDark: boolean;
-  role: string;
+  capas: CAPA[];  role: string;
   canSign: boolean;
   agiMode: string;
   agiAgent: boolean;
@@ -60,7 +58,6 @@ export interface ResponseTabProps {
 export function ResponseTab({
   liveEvent,
   capas,
-  isDark,
   role,
   canSign,
   agiMode,
@@ -166,7 +163,7 @@ export function ResponseTab({
         <div
           className={clsx(
             "rounded-xl p-5 mb-4 border",
-            isDark ? "bg-[rgba(16,185,129,0.08)] border-[rgba(16,185,129,0.3)]" : "bg-[#f0fdf4] border-[#a7f3d0]",
+            "bg-(--success-bg) border-(--success)",
           )}
           role="status"
           aria-live="polite"

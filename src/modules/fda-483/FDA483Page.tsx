@@ -76,9 +76,7 @@ export function FDA483Page() {
   const { org, sites, users } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
-  const dateFormat = org.dateFormat;
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
+  const dateFormat = org.dateFormat;  const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const agiAgent = useAppSelector((s) => s.settings.agi.agents.fda483);
   const user = useAppSelector((s) => s.auth.user);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
@@ -321,9 +319,7 @@ export function FDA483Page() {
         <div
           className={clsx(
             "flex items-start gap-3 p-4 rounded-xl border",
-            isDark
-              ? "bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.25)]"
-              : "bg-[#fef2f2] border-[#fca5a5]",
+            "bg-(--danger-bg) border-(--danger)",
           )}
           role="alert"
         >
@@ -395,7 +391,6 @@ export function FDA483Page() {
               sites={sites}
               timezone={timezone}
               dateFormat={dateFormat}
-              isDark={isDark}
               role={role}
               onTypeFilterChange={setTypeFilter}
               onAgencyFilterChange={setAgencyFilter}
@@ -431,7 +426,6 @@ export function FDA483Page() {
               sites={sites}
               timezone={timezone}
               dateFormat={dateFormat}
-              isDark={isDark}
               role={role}
               ownerName={ownerName}
               onGoToEvents={resetWorkflow}
@@ -445,7 +439,6 @@ export function FDA483Page() {
                       liveEvent={liveEvent}
                       selectedObs={selectedObs}
                       selectedObsId={selectedObsId}
-                      isDark={isDark}
                       role={role}
                       whyAnswers={whyAnswers}
                       fishboneAnswers={fishboneAnswers}
@@ -508,7 +501,6 @@ export function FDA483Page() {
             <ResponseTab
           liveEvent={liveEvent}
           capas={capas}
-          isDark={isDark}
           role={role}
           canSign={canSign}
           canSubmit={canSubmitResponse}
@@ -613,7 +605,6 @@ export function FDA483Page() {
       <SignSubmitModal
         open={signOpen}
         liveEvent={liveEvent}
-        isDark={isDark}
         signMeaning={signMeaning}
         signPassword={signPassword}
         onClose={() => setSignOpen(false)}

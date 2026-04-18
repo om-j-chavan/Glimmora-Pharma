@@ -94,10 +94,7 @@ export function GapPage() {
   const frameworks = useAppSelector((s) => s.settings.frameworks);
   const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
-  const agiCapa = useAppSelector((s) => s.settings.agi.agents.capa);
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-
-  const activeFrameworks = useMemo(
+  const agiCapa = useAppSelector((s) => s.settings.agi.agents.capa);  const activeFrameworks = useMemo(
     () => (Object.keys(frameworks) as (keyof typeof frameworks)[]).filter((k) => frameworks[k]),
     [frameworks],
   );
@@ -285,7 +282,7 @@ export function GapPage() {
           findingsTotal={findings.length} baseCount={baseFindings.length}
           criticalCount={criticalCount} highCount={highCount} lowCount={lowCount}
           openCount={openCount} closedCount={closedCount} overdueCount={overdueCount}
-          topDrivers={topDrivers} severityData={severityData} isDark={isDark}
+          topDrivers={topDrivers} severityData={severityData}
           renderFilters={renderFilters}
           lastClosedFinding={(() => {
             const closed = baseFindings.filter((f) => f.status === "Closed");
@@ -299,8 +296,7 @@ export function GapPage() {
       {activeTab === "register" && (
         <GapRegisterTab
           filteredFindings={baseFindings} findingsTotal={findings.length}
-          selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding}
-          isDark={isDark} isViewOnly={isViewOnly} users={users}
+          selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding} isViewOnly={isViewOnly} users={users}
           timezone={timezone} dateFormat={dateFormat} capas={capas}
           agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
           renderFilters={renderFilters}
@@ -313,8 +309,7 @@ export function GapPage() {
         <GapEvidenceTab
           evidenceAreas={evidenceAreas} allEvidenceRows={allEvidenceRows}
           completeCount={completeCount} partialCount={partialCount} missingCount={missingCount}
-          expandedAreas={expandedAreas} onToggleArea={toggleArea}
-          isDark={isDark} isViewOnly={isViewOnly} users={users}
+          expandedAreas={expandedAreas} onToggleArea={toggleArea} isViewOnly={isViewOnly} users={users}
           onLinkEvidence={(fid, link) => { setEvidenceFindingId(fid); setEvidenceCurrentLink(link); setEvidenceModalOpen(true); }}
           onFindingClick={(fid) => { setActiveTab("register"); const f = findings.find((x) => x.id === fid); if (f) setSelectedFinding(f); }}
           onExport={() => setExportPopup(true)}
@@ -335,7 +330,6 @@ export function GapPage() {
         onSave={handleLinkEvidence}
         findingId={evidenceFindingId} currentLink={evidenceCurrentLink}
         finding={findings.find((f) => f.id === evidenceFindingId)}
-        isDark={isDark}
       />
 
       {/* Popups */}

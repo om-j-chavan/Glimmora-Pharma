@@ -11,11 +11,9 @@ interface EvidenceLinkModalProps {
   onSave: (findingId: string, evidenceLink: string) => void;
   findingId: string;
   currentLink: string;
-  finding: Finding | undefined;
-  isDark: boolean;
-}
+  finding: Finding | undefined;}
 
-export function EvidenceLinkModal({ isOpen, onClose, onSave, findingId, currentLink, finding, isDark }: EvidenceLinkModalProps) {
+export function EvidenceLinkModal({ isOpen, onClose, onSave, findingId, currentLink, finding }: EvidenceLinkModalProps) {
   const [evidenceInput, setEvidenceInput] = useState(currentLink);
 
   useEffect(() => {
@@ -29,7 +27,7 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, findingId, currentL
 
   return (
     <Modal open={isOpen} onClose={handleClose} title={currentLink ? "Update evidence document" : "Link evidence document"}>
-      <div className={clsx("rounded-lg p-3 mb-4 border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+      <div className={clsx("rounded-lg p-3 mb-4 border", "bg-(--bg-surface) border-(--bg-border)")}>
         <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Linking evidence for</p>
         <p className="font-mono text-[12px] font-semibold text-[#0ea5e9] mt-0.5">{findingId}</p>
         {finding && <p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}>{finding.requirement}</p>}

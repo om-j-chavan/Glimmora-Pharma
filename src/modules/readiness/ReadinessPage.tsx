@@ -395,7 +395,7 @@ export function ReadinessPage() {
 
                                 {/* Suggestion banner */}
                                 {!isComplete && card.showSuggestion && role !== "viewer" && (
-                                  <div className="mt-2 rounded-lg p-2.5" style={{ background: isDark ? "rgba(245,158,11,0.08)" : "#FEF9EC", border: "1px solid #F59E0B" }}>
+                                  <div className="mt-2 rounded-lg p-2.5" style={{ background: "var(--warning-bg)", border: "1px solid #F59E0B" }}>
                                     <p className="text-[11px] font-semibold mb-2" style={{ color: isDark ? "#f59e0b" : "#7A6200" }}>💡 {card.suggestionText ?? "Ready to mark this done?"}</p>
                                     <div className="flex items-center gap-2">
                                       <button
@@ -426,9 +426,9 @@ export function ReadinessPage() {
                                       onClick={() => markCardComplete(card.id, card.action)}
                                       aria-label={`Mark complete: ${card.action}`}
                                       className="w-full flex items-center justify-center gap-1 text-[10px] font-semibold rounded-md py-1 cursor-pointer border transition-colors"
-                                      style={{ background: "rgba(245,158,11,0.1)", borderColor: "rgba(245,158,11,0.3)", color: "#f59e0b" }}
-                                      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(245,158,11,0.2)"; }}
-                                      onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(245,158,11,0.1)"; }}
+                                      style={{ background: "var(--warning-bg)", borderColor: "var(--warning-bg)", color: "#f59e0b" }}
+                                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--warning-bg)"; }}
+                                      onMouseLeave={(e) => { e.currentTarget.style.background = "var(--warning-bg)"; }}
                                     >
                                       <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Mark Complete
                                     </button>
@@ -480,7 +480,7 @@ export function ReadinessPage() {
         <section aria-label="Governance model" className="flex flex-col gap-3">
           {/* ─── SECTION 1 — War room model ─── */}
           <CollapsibleSection id="war-room" icon={AlertTriangle} iconColor="#f59e0b" title="War room model" isOpen={openSections.has("war-room")} onToggle={() => toggleSection("war-room")}>
-            <div className={clsx("flex items-start gap-3 p-4 rounded-xl border", isDark ? "bg-[rgba(14,165,233,0.06)] border-[rgba(14,165,233,0.15)]" : "bg-[#eff6ff] border-[#bfdbfe]")}>
+            <div className={clsx("flex items-start gap-3 p-4 rounded-xl border", "bg-(--brand-muted) border-(--brand)")}>
               <AlertTriangle className="w-4 h-4 text-[#0ea5e9] shrink-0 mt-0.5" aria-hidden="true" />
               <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>During an FDA inspection, two parallel teams operate. Front room faces the inspector. Back room coordinates evidence and responses.</p>
             </div>
@@ -704,7 +704,7 @@ export function ReadinessPage() {
                 type="button"
                 onClick={dismissTrainingInfo}
                 aria-label="Dismiss info banner"
-                className="p-1 rounded-md cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.18)]"
+                className="p-1 rounded-md cursor-pointer border-none bg-transparent hover:bg-(--brand-muted)"
                 style={{ color: "var(--brand)" }}
               >
                 <X className="w-4 h-4" aria-hidden="true" />
@@ -775,12 +775,12 @@ export function ReadinessPage() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {/* ─── COLUMN 1: OVERDUE ─── */}
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: isDark ? "rgba(239,68,68,0.08)" : "#FEF2F2", border: `1px solid ${isDark ? "rgba(239,68,68,0.2)" : "#FECACA"}` }}>
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--danger-bg)", border: `1px solid ${"var(--danger-bg)"}` }}>
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="w-4 h-4 shrink-0" style={{ color: "#A32D2D" }} aria-hidden="true" />
                       <p className="text-[12.5px] font-semibold" style={{ color: isDark ? "#ef4444" : "#A32D2D" }}>Overdue</p>
                     </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: isDark ? "rgba(239,68,68,0.15)" : "#FECACA", color: isDark ? "#ef4444" : "#A32D2D" }}>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--danger-bg)", color: isDark ? "#ef4444" : "#A32D2D" }}>
                       {overdueSims.length} simulation{overdueSims.length !== 1 ? "s" : ""}
                     </span>
                   </div>
@@ -793,7 +793,7 @@ export function ReadinessPage() {
                     <div key={sim.id} className="card p-4" style={cardShell("#ef4444")}>
                       <SimCardHeader sim={sim} />
                       <div className="flex items-center gap-2 mb-3">
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>Overdue</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--danger-bg)", color: "#ef4444" }}>Overdue</span>
                         <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{dayjs.utc(sim.scheduledAt).tz(timezone).format("DD MMM YYYY")}</span>
                       </div>
                       <SimCardMeta sim={sim} />
@@ -806,12 +806,12 @@ export function ReadinessPage() {
 
                 {/* ─── COLUMN 2: UPCOMING ─── */}
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: isDark ? "rgba(245,158,11,0.08)" : "#FEF9EC", border: `1px solid ${isDark ? "rgba(245,158,11,0.2)" : "#FDE68A"}` }}>
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--warning-bg)", border: `1px solid ${"var(--warning-bg)"}` }}>
                     <div className="flex items-center gap-2">
                       <Clock className="w-4 h-4 shrink-0" style={{ color: "#7A6200" }} aria-hidden="true" />
                       <p className="text-[12.5px] font-semibold" style={{ color: isDark ? "#f59e0b" : "#7A6200" }}>Upcoming</p>
                     </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: isDark ? "rgba(245,158,11,0.15)" : "#FDE68A", color: isDark ? "#f59e0b" : "#7A6200" }}>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--warning-bg)", color: isDark ? "#f59e0b" : "#7A6200" }}>
                       {upcomingSims.length} simulation{upcomingSims.length !== 1 ? "s" : ""}
                     </span>
                   </div>
@@ -831,14 +831,14 @@ export function ReadinessPage() {
                         <SimCardHeader sim={sim} />
                         <div className="flex items-center gap-2 mb-3 flex-wrap">
                           {isToday ? (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(16,185,129,0.15)", color: "#10b981" }}>Today</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--success-bg)", color: "#10b981" }}>Today</span>
                           ) : dl === 1 ? (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}>Tomorrow</span>
                           ) : (
                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}>{dl} days away</span>
                           )}
                           {isRunning && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(14,165,233,0.15)", color: "#0ea5e9" }}>In Progress</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--brand-muted)", color: "#0ea5e9" }}>In Progress</span>
                           )}
                         </div>
                         <SimCardMeta sim={sim} />
@@ -855,12 +855,12 @@ export function ReadinessPage() {
 
                 {/* ─── COLUMN 3: COMPLETED ─── */}
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: isDark ? "rgba(16,185,129,0.08)" : "#E8F5F1", border: `1px solid ${isDark ? "rgba(16,185,129,0.2)" : "#A7F0D4"}` }}>
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--success-bg)", border: `1px solid ${"var(--success-bg)"}` }}>
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "#0F6E56" }} aria-hidden="true" />
                       <p className="text-[12.5px] font-semibold" style={{ color: isDark ? "#10b981" : "#0F6E56" }}>Completed</p>
                     </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: isDark ? "rgba(16,185,129,0.15)" : "#A7F0D4", color: isDark ? "#10b981" : "#0F6E56" }}>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--success-bg)", color: isDark ? "#10b981" : "#0F6E56" }}>
                       {completedSims.length} simulation{completedSims.length !== 1 ? "s" : ""}
                     </span>
                   </div>
@@ -1034,7 +1034,7 @@ export function ReadinessPage() {
                         type="button"
                         onClick={() => simSetValue("participants", watchParticipants.filter((x) => x !== id))}
                         aria-label={`Remove ${u.name}`}
-                        className="inline-flex items-center justify-center w-4 h-4 rounded-full cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.18)]"
+                        className="inline-flex items-center justify-center w-4 h-4 rounded-full cursor-pointer border-none bg-transparent hover:bg-(--brand-muted)"
                         style={{ color: "var(--brand)" }}
                       >
                         <X className="w-3 h-3" aria-hidden="true" />
@@ -1117,7 +1117,7 @@ export function ReadinessPage() {
                 {TRAINING_MODULES.map((m) => {
                   const checked = completeModules.has(m);
                   return (
-                    <label key={m} className="flex items-center gap-2 py-1 px-2 cursor-pointer rounded-md hover:bg-[rgba(14,165,233,0.04)]">
+                    <label key={m} className="flex items-center gap-2 py-1 px-2 cursor-pointer rounded-md hover:bg-(--brand-muted)">
                       <input
                         type="checkbox"
                         className="w-3.5 h-3.5 accent-[#0ea5e9] cursor-pointer"
@@ -1130,7 +1130,7 @@ export function ReadinessPage() {
                 })}
               </div>
               {completeModules.size > 0 && (
-                <div className={clsx("rounded-lg p-2.5", isDark ? "bg-[rgba(14,165,233,0.08)] border border-[rgba(14,165,233,0.2)]" : "bg-[#eff6ff] border border-[#bfdbfe]")}>
+                <div className={clsx("rounded-lg p-2.5", isDark ? "bg-(--brand-muted) border border-(--brand)" : "bg-[#eff6ff] border border-[#bfdbfe]")}>
                   <p className="text-[11px] font-semibold mb-1" style={{ color: "var(--brand)" }}>For participants:</p>
                   <ul className="space-y-0.5 list-none p-0 m-0">
                     {activeSim.participants.map((id) => (

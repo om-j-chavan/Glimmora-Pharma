@@ -29,16 +29,14 @@ interface AddCAPAModalProps {
   onClose: () => void;
   onSave: (data: CAPAForm) => void;
   users: UserConfig[];
-  sites: SiteConfig[];
-  isDark: boolean;
-  lockedSiteId?: string | null;
+  sites: SiteConfig[];  lockedSiteId?: string | null;
   defaultDescription?: string;
   defaultSource?: CAPAForm["source"];
   defaultDiGate?: boolean;
   defaultRisk?: CAPAForm["risk"];
 }
 
-export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, isDark, lockedSiteId, defaultDescription, defaultSource, defaultDiGate, defaultRisk }: AddCAPAModalProps) {
+export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSiteId, defaultDescription, defaultSource, defaultDiGate, defaultRisk }: AddCAPAModalProps) {
   const { register: reg, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<CAPAForm>({
     resolver: zodResolver(capaSchema),
     defaultValues: { source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "High", siteId: lockedSiteId ?? "", effectivenessCheck: true, diGate: defaultDiGate ?? false, description: defaultDescription ?? "" },
@@ -78,10 +76,10 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, isDark, lo
           <div><label htmlFor="capa-finding" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Linked finding (optional)</label><input id="capa-finding" type="text" className="input text-[12px]" placeholder="FIND-001" {...reg("findingId")} /></div>
 
           {/* Toggles */}
-          <div className={clsx("flex items-center justify-between p-3 rounded-lg border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+          <div className={clsx("flex items-center justify-between p-3 rounded-lg border", "bg-(--bg-surface) border-(--bg-border)")}>
             <Controller name="effectivenessCheck" control={control} render={({ field }) => <Toggle id="eff-toggle" checked={field.value} onChange={field.onChange} label="Effectiveness check" description="90-day post-closure monitoring" />} />
           </div>
-          <div className={clsx("flex items-center justify-between p-3 rounded-lg border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+          <div className={clsx("flex items-center justify-between p-3 rounded-lg border", "bg-(--bg-surface) border-(--bg-border)")}>
             <Controller name="diGate" control={control} render={({ field }) => <Toggle id="di-toggle" checked={field.value} onChange={field.onChange} label="DI gate required" description="Data integrity review needed" />} />
           </div>
         </div>

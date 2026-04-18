@@ -13,14 +13,14 @@ import { NotificationBell } from "./NotificationBell";
 import dayjs from "@/lib/dayjs";
 
 const roleBadge: Record<UserRole, { bg: string; color: string }> = {
-  super_admin:        { bg: "rgba(239,68,68,0.12)",   color: "#ef4444" },
+  super_admin:        { bg: "var(--danger-bg)",   color: "#ef4444" },
   customer_admin:     { bg: "rgba(139,105,20,0.12)",  color: "#8b6914" },
   qa_head:            { bg: "rgba(139,92,246,0.12)",  color: "#a78bfa" },
-  qc_lab_director:    { bg: "rgba(16,185,129,0.12)",  color: "#10b981" },
+  qc_lab_director:    { bg: "var(--success-bg)",  color: "#10b981" },
   regulatory_affairs: { bg: "rgba(236,72,153,0.12)",  color: "#f472b6" },
-  csv_val_lead:       { bg: "rgba(14,165,233,0.12)",  color: "#38bdf8" },
+  csv_val_lead:       { bg: "var(--brand-muted)",  color: "#38bdf8" },
   it_cdo:             { bg: "rgba(20,184,166,0.12)",  color: "#2dd4bf" },
-  operations_head:    { bg: "rgba(245,158,11,0.12)",  color: "#f59e0b" },
+  operations_head:    { bg: "var(--warning-bg)",  color: "#f59e0b" },
   viewer:             { bg: "rgba(148,163,184,0.1)",   color: "#94a3b8" },
 };
 

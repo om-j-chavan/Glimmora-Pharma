@@ -82,9 +82,7 @@ export interface ObservationsTabProps {
   capas: CAPA[];
   sites: Site[];
   timezone: string;
-  dateFormat: string;
-  isDark: boolean;
-  role: string;
+  dateFormat: string;  role: string;
   ownerName: (id: string) => string;
   onGoToEvents: () => void;
   onAddObservation: () => void;
@@ -98,7 +96,6 @@ export function ObservationsTab({
   sites,
   timezone,
   dateFormat,
-  isDark,
   role,
   ownerName,
   onGoToEvents,
@@ -220,8 +217,8 @@ export function ObservationsTab({
           role="status"
           className="flex items-start gap-2 p-3 rounded-xl mb-4 border"
           style={{
-            background: isDark ? "rgba(16,185,129,0.08)" : "#f0fdf4",
-            borderColor: isDark ? "rgba(16,185,129,0.25)" : "#a7f3d0",
+            background: "var(--success-bg)",
+            borderColor: "var(--success-bg)",
           }}
         >
           <ClipboardCheck className="w-4 h-4 mt-0.5 shrink-0 text-[#10b981]" aria-hidden="true" />
@@ -242,8 +239,8 @@ export function ObservationsTab({
           role="alert"
           className="flex items-start gap-2 p-3 rounded-xl mb-4 border"
           style={{
-            background: isDark ? "rgba(245,158,11,0.08)" : "#fffbeb",
-            borderColor: isDark ? "rgba(245,158,11,0.25)" : "#fde68a",
+            background: "var(--warning-bg)",
+            borderColor: "var(--warning-bg)",
           }}
         >
           <span aria-hidden="true" className="text-[14px]">&#9888;&#65039;</span>
@@ -440,7 +437,7 @@ export function ObservationsTab({
               <div
                 key={c.id}
                 className="flex items-start justify-between py-3 border-b last:border-0"
-                style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}
+                style={{ borderColor: "var(--bg-border)" }}
               >
                 <div className="flex-1 min-w-0 mr-3">
                   <p
@@ -526,7 +523,7 @@ export function ObservationsTab({
                 key={c.id}
                 className="flex items-center justify-between py-2.5 border-b last:border-0 cursor-pointer hover:opacity-80"
                 style={{
-                  borderColor: isDark ? "#0f2039" : "#f1f5f9",
+                  borderColor: "var(--bg-border)",
                 }}
                 onClick={() =>
                   navigate("/capa", { state: { openCapaId: c.id } })

@@ -69,9 +69,7 @@ export interface EventsTabProps {
   anyFilter: boolean;
   sites: Site[];
   timezone: string;
-  dateFormat: string;
-  isDark: boolean;
-  role: string;
+  dateFormat: string;  role: string;
   onTypeFilterChange: (v: string) => void;
   onAgencyFilterChange: (v: string) => void;
   onStatusFilterChange: (v: string) => void;
@@ -96,7 +94,6 @@ export function EventsTab({
   sites,
   timezone,
   dateFormat,
-  isDark,
   role,
   onTypeFilterChange,
   onAgencyFilterChange,
@@ -305,8 +302,7 @@ export function EventsTab({
               <div
                 key={ev.id}
                 className={clsx(
-                  "card cursor-pointer transition-all duration-150 hover:border-[#0ea5e9]",
-                  isDark ? "hover:bg-[#071e38]" : "hover:bg-[#eff6ff]",
+                  "card cursor-pointer transition-all duration-150 hover:border-[#0ea5e9] hover:bg-(--brand-muted)",
                 )}
                 onClick={() => onOpenEvent(ev)}
                 role="button"
@@ -327,7 +323,7 @@ export function EventsTab({
                     {isClosed ? (
                       <div
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
-                        style={{ background: "rgba(16,185,129,0.12)", color: "#10b981" }}
+                        style={{ background: "var(--success-bg)", color: "#10b981" }}
                       >
                         <Clock className="w-3 h-3" aria-hidden="true" />
                         {effectiveStatus === "Closed" ? "Closed" : "Submitted"}
@@ -337,10 +333,10 @@ export function EventsTab({
                         className={clsx(
                           "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium",
                           isOverdue
-                            ? "bg-[rgba(239,68,68,0.12)] text-[#ef4444]"
+                            ? "bg-(--danger-bg) text-[#ef4444]"
                             : isUrgent
-                              ? "bg-[rgba(245,158,11,0.12)] text-[#f59e0b]"
-                              : "bg-[rgba(16,185,129,0.12)] text-[#10b981]",
+                              ? "bg-(--warning-bg) text-[#f59e0b]"
+                              : "bg-(--success-bg) text-[#10b981]",
                         )}
                       >
                         <Clock className="w-3 h-3" aria-hidden="true" />
@@ -377,7 +373,7 @@ export function EventsTab({
                     return (
                       <div className="flex items-center gap-2 mt-3">
                         <span className="text-[10px] font-semibold uppercase tracking-wider shrink-0" style={{ color: "var(--text-muted)" }}>Readiness</span>
-                        <div className={clsx("h-1.5 flex-1 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}>
+                        <div className={clsx("h-1.5 flex-1 rounded-full", "bg-(--bg-border)")}>
                           <div className="h-full rounded-full transition-all" style={{ width: `${readiness}%`, background: col }} />
                         </div>
                         <span className="text-[11px] font-bold shrink-0" style={{ color: col }}>{readiness}%</span>

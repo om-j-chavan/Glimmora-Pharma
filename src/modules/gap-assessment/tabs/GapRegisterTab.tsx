@@ -56,9 +56,7 @@ interface GapRegisterTabProps {
   filteredFindings: Finding[];
   findingsTotal: number;
   selectedFinding: Finding | null;
-  onSelectFinding: (f: Finding | null) => void;
-  isDark: boolean;
-  isViewOnly: boolean;
+  onSelectFinding: (f: Finding | null) => void;  isViewOnly: boolean;
   users: UserConfig[];
   timezone: string;
   dateFormat: string;
@@ -73,8 +71,7 @@ interface GapRegisterTabProps {
 }
 
 export function GapRegisterTab({
-  filteredFindings, findingsTotal, selectedFinding, onSelectFinding,
-  isDark, isViewOnly, users, timezone, dateFormat, capas,
+  filteredFindings, findingsTotal, selectedFinding, onSelectFinding, isViewOnly, users, timezone, dateFormat, capas,
   agiMode, agiCapa, isAnyFilterActive, renderFilters,
   onAddOpen, onRaiseCapa, onNavigateCapa,
 }: GapRegisterTabProps) {
@@ -219,7 +216,7 @@ export function GapRegisterTab({
                 const linkedCapa = capas.find((c) => c.id === f.capaId) ?? capas.find((c) => c.findingId === f.id);
                 return (
                 <tr key={f.id} onClick={() => onSelectFinding(f)} className="cursor-pointer" aria-selected={selectedFinding?.id === f.id}
-                  style={selectedFinding?.id === f.id ? { background: isDark ? "#0c2f5a" : "#eff6ff" } : {}}>
+                  style={selectedFinding?.id === f.id ? { background: "var(--brand-muted)" } : {}}>
                   <th scope="row">
                     <div className="font-mono text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>{f.id}</div>
                   </th>

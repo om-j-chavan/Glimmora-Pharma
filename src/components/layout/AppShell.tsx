@@ -4,7 +4,6 @@ import { Mail } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { useNotificationEngine } from "@/hooks/useNotificationEngine";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
@@ -19,9 +18,7 @@ export function AppShell() {
   useNotificationEngine();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const dispatch = useAppDispatch();
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const { activePlan, tenantName, isExpired, isNearExpiry, daysRemaining } = useTenantConfig();
+  const dispatch = useAppDispatch();  const { activePlan, tenantName, isExpired, isNearExpiry, daysRemaining } = useTenantConfig();
   const { isSuperAdmin } = useRole();
 
   const isBlocked = isExpired && !isSuperAdmin;
@@ -37,7 +34,7 @@ export function AppShell() {
         <div
           className={clsx(
             "rounded-2xl p-8 w-full max-w-md text-center border",
-            isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-white border-[#e2e8f0]",
+            "bg-(--bg-elevated) border-(--bg-border)",
           )}
         >
           {/* Logo */}
@@ -72,7 +69,7 @@ export function AppShell() {
           <div
             className={clsx(
               "rounded-xl p-4 mb-6 text-left",
-              isDark ? "bg-[#071526]" : "bg-[#f8fafc]",
+              "bg-(--bg-surface)",
             )}
           >
             {[
@@ -87,7 +84,7 @@ export function AppShell() {
                   borderBottom:
                     i === arr.length - 1
                       ? "none"
-                      : `1px solid ${isDark ? "#1e3a5a" : "#e2e8f0"}`,
+                      : `1px solid ${"var(--bg-border)"}`,
                 }}
               >
                 <span
@@ -169,12 +166,8 @@ export function AppShell() {
               className={clsx(
                 "shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 border-b",
                 isCritical
-                  ? isDark
-                    ? "bg-[rgba(239,68,68,0.06)] border-[rgba(239,68,68,0.2)]"
-                    : "bg-[#fef2f2] border-[#fca5a5]"
-                  : isDark
-                    ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.2)]"
-                    : "bg-[#fffbeb] border-[#fde68a]",
+                  ? "bg-(--danger-bg) border-(--danger)"
+                  : "bg-(--warning-bg) border-(--warning)",
               )}
             >
               <div className="min-w-0">

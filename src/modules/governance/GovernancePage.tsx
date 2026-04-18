@@ -48,9 +48,7 @@ export function GovernancePage() {
   const { org, users, allSites } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const companyName = org.companyName;
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const user = useAppSelector((s) => s.auth.user);
+  const companyName = org.companyName;  const user = useAppSelector((s) => s.auth.user);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { role } = useRole();
 
@@ -200,7 +198,7 @@ export function GovernancePage() {
       <header className="flex items-start justify-between flex-wrap gap-4">
         <div><h1 className="page-title">Governance &amp; KPIs</h1><p className="page-subtitle mt-1">{visibleSites.length} sites &middot; {capas.length} CAPAs &middot; {findings.length} findings &middot; {raidItems.length} RAID items</p></div>
         <div className="flex items-center gap-2">
-          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span><span className="text-[20px] font-bold" style={{ color: noData ? "var(--text-muted)" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444" }}>{noData ? "\u2014" : `${readinessScore}%`}</span></div>
+          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span><span className="text-[20px] font-bold" style={{ color: noData ? "var(--text-muted)" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444" }}>{noData ? "\u2014" : `${readinessScore}%`}</span></div>
           <div className="relative" ref={exportMenuRef}>
             <Button
               variant="secondary"
@@ -247,7 +245,7 @@ export function GovernancePage() {
 
       {/* Tab panels */}
       <div role="tabpanel" id="panel-kpis" aria-labelledby="tab-kpis" tabIndex={0} hidden={activeTab !== "kpis"}>
-        <KPIScorecardTab companyName={companyName} readinessScore={readinessScore} noData={noData} capaTimeliness={capaTimeliness} closedCAPAsCount={closedCAPAs.length} overdueCommitments={overdueCommitments} repeatObservationRisk={repeatObservationRisk} diExceptions={diExceptions} auditTrailCoverage={auditTrailCoverage} csvDrift={csvDrift} systemsCount={systems.length} capaTrend={capaTrend} capaTrendEmpty={capaTrendEmpty} valBreakdown={valBreakdown} diByArea={diByArea} siteReadiness={siteReadiness} sites={visibleSites} isDark={isDark} currentMonth={dayjs().format("MMMM YYYY")} onNavigateSettings={() => navigate("/settings")} />
+        <KPIScorecardTab companyName={companyName} readinessScore={readinessScore} noData={noData} capaTimeliness={capaTimeliness} closedCAPAsCount={closedCAPAs.length} overdueCommitments={overdueCommitments} repeatObservationRisk={repeatObservationRisk} diExceptions={diExceptions} auditTrailCoverage={auditTrailCoverage} csvDrift={csvDrift} systemsCount={systems.length} capaTrend={capaTrend} capaTrendEmpty={capaTrendEmpty} valBreakdown={valBreakdown} diByArea={diByArea} siteReadiness={siteReadiness} sites={visibleSites} currentMonth={dayjs().format("MMMM YYYY")} onNavigateSettings={() => navigate("/settings")} />
       </div>
 
       <div role="tabpanel" id="panel-raid" aria-labelledby="tab-raid" tabIndex={0} hidden={activeTab !== "raid"}>

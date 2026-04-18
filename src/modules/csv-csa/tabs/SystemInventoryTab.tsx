@@ -85,9 +85,7 @@ export interface SystemInventoryTabProps {
   sites: SiteConfig[];
   users: UserConfig[];
   timezone: string;
-  dateFormat: string;
-  isDark: boolean;
-  showPart11: boolean;
+  dateFormat: string;  showPart11: boolean;
   showAnnex11: boolean;
   showGAMP5: boolean;
   isViewOnly: boolean;
@@ -112,7 +110,7 @@ export interface SystemInventoryTabProps {
 
 export function SystemInventoryTab({
   systems, filteredSystems, highRisk, valOverdue, nonCompliant,
-  sites, users, timezone, dateFormat, isDark,
+  sites, users, timezone, dateFormat,
   showPart11, showAnnex11, showGAMP5,
   isViewOnly, role,
   siteFilter, typeFilter, riskFilter, valFilter, searchQ, anyFilter,
@@ -146,7 +144,7 @@ export function SystemInventoryTab({
       </section>
 
       {/* Filters */}
-      <section aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+      <section aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
         <Filter className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         <Dropdown placeholder="All sites" value={siteFilter} onChange={onSiteFilterChange} width="w-36" options={[{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]} />

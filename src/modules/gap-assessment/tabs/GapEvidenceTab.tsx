@@ -32,9 +32,7 @@ interface GapEvidenceTabProps {
   partialCount: number;
   missingCount: number;
   expandedAreas: Set<string>;
-  onToggleArea: (area: string) => void;
-  isDark: boolean;
-  isViewOnly: boolean;
+  onToggleArea: (area: string) => void;  isViewOnly: boolean;
   users: UserConfig[];
   onLinkEvidence: (findingId: string, currentLink: string) => void;
   onFindingClick: (findingId: string) => void;
@@ -44,7 +42,7 @@ interface GapEvidenceTabProps {
 
 export function GapEvidenceTab({
   evidenceAreas, allEvidenceRows, completeCount, partialCount, missingCount,
-  expandedAreas, onToggleArea, isDark, isViewOnly, users,
+  expandedAreas, onToggleArea, isViewOnly, users,
   onLinkEvidence, onFindingClick, onExport, onGoToRegister,
 }: GapEvidenceTabProps) {
   function ownerName(uid: string) { return users.find((u) => u.id === uid)?.name ?? uid; }
@@ -79,8 +77,7 @@ export function GapEvidenceTab({
               return (
                 <div key={area}>
                   <button type="button" onClick={() => onToggleArea(area)} aria-expanded={isExp} aria-controls={`evidence-area-${areaKey}`}
-                    className={clsx("w-full flex items-center justify-between p-4 rounded-xl border cursor-pointer text-left transition-all duration-150",
-                      isDark ? "bg-[#0a1f38] border-[#1e3a5a] hover:bg-[#0d2a4a]" : "bg-white border-[#e2e8f0] hover:bg-[#f8fafc]")}>
+                    className="w-full flex items-center justify-between p-4 rounded-xl border cursor-pointer text-left transition-all duration-150 bg-(--bg-elevated) border-(--bg-border) hover:bg-(--bg-hover)">
                     <span className="flex items-center gap-2">
                       <ChevronDown className={clsx("w-4 h-4 transition-transform duration-150 shrink-0", isExp && "rotate-180")} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
                       <span className="font-semibold text-[13px]" style={{ color: "var(--text-primary)" }}>{area}</span>

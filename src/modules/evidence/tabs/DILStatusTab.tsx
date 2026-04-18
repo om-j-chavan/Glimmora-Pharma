@@ -28,17 +28,15 @@ export interface DILStatusTabProps {
   currentCount: number;
   missingCount: number;
   findings: Finding[];
-  capas: CAPA[];
-  isDark: boolean;
-}
+  capas: CAPA[];}
 
 export function DILStatusTab({
-  allDocs, currentCount, missingCount, findings, capas, isDark,
+  allDocs, currentCount, missingCount, findings, capas,
 }: DILStatusTabProps) {
   return (
     <>
       {/* Info banner */}
-      <div className={clsx("flex items-start gap-2 p-4 rounded-xl mb-6 border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
+      <div className={clsx("flex items-start gap-2 p-4 rounded-xl mb-6 border", "bg-(--warning-bg) border-(--warning)")}>
         <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
         <div><p className="text-[12px] font-medium text-[#f59e0b]">DIL &mdash; Document Information List</p><p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Inspectors submit a DIL &mdash; a list of documents they want to review. This board tracks which documents have been retrieved and are ready.</p></div>
       </div>
@@ -56,16 +54,16 @@ export function DILStatusTab({
           const areaDocs = allDocs.filter((d) => d.area === area); const curr = areaDocs.filter((d) => d.status === "Current").length; const total = areaDocs.length; const pct = total === 0 ? 0 : Math.round((curr / total) * 100);
           if (total === 0) return null;
           return (
-            <div key={area} className="p-2.5 rounded-lg" style={{ background: pct === 100 ? "rgba(16,185,129,0.06)" : pct === 0 ? "rgba(245,158,11,0.06)" : "transparent" }}>
+            <div key={area} className="p-2.5 rounded-lg" style={{ background: pct === 100 ? "var(--success-bg)" : pct === 0 ? "var(--warning-bg)" : "transparent" }}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>{area}</span>
                 <div className="flex items-center gap-2">
                   {pct === 100 ? (
-                    <span className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(16,185,129,0.12)", color: "#10b981" }}>
+                    <span className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: "var(--success-bg)", color: "#10b981" }}>
                       <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Ready
                     </span>
                   ) : pct === 0 ? (
-                    <span className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}>
+                    <span className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: "var(--warning-bg)", color: "#f59e0b" }}>
                       <AlertTriangle className="w-3 h-3" aria-hidden="true" /> Action needed
                     </span>
                   ) : null}
@@ -73,7 +71,7 @@ export function DILStatusTab({
                   <span className="text-[12px] font-semibold" style={{ color: pct === 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#ef4444" }}>{pct}%</span>
                 </div>
               </div>
-              <div className={clsx("h-2 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${area} fulfillment`}><div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: pct === 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#ef4444" }} /></div>
+              <div className={clsx("h-2 rounded-full", "bg-(--bg-border)")} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${area} fulfillment`}><div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: pct === 100 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#ef4444" }} /></div>
             </div>
           );
         })}
@@ -92,7 +90,7 @@ export function DILStatusTab({
               const hasDiGate = linkedCapa?.diGate ?? false;
               const diGateCleared = linkedCapa?.diGateStatus === "cleared";
               return (
-                <div key={f.id} className="p-3 rounded-lg border" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
+                <div key={f.id} className="p-3 rounded-lg border" style={{ borderColor: "var(--bg-border)" }}>
                   <div className="space-y-2">
                     {/* Step 1: Finding */}
                     <div className="flex items-center gap-2">
@@ -100,7 +98,7 @@ export function DILStatusTab({
                       <Badge variant="blue">{f.id}</Badge>
                       <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Gap Assessment &middot; {f.area}</span>
                     </div>
-                    <div className="ml-3 pl-2" style={{ borderLeft: `2px solid ${isDark ? "#1e3a5a" : "#e2e8f0"}` }}>
+                    <div className="ml-3 pl-2" style={{ borderLeft: `2px solid ${"var(--bg-border)"}` }}>
                       {/* Step 2: CAPA */}
                       <div className="flex items-center gap-2 py-1.5">
                         <div className={clsx("w-2 h-2 rounded-full shrink-0", linkedCapa ? "bg-[#f59e0b]" : "bg-[#94a3b8]")} />

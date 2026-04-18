@@ -68,9 +68,7 @@ export interface SystemDetailTabProps {
   sites: SiteConfig[];
   users: UserConfig[];
   timezone: string;
-  dateFormat: string;
-  isDark: boolean;
-  isViewOnly: boolean;
+  dateFormat: string;  isViewOnly: boolean;
   role: string;
   showPart11: boolean;
   showAnnex11: boolean;
@@ -93,7 +91,7 @@ export interface SystemDetailTabProps {
 
 export function SystemDetailTab({
   selectedSystem, systems, roadmap, findings, capas,
-  sites, users, timezone, dateFormat, isDark,
+  sites, users, timezone, dateFormat,
   isViewOnly, role, showPart11, showAnnex11, showGAMP5,
   detailTab, onDetailTabChange,
   onBack, onEdit, onGoToInventory,
@@ -117,7 +115,7 @@ export function SystemDetailTab({
   return (
     <>
       {/* System header */}
-      <div className={clsx("rounded-xl p-4 mb-4 border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+      <div className={clsx("rounded-xl p-4 mb-4 border", "bg-(--bg-elevated) border-(--bg-border)")}>
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: si.color + "18" }}>
@@ -153,13 +151,13 @@ export function SystemDetailTab({
 
       {/* Overview */}
       <div role="tabpanel" id="dpanel-overview" aria-labelledby="dtab-overview" tabIndex={0} hidden={detailTab !== "overview"}>
-        <OverviewPanel system={selectedSystem} sites={sites} users={users} isDark={isDark} />
+        <OverviewPanel system={selectedSystem} sites={sites} users={users} />
       </div>
 
       {/* Risk & Controls */}
       <div role="tabpanel" id="dpanel-risk" aria-labelledby="dtab-risk" tabIndex={0} hidden={detailTab !== "risk"}>
         <RiskControlsPanel
-          system={selectedSystem} isDark={isDark} role={role}
+          system={selectedSystem} role={role}
           showPart11={showPart11} showAnnex11={showAnnex11} showGAMP5={showGAMP5}
           onNavigateSettings={onNavigateSettings}
           onSaveRiskFactors={onSaveRiskFactors}
@@ -181,7 +179,7 @@ export function SystemDetailTab({
       {/* DI & Audit Trail */}
       <div role="tabpanel" id="dpanel-di" aria-labelledby="dtab-di" tabIndex={0} hidden={detailTab !== "di"}>
         <DIAuditPanel
-          system={selectedSystem} findings={findings} capas={capas} isDark={isDark} role={role}
+          system={selectedSystem} findings={findings} capas={capas} role={role}
           onNavigateGap={onNavigateGap} onNavigateCapa={onNavigateCapa}
           onSaveRemediation={onSaveRemediation}
         />

@@ -43,9 +43,7 @@ export interface CSVRoadmapTabProps {
   systems: GxPSystem[];
   roadmap: RoadmapActivity[];
   roadmapGrouped: { system: GxPSystem; activities: RoadmapActivity[] }[];
-  users: UserConfig[];
-  isDark: boolean;
-  role: string;
+  users: UserConfig[];  role: string;
   rmSysFilter: string;
   rmTypeFilter: string;
   rmStatusFilter: string;
@@ -59,7 +57,7 @@ export interface CSVRoadmapTabProps {
 }
 
 export function CSVRoadmapTab({
-  systems, roadmap, roadmapGrouped, users, isDark, role,
+  systems, roadmap, roadmapGrouped, users, role,
   rmSysFilter, rmTypeFilter, rmStatusFilter,
   onRmSysFilterChange, onRmTypeFilterChange, onRmStatusFilterChange,
   onClearRoadmapFilters, onAddActivityOpen, onGoToInventory, onCompleteActivity,
@@ -70,7 +68,7 @@ export function CSVRoadmapTab({
       <div
         className={clsx(
           "flex items-start gap-2 p-3 rounded-xl mb-4 border",
-          isDark ? "bg-[rgba(14,165,233,0.08)] border-[rgba(14,165,233,0.25)]" : "bg-[#eff6ff] border-[#bfdbfe]",
+          "bg-(--brand-muted) border-(--brand)",
         )}
         role="status"
       >
@@ -138,7 +136,7 @@ export function CSVRoadmapTab({
                 {activities.map((a) => {
                   const pct = activityProgress(a);
                   return (
-                    <div key={a.id} className={clsx("p-3 rounded-lg border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-white border-[#e2e8f0]")}>
+                    <div key={a.id} className={clsx("p-3 rounded-lg border", "bg-(--bg-elevated) border-(--bg-border)")}>
                       <div className="flex items-center gap-3">
                         <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ACTIVITY_COLORS[a.type] ?? "#64748b" }} />
                         <div className="flex-1 min-w-0">
@@ -162,7 +160,7 @@ export function CSVRoadmapTab({
                           </Button>
                         )}
                       </div>
-                      <div className={clsx("h-1 rounded-full mt-2", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}>
+                      <div className={clsx("h-1 rounded-full mt-2", "bg-(--bg-border)")}>
                         <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: a.status === "Overdue" ? "#ef4444" : a.status === "Complete" ? "#10b981" : a.status === "In Progress" ? "#f59e0b" : "#0ea5e9" }} />
                       </div>
                     </div>

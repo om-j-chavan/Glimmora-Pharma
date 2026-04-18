@@ -22,9 +22,7 @@ function eventTypeBadge(t: EventType) {
 
 export interface SignSubmitModalProps {
   open: boolean;
-  liveEvent: FDA483Event | null;
-  isDark: boolean;
-  signMeaning: string;
+  liveEvent: FDA483Event | null;  signMeaning: string;
   signPassword: string;
   onClose: () => void;
   onSignMeaningChange: (v: string) => void;
@@ -35,7 +33,6 @@ export interface SignSubmitModalProps {
 export function SignSubmitModal({
   open,
   liveEvent,
-  isDark,
   signMeaning,
   signPassword,
   onClose,
@@ -58,9 +55,7 @@ export function SignSubmitModal({
         <div
           className={clsx(
             "rounded-lg p-3 mb-4",
-            isDark
-              ? "bg-[#071526] border border-[#1e3a5a]"
-              : "bg-[#f8fafc] border border-[#e2e8f0]",
+            "bg-(--bg-surface) border border-(--bg-border)",
           )}
         >
           <div className="flex items-center gap-2 flex-wrap">

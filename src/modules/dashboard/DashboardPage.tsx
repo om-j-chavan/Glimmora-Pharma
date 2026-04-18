@@ -290,7 +290,7 @@ export function DashboardPage() {
               ) : filteredFindings.length === 0 && filteredCAPAs.length === 0 ? (
                 <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No findings match current filters. Adjust filters to see insights.</p>
               ) : insights.slice(0, 5).map((ins, i) => (
-                <div key={i} className={clsx("flex items-start gap-2 p-2.5 rounded-lg", ins.type === "warning" ? isDark ? "bg-[rgba(245,158,11,0.06)] border border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border border-[#fde68a]" : ins.type === "success" ? isDark ? "bg-[rgba(16,185,129,0.06)] border border-[rgba(16,185,129,0.15)]" : "bg-[#f0fdf4] border border-[#a7f3d0]" : isDark ? "bg-[#071526] border border-[#1e3a5a]" : "bg-[#f8fafc] border border-[#e2e8f0]")}>
+                <div key={i} className={clsx("flex items-start gap-2 p-2.5 rounded-lg", ins.type === "warning" ? isDark ? "bg-(--warning-bg) border border-(--warning)" : "bg-[#fffbeb] border border-[#fde68a]" : ins.type === "success" ? isDark ? "bg-(--success-bg) border border-(--success)" : "bg-[#f0fdf4] border border-[#a7f3d0]" : "bg-(--bg-surface) border border-(--bg-border)")}>
                   {ins.type === "warning" ? <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" /> : ins.type === "success" ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981] flex-shrink-0 mt-0.5" aria-hidden="true" /> : <Info className="w-3.5 h-3.5 text-[#0ea5e9] flex-shrink-0 mt-0.5" aria-hidden="true" />}
                   <div className="flex-1 min-w-0"><p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{ins.text}</p>{ins.action && ins.link && <button onClick={() => navigate(ins.link!)} className="text-[10px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer mt-1">{ins.action} &rarr;</button>}</div>
                 </div>
@@ -302,7 +302,7 @@ export function DashboardPage() {
           <CardSection icon={Activity} iconColor="#ef4444" title="Risk signals">
             {/* By severity */}
             {(["Critical", "High", "Low"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "High" ? "#f59e0b" : "#10b981"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
-              <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
+              <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ background: dot }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{sev}</span></div>
                 <span className="text-[14px] font-bold" style={{ color: valCol }}>{cnt}</span>
               </div>
@@ -310,7 +310,7 @@ export function DashboardPage() {
             {/* By area */}
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-muted)" }}>By area</p>
             {["Manufacturing", "QC Lab", "QMS", "CSV/IT"].map((area) => { const cnt = filteredFindings.filter((f) => f.area === area && f.status !== "Closed").length; const max = Math.max(...["Manufacturing", "QC Lab", "QMS", "CSV/IT"].map((a) => filteredFindings.filter((f) => f.area === a && f.status !== "Closed").length), 1); return (
-              <div key={area} className="mb-2"><div className="flex justify-between mb-1"><span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{area}</span><span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>{cnt}</span></div><div className={clsx("h-1 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}><div className="h-full rounded-full bg-[#0ea5e9]" style={{ width: `${Math.round((cnt / max) * 100)}%` }} /></div></div>
+              <div key={area} className="mb-2"><div className="flex justify-between mb-1"><span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{area}</span><span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>{cnt}</span></div><div className={clsx("h-1 rounded-full", "bg-(--bg-border)")}><div className="h-full rounded-full bg-[#0ea5e9]" style={{ width: `${Math.round((cnt / max) * 100)}%` }} /></div></div>
             ); })}
             {/* Quick links */}
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-muted)" }}>Quick links</p>
@@ -320,7 +320,7 @@ export function DashboardPage() {
               { label: "CSV / CSA", path: "/csv-csa", Icon: Database, badge: csvHighRisk, color: "#f59e0b" },
               { label: "FDA 483", path: "/fda-483", Icon: FileWarning, badge: fda483Events.filter((e) => e.status !== "Closed").length, color: "#ef4444" },
             ].map((lk) => (
-              <button key={lk.path} type="button" onClick={() => navigate(lk.path)} title={lk.tip} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.06)] transition-colors text-left">
+              <button key={lk.path} type="button" onClick={() => navigate(lk.path)} title={lk.tip} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-(--brand-muted) transition-colors text-left">
                 <div className="flex items-center gap-2"><lk.Icon className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><span style={{ color: "var(--text-primary)" }}>{lk.label}</span></div>
                 {lk.badge > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ background: lk.color }}>{lk.badge}</span>}
               </button>
