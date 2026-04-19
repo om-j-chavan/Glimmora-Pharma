@@ -19,6 +19,7 @@ import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 
 import { KPIScorecardTab } from "./tabs/KPIScorecardTab";
+import { MOCK_SITE_KPIS, MOCK_SITE_TREND } from "@/mock/governance.mock";
 import { RAIDTab } from "./tabs/RAIDTab";
 
 type TabId = "kpis" | "raid";
@@ -247,7 +248,7 @@ export function GovernancePage() {
 
       {/* Tab panels */}
       <div role="tabpanel" id="panel-kpis" aria-labelledby="tab-kpis" tabIndex={0} hidden={activeTab !== "kpis"}>
-        <KPIScorecardTab companyName={companyName} readinessScore={readinessScore} noData={noData} capaTimeliness={capaTimeliness} closedCAPAsCount={closedCAPAs.length} overdueCommitments={overdueCommitments} repeatObservationRisk={repeatObservationRisk} diExceptions={diExceptions} auditTrailCoverage={auditTrailCoverage} csvDrift={csvDrift} systemsCount={systems.length} capaTrend={capaTrend} capaTrendEmpty={capaTrendEmpty} valBreakdown={valBreakdown} diByArea={diByArea} siteReadiness={siteReadiness} sites={visibleSites} isDark={isDark} currentMonth={dayjs().format("MMMM YYYY")} onNavigateSettings={() => navigate("/settings")} />
+        <KPIScorecardTab companyName={companyName} readinessScore={readinessScore} noData={noData} capaTimeliness={capaTimeliness} closedCAPAsCount={closedCAPAs.length} overdueCommitments={overdueCommitments} repeatObservationRisk={repeatObservationRisk} diExceptions={diExceptions} auditTrailCoverage={auditTrailCoverage} csvDrift={csvDrift} systemsCount={systems.length} capaTrend={capaTrend} capaTrendEmpty={capaTrendEmpty} valBreakdown={valBreakdown} diByArea={diByArea} siteReadiness={siteReadiness} sites={visibleSites} isDark={isDark} currentMonth={dayjs().format("MMMM YYYY")} onNavigateSettings={() => navigate("/settings")} siteKPIs={MOCK_SITE_KPIS} siteTrend={MOCK_SITE_TREND} />
       </div>
 
       <div role="tabpanel" id="panel-raid" aria-labelledby="tab-raid" tabIndex={0} hidden={activeTab !== "raid"}>
@@ -255,7 +256,7 @@ export function GovernancePage() {
       </div>
 
       {/* Add RAID Modal */}
-      <Modal open={addRaidOpen} onClose={() => { setAddRaidOpen(false); setEditingRaid(null); }} title={editingRaid ? "Edit RAID item" : "Add RAID item"}>
+      <Modal open={addRaidOpen} onClose={() => { setAddRaidOpen(false); setEditingRaid(null); }} title={editingRaid ? "Edit RAID Entry" : "Log RAID Entry"}>
         <form onSubmit={raidForm.handleSubmit(onRaidSave)} noValidate className="space-y-4"><div className="grid grid-cols-2 gap-3">
           <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Type *</label><Controller name="type" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Risk", "Action", "Issue", "Decision"].map((t) => ({ value: t, label: t }))} />} /></div>
           <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Priority *</label><Controller name="priority" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Critical", "High", "Medium", "Low"].map((p) => ({ value: p, label: p }))} />} /></div>

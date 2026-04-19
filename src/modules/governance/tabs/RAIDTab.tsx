@@ -81,7 +81,7 @@ export function RAIDTab({
         <Dropdown placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} width="w-36" options={[{ value: "", label: "All statuses" }, ...["Open", "In Progress", "Closed", "Escalated"].map((s) => ({ value: s, label: s }))]} />
         <Dropdown placeholder="All priorities" value={priorityFilter} onChange={setPriorityFilter} width="w-36" options={[{ value: "", label: "All priorities" }, ...["Critical", "High", "Medium", "Low"].map((p) => ({ value: p, label: p }))]} />
         {anyRaidFilter && <Button variant="ghost" size="sm" onClick={() => { setTypeFilter(""); setStatusFilter(""); setPriorityFilter(""); }}>Clear</Button>}
-        <div className="ml-auto">{canAdd && <Button variant="primary" size="sm" icon={Plus} onClick={onAddRaidOpen}>Add RAID item</Button>}</div>
+        <div className="ml-auto">{canAdd && <Button variant="primary" size="sm" icon={Plus} onClick={onAddRaidOpen}>Log RAID Entry</Button>}</div>
       </div>
       <div className="flex items-center gap-3 flex-wrap mb-4"><Badge variant="red">{raidItems.filter((r) => r.type === "Risk").length} Risks</Badge><Badge variant="blue">{raidItems.filter((r) => r.type === "Action").length} Actions</Badge><Badge variant="amber">{raidItems.filter((r) => r.type === "Issue").length} Issues</Badge><Badge variant="green">{raidItems.filter((r) => r.type === "Decision").length} Decisions</Badge></div>
       {raidItems.length === 0 ? (

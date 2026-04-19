@@ -72,7 +72,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, users, systems
   }
 
   return (
-    <Modal open={isOpen} onClose={handleClose} title="Log new finding">
+    <Modal open={isOpen} onClose={handleClose} title="Report Compliance Gap">
       <form onSubmit={handleSubmit(onSubmit)} aria-label="Add new finding" className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           {/* Site — hidden for non-admin (auto-assigned from login), visible dropdown for admin */}
@@ -165,7 +165,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, users, systems
         </div>
         <div className="flex justify-end gap-3 pt-2">
           <Button variant="ghost" type="button" onClick={handleClose}>Cancel</Button>
-          <Button variant="primary" type="submit" icon={Plus} loading={isSubmitting}>Log finding</Button>
+          <Button variant="primary" type="submit" icon={Plus} loading={isSubmitting}>Report Gap</Button>
         </div>
       </form>
     </Modal>

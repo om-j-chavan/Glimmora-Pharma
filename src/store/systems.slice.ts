@@ -8,7 +8,20 @@ export type GAMP5Category = "1" | "3" | "4" | "5";
 export type RiskLevel = "HIGH" | "MEDIUM" | "LOW";
 
 export type ValidationStageKey = "URS" | "FS" | "DS" | "IQ" | "OQ" | "PQ" | "RTR";
-export type ValidationStageStatus = "complete" | "in-progress" | "skipped" | "pending";
+export type ValidationStageStatus = "not_started" | "draft" | "in_review" | "approved" | "rejected" | "skipped" | "complete" | "in-progress" | "pending";
+
+export interface StageDocument {
+  id: string;
+  fileName: string;
+  fileType: string;
+  fileSize: string;
+  version: string;
+  status: "draft" | "in_review" | "approved";
+  uploadedBy: string;
+  uploadedAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+}
 
 export interface ValidationStage {
   key: ValidationStageKey;
@@ -16,6 +29,18 @@ export interface ValidationStage {
   date?: string;
   targetDate?: string;
   documentName?: string;
+  documents?: StageDocument[];
+  notes?: string;
+  submittedBy?: string;
+  submittedDate?: string;
+  reviewedBy?: string;
+  reviewedDate?: string;
+  approvedBy?: string;
+  approvedDate?: string;
+  rejectedBy?: string;
+  rejectedDate?: string;
+  rejectionReason?: string;
+  completionDate?: string;
 }
 
 export const VALIDATION_STAGE_LABELS: Record<ValidationStageKey, string> = {
@@ -63,6 +88,8 @@ export interface GxPSystem {
   createdAt: string;
 }
 
+export type CompletionType = "execution" | "approval";
+
 export interface RoadmapActivity {
   id: string;
   tenantId: string;
@@ -72,6 +99,8 @@ export interface RoadmapActivity {
   status: "Planned" | "In Progress" | "Complete" | "Overdue";
   startDate: string;
   endDate: string;
+  completionType?: CompletionType;
+  completionCriteria?: string;
   owner: string;
 }
 
@@ -105,8 +134,68 @@ const systemsSlice = createSlice({
       const item = state.roadmap.find((a) => a.id === payload.id);
       if (item) Object.assign(item, payload.patch);
     },
+    submitStageForReview(state, { payload }: PayloadAction<{ systemId: string; stageKey: ValidationStageKey; submittedBy: string }>) {
+      const sys = state.items.find((s) => s.id === payload.systemId);
+      if (!sys) return;
+      if (!sys.validationStages) sys.validationStages = [];
+      const stage = sys.validationStages.find((s) => s.key === payload.stageKey);
+      if (stage) { stage.status = "in_review"; stage.submittedBy = payload.submittedBy; stage.submittedDate = new Date().toISOString(); }
+      else sys.validationStages.push({ key: payload.stageKey, status: "in_review", submittedBy: payload.submittedBy, submittedDate: new Date().toISOString() });
+    },
+    approveStage(state, { payload }: PayloadAction<{ systemId: string; stageKey: ValidationStageKey; approvedBy: string }>) {
+      const sys = state.items.find((s) => s.id === payload.systemId);
+      const stage = sys?.validationStages?.find((s) => s.key === payload.stageKey);
+      if (stage) {
+        stage.status = "approved";
+        stage.approvedBy = payload.approvedBy;
+        stage.approvedDate = new Date().toISOString();
+        stage.completionDate = new Date().toISOString();
+        stage.rejectedBy = undefined;
+        stage.rejectedDate = undefined;
+        stage.rejectionReason = undefined;
+      }
+    },
+    rejectStage(state, { payload }: PayloadAction<{ systemId: string; stageKey: ValidationStageKey; rejectedBy: string; reason: string }>) {
+      const sys = state.items.find((s) => s.id === payload.systemId);
+      const stage = sys?.validationStages?.find((s) => s.key === payload.stageKey);
+      if (stage) {
+        stage.status = "rejected";
+        stage.rejectedBy = payload.rejectedBy;
+        stage.rejectedDate = new Date().toISOString();
+        stage.rejectionReason = payload.reason;
+        stage.approvedBy = undefined;
+        stage.approvedDate = undefined;
+      }
+    },
+    skipStage(state, { payload }: PayloadAction<{ systemId: string; stageKey: ValidationStageKey; approvedBy: string; reason: string }>) {
+      const sys = state.items.find((s) => s.id === payload.systemId);
+      if (!sys) return;
+      if (!sys.validationStages) sys.validationStages = [];
+      const stage = sys.validationStages.find((s) => s.key === payload.stageKey);
+      if (stage) { stage.status = "skipped"; stage.approvedBy = payload.approvedBy; stage.approvedDate = new Date().toISOString(); stage.rejectionReason = payload.reason; }
+      else sys.validationStages.push({ key: payload.stageKey, status: "skipped", approvedBy: payload.approvedBy, approvedDate: new Date().toISOString(), rejectionReason: payload.reason });
+    },
+    addStageDocument(state, { payload }: PayloadAction<{ systemId: string; stageKey: ValidationStageKey; doc: StageDocument }>) {
+      const sys = state.items.find((s) => s.id === payload.systemId);
+      if (!sys) return;
+      if (!sys.validationStages) sys.validationStages = [];
+      let stage = sys.validationStages.find((s) => s.key === payload.stageKey);
+      if (!stage) { stage = { key: payload.stageKey, status: "draft" }; sys.validationStages.push(stage); }
+      if (!stage.documents) stage.documents = [];
+      stage.documents.push(payload.doc);
+      if (stage.status === "not_started" || stage.status === "pending") stage.status = "draft";
+    },
+    updateStageNotes(state, { payload }: PayloadAction<{ systemId: string; stageKey: ValidationStageKey; notes: string }>) {
+      const sys = state.items.find((s) => s.id === payload.systemId);
+      const stage = sys?.validationStages?.find((s) => s.key === payload.stageKey);
+      if (stage) stage.notes = payload.notes;
+    },
   },
 });
 
-export const { addSystem, updateSystem, removeSystem, addActivity, updateActivity } = systemsSlice.actions;
+export const {
+  addSystem, updateSystem, removeSystem, addActivity, updateActivity,
+  submitStageForReview, approveStage, rejectStage, skipStage,
+  addStageDocument, updateStageNotes,
+} = systemsSlice.actions;
 export default systemsSlice.reducer;

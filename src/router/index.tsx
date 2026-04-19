@@ -66,6 +66,12 @@ export const router = createBrowserRouter([
         }),
       },
       {
+        path: "deviation",
+        lazy: async () => ({
+          Component: (await import("@/modules/deviation/DeviationPage")).DeviationPage,
+        }),
+      },
+      {
         path: "capa",
         loader: makeRoleLoader("capa"),
         lazy: async () => ({
@@ -125,6 +131,18 @@ export const router = createBrowserRouter([
         path: "readiness",
         lazy: async () => ({
           Component: (await import("@/modules/readiness/ReadinessPage")).ReadinessPage,
+        }),
+      },
+      {
+        path: "ai-policy",
+        lazy: async () => ({
+          Component: (await import("@/modules/settings/AIPolicyPage")).AIPolicyPage,
+        }),
+      },
+      {
+        path: "audit-trail",
+        lazy: async () => ({
+          Component: (await import("@/modules/audit-trail/AuditTrailPage")).AuditTrailPage,
         }),
       },
     ],

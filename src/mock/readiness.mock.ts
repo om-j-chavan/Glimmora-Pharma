@@ -1,4 +1,4 @@
-import type { ReadinessCard, Playbook, Simulation, TrainingRecord } from "@/store/readiness.slice";
+import type { ReadinessCard, Playbook, Simulation, TrainingRecord, Inspection } from "@/store/readiness.slice";
 
 export const MOCK_READINESS_CARDS: ReadinessCard[] = [
   // People lane
@@ -34,3 +34,52 @@ export const MOCK_PLAYBOOKS: Playbook[] = [
 export const MOCK_SIMULATIONS: Simulation[] = [];
 
 export const MOCK_TRAINING_RECORDS: TrainingRecord[] = [];
+
+export const MOCK_INSPECTIONS: Inspection[] = [
+  {
+    id: "INSP-2026-001", tenantId: "tenant-glimmora",
+    title: "FDA GMP Inspection Q2 2026", siteId: "site-chennai", siteName: "Chennai QC Laboratory",
+    agency: "FDA", type: "announced", status: "preparation",
+    expectedDate: "2026-06-01T00:00:00Z",
+    readinessScore: 0, totalActions: 16, completedActions: 0,
+    inspectionLead: "u-002",
+    frontRoom: ["Dr. Priya Sharma", "Rahul Mehta", "Dr. Nisha Rao", "Vikram Singh"],
+    backRoom: ["Anita Patel", "Suresh Kumar", "Dr. Nisha Rao", "Rahul Mehta"],
+    createdBy: "u-002", createdAt: "2026-04-01T00:00:00Z", updatedAt: "2026-04-01T00:00:00Z",
+    notes: "FDA announced inspection following Q1 483 observations",
+  },
+  {
+    id: "INSP-2026-002", tenantId: "tenant-glimmora",
+    title: "EMA Annex 11 Review", siteId: "site-mumbai", siteName: "Mumbai API Plant",
+    agency: "EMA", type: "announced", status: "preparation",
+    expectedDate: "2026-07-15T00:00:00Z",
+    readinessScore: 67, totalActions: 15, completedActions: 10,
+    inspectionLead: "u-003",
+    frontRoom: ["Rahul Mehta", "Dr. Priya Sharma"],
+    backRoom: ["Anita Patel", "Dr. Nisha Rao"],
+    createdBy: "u-002", createdAt: "2026-03-15T00:00:00Z", updatedAt: "2026-03-15T00:00:00Z",
+  },
+  {
+    id: "INSP-2026-003", tenantId: "tenant-glimmora",
+    title: "MHRA GMP Routine Inspection", siteId: "site-hyderabad", siteName: "Hyderabad Formulation",
+    agency: "MHRA", type: "announced", status: "preparation",
+    expectedDate: "2026-08-30T00:00:00Z",
+    readinessScore: 82, totalActions: 16, completedActions: 13,
+    inspectionLead: "u-002",
+    frontRoom: ["Dr. Priya Sharma", "Vikram Singh"],
+    backRoom: ["Anita Patel", "Suresh Kumar"],
+    createdBy: "u-002", createdAt: "2026-02-01T00:00:00Z", updatedAt: "2026-02-01T00:00:00Z",
+  },
+  {
+    id: "INSP-2026-000", tenantId: "tenant-glimmora",
+    title: "FDA GMP Inspection Q1 2026", siteId: "site-chennai", siteName: "Chennai QC Laboratory",
+    agency: "FDA", type: "announced", status: "completed",
+    expectedDate: "2026-03-10T00:00:00Z", startDate: "2026-03-10T00:00:00Z", endDate: "2026-03-12T00:00:00Z",
+    readinessScore: 100, totalActions: 14, completedActions: 14,
+    linkedFDA483Id: "FEI-3004795103-2026",
+    inspectionLead: "u-002",
+    createdBy: "u-002", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-03-12T00:00:00Z",
+    notes: "Resulted in FDA 483 with 3 observations",
+    completionOutcome: "FDA 483 issued",
+  },
+];

@@ -17,10 +17,12 @@ import { store } from "@/store";
 
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   addCard, updateCard, addSimulation, updateSimulation, addTraining, removeTraining,
+  addInspection, setActiveInspection,
   type Playbook, type Simulation, type ReadinessLane, type ReadinessBucket,
-  type PlaybookType,
+  type PlaybookType, type InspectionAgency, type InspectionType,
 } from "@/store/readiness.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
@@ -82,16 +84,22 @@ type CardForm = z.infer<typeof cardSchema>;
 
 export function ReadinessPage() {
   const dispatch = useAppDispatch();
-  const { cards, playbooks, simulations, training, score: readinessScore, complete: completeCount, total: totalCards } = useAppSelector((s) => s.readiness);
-  const { users, tenantId } = useTenantConfig();
+  const { cards, playbooks, simulations, training, score: readinessScore, complete: completeCount, total: totalCards, inspections, activeInspectionId } = useAppSelector((s) => s.readiness);
+  const { users, tenantId, allSites } = useTenantConfig();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const authUser = useAppSelector((s) => s.auth.user);
   const currentUserId = authUser?.id ?? "";
   const { role } = useRole();
+  const { canScheduleSimulation, canUpdateTraining, canCompleteSimulation } = usePermissions();
 
   const tenantCards = cards.filter((c) => c.tenantId === tenantId);
   const tenantPlaybooks = playbooks.filter((p) => p.tenantId === tenantId);
   const tenantSims = simulations.filter((s) => s.tenantId === tenantId);
+
+  const tenantInspections = inspections.filter((i) => i.tenantId === tenantId);
+  const activeInspection = tenantInspections.find((i) => i.id === activeInspectionId) ?? null;
+  const activeInspections = tenantInspections.filter((i) => i.status !== "completed" && i.status !== "cancelled");
+  const completedInspections = tenantInspections.filter((i) => i.status === "completed");
 
   const inProgressCount = tenantCards.filter((c) => c.status === "In Progress").length;
   const overdueCount = tenantCards.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length;
@@ -111,9 +119,8 @@ export function ReadinessPage() {
   };
   const roleLabel = (r: string) => ROLE_LABELS[r] ?? r;
   const simEligibleUsers = users.filter((u) => !["super_admin", "customer_admin", "viewer"].includes(u.role));
-  const isQAHead = role === "qa_head";
-  const canEditTrainingFor = (userId: string) => isQAHead || userId === currentUserId;
-  const canManageSims = role === "qa_head" || role === "customer_admin";
+  const canEditTrainingFor = (userId: string) => canUpdateTraining || userId === currentUserId;
+  const canManageSims = canScheduleSimulation;
 
   const [activeTab, setActiveTab] = useState<TabId>("training");
   const [selectedPlaybook, setSelectedPlaybook] = useState<Playbook | null>(null);
@@ -124,6 +131,39 @@ export function ReadinessPage() {
   const [laneFilter, setLaneFilter] = useState("");
   const [openSections, setOpenSections] = useState<Set<string>>(new Set(["war-room", "teams"]));
   const toggleSection = (k: string) => setOpenSections((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+
+  // Create Inspection modal
+  const [createInspOpen, setCreateInspOpen] = useState(false);
+  const [inspTitle, setInspTitle] = useState("");
+  const [inspAgency, setInspAgency] = useState<InspectionAgency>("FDA");
+  const [inspType, setInspType] = useState<InspectionType>("announced");
+  const [inspSite, setInspSite] = useState(allSites[0]?.id ?? "");
+  const [inspDate, setInspDate] = useState("");
+  const [inspLead, setInspLead] = useState("");
+  const [inspNotes, setInspNotes] = useState("");
+  const [inspCreatedPopup, setInspCreatedPopup] = useState(false);
+
+  function handleCreateInspection() {
+    if (!inspTitle.trim() || !inspSite || !inspLead) return;
+    const id = `INSP-${dayjs().format("YYYY")}-${String(tenantInspections.length + 1).padStart(3, "0")}`;
+    const site = allSites.find((s) => s.id === inspSite);
+    const now = new Date().toISOString();
+    dispatch(addInspection({
+      id, tenantId: tenantId ?? "", title: inspTitle.trim(),
+      siteId: inspSite, siteName: site?.name ?? inspSite,
+      agency: inspAgency, type: inspType, status: "preparation",
+      expectedDate: inspDate ? dayjs(inspDate).utc().toISOString() : undefined,
+      readinessScore: 0, totalActions: 16, completedActions: 0,
+      inspectionLead: inspLead,
+      createdBy: currentUserId, createdAt: now, updatedAt: now,
+      notes: inspNotes.trim() || undefined,
+    }));
+    dispatch(setActiveInspection(id));
+    auditLog({ action: "INSPECTION_CREATED", module: "Inspection Readiness", recordId: id, recordTitle: inspTitle.trim() });
+    setCreateInspOpen(false);
+    setInspTitle(""); setInspDate(""); setInspNotes("");
+    setInspCreatedPopup(true);
+  }
 
   // Training tab info banner (dismissible + persisted)
   const [showTrainingInfo, setShowTrainingInfo] = useState(() => {
@@ -318,6 +358,38 @@ export function ReadinessPage() {
         }
       />
 
+      {/* Inspection selector */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <Dropdown
+          value={activeInspectionId ?? ""}
+          onChange={(id) => dispatch(setActiveInspection(id))}
+          placeholder="Select inspection..."
+          width="w-80"
+          options={[
+            ...activeInspections.map((i) => ({
+              value: i.id,
+              label: `${i.title} \u2014 ${i.siteName} (${i.readinessScore}%)`,
+            })),
+            ...(completedInspections.length > 0
+              ? completedInspections.map((i) => ({
+                  value: i.id,
+                  label: `\u2713 ${i.title} \u2014 ${i.siteName} (100%)`,
+                }))
+              : []),
+          ]}
+        />
+        {activeInspection && (
+          <div className="flex items-center gap-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
+            <Badge variant={activeInspection.agency === "FDA" ? "blue" : activeInspection.agency === "EMA" ? "purple" : activeInspection.agency === "MHRA" ? "amber" : "gray"}>{activeInspection.agency}</Badge>
+            <span>{activeInspection.type}</span>
+            {activeInspection.expectedDate && <span>· Expected {dayjs.utc(activeInspection.expectedDate).tz(timezone).format("DD MMM YYYY")}</span>}
+          </div>
+        )}
+        {(canScheduleSimulation) && (
+          <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateInspOpen(true)} className="ml-auto">New Inspection</Button>
+        )}
+      </div>
+
       {/* Tabs */}
       <TabBar tabs={TABS} activeTab={activeTab} onChange={(id) => { setActiveTab(id as TabId); setSelectedPlaybook(null); }} ariaLabel="Readiness sections" />
 
@@ -404,7 +476,7 @@ export function ReadinessPage() {
                                         className="flex items-center gap-1 text-[10px] font-semibold rounded-md px-2 py-1 cursor-pointer border-none"
                                         style={{ background: "#f59e0b", color: "#ffffff" }}
                                       >
-                                        <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Mark Complete
+                                        <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Mark as Complete
                                       </button>
                                       <button
                                         type="button"
@@ -418,7 +490,7 @@ export function ReadinessPage() {
                                   </div>
                                 )}
 
-                                {/* Mark Complete (default) */}
+                                {/* Mark as Complete (default) */}
                                 {role !== "viewer" && !isComplete && !card.showSuggestion && (
                                   <div className="mt-2 pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#f1f5f9" }}>
                                     <button
@@ -430,7 +502,7 @@ export function ReadinessPage() {
                                       onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(245,158,11,0.2)"; }}
                                       onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(245,158,11,0.1)"; }}
                                     >
-                                      <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Mark Complete
+                                      <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Mark as Complete
                                     </button>
                                   </div>
                                 )}
@@ -797,7 +869,7 @@ export function ReadinessPage() {
                         <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{dayjs.utc(sim.scheduledAt).tz(timezone).format("DD MMM YYYY")}</span>
                       </div>
                       <SimCardMeta sim={sim} />
-                      {canManageSims && (
+                      {canCompleteSimulation && (
                         <Button variant="primary" size="sm" icon={CheckCircle2} fullWidth onClick={() => openStartSimulation(sim)}>Mark complete</Button>
                       )}
                     </div>
@@ -845,7 +917,7 @@ export function ReadinessPage() {
                         {isToday && sim.status === "Scheduled" && canManageSims && (
                           <Button variant="primary" size="sm" icon={Play} fullWidth onClick={() => openStartSimulation(sim)}>Start simulation</Button>
                         )}
-                        {isRunning && canManageSims && (
+                        {isRunning && canCompleteSimulation && (
                           <Button variant="primary" size="sm" icon={CheckCircle2} fullWidth onClick={() => openStartSimulation(sim)}>Complete &amp; score</Button>
                         )}
                       </div>
@@ -1170,6 +1242,26 @@ export function ReadinessPage() {
           </div>
         </div>
       </Modal>
+
+      {/* ═══ CREATE INSPECTION MODAL ═══ */}
+      <Modal open={createInspOpen} onClose={() => setCreateInspOpen(false)} title="Create New Inspection">
+        <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Inspection title *</p><input className="input w-full" value={inspTitle} onChange={(e) => setInspTitle(e.target.value)} placeholder="FDA GMP Inspection Q2 2026" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Agency *</p><Dropdown value={inspAgency} onChange={(v) => setInspAgency(v as InspectionAgency)} options={["FDA", "EMA", "MHRA", "WHO", "Internal"].map((a) => ({ value: a, label: a }))} width="w-full" /></div>
+            <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Type *</p><Dropdown value={inspType} onChange={(v) => setInspType(v as InspectionType)} options={[{ value: "announced", label: "Announced" }, { value: "unannounced", label: "Unannounced" }, { value: "follow_up", label: "Follow-up" }, { value: "pre_approval", label: "Pre-approval" }]} width="w-full" /></div>
+          </div>
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Site *</p><Dropdown value={inspSite} onChange={setInspSite} options={allSites.map((s) => ({ value: s.id, label: s.name }))} width="w-full" placeholder="Select site..." /></div>
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Expected date (optional)</p><input type="date" className="input w-full" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /></div>
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Inspection lead *</p><Dropdown value={inspLead} onChange={setInspLead} options={users.filter((u) => u.role === "qa_head" || u.role === "customer_admin").map((u) => ({ value: u.id, label: u.name }))} width="w-full" placeholder="Select lead..." /></div>
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Notes (optional)</p><textarea rows={2} className="input w-full resize-none" value={inspNotes} onChange={(e) => setInspNotes(e.target.value)} placeholder="Context or background..." /></div>
+          <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
+            <Button variant="secondary" onClick={() => setCreateInspOpen(false)}>Cancel</Button>
+            <Button variant="primary" icon={Plus} disabled={!inspTitle.trim() || !inspSite || !inspLead} onClick={handleCreateInspection}>Create Inspection</Button>
+          </div>
+        </div>
+      </Modal>
+      <Popup isOpen={inspCreatedPopup} variant="success" title="Inspection created" description={`${inspTitle || "Inspection"} created. Readiness: 0%`} onDismiss={() => setInspCreatedPopup(false)} />
     </main>
   );
 }

@@ -181,7 +181,7 @@ export function GapRegisterTab({
           <input type="search" className="input pl-8 text-[12px]" placeholder="Search findings..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} aria-label="Search findings" />
         </div>
         {renderFilters(true)}
-        {!isViewOnly && <Button variant="primary" size="sm" icon={Plus} onClick={onAddOpen}>Log finding</Button>}
+        {!isViewOnly && <Button variant="primary" size="sm" icon={Plus} onClick={onAddOpen}>Report Gap</Button>}
       </div>
 
       {/* Table */}

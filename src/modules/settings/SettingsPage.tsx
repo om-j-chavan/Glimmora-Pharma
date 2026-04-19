@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { Building2, MapPin, Users, BookOpen, Bot, Shield } from "lucide-react";
+import { Building2, MapPin, Users, BookOpen, Bot, Shield, Info } from "lucide-react";
 import { OrgTab } from "./tabs/OrgTab";
 import { SitesTab } from "./tabs/SitesTab";
 import { UsersTab } from "./tabs/UsersTab";
 import { FrameworksTab } from "./tabs/FrameworksTab";
 import { AGIPolicyTab } from "./tabs/AGIPolicyTab";
 import { PermissionsTab } from "./tabs/PermissionsTab";
-import { useRole } from "@/hooks/useRole";
+import { usePermissions } from "@/hooks/usePermissions";
 
-const TABS = [
+const ALL_TABS = [
   { id: "org", label: "Organization", icon: Building2 },
   { id: "sites", label: "Sites", icon: MapPin },
   { id: "users", label: "Users & Roles", icon: Users },
@@ -17,21 +17,33 @@ const TABS = [
   { id: "permissions", label: "Permissions", icon: Shield },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+type TabId = (typeof ALL_TABS)[number]["id"];
 
 export function SettingsPage() {
   const [active, setActive] = useState<TabId>("org");
-  const { role } = useRole();
+  const { canManageSettings, isQAHead, role } = usePermissions();
+  const readOnly = !canManageSettings;
+  const visibleTabs = isQAHead ? ALL_TABS.filter((t) => t.id !== "permissions") : ALL_TABS;
 
   return (
     <div className="flex flex-col -m-3 sm:-m-4 lg:-m-5 h-full min-h-0">
-      {/* Tab bar — pinned at top, never scrolls */}
+      {/* Read-only banner for non-admin roles */}
+      {readOnly && (
+        <div className="flex items-start gap-2 px-5 py-3 border-b" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
+          <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            Settings can only be modified by <strong style={{ color: "var(--brand)" }}>Customer Admin</strong>.
+          </p>
+        </div>
+      )}
+
+      {/* Tab bar */}
       <div
         role="tablist"
         aria-label="Settings sections"
         className="flex shrink-0 border-b border-(--bg-border) bg-(--bg-base) px-3 sm:px-4 lg:px-5 overflow-x-auto"
       >
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -52,9 +64,9 @@ export function SettingsPage() {
         ))}
       </div>
 
-      {/* Tab content — scrolls independently */}
+      {/* Tab content */}
       <div className="flex-1 overflow-y-auto min-h-0 p-3 sm:p-4 lg:p-5">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <section
             key={tab.id}
             role="tabpanel"
@@ -64,11 +76,11 @@ export function SettingsPage() {
             hidden={active !== tab.id}
             className="focus:outline-none"
           >
-            {tab.id === "org" && <OrgTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "sites" && <SitesTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "users" && <UsersTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "frameworks" && <FrameworksTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "agi" && <AGIPolicyTab readOnly={role !== "super_admin" && role !== "customer_admin" && role !== "it_cdo"} />}
+            {tab.id === "org" && <OrgTab readOnly={readOnly} />}
+            {tab.id === "sites" && <SitesTab readOnly={readOnly} />}
+            {tab.id === "users" && <UsersTab readOnly={readOnly} />}
+            {tab.id === "frameworks" && <FrameworksTab readOnly={readOnly} />}
+            {tab.id === "agi" && <AGIPolicyTab readOnly={readOnly && role !== "it_cdo"} />}
             {tab.id === "permissions" && <PermissionsTab />}
           </section>
         ))}

@@ -52,9 +52,9 @@ type DetailTab = "overview" | "risk" | "validation" | "di";
 
 const DETAIL_TABS: { id: DetailTab; label: string }[] = [
   { id: "overview", label: "Overview" },
-  { id: "risk", label: "Risk & Controls" },
-  { id: "validation", label: "Validation" },
-  { id: "di", label: "DI & Audit Trail" },
+  { id: "risk", label: "Risk Assessment" },
+  { id: "validation", label: "Validation Lifecycle" },
+  { id: "di", label: "Data Integrity" },
 ];
 
 /* ── Props ── */

@@ -5,8 +5,8 @@ import {
   Search,
   ClipboardList,
   Monitor,
-  Map,
   FileText,
+  AlertTriangle,
   Building2,
   BarChart3,
   Settings,
@@ -15,7 +15,6 @@ import {
   ChevronDown,
   Layers,
   FlaskConical,
-  Cpu,
   SlidersHorizontal,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -41,40 +40,35 @@ interface NavGroup {
 const NAV_GROUPS: NavGroup[] = [
   {
     id: "qms",
-    label: "QMS & Compliance",
+    label: "Core Compliance",
     icon: Layers,
     items: [
-      { path: "/",              label: "Dashboard",      icon: LayoutDashboard },
-      { path: "gap-assessment", label: "Gap Assessment", icon: Search },
-      { path: "capa",           label: "CAPA Tracker",   icon: ClipboardList },
-      { path: "evidence",       label: "Evidence",       icon: FileText },
+      { path: "/",              label: "Dashboard",              icon: LayoutDashboard },
+      { path: "gap-assessment", label: "Gap Assessment",         icon: Search },
+      { path: "deviation",      label: "Deviation Management",   icon: AlertTriangle },
+      { path: "capa",           label: "CAPA Tracker",           icon: ClipboardList },
+      { path: "csv-csa",        label: "CSV / CSA Validation",   icon: Monitor },
+      { path: "fda-483",        label: "FDA 483 & Regulatory",   icon: Building2 },
+      { path: "evidence",       label: "Evidence & Documents",   icon: FileText },
     ],
   },
   {
-    id: "validation",
-    label: "Validation & Inspection",
+    id: "readiness",
+    label: "Readiness & Governance",
     icon: FlaskConical,
     items: [
-      { path: "csv-csa",    label: "CSV / CSA",  icon: Monitor },
-      { path: "inspection", label: "Inspection", icon: Map },
-      { path: "readiness",  label: "Readiness",  icon: ShieldCheck },
-      { path: "fda-483",    label: "FDA 483",    icon: Building2 },
-    ],
-  },
-  {
-    id: "intelligence",
-    label: "Intelligence",
-    icon: Cpu,
-    items: [
-      { path: "governance",  label: "Governance",  icon: BarChart3 },
+      { path: "readiness",  label: "Inspection Readiness",  icon: ShieldCheck },
+      { path: "governance",  label: "Governance & KPIs",    icon: BarChart3 },
+      { path: "audit-trail", label: "Audit Trail",          icon: ClipboardList },
     ],
   },
   {
     id: "admin",
-    label: "Administration",
+    label: "System & Config",
     icon: SlidersHorizontal,
     items: [
-      { path: "settings", label: "Settings", icon: Settings },
+      { path: "settings",    label: "Settings",    icon: Settings },
+      { path: "audit-trail", label: "Audit Trail", icon: ClipboardList },
     ],
   },
 ];
@@ -92,7 +86,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   const activeSite = useActiveSite();
-  const { allowedPaths } = useRole();
+  const { allowedPaths, role } = useRole();
   const { setupNeeded, completedCount, totalSteps } = useSetupStatus();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
@@ -120,7 +114,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
     items: g.items.filter((item) => {
-      if (item.path === "readiness") return true;
+      if (item.path === "readiness" || item.path === "deviation") return true;
+      if (item.path === "audit-trail") return role === "qa_head" || role === "customer_admin" || role === "super_admin";
       return allowedPaths.includes(item.path);
     }),
   })).filter((g) => g.items.length > 0);

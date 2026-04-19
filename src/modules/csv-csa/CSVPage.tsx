@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router";
 import clsx from "clsx";
-import { Database, GitBranch, Plus, Info, X } from "lucide-react";
+import { Database, GitBranch, Plus, Info, X, Link2 } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { NoSitesPopup, TabBar, PageHeader } from "@/components/shared";
 import dayjs from "@/lib/dayjs";
@@ -22,18 +22,20 @@ import { Popup } from "@/components/ui/Popup";
 import { SystemInventoryTab } from "./tabs/SystemInventoryTab";
 import { SystemDetailTab } from "./tabs/SystemDetailTab";
 import { CSVRoadmapTab } from "./tabs/CSVRoadmapTab";
+import { RTMTab } from "./tabs/RTMTab";
 import { AddSystemModal, type SystemForm } from "./modals/AddSystemModal";
 import { EditSystemModal, type SystemForm as EditSystemForm } from "./modals/EditSystemModal";
 import { AddActivityModal, type ActivityForm } from "./modals/AddActivityModal";
 
 /* ── Constants ── */
 
-type TabId = "inventory" | "roadmap";
+type TabId = "inventory" | "roadmap" | "rtm";
 type DetailTab = "overview" | "risk" | "validation" | "di";
 
 const TABS: { id: TabId; label: string; Icon: typeof Database }[] = [
   { id: "inventory", label: "System Inventory", Icon: Database },
   { id: "roadmap", label: "CSV Roadmap", Icon: GitBranch },
+  { id: "rtm", label: "RTM", Icon: Link2 },
 ];
 
 /* ══════════════════════════════════════ */
@@ -373,6 +375,11 @@ export function CSVPage() {
           onGoToInventory={() => setActiveTab("inventory")}
           onCompleteActivity={handleCompleteActivity}
         />
+      </div>
+
+      {/* ═══ RTM TAB ═══ */}
+      <div role="tabpanel" id="panel-rtm" aria-labelledby="tab-rtm" tabIndex={0} hidden={activeTab !== "rtm"}>
+        <RTMTab isDark={isDark} />
       </div>
 
       {/* ═══════════ SYSTEM DETAIL DRAWER ═══════════ */}

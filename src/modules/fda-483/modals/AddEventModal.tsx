@@ -92,7 +92,7 @@ export function AddEventModal({ open, onClose, onSave, sites, lockedSiteId }: Ad
     <Modal
       open={open}
       onClose={handleClose}
-      title="Log regulatory event"
+      title="Register Regulatory Event"
     >
       <form
         onSubmit={form.handleSubmit(handleSubmit)}
@@ -279,7 +279,7 @@ export function AddEventModal({ open, onClose, onSave, sites, lockedSiteId }: Ad
             type="submit"
             loading={form.formState.isSubmitting}
           >
-            Log event
+            Register Event
           </Button>
         </div>
       </form>

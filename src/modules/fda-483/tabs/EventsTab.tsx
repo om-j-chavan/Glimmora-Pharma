@@ -31,13 +31,18 @@ function eventTypeBadge(t: EventType) {
 }
 
 function eventStatusBadge(s: EventStatus) {
-  const m: Record<EventStatus, "blue" | "red" | "amber" | "green"> = {
+  const m: Record<EventStatus, "blue" | "red" | "amber" | "green" | "purple" | "gray"> = {
     Open: "blue",
+    "Under Investigation": "amber",
     "Response Due": "red",
-    "Response Submitted": "amber",
-    Closed: "green",
+    "Response Drafted": "purple",
+    "Pending QA Sign-off": "amber",
+    "Response Submitted": "green",
+    "FDA Acknowledged": "green",
+    Closed: "gray",
+    "Warning Letter": "red",
   };
-  return <Badge variant={m[s]}>{s}</Badge>;
+  return <Badge variant={m[s] ?? "gray"}>{s}</Badge>;
 }
 
 function daysLeft(d: string) {

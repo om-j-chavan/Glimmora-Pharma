@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
 import clsx from "clsx";
 import {
   FileText,
@@ -11,6 +12,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { addResponseDocument, removeResponseDocument } from "@/store/fda483.slice";
+import { DocumentUpload } from "@/components/shared";
 import type {
   FDA483Event,
   EventStatus,
@@ -78,6 +81,7 @@ export function ResponseTab({
   onGenerateAGIDraft,
   onSignSubmit,
 }: ResponseTabProps) {
+  const dispatch = useAppDispatch();
   // Local UI state for modals
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [agiModalOpen, setAgiModalOpen] = useState(false);
@@ -121,20 +125,25 @@ export function ResponseTab({
   const allCapasClosed = capasRaised && linkedCapas.length > 0
     && linkedCapas.every((c) => c.status === "Closed");
 
+  const obsWithCapa = liveEvent.observations.filter((o) => (o.capaIds?.length ?? 0) > 0 || !!o.capaId).length;
+  const hasResponseDocs = (liveEvent.responseDocuments?.length ?? 0) > 0;
+
   const checks = [
     {
       label: "All observations have RCA",
-      done:
-        liveEvent.observations.length > 0 &&
-        liveEvent.observations.every((o) => o.rootCause?.trim()),
+      done: liveEvent.observations.length > 0 && liveEvent.observations.every((o) => o.rootCause?.trim()),
     },
     {
       label: allCapasClosed
         ? "All CAPAs raised and closed"
         : capasRaised
-          ? "CAPAs raised \u2014 pending closure"
-          : "All observations have CAPA raised",
+          ? `CAPAs raised (${obsWithCapa}/${totalObs}) \u2014 pending closure`
+          : `All observations have CAPA (${obsWithCapa}/${totalObs})`,
       done: allCapasClosed,
+    },
+    {
+      label: `Response documents attached (${liveEvent.responseDocuments?.length ?? 0})`,
+      done: hasResponseDocs,
     },
     {
       label: "Response draft written",
@@ -142,9 +151,7 @@ export function ResponseTab({
     },
     {
       label: "All commitments have due dates",
-      done:
-        liveEvent.commitments.length > 0 &&
-        liveEvent.commitments.every((c) => c.dueDate),
+      done: liveEvent.commitments.length > 0 && liveEvent.commitments.every((c) => c.dueDate),
     },
     {
       label: "Response within deadline",
@@ -340,6 +347,24 @@ export function ResponseTab({
         </div>
       </div>
 
+      {/* Supporting Documents */}
+      <div className="card mt-4">
+        <div className="card-body">
+          <DocumentUpload
+            recordId={liveEvent.id + "_response"}
+            recordTitle="Response Package"
+            module="FDA 483 Response"
+            existingDocs={liveEvent.responseDocuments ?? []}
+            onUpload={(doc) => dispatch(addResponseDocument({ eventId: liveEvent.id, doc }))}
+            onDelete={(docId) => dispatch(removeResponseDocument({ eventId: liveEvent.id, docId }))}
+            readOnly={isSubmitted}
+          />
+          <p className="text-[10px] italic mt-2" style={{ color: "var(--text-muted)" }}>
+            All attached documents will be included in the FDA response package when QA Head signs and submits.
+          </p>
+        </div>
+      </div>
+
       {/* Sign & Submit */}
       {canSign &&
         liveEvent.responseDraft?.trim() &&
@@ -354,7 +379,7 @@ export function ResponseTab({
               onClick={onSignSubmit}
               aria-label={canSubmit ? "Sign and submit response" : "Complete previous steps first"}
             >
-              Sign &amp; Submit Response
+              Sign &amp; Submit to FDA
             </Button>
             <p
               className="text-[10px] text-center mt-1.5"

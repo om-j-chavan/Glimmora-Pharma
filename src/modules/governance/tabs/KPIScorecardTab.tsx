@@ -1,11 +1,14 @@
+import { useState } from "react";
 import clsx from "clsx";
 import {
   Clock, AlertTriangle, RotateCw, ShieldAlert, Shield, Activity,
-  BarChart3, Database, MapPin, CheckCircle2,
+  BarChart3, Database, MapPin, CheckCircle2, TrendingUp,
 } from "lucide-react";
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { chartDefaults } from "@/lib/chartColors";
 import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import type { SiteKPI } from "@/mock/governance.mock";
 
 interface Site {
   id: string;
@@ -42,6 +45,8 @@ export interface KPIScorecardTabProps {
   isDark: boolean;
   currentMonth: string;
   onNavigateSettings: () => void;
+  siteKPIs?: SiteKPI[];
+  siteTrend?: { month: string; chennai: number; mumbai: number; bangalore: number; hyderabad: number }[];
 }
 
 export function KPIScorecardTab({
@@ -49,7 +54,9 @@ export function KPIScorecardTab({
   overdueCommitments, repeatObservationRisk, diExceptions, auditTrailCoverage,
   csvDrift, systemsCount, capaTrend, capaTrendEmpty, valBreakdown, diByArea,
   siteReadiness, sites, isDark, currentMonth, onNavigateSettings,
+  siteKPIs = [], siteTrend = [],
 }: KPIScorecardTabProps) {
+  void useState; // site filter reserved for future use
   return (
     <>
       {/* Scorecard header */}
@@ -97,6 +104,106 @@ export function KPIScorecardTab({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{siteReadiness.map((sr) => { const col = sr.score >= 80 ? "#10b981" : sr.score >= 60 ? "#f59e0b" : "#ef4444"; return (<div key={sr.site.id} className="rounded-xl p-4 border" style={{ background: col + (isDark ? "12" : "0A"), borderColor: col + "40" }}><div className="flex items-center justify-between mb-2"><div><p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{sr.site.name}</p><p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{sr.site.risk} risk</p></div><p className="text-[22px] font-bold" style={{ color: col }}>{sr.score}%</p></div><div className={clsx("h-1.5 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}><div className="h-full rounded-full" style={{ width: `${sr.score}%`, background: col }} /></div><div className="flex items-center gap-3 mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}><span>{sr.findingsCount} findings</span><span>{sr.capasCount} CAPAs</span></div></div>); })}</div>
         )}
       </div></div>
+
+      {/* ── Multi-site comparison ── */}
+      {siteKPIs.length > 0 && (
+        <>
+          <div className="card mt-6">
+            <div className="card-header">
+              <div className="flex items-center gap-2"><BarChart3 className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">Multi-site comparison</span></div>
+            </div>
+            <div className="card-body overflow-x-auto">
+              <table className="data-table" style={{ minWidth: 700 }} aria-label="Site comparison matrix">
+                <thead>
+                  <tr>
+                    <th scope="col">Metric</th>
+                    {siteKPIs.map((s) => <th key={s.siteId} scope="col" className="text-center">{s.siteName.split(" ")[0]}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    { label: "Readiness %", key: "readinessScore", thresh: [80, 60] },
+                    { label: "Open findings", key: "openFindings", thresh: [0, 1], invert: true },
+                    { label: "Overdue CAPAs", key: "overdueCAPAs", thresh: [0, 1], invert: true },
+                    { label: "Active FDA 483", key: "activeFDA483", thresh: [0, 1], invert: true },
+                    { label: "DI exceptions", key: "diExceptions", thresh: [0, 1], invert: true },
+                    { label: "CAPA timeliness", key: "capaTimeliness", thresh: [80, 60] },
+                    { label: "Audit trail %", key: "auditTrailCoverage", thresh: [80, 60] },
+                  ] as { label: string; key: keyof SiteKPI; thresh: number[]; invert?: boolean }[]).map((row) => (
+                    <tr key={row.label}>
+                      <th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{row.label}</th>
+                      {siteKPIs.map((s) => {
+                        const v = s[row.key] as number;
+                        const isGood = row.invert ? v <= row.thresh[0] : v >= row.thresh[0];
+                        const isMid = row.invert ? v <= row.thresh[1] : v >= row.thresh[1];
+                        const bg = isGood ? "#E8F5F1" : isMid ? "#FEF9EC" : "#FEF2F2";
+                        const col = isGood ? "#0F6E56" : isMid ? "#7A6200" : "#A32D2D";
+                        const bgDark = isGood ? "rgba(16,185,129,0.08)" : isMid ? "rgba(245,158,11,0.08)" : "rgba(239,68,68,0.08)";
+                        return (
+                          <td key={s.siteId} className="text-center text-[12px] font-semibold" style={{ background: isDark ? bgDark : bg, color: col }}>
+                            {row.key === "readinessScore" || row.key === "capaTimeliness" || row.key === "auditTrailCoverage" ? `${v}%` : String(v)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Site ranking */}
+          <div className="card mt-4">
+            <div className="card-header">
+              <div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" /><span className="card-title">Site compliance ranking</span></div>
+            </div>
+            <div className="card-body space-y-2">
+              {[...siteKPIs].sort((a, b) => b.readinessScore - a.readinessScore).map((s, i) => {
+                const col = s.readinessScore >= 80 ? "#10b981" : s.readinessScore >= 60 ? "#f59e0b" : "#ef4444";
+                return (
+                  <div key={s.siteId} className="flex items-center gap-3">
+                    <span className="text-[14px] font-bold w-6 text-right" style={{ color: col }}>{i + 1}.</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{s.siteName}</span>
+                        <Badge variant={s.riskLevel === "HIGH" ? "red" : s.riskLevel === "MEDIUM" ? "amber" : "green"}>{s.riskLevel}</Badge>
+                      </div>
+                      <div className={clsx("h-1.5 rounded-full mt-1", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}>
+                        <div className="h-full rounded-full transition-all" style={{ width: `${s.readinessScore}%`, background: col }} />
+                      </div>
+                    </div>
+                    <span className="text-[16px] font-bold shrink-0" style={{ color: col }}>{s.readinessScore}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Site trend chart */}
+          {siteTrend.length > 0 && (
+            <div className="card mt-4">
+              <div className="card-header">
+                <div className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">Readiness trend by site</span></div>
+              </div>
+              <div className="card-body">
+                <ResponsiveContainer width="100%" height={240}>
+                  <LineChart data={siteTrend}>
+                    <CartesianGrid {...chartDefaults.cartesianGrid} />
+                    <XAxis dataKey="month" {...chartDefaults.xAxis} />
+                    <YAxis {...chartDefaults.yAxis} domain={[0, 100]} />
+                    <Tooltip {...chartDefaults.tooltip} />
+                    <Legend iconType="circle" iconSize={8} />
+                    <Line type="monotone" dataKey="chennai" name="Chennai" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="mumbai" name="Mumbai" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="bangalore" name="Bangalore" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="hyderabad" name="Hyderabad" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </>
   );
 }

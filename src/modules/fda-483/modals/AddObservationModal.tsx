@@ -13,7 +13,7 @@ const obsSchema = z.object({
   area: z.string().optional(),
   regulation: z.string().optional(),
   severity: z.enum(["Critical", "High", "Low"]),
-  status: z.enum(["Open", "RCA In Progress", "Response Drafted", "Closed"]),
+  status: z.enum(["Open", "In Progress", "RCA In Progress", "CAPA Linked", "Response Ready", "Response Drafted", "Closed"]),
 });
 
 export type ObsFormData = z.infer<typeof obsSchema>;

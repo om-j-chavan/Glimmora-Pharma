@@ -9,11 +9,13 @@ import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   addCAPA, updateCAPA, closeCAPA,
+  addCAPADocument, removeCAPADocument, approveCAPADocument,
   type CAPA, type RCAMethod,
 } from "@/store/capa.slice";
 import { closeFinding } from "@/store/findings.slice";
@@ -21,6 +23,8 @@ import { updateObservation } from "@/store/fda483.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
+import { StatusGuide } from "@/components/shared";
+import { CAPA_STATUSES } from "@/constants/statusTaxonomy";
 
 import { QMSBlueprintTab } from "./tabs/QMSBlueprintTab";
 import { CAPATrackerTab } from "./tabs/CAPATrackerTab";
@@ -51,6 +55,7 @@ export function CAPAPage() {
   const location = useLocation();
   const dispatch = useAppDispatch();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
+  const { isCustomerAdmin, canCreateCAPAs } = usePermissions();
 
   const { capas, fda483Events, tenantId } = useTenantData();
   const { org, users, allSites } = useTenantConfig();
@@ -225,8 +230,10 @@ export function CAPAPage() {
         <div>
           <h1 className="page-title">QMS &amp; CAPA Tracker</h1>
           <p className="page-subtitle mt-1">{capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}</p>
+          <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
         </div>
-        {!isViewOnly && <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>New CAPA</Button>}
+        {canCreateCAPAs && <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>New CAPA</Button>}
+        {isCustomerAdmin && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>CAPA actions require QA Head authorization</p>}
       </header>
 
       {/* Tab bar */}
@@ -253,12 +260,15 @@ export function CAPAPage() {
       {activeTab === "tracker" && (
         <CAPATrackerTab
           capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
-          isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
-          timezone={timezone} dateFormat={dateFormat} canSign={canSign} canCloseCapa={canCloseCapa}
+          isDark={isDark} isViewOnly={isViewOnly || isCustomerAdmin} users={users} user={user} sites={allSites}
+          timezone={timezone} dateFormat={dateFormat} canSign={isCustomerAdmin ? false : canSign} canCloseCapa={isCustomerAdmin ? false : canCloseCapa}
           onAddOpen={() => setAddOpen(true)} onEditOpen={() => setEditModalOpen(true)}
           onSignOpen={() => setSignOpen(true)} onSubmitForReview={handleSubmitForReview}
           onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
           onNavigateCapa={() => navigate("/gap-assessment")}
+          onDocUpload={(capaId, doc) => dispatch(addCAPADocument({ capaId, doc }))}
+          onDocDelete={(capaId, docId) => dispatch(removeCAPADocument({ capaId, docId }))}
+          onDocApprove={(capaId, docId, approvedBy) => dispatch(approveCAPADocument({ capaId, docId, approvedBy }))}
         />
       )}
 

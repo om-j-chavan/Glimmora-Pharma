@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   ClipboardCheck, Plus, Search, ChevronRight, Link2, Pencil,
-  AlertCircle, AlertTriangle, CheckCircle2, TrendingUp, FileText,
+  AlertCircle, AlertTriangle, CheckCircle2, TrendingUp,
   ShieldCheck, Send,
 } from "lucide-react";
+import { DocumentUpload, type LinkedDocument } from "@/components/shared";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import type { CAPA, CAPARisk, CAPAStatus } from "@/store/capa.slice";
@@ -16,6 +17,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 
 /* ── Helpers ── */
+const SOURCE_LABEL: Record<string, string> = { "483": "FDA 483 Observation", "Gap Assessment": "Gap Assessment Finding", Deviation: "Deviation Report", "Internal Audit": "Internal Audit", Complaint: "Complaint", OOS: "OOS", "Change Control": "Change Control" };
+function sourceLabel(s: string) { return SOURCE_LABEL[s] ?? s; }
 const RISK_VARIANT: Record<CAPARisk, "red" | "amber" | "green"> = { Critical: "red", High: "amber", Low: "green" };
 const STATUS_VARIANT: Record<CAPAStatus, "blue" | "amber" | "purple" | "green"> = { Open: "blue", "In Progress": "amber", "Pending QA Review": "purple", Closed: "green" };
 function riskBadge(r: CAPARisk) { return <Badge variant={RISK_VARIANT[r]}>{r}</Badge>; }
@@ -49,6 +52,9 @@ interface CAPATrackerTabProps {
   onSubmitForReview: (id: string) => void;
   onNavigateGap: (findingId: string) => void;
   onNavigateCapa: () => void;
+  onDocUpload?: (capaId: string, doc: LinkedDocument) => void;
+  onDocDelete?: (capaId: string, docId: string) => void;
+  onDocApprove?: (capaId: string, docId: string, approvedBy: string) => void;
 }
 
 export function CAPATrackerTab({
@@ -57,6 +63,7 @@ export function CAPATrackerTab({
   canSign, canCloseCapa,
   onAddOpen, onEditOpen, onSignOpen, onSubmitForReview,
   onNavigateGap, onNavigateCapa,
+  onDocUpload, onDocDelete, onDocApprove,
 }: CAPATrackerTabProps) {
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const showSiteColumn = !selectedSiteId && sites.length > 1;
@@ -124,7 +131,7 @@ export function CAPATrackerTab({
               {showSiteColumn && <th scope="col">Site</th>}
               <th scope="col">Source</th><th scope="col">Description</th>
               <th scope="col">Risk</th><th scope="col">Status</th><th scope="col">Owner</th>
-              <th scope="col">Due date</th><th scope="col" title="Effectiveness check \u2014 90-day recurrence review">Eff.</th><th scope="col"><span className="sr-only">Open</span></th>
+              <th scope="col">Due date</th><th scope="col" title="90-day effectiveness check status">Effectiveness</th><th scope="col"><span className="sr-only">Open</span></th>
             </tr></thead>
             <tbody>
               {displayed.map((c) => (
@@ -135,7 +142,7 @@ export function CAPATrackerTab({
                     {c.findingId && <div className="flex items-center gap-1 mt-0.5"><Link2 className="w-3 h-3 text-[#0ea5e9]" aria-hidden="true" /><span className="text-[10px] text-[#0ea5e9]">{c.findingId}</span></div>}
                   </th>
                   {showSiteColumn && <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{siteName(c.siteId)}</td>}
-                  <td><Badge variant="gray">{c.source}</Badge></td>
+                  <td><Badge variant="gray">{sourceLabel(c.source)}</Badge></td>
                   <td><span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{c.description}</span></td>
                   <td>{riskBadge(c.risk)}</td>
                   <td>{capaStatusBadge(c.status)}</td>
@@ -203,7 +210,7 @@ export function CAPATrackerTab({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-[11px] mb-1" style={{ color: "var(--text-muted)" }}>Source</p>
-                <Badge variant="gray">{selectedCAPA.source}</Badge>
+                <Badge variant="gray">{sourceLabel(selectedCAPA.source)}</Badge>
               </div>
               {selectedCAPA.findingId && (
                 <div>
@@ -259,13 +266,17 @@ export function CAPATrackerTab({
               );
             })()}
 
-            {/* Evidence */}
-            <div>
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Evidence</h3>
-              {selectedCAPA.evidenceLinks.length > 0
-                ? <ul className="space-y-1 list-none p-0">{selectedCAPA.evidenceLinks.map((l, i) => <li key={i} className="flex items-center gap-2"><FileText className="w-3.5 h-3.5 text-[#0ea5e9] shrink-0" aria-hidden="true" /><span className="text-[11px] text-[#0ea5e9]">{l}</span></li>)}</ul>
-                : <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No evidence linked yet</p>}
-            </div>
+            {/* Evidence — Document Upload */}
+            <DocumentUpload
+              recordId={selectedCAPA.id}
+              recordTitle={selectedCAPA.description}
+              module="CAPA Tracker"
+              existingDocs={selectedCAPA.documents ?? []}
+              onUpload={(doc) => onDocUpload?.(selectedCAPA.id, doc)}
+              onDelete={(docId) => onDocDelete?.(selectedCAPA.id, docId)}
+              onApprove={(docId, by) => onDocApprove?.(selectedCAPA.id, docId, by)}
+              readOnly={isViewOnly || selectedCAPA.status === "Closed"}
+            />
 
             {/* Effectiveness */}
             {selectedCAPA.effectivenessCheck && selectedCAPA.status === "Closed" && selectedCAPA.effectivenessDate && (

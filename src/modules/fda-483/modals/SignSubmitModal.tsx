@@ -47,7 +47,7 @@ export function SignSubmitModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Sign & Submit Response"
+      title="Sign & Submit to FDA"
     >
       <p id="sign-483-notice" className="alert alert-info mb-4 text-[12px]">
         This is a GxP electronic signature under 21 CFR Part 11. Your

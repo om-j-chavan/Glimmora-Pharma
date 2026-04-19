@@ -3,11 +3,13 @@ import { useNavigate, useLocation } from "react-router";
 import { BarChart3, ClipboardList, FolderOpen, Plus } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
-import { NoSitesPopup, TabBar, PlanLimitPopup, PageHeader } from "@/components/shared";
+import { NoSitesPopup, TabBar, PlanLimitPopup, PageHeader, StatusGuide } from "@/components/shared";
+import { FINDING_STATUSES } from "@/constants/statusTaxonomy";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
@@ -82,6 +84,7 @@ export function GapPage() {
   const location = useLocation();
   const dispatch = useAppDispatch();
   const { isViewOnly } = useRole();
+  const { canCreateFindings, isCustomerAdmin } = usePermissions();
   const { hasSites } = useSetupStatus();
   const { isAtLimit, getLimit, tenantPlan } = usePlanLimits();
   const atFindingLimit = isAtLimit("findings");
@@ -273,8 +276,9 @@ export function GapPage() {
       <PageHeader
         title="Gap Assessment &amp; Findings"
         subtitle={findings.length === 0 ? "No findings logged yet" : `${findings.length} findings \u00b7 ${criticalCount} critical \u00b7 ${openCount} open`}
-        actions={!isViewOnly ? <Button variant="primary" icon={Plus} onClick={() => { if (!hasSites) { setNoSitesOpen(true); return; } if (atFindingLimit) { setPlanLimitOpen(true); return; } setAddOpen(true); }}>Log finding</Button> : undefined}
+        actions={canCreateFindings ? <Button variant="primary" icon={Plus} onClick={() => { if (!hasSites) { setNoSitesOpen(true); return; } if (atFindingLimit) { setPlanLimitOpen(true); return; } setAddOpen(true); }}>Report Gap</Button> : isCustomerAdmin ? <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Contact QA Head or team member to log findings</p> : undefined}
       />
+      <StatusGuide module="Gap Assessment" statuses={FINDING_STATUSES} />
 
       {/* Tab bar */}
       <TabBar tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as TabId)} ariaLabel="Gap assessment sections" />
@@ -300,7 +304,7 @@ export function GapPage() {
         <GapRegisterTab
           filteredFindings={baseFindings} findingsTotal={findings.length}
           selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding}
-          isDark={isDark} isViewOnly={isViewOnly} users={users}
+          isDark={isDark} isViewOnly={isViewOnly || isCustomerAdmin} users={users}
           timezone={timezone} dateFormat={dateFormat} capas={capas}
           agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
           renderFilters={renderFilters}

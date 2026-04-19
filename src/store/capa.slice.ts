@@ -1,4 +1,5 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
+import type { LinkedDocument } from "@/components/shared/DocumentUpload";
 
 export type CAPARisk = "Critical" | "High" | "Low";
 export type CAPAStatus = "Open" | "In Progress" | "Pending QA Review" | "Closed";
@@ -32,6 +33,7 @@ export interface CAPA {
   closedAt?: string;
   closedBy?: string;
   createdAt: string;
+  documents?: LinkedDocument[];
 }
 
 interface CAPAState {
@@ -65,8 +67,24 @@ const capaSlice = createSlice({
       const item = state.items.find((c) => c.id === payload.id);
       if (item) item.evidenceLinks.push(payload.link);
     },
+    addCAPADocument(state, { payload }: PayloadAction<{ capaId: string; doc: LinkedDocument }>) {
+      const item = state.items.find((c) => c.id === payload.capaId);
+      if (item) {
+        if (!item.documents) item.documents = [];
+        item.documents.push(payload.doc);
+      }
+    },
+    removeCAPADocument(state, { payload }: PayloadAction<{ capaId: string; docId: string }>) {
+      const item = state.items.find((c) => c.id === payload.capaId);
+      if (item && item.documents) item.documents = item.documents.filter((d) => d.id !== payload.docId);
+    },
+    approveCAPADocument(state, { payload }: PayloadAction<{ capaId: string; docId: string; approvedBy: string }>) {
+      const item = state.items.find((c) => c.id === payload.capaId);
+      const doc = item?.documents?.find((d) => d.id === payload.docId);
+      if (doc) { doc.status = "approved"; doc.approvedBy = payload.approvedBy; doc.approvedAt = new Date().toISOString(); }
+    },
   },
 });
 
-export const { addCAPA, updateCAPA, closeCAPA, addEvidence } = capaSlice.actions;
+export const { addCAPA, updateCAPA, closeCAPA, addEvidence, addCAPADocument, removeCAPADocument, approveCAPADocument } = capaSlice.actions;
 export default capaSlice.reducer;

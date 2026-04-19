@@ -12,6 +12,9 @@ import raidReducer from "./raid.slice";
 import permissionsReducer from "./permissions.slice";
 import notificationsReducer from "./notifications.slice";
 import readinessReducer from "./readiness.slice";
+import auditTrailReducer from "./auditTrail.slice";
+import deviationReducer from "./deviation.slice";
+import rtmReducer from "./rtm.slice";
 import { loadPersistedState, persistMiddleware } from "./persistence";
 
 const rootReducer = combineReducers({
@@ -28,6 +31,9 @@ const rootReducer = combineReducers({
   permissions: permissionsReducer,
   notifications: notificationsReducer,
   readiness: readinessReducer,
+  auditTrail: auditTrailReducer,
+  deviation: deviationReducer,
+  rtm: rtmReducer,
 });
 
 export const store = configureStore({

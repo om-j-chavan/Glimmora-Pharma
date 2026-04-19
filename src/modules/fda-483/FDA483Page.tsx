@@ -8,6 +8,9 @@ import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
+import { usePermissions } from "@/hooks/usePermissions";
+import { StatusGuide } from "@/components/shared";
+import { FDA483_EVENT_STATUSES } from "@/constants/statusTaxonomy";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
@@ -19,6 +22,7 @@ import {
   addCommitment,
   setResponseDraft,
   setAGIDraft,
+  linkCAPAToEvent,
   type FDA483Event,
   type EventStatus,
   type Observation,
@@ -83,6 +87,7 @@ export function FDA483Page() {
   const user = useAppSelector((s) => s.auth.user);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { role, canSign } = useRole();
+  const { isCustomerAdmin, canCreateEvents } = usePermissions();
   const { hasSites } = useSetupStatus();
 
   function ownerName(id: string) {
@@ -304,16 +309,19 @@ export function FDA483Page() {
               ? "No regulatory events logged yet"
               : `${events.length} events \u00b7 ${openCount} open \u00b7 ${dueCount} response due`}
           </p>
+          <StatusGuide module="FDA 483 Events" statuses={FDA483_EVENT_STATUSES} />
         </div>
-        {role !== "viewer" && (
+        {canCreateEvents ? (
           <Button
             variant="primary"
             icon={Plus}
             onClick={() => { if (!hasSites) { setNoSitesOpen(true); return; } setAddEventOpen(true); }}
           >
-            Log event
+            Register Event
           </Button>
-        )}
+        ) : isCustomerAdmin ? (
+          <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>FDA events require QA Head to log and submit</p>
+        ) : null}
       </header>
 
       {/* Deadline alert */}
@@ -499,6 +507,7 @@ export function FDA483Page() {
                           evidenceLinks: [], diGate: false, createdAt: "",
                         }));
                         dispatch(updateObservation({ eventId: liveEvent.id, obsId: selectedObs.id, patch: { capaId } }));
+                        dispatch(linkCAPAToEvent({ eventId: liveEvent.id, capaId, observationNumber: selectedObs.number }));
                         auditLog({ action: "CAPA_RAISED_FROM_483", module: "fda-483", recordId: selectedObs.id, newValue: { capaId } });
                         setCapaRaisedPopup(true);
                       }}
@@ -510,7 +519,7 @@ export function FDA483Page() {
           capas={capas}
           isDark={isDark}
           role={role}
-          canSign={canSign}
+          canSign={isCustomerAdmin ? false : canSign}
           canSubmit={canSubmitResponse}
           agiMode={agiMode}
           agiAgent={agiAgent}

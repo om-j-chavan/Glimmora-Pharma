@@ -36,7 +36,40 @@ export interface Simulation {
 
 export interface TrainingRecord { id: string; userId: string; module: string; completedAt: string; score?: number; tenantId: string; }
 
+export type InspectionAgency = "FDA" | "EMA" | "MHRA" | "WHO" | "Internal";
+export type InspectionType = "announced" | "unannounced" | "follow_up" | "pre_approval";
+export type InspectionStatus = "planning" | "preparation" | "active" | "completed" | "cancelled";
+
+export interface Inspection {
+  id: string;
+  tenantId: string;
+  title: string;
+  siteId: string;
+  siteName: string;
+  agency: InspectionAgency;
+  type: InspectionType;
+  status: InspectionStatus;
+  expectedDate?: string;
+  startDate?: string;
+  endDate?: string;
+  readinessScore: number;
+  totalActions: number;
+  completedActions: number;
+  linkedFDA483Id?: string;
+  linkedFindings?: string[];
+  inspectionLead: string;
+  frontRoom?: string[];
+  backRoom?: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  notes?: string;
+  completionOutcome?: string;
+}
+
 interface ReadinessState {
+  inspections: Inspection[];
+  activeInspectionId: string | null;
   cards: ReadinessCard[];
   playbooks: Playbook[];
   simulations: Simulation[];
@@ -46,7 +79,7 @@ interface ReadinessState {
   total: number;
 }
 
-import { MOCK_READINESS_CARDS, MOCK_PLAYBOOKS, MOCK_SIMULATIONS, MOCK_TRAINING_RECORDS } from "@/mock";
+import { MOCK_READINESS_CARDS, MOCK_PLAYBOOKS, MOCK_SIMULATIONS, MOCK_TRAINING_RECORDS, MOCK_INSPECTIONS } from "@/mock";
 
 function calcScore(cards: ReadinessCard[]) {
   if (cards.length === 0) return { score: 0, complete: 0, total: 0 };
@@ -66,7 +99,11 @@ function calcScore(cards: ReadinessCard[]) {
 
 const init = calcScore(MOCK_READINESS_CARDS);
 
+const activeId = MOCK_INSPECTIONS.find((i) => i.status !== "completed" && i.status !== "cancelled")?.id ?? null;
+
 const initialState: ReadinessState = {
+  inspections: MOCK_INSPECTIONS,
+  activeInspectionId: activeId,
   cards: MOCK_READINESS_CARDS,
   playbooks: MOCK_PLAYBOOKS,
   simulations: MOCK_SIMULATIONS,
@@ -104,8 +141,34 @@ const readinessSlice = createSlice({
     removeTraining(state, { payload }: PayloadAction<{ userId: string; module: string; tenantId: string }>) {
       state.training = state.training.filter((t) => !(t.userId === payload.userId && t.module === payload.module && t.tenantId === payload.tenantId));
     },
+    // Inspection management
+    addInspection(state, { payload }: PayloadAction<Inspection>) {
+      state.inspections.push(payload);
+    },
+    updateInspection(state, { payload }: PayloadAction<{ id: string; patch: Partial<Inspection> }>) {
+      const insp = state.inspections.find((i) => i.id === payload.id);
+      if (insp) Object.assign(insp, payload.patch, { updatedAt: new Date().toISOString() });
+    },
+    setActiveInspection(state, { payload }: PayloadAction<string>) {
+      state.activeInspectionId = payload;
+    },
+    completeInspection(state, { payload }: PayloadAction<{ id: string; startDate?: string; endDate?: string; outcome?: string; linkedFDA483Id?: string }>) {
+      const insp = state.inspections.find((i) => i.id === payload.id);
+      if (insp) {
+        insp.status = "completed";
+        insp.startDate = payload.startDate;
+        insp.endDate = payload.endDate;
+        insp.completionOutcome = payload.outcome;
+        insp.linkedFDA483Id = payload.linkedFDA483Id;
+        insp.updatedAt = new Date().toISOString();
+      }
+    },
   },
 });
 
-export const { addCard, updateCard, removeCard, addPlaybook, updatePlaybook, addSimulation, updateSimulation, addTraining, removeTraining } = readinessSlice.actions;
+export const {
+  addCard, updateCard, removeCard, addPlaybook, updatePlaybook,
+  addSimulation, updateSimulation, addTraining, removeTraining,
+  addInspection, updateInspection, setActiveInspection, completeInspection,
+} = readinessSlice.actions;
 export default readinessSlice.reducer;
