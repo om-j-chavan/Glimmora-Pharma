@@ -23,6 +23,7 @@ import { useRole } from "@/hooks/useRole";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useActiveSite } from "@/hooks/useActiveSite";
 import { logout } from "@/store/auth.slice";
+import { logout as nextAuthLogout } from "@/lib/authClient";
 
 interface NavItem {
   path: string;
@@ -120,7 +121,15 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     }),
   })).filter((g) => g.items.length > 0);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // AUTH-03: Clear next-auth session cookie first (server-side), then
+    // reset Redux state, then navigate. Errors are non-fatal — we still
+    // want to clear local state and navigate if the network call fails.
+    try {
+      await nextAuthLogout();
+    } catch (err) {
+      console.warn("[logout] next-auth signOut failed", err);
+    }
     dispatch(logout());
     navigate("/login");
   };

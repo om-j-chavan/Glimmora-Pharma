@@ -10,6 +10,7 @@ import {
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { logout } from "@/store/auth.slice";
+import { logout as nextAuthLogout } from "@/lib/authClient";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 const NAV_ITEMS = [
@@ -22,7 +23,8 @@ export function AdminShell() {
   const user = useAppSelector((s) => s.auth.user);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await nextAuthLogout(); } catch { /* ignore */ }
     dispatch(logout());
     navigate("/login");
   };

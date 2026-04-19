@@ -139,6 +139,7 @@ Open URL → Sign In (email/SSO) → Select Organisation / Site → Dashboard
 - If you have access to multiple sites, you will see multiple cards on the site picker. Select the relevant site for this session.
 - Your role is site-specific. Switching sites may change available modules.
 - If you are denied access to a module, your role does not include that path. Contact your Super Admin.
+- **Inactive accounts** — users whose status is set to Inactive in Settings → Users & Roles cannot sign in. They will see the message "Your account is inactive. Please contact your administrator to reactivate it." Re-activation is done by a Super Admin or Customer Admin from Settings → Users & Roles.
 
 ---
 
@@ -149,7 +150,7 @@ Open URL → Sign In (email/SSO) → Select Organisation / Site → Dashboard
 **What it shows:**
 - **Readiness Score** — Overall GxP/GMP inspection readiness (0–100).
 - **KPI Cards** — Critical findings count, CAPA overdue %, high-risk CSV systems, training compliance %.
-- **Area Heatmap** — Risk level (HIGH/MED/LOW) by site and functional area.
+- **Area Heatmap** — Risk level (HIGH/MED/LOW) by site and functional area. Cells are colour-coded: green ≥ 80%, amber 60–79%, red < 60%, and grey dashed "—" when no findings, CAPAs, or systems have been logged yet for that area + site (i.e. not assessed, not 100% ready).
 - **Observation Trend Chart** — Monthly observation volume by severity (Critical/Major/Minor).
 - **AGI Insights Panel** — Active only when AGI mode is Assisted or Autonomous. Shows top 3 risks with module links.
 - **90-Day Action Plan** — Prioritised actions with owners, due dates, status, and AGI risk scores.
@@ -491,7 +492,7 @@ Click "Reports & Exports" tab
 | Tab | Who | What |
 |---|---|---|
 | Org & Sites | super_admin | Tenant name, contact, site list, site metadata |
-| Sites | super_admin | Add/edit/remove sites, GMP scope, country, risk level |
+| Sites | super_admin | Add/edit/remove sites, GMP scope, country, risk level. Inactive sites remain listed here so they can be re-activated, but are hidden from every other dropdown, heatmap, and picker across the app. |
 | Users & Roles | super_admin | Add/invite users, assign roles, set GxP signatory flag |
 | Regulatory Frameworks | super_admin | Toggle which regulations apply (21 CFR 210/211, Part 11, Annex 11/15, ICH Q9/Q10, WHO GMP) |
 | AGI Policy | super_admin, it_cdo | AGI mode (Autonomous / Assisted / Manual), agent-by-agent toggles, logging, retention |

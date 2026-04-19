@@ -70,6 +70,17 @@ export async function loginApi(
     body: JSON.stringify({ username, password }),
   });
   if (res.status === 401) return null;
+  if (res.status === 403) {
+    // Gated login — inactive user, expired subscription, etc. Surface the
+    // tagged reason so the UI can show a specific message.
+    const body = (await res.json().catch(() => ({}))) as {
+      reason?: string;
+      error?: string;
+    };
+    const err = new Error(body.reason ?? body.error ?? "Login blocked");
+    (err as Error & { reason?: string }).reason = body.reason;
+    throw err;
+  }
   if (!res.ok) throw new Error(`Login failed: ${res.status}`);
   return (await res.json()) as LoginResult;
 }

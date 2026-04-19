@@ -47,9 +47,7 @@ export interface DocumentLibraryTabProps {
   selectedDocs: Set<string>;
   toggleDocSelection: (id: string) => void;
   setSelectedDocs: (v: Set<string>) => void;
-  systems: { id: string; name: string }[];
-  isDark: boolean;
-  role: string;
+  systems: { id: string; name: string }[];  role: string;
   timezone: string;
   dateFormat: string;
   onAddDocOpen: () => void;
@@ -61,7 +59,7 @@ export function DocumentLibraryTab({
   typeFilter, setTypeFilter, systemFilter, setSystemFilter, statusFilter,
   setStatusFilter, dateFrom, setDateFrom, dateTo, setDateTo, anyFilter,
   clearFilters, viewMode, setViewMode, selectedDocs, toggleDocSelection,
-  setSelectedDocs, systems, isDark, role, timezone, dateFormat,
+  setSelectedDocs, systems, role, timezone, dateFormat,
   onAddDocOpen, onNavigate,
 }: DocumentLibraryTabProps) {
   return (
@@ -73,7 +71,7 @@ export function DocumentLibraryTab({
       </div>
 
       {/* Facets */}
-      <section aria-label="Document filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+      <section aria-label="Document filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
         <Filter className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         <Dropdown placeholder="All areas" value={areaFilter} onChange={setAreaFilter} width="w-36" options={[{ value: "", label: "All areas" }, ...DOC_AREAS.map((a) => ({ value: a, label: a }))]} />
@@ -85,7 +83,7 @@ export function DocumentLibraryTab({
         {anyFilter && <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>}
 
         {/* View toggle */}
-        <div className={clsx("ml-auto flex items-center gap-1 p-1 rounded-lg", isDark ? "bg-[#071526]" : "bg-[#f1f5f9]")}>
+        <div className={clsx("ml-auto flex items-center gap-1 p-1 rounded-lg", "bg-(--bg-surface)")}>
           <button type="button" aria-pressed={viewMode === "grid"} aria-label="Grid view" onClick={() => setViewMode("grid")} className={clsx("p-1.5 rounded-md transition-colors border-none cursor-pointer", viewMode === "grid" ? "bg-[#0ea5e9] text-white" : "bg-transparent text-(--text-muted)")}>
             <LayoutGrid className="w-3.5 h-3.5" />
           </button>
@@ -134,8 +132,8 @@ export function DocumentLibraryTab({
                   <p className="text-[13px] font-medium line-clamp-2 mb-1" style={{ color: "var(--text-primary)" }}>{doc.title}</p>
                   <p className="font-mono text-[10px] mb-2" style={{ color: "var(--text-muted)" }}>{doc.reference}</p>
                   <div className="flex gap-1.5 flex-wrap mb-2">{docStatusBadge(doc.status)}<Badge variant="gray">{doc.type}</Badge><Badge variant="gray">{doc.area}</Badge></div>
-                  {doc.complianceTags.length > 0 && <div className="flex gap-1 flex-wrap">{doc.complianceTags.map((tag) => <span key={tag} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[rgba(99,102,241,0.1)] text-[#6366f1]">{tag}</span>)}</div>}
-                  <div className="flex items-center justify-between mt-3 pt-2 border-t" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
+                  {doc.complianceTags.length > 0 && <div className="flex gap-1 flex-wrap">{doc.complianceTags.map((tag) => <span key={tag} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-(--info-bg) text-[#6366f1]">{tag}</span>)}</div>}
+                  <div className="flex items-center justify-between mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
                     <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>v{doc.version} &middot; {doc.effectiveDate ? dayjs.utc(doc.effectiveDate).tz(timezone).format(dateFormat) : "\u2014"}</span>
                     <div className="flex items-center gap-1.5">
                       {doc.findingId && <button onClick={() => onNavigate("/gap-assessment", { state: { openFindingId: doc.findingId } })} title={`Finding: ${doc.findingId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><Search className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
@@ -161,7 +159,7 @@ export function DocumentLibraryTab({
               {filteredDocs.map((doc) => {
                 const DocIcon = DOC_TYPE_ICONS[doc.type]; const iconColor = DOC_TYPE_COLORS[doc.type];
                 return (
-                  <tr key={doc.id} className={clsx(selectedDocs.has(doc.id) && (isDark ? "bg-[#071e38]" : "bg-[#eff6ff]"))}>
+                  <tr key={doc.id} className={clsx(selectedDocs.has(doc.id) && "bg-(--brand-muted)")}>
                     <td><input type="checkbox" className="w-4 h-4 accent-[#0ea5e9]" checked={selectedDocs.has(doc.id)} onChange={() => toggleDocSelection(doc.id)} aria-label={`Select ${doc.title}`} /></td>
                     <th scope="row"><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: iconColor + "18" }}><DocIcon className="w-3.5 h-3.5" style={{ color: iconColor }} aria-hidden="true" /></div><div><p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{doc.title}</p><p className="font-mono text-[10px]" style={{ color: "var(--text-muted)" }}>{doc.reference}</p></div></div></th>
                     <td><Badge variant="gray">{doc.type}</Badge></td>
@@ -169,7 +167,7 @@ export function DocumentLibraryTab({
                     <td>{docStatusBadge(doc.status)}</td>
                     <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>v{doc.version}</td>
                     <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{doc.effectiveDate ? dayjs.utc(doc.effectiveDate).tz(timezone).format(dateFormat) : "\u2014"}{doc.expiryDate && dayjs.utc(doc.expiryDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Expired</div>}</td>
-                    <td><div className="flex gap-1 flex-wrap">{doc.complianceTags.map((tag) => <span key={tag} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-[rgba(99,102,241,0.1)] text-[#6366f1]">{tag}</span>)}</div></td>
+                    <td><div className="flex gap-1 flex-wrap">{doc.complianceTags.map((tag) => <span key={tag} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-(--info-bg) text-[#6366f1]">{tag}</span>)}</div></td>
                     <td><div className="flex items-center gap-1.5">
                       {doc.findingId && <button onClick={() => onNavigate("/gap-assessment", { state: { openFindingId: doc.findingId } })} title={`Finding: ${doc.findingId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><Search className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
                       {doc.capaId && <button onClick={() => onNavigate("/capa", { state: { openCapaId: doc.capaId } })} title={`CAPA: ${doc.capaId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><ClipboardCheck className="w-3.5 h-3.5 text-[#10b981]" /></button>}

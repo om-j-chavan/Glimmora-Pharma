@@ -39,11 +39,11 @@ const CONFIG = {
     Icon: CheckCircle2,
     iconColor: "#10b981",
     iconBg: {
-      dark: "bg-[rgba(16,185,129,0.12)]",
+      dark: "bg-(--success-bg)",
       light: "bg-[#f0fdf4]",
     },
     border: {
-      dark: "border-[rgba(16,185,129,0.25)]",
+      dark: "border-(--success)",
       light: "border-[#a7f3d0]",
     },
     timerColor: "bg-[#10b981]",
@@ -52,11 +52,11 @@ const CONFIG = {
     Icon: AlertCircle,
     iconColor: "#ef4444",
     iconBg: {
-      dark: "bg-[rgba(239,68,68,0.12)]",
+      dark: "bg-(--danger-bg)",
       light: "bg-[#fef2f2]",
     },
     border: {
-      dark: "border-[rgba(239,68,68,0.25)]",
+      dark: "border-(--danger)",
       light: "border-[#fca5a5]",
     },
     primaryBtn: {
@@ -68,11 +68,11 @@ const CONFIG = {
     Icon: AlertTriangle,
     iconColor: "#f59e0b",
     iconBg: {
-      dark: "bg-[rgba(245,158,11,0.12)]",
+      dark: "bg-(--warning-bg)",
       light: "bg-[#fffbeb]",
     },
     border: {
-      dark: "border-[rgba(245,158,11,0.25)]",
+      dark: "border-(--warning)",
       light: "border-[#fcd34d]",
     },
     primaryBtn: {
@@ -80,7 +80,7 @@ const CONFIG = {
       light: "bg-[#d97706] hover:bg-[#b45309] text-white",
     },
     ghostBtn: {
-      dark: "bg-[rgba(245,158,11,0.08)] text-[#f59e0b] border border-[rgba(245,158,11,0.2)] hover:bg-[rgba(245,158,11,0.14)]",
+      dark: "bg-(--warning-bg) text-[#f59e0b] border border-(--warning) hover:bg-(--warning-bg)",
       light:
         "bg-[#fffbeb] text-[#92400e] border border-[#fcd34d] hover:bg-[#fef3c7]",
     },
@@ -89,11 +89,11 @@ const CONFIG = {
     Icon: AlertTriangle,
     iconColor: "#ef4444",
     iconBg: {
-      dark: "bg-[rgba(239,68,68,0.1)]",
+      dark: "bg-(--danger-bg)",
       light: "bg-[#fef2f2]",
     },
     border: {
-      dark: "border-[rgba(239,68,68,0.2)]",
+      dark: "border-(--danger)",
       light: "border-[#fca5a5]",
     },
     primaryBtn: {
@@ -101,7 +101,7 @@ const CONFIG = {
       light: "bg-[#dc2626] hover:bg-[#b91c1c] text-white",
     },
     ghostBtn: {
-      dark: "bg-[rgba(255,255,255,0.04)] text-[#94a3b8] border border-[#1e3a5a] hover:bg-[rgba(255,255,255,0.08)] hover:text-[#e2e8f0]",
+      dark: "bg-[rgba(255,255,255,0.04)] text-[#94a3b8] border border-(--bg-border) hover:bg-[rgba(255,255,255,0.08)] hover:text-[#e2e8f0]",
       light:
         "bg-[#f3f4f6] text-[#374151] border border-[#d1d5db] hover:bg-[#e5e7eb] hover:text-[#111827]",
     },
@@ -110,15 +110,15 @@ const CONFIG = {
     Icon: Loader2,
     iconColor: "#6366f1",
     iconBg: {
-      dark: "bg-[rgba(99,102,241,0.12)]",
+      dark: "bg-(--info-bg)",
       light: "bg-[#eef2ff]",
     },
     border: {
-      dark: "border-[rgba(99,102,241,0.25)]",
+      dark: "border-(--info)",
       light: "border-[#c4b5fd]",
     },
     barColor: "bg-[#6366f1]",
-    trackColor: { dark: "bg-[#0a1f38]", light: "bg-[#eef2ff]" },
+    trackColor: { dark: "bg-(--bg-elevated)", light: "bg-[#eef2ff]" },
     progressValColor: { dark: "text-[#818cf8]", light: "text-[#4f46e5]" },
   },
 } as const;
@@ -251,7 +251,7 @@ export function Popup({
         className={clsx(
           "relative rounded-xl overflow-hidden w-full max-w-[380px] border shadow-2xl",
           "animate-[popupIn_0.15s_ease-out]",
-          isDark ? "bg-[#071526]" : "bg-white",
+          "bg-(--bg-surface)",
           cfg.border[m],
           className,
         )}

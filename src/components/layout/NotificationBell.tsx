@@ -119,12 +119,12 @@ export function NotificationBell() {
       {/* Dropdown */}
       {open && (
         <div
-          className={clsx("absolute right-0 top-11 w-[calc(100vw-24px)] sm:w-80 max-w-80 rounded-xl border shadow-lg z-50 overflow-hidden", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-white border-[#e2e8f0]")}
+          className={clsx("absolute right-0 top-11 w-[calc(100vw-24px)] sm:w-80 max-w-80 rounded-xl border shadow-lg z-50 overflow-hidden", "bg-(--bg-elevated) border-(--bg-border)")}
           role="dialog"
           aria-label="Notifications"
         >
           {/* Header */}
-          <div className={clsx("flex items-center justify-between px-4 py-3 border-b", isDark ? "border-[#1e3a5a]" : "border-[#f1f5f9]")}>
+          <div className={clsx("flex items-center justify-between px-4 py-3 border-b", "border-(--bg-border)")}>
             <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Notifications</span>
             <div className="flex items-center gap-2">
               {unreadCount > 0 && (
@@ -140,7 +140,7 @@ export function NotificationBell() {
           </div>
 
           {/* Category tabs */}
-          <div className={clsx("flex gap-1 px-3 py-2 overflow-x-auto border-b", isDark ? "border-[#1e3a5a]" : "border-[#f1f5f9]")} style={{ scrollbarWidth: "none" }}>
+          <div className={clsx("flex gap-1 px-3 py-2 overflow-x-auto border-b", "border-(--bg-border)")} style={{ scrollbarWidth: "none" }}>
             {CATEGORIES.map((cat) => {
               const catUnread = cat === "All" ? unreadCount : notifications.filter((n) => !n.read && NOTIF_CONFIG[n.type]?.category === cat).length;
               return (
@@ -148,7 +148,7 @@ export function NotificationBell() {
                   key={cat} type="button" onClick={() => setCategory(cat)}
                   className={clsx(
                     "flex-shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium border-none cursor-pointer transition-colors",
-                    activeCategory === cat ? "bg-[#0ea5e9] text-white" : isDark ? "bg-[#071526] text-[#8899b8]" : "bg-[#f1f5f9] text-[#64748b]",
+                    activeCategory === cat ? "bg-[#0ea5e9] text-white" : isDark ? "bg-(--bg-surface) text-[#8899b8]" : "bg-[#f1f5f9] text-[#64748b]",
                   )}
                 >
                   {cat}
@@ -175,8 +175,8 @@ export function NotificationBell() {
                   key={notif.id}
                   className={clsx(
                     "flex items-start gap-3 px-4 py-3 border-b last:border-0 cursor-pointer transition-colors duration-150",
-                    !notif.read && (isDark ? "bg-[rgba(14,165,233,0.04)]" : "bg-[#fafbff]"),
-                    isDark ? "border-[#0f2039] hover:bg-[#071526]" : "border-[#f1f5f9] hover:bg-[#f8fafc]",
+                    !notif.read && (isDark ? "bg-(--brand-muted)" : "bg-[#fafbff]"),
+                    isDark ? "border-(--bg-border) hover:bg-(--bg-surface)" : "border-[#f1f5f9] hover:bg-[#f8fafc]",
                   )}
                   onClick={() => { dispatch(markRead(notif.id)); if (notif.link) navigate(notif.link, { state: notif.linkState }); setOpen(false); }}
                   role="button"

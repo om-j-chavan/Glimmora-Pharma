@@ -20,14 +20,12 @@ interface CAPAMetricsTabProps {
   hasTrendData: boolean;
   statusDonut: readonly { name: string; value: number; fill: string }[];
   sourceBreakdown: { source: string; count: number }[];
-  maxSrcCount: number;
-  isDark: boolean;
-}
+  maxSrcCount: number;}
 
 export function CAPAMetricsTab({
   capasTotal, closedCount, onTimeRate, overdueRate, overdueCount,
   diExceptions, effectivenessCount, riskSignalData, hasTrendData,
-  statusDonut, sourceBreakdown, maxSrcCount, isDark,
+  statusDonut, sourceBreakdown, maxSrcCount,
 }: CAPAMetricsTabProps) {
   return (
     <div role="tabpanel" id="panel-metrics" aria-labelledby="tab-metrics" tabIndex={0}>
@@ -84,10 +82,10 @@ export function CAPAMetricsTab({
           <div className="card-body p-0">
             {sourceBreakdown.length === 0 ? <div className="text-center py-10"><ClipboardCheck className="w-8 h-8 mx-auto mb-2 text-[#334155]" /><p className="text-[13px]" style={{ color: "var(--text-muted)" }}>No CAPAs yet</p></div> : (
               <table className="w-full text-[12px]"><tbody>{sourceBreakdown.map((s) => (
-                <tr key={s.source} className="border-b" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
+                <tr key={s.source} className="border-b" style={{ borderColor: "var(--bg-border)" }}>
                   <td className="py-3 px-4" style={{ color: "var(--text-secondary)" }}>{s.source}</td>
                   <td className="py-3 px-2"><Badge variant="gray">{s.count}</Badge></td>
-                  <td className="py-3 px-4 w-32"><div className="h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? "#1e3a5a" : "#e2e8f0" }}><div className="h-full bg-[#0ea5e9] rounded-full transition-all duration-300" style={{ width: `${(s.count / maxSrcCount) * 100}%` }} /></div></td>
+                  <td className="py-3 px-4 w-32"><div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--bg-border)" }}><div className="h-full bg-[#0ea5e9] rounded-full transition-all duration-300" style={{ width: `${(s.count / maxSrcCount) * 100}%` }} /></div></td>
                 </tr>
               ))}</tbody></table>
             )}

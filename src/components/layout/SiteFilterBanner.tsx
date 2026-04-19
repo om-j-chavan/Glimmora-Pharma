@@ -8,9 +8,7 @@ import { setSelectedSite } from "@/store/auth.slice";
 export function SiteFilterBanner() {
   const dispatch = useAppDispatch();
   const user = useAppSelector((s) => s.auth.user);
-  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const { allSites } = useTenantConfig();
+  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);  const { allSites } = useTenantConfig();
 
   if (user?.role !== "super_admin" || !selectedSiteId) return null;
 
@@ -21,9 +19,7 @@ export function SiteFilterBanner() {
     <div
       className={clsx(
         "flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-6 py-2 text-[11px] border-b",
-        isDark
-          ? "bg-[rgba(14,165,233,0.06)] border-[rgba(14,165,233,0.15)]"
-          : "bg-[#eff6ff] border-[#bfdbfe]",
+        "bg-(--brand-muted) border-(--brand)",
       )}
       role="status"
       aria-live="polite"

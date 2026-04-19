@@ -12,9 +12,7 @@ import { Badge } from "@/components/ui/Badge";
 export interface RCATabProps {
   liveEvent: FDA483Event | null;
   selectedObs: Observation | null;
-  selectedObsId: string;
-  isDark: boolean;
-  role: string;
+  selectedObsId: string;  role: string;
   whyAnswers: string[];
   fishboneAnswers: Record<string, string>;
   fishboneRoot: string;
@@ -37,7 +35,6 @@ export function RCATab({
   liveEvent,
   selectedObs,
   selectedObsId,
-  isDark,
   role,
   whyAnswers,
   fishboneAnswers,
@@ -164,9 +161,7 @@ export function RCATab({
                       "px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all",
                       selectedObs.rcaMethod === m
                         ? "bg-[#6366f1] text-white border-[#6366f1]"
-                        : isDark
-                          ? "bg-transparent border-[#1e3a5a] text-[#94a3b8] hover:border-[#6366f1]"
-                          : "bg-transparent border-[#e2e8f0] text-[#64748b] hover:border-[#6366f1]",
+                        : "bg-transparent border-(--bg-border) text-(--text-secondary) hover:border-[#6366f1]",
                     )}
                   >
                     {m}
@@ -186,9 +181,7 @@ export function RCATab({
                 <div
                   className={clsx(
                     "p-3 rounded-lg",
-                    isDark
-                      ? "bg-[#071526] border border-[#1e3a5a]"
-                      : "bg-[#f8fafc] border border-[#e2e8f0]",
+                    "bg-(--bg-surface) border border-(--bg-border)",
                   )}
                 >
                   <p
@@ -206,7 +199,7 @@ export function RCATab({
                 </div>
                 {[1, 2, 3, 4, 5].map((n) => (
                   <div key={n} className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full flex-shrink-0 mt-2 flex items-center justify-center text-[10px] font-bold bg-[rgba(99,102,241,0.12)] text-[#6366f1]">
+                    <div className="w-6 h-6 rounded-full flex-shrink-0 mt-2 flex items-center justify-center text-[10px] font-bold bg-(--info-bg) text-[#6366f1]">
                       {n}
                     </div>
                     <div className="flex-1">
@@ -237,9 +230,7 @@ export function RCATab({
                 <div
                   className={clsx(
                     "mt-2 p-3 rounded-lg border",
-                    isDark
-                      ? "bg-[rgba(99,102,241,0.08)] border-[rgba(99,102,241,0.2)]"
-                      : "bg-[#f5f3ff] border-[#a5b4fc]",
+                    "bg-(--info-bg) border-(--info)",
                   )}
                 >
                   <p className="text-[11px] font-semibold text-[#6366f1] mb-1">
@@ -278,9 +269,7 @@ export function RCATab({
                 <div
                   className={clsx(
                     "p-3 rounded-lg",
-                    isDark
-                      ? "bg-[#071526] border border-[#1e3a5a]"
-                      : "bg-[#f8fafc] border border-[#e2e8f0]",
+                    "bg-(--bg-surface) border border-(--bg-border)",
                   )}
                 >
                   <p
@@ -368,9 +357,7 @@ export function RCATab({
                 <div
                   className={clsx(
                     "p-3 rounded-lg",
-                    isDark
-                      ? "bg-[#071526] border border-[#1e3a5a]"
-                      : "bg-[#f8fafc] border border-[#e2e8f0]",
+                    "bg-(--bg-surface) border border-(--bg-border)",
                   )}
                 >
                   <p

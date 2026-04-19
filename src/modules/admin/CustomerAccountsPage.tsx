@@ -23,6 +23,7 @@ import {
   type Tenant,
 } from "@/store/auth.slice";
 import { fetchTenants, createTenantApi, updateTenantApi, deleteTenantApi } from "@/lib/tenantApi";
+import { isTenantEffectivelyActive, getInactiveReason } from "@/lib/tenantStatus";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
@@ -961,9 +962,22 @@ export function CustomerAccountsPage() {
                   <td>{tenant.config.sites.length}</td>
                   <td>{tenant.config.users.length}</td>
                   <td>
-                    <Badge variant={tenant.active ? "green" : "gray"}>
-                      {tenant.active ? "Active" : "Inactive"}
-                    </Badge>
+                    {(() => {
+                      const effective = isTenantEffectivelyActive(tenant);
+                      const reason = getInactiveReason(tenant);
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          <Badge variant={effective ? "green" : "gray"}>
+                            {effective ? "Active" : "Inactive"}
+                          </Badge>
+                          {!effective && reason && (
+                            <span className="text-[10px]" style={{ color: "var(--text-muted)" }} title={reason}>
+                              {reason.length > 28 ? reason.slice(0, 28) + "…" : reason}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>
                     <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>

@@ -16,6 +16,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { setCredentials, setActiveSite, setSelectedSite, setTenants, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
 import { loginApi } from "@/lib/tenantApi";
+import { login as nextAuthLogin } from "@/lib/authClient";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
@@ -178,12 +179,50 @@ export function LoginPage() {
 
     setLoadingName(displayName);
     setLoadingTenant(true);
-    await new Promise((r) => setTimeout(r, 600));
     navigate("/");
   };
 
   const onSubmit = async (data: FormValues) => {
     const key = data.email.toLowerCase().trim();
+
+    // 0. Establish a real next-auth session (real JWT, HttpOnly cookie).
+    //    We do this BEFORE the legacy Redux flow so the session cookie is in
+    //    place by the time API calls go out. If next-auth rejects, fall back
+    //    to the legacy paths so dev/demo flows keep working.
+    try {
+      const result = await nextAuthLogin(data.email.trim(), data.password);
+      if (!result.ok) {
+        // Surface specific auth errors back to the form (subscription, etc.)
+        if (result.error && result.error.includes("SUBSCRIPTION_INACTIVE")) {
+          setError("root", {
+            message:
+              "Your subscription has expired or no active plan is configured. Please contact your administrator.",
+          });
+          return;
+        }
+        if (result.error && result.error.includes("USER_INACTIVE")) {
+          setError("root", {
+            message:
+              "Your account is inactive. Please contact your administrator to reactivate it.",
+          });
+          return;
+        }
+        console.warn("[login] next-auth rejected credentials:", result.error);
+      }
+    } catch (err) {
+      console.warn("[login] next-auth signIn failed", err);
+    }
+
+    // Strip any ?callbackUrl=... query param that next-auth may have placed on
+    // the URL (e.g. when the user hit a protected route before signing in).
+    // We navigate explicitly based on role below, so we never want to honor
+    // a callback URL — especially one pointing at an /api/* route which would
+    // render the raw JSON in the browser.
+    try {
+      if (typeof window !== "undefined" && window.location.search) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    } catch { /* ignore */ }
 
     // 1. Check static mock accounts first
     const mockAccount = MOCK_ACCOUNTS[key];
@@ -193,8 +232,9 @@ export function LoginPage() {
       if (mockAccount.user.role === "super_admin") {
         setLoadingName("Platform Admin");
         setLoadingTenant(true);
-        await new Promise((r) => setTimeout(r, 600));
-        navigate("/admin");
+          // Full page navigation — guarantees URL is exactly /admin with no
+        // leftover query params, and rehydrates the SPA shell cleanly.
+        window.location.assign("/admin");
         return;
       }
 
@@ -205,8 +245,7 @@ export function LoginPage() {
         dispatch(setSelectedSite(null));
         setLoadingName(userTenant?.name ?? "workspace");
         setLoadingTenant(true);
-        await new Promise((r) => setTimeout(r, 600));
-        navigate("/");
+          window.location.assign("/");
         return;
       }
 
@@ -227,8 +266,7 @@ export function LoginPage() {
         if (user.role === "super_admin") {
           setLoadingName("Platform Admin");
           setLoadingTenant(true);
-          await new Promise((r) => setTimeout(r, 600));
-          navigate("/admin");
+              window.location.assign("/admin");
           return;
         }
 
@@ -236,6 +274,21 @@ export function LoginPage() {
         return;
       }
     } catch (err) {
+      const reason = (err as Error & { reason?: string })?.reason;
+      if (reason === "USER_INACTIVE") {
+        setError("root", {
+          message:
+            "Your account is inactive. Please contact your administrator to reactivate it.",
+        });
+        return;
+      }
+      if (reason === "SUBSCRIPTION_INACTIVE") {
+        setError("root", {
+          message:
+            "Your subscription has expired or no active plan is configured. Please contact your administrator.",
+        });
+        return;
+      }
       console.warn("[login] API unreachable, falling back to local cache", err);
     }
 
@@ -247,7 +300,14 @@ export function LoginPage() {
           u.email.toLowerCase() === key ||
           u.name.toLowerCase() === key,
       );
-      if (tenantUser && tenantUser.status === "Active" && (!tenantUser.password || tenantUser.password === data.password)) {
+      if (tenantUser && (!tenantUser.password || tenantUser.password === data.password)) {
+        if (tenantUser.status !== "Active") {
+          setError("root", {
+            message:
+              "Your account is inactive. Please contact your administrator to reactivate it.",
+          });
+          return;
+        }
         const user: AuthUser = {
           id: tenantUser.id,
           name: tenantUser.name,
@@ -262,8 +322,7 @@ export function LoginPage() {
         if (user.role === "super_admin") {
           setLoadingName("Platform Admin");
           setLoadingTenant(true);
-          await new Promise((r) => setTimeout(r, 600));
-          navigate("/admin");
+              window.location.assign("/admin");
           return;
         }
 
@@ -273,8 +332,7 @@ export function LoginPage() {
           dispatch(setSelectedSite(null));
           setLoadingName(tenant.name);
           setLoadingTenant(true);
-          await new Promise((r) => setTimeout(r, 600));
-          navigate("/");
+              window.location.assign("/");
           return;
         }
 

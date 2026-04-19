@@ -119,7 +119,7 @@ function SiteForm({
 
 export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
-  const { allSites: sites, tenantId } = useTenantConfig();
+  const { allSitesIncludingInactive: sites, tenantId } = useTenantConfig();
   useTenantData();
   const { isAtLimit, isNearLimit, getCount, getLimit, tenantPlan } = usePlanLimits();
 

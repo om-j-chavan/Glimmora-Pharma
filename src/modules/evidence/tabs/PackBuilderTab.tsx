@@ -22,16 +22,14 @@ export interface PackBuilderTabProps {
   allDocs: EvidenceDocument[];
   packs: EvidencePack[];
   selectedDocs: Set<string>;
-  toggleDocSelection: (id: string) => void;
-  isDark: boolean;
-  onBuildPackOpen: () => void;
+  toggleDocSelection: (id: string) => void;  onBuildPackOpen: () => void;
   onPreviewPack: (pack: EvidencePack) => void;
   onExportPack: (pack: EvidencePack) => void;
   onSwitchToLibrary: () => void;
 }
 
 export function PackBuilderTab({
-  allDocs, packs, selectedDocs, toggleDocSelection, isDark,
+  allDocs, packs, selectedDocs, toggleDocSelection,
   onBuildPackOpen, onPreviewPack, onExportPack, onSwitchToLibrary,
 }: PackBuilderTabProps) {
   return (
@@ -47,7 +45,7 @@ export function PackBuilderTab({
         {[{ step: 1, Icon: CheckSquare, color: "#0ea5e9", title: "Select documents", desc: "Go to Document Library and check the documents you want in the pack." },
           { step: 2, Icon: Package, color: "#6366f1", title: "Name the pack", desc: 'Give the pack a name and purpose, e.g. "FDA 483 Response Pack \u2014 Mar 2026".' },
           { step: 3, Icon: Download, color: "#10b981", title: "Export", desc: "Preview the pack metadata and export as a structured document list." }].map((s) => (
-          <div key={s.step} className={clsx("rounded-xl p-4 border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+          <div key={s.step} className={clsx("rounded-xl p-4 border", "bg-(--bg-elevated) border-(--bg-border)")}>
             <div className="flex items-center gap-2 mb-2"><div className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-white" style={{ background: s.color }}>{s.step}</div><s.Icon className="w-4 h-4" style={{ color: s.color }} aria-hidden="true" /></div>
             <p className="text-[12px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>{s.title}</p>
             <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{s.desc}</p>
@@ -63,7 +61,7 @@ export function PackBuilderTab({
           <div className="card-header"><div className="flex items-center gap-2"><Package className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">Selected for pack</span></div><Badge variant="blue">{selectedDocs.size} documents</Badge></div>
           <div className="card-body space-y-2">
             {Array.from(selectedDocs).map((docId) => { const doc = allDocs.find((d) => d.id === docId); if (!doc) return null; const DI = DOC_TYPE_ICONS[doc.type]; const ic = DOC_TYPE_COLORS[doc.type]; return (
-              <div key={docId} className="flex items-center justify-between p-2.5 rounded-lg" style={{ background: isDark ? "#071526" : "#f8fafc" }}>
+              <div key={docId} className="flex items-center justify-between p-2.5 rounded-lg" style={{ background: "var(--bg-surface)" }}>
                 <div className="flex items-center gap-2 flex-1 min-w-0"><div className="w-6 h-6 rounded flex-shrink-0 flex items-center justify-center" style={{ background: ic + "18" }}><DI className="w-3 h-3" style={{ color: ic }} aria-hidden="true" /></div><div className="min-w-0"><p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{doc.title}</p><p className="font-mono text-[10px]" style={{ color: "var(--text-muted)" }}>{doc.reference} &middot; v{doc.version}</p></div></div>
                 <div className="flex items-center gap-2 ml-2 flex-shrink-0">{docStatusBadge(doc.status)}<button onClick={() => toggleDocSelection(docId)} aria-label={`Remove ${doc.title}`} className="opacity-40 hover:opacity-100 border-none bg-transparent cursor-pointer"><X className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} /></button></div>
               </div>

@@ -59,9 +59,7 @@ export function AGIPage() {
   const { driftAlerts, driftMetrics, capas, findings, systems, fda483Events, tenantId } = useTenantData();
   const { org, users } = useTenantConfig();
   const timezone = org.timezone;
-  const dateFormat = org.dateFormat;
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const { role } = useRole();
+  const dateFormat = org.dateFormat;  const { role } = useRole();
 
   function ownerName(id: string) { return users.find((u) => u.id === id)?.name ?? id; }
 
@@ -125,7 +123,7 @@ export function AGIPage() {
 
       {/* Manual mode banner */}
       {isManualMode && (
-        <div className={clsx("flex items-start gap-3 p-4 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")} role="status">
+        <div className={clsx("flex items-start gap-3 p-4 rounded-xl border", "bg-(--warning-bg) border-(--warning)")} role="status">
           <AlertTriangle className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1"><p className="text-[13px] font-medium text-[#f59e0b]">AGI is in manual mode</p><p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>All AGI capabilities are disabled. Enable agents in Settings &rarr; AGI Policy to activate intelligence features.</p></div>
           <Button variant="ghost" size="sm" onClick={() => navigate("/settings")}>Configure</Button>
@@ -144,7 +142,7 @@ export function AGIPage() {
 
       {/* Tab panels */}
       <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>
-        <AGIOverviewTab isManualMode={isManualMode} isAutoMode={isAutoMode} insightsGenerated={insightsGenerated} actionsTriggered={actionsTriggered} hitlApprovals={hitlApprovals} openAlertsCount={openAlerts.length} capabilities={capabilities} isDark={isDark} onNavigateSettings={() => navigate("/settings")} />
+        <AGIOverviewTab isManualMode={isManualMode} isAutoMode={isAutoMode} insightsGenerated={insightsGenerated} actionsTriggered={actionsTriggered} hitlApprovals={hitlApprovals} openAlertsCount={openAlerts.length} capabilities={capabilities} onNavigateSettings={() => navigate("/settings")} />
       </div>
 
       <div role="tabpanel" id="panel-intended" aria-labelledby="tab-intended" tabIndex={0} hidden={activeTab !== "intended"}>
@@ -152,7 +150,7 @@ export function AGIPage() {
       </div>
 
       <div role="tabpanel" id="panel-oversight" aria-labelledby="tab-oversight" tabIndex={0} hidden={activeTab !== "oversight"}>
-        <OversightTab pendingReviewCount={capas.filter((c) => c.status === "Pending QA Review").length} approvedCount={capas.filter((c) => c.status === "Closed").length} agiAssistedCount={capas.filter((c) => c.source === "Gap Assessment").length} closedCAPAs={capas.filter((c) => c.status === "Closed")} isDark={isDark} ownerName={ownerName} />
+        <OversightTab pendingReviewCount={capas.filter((c) => c.status === "Pending QA Review").length} approvedCount={capas.filter((c) => c.status === "Closed").length} agiAssistedCount={capas.filter((c) => c.source === "Gap Assessment").length} closedCAPAs={capas.filter((c) => c.status === "Closed")} ownerName={ownerName} />
       </div>
 
       <div role="tabpanel" id="panel-drift" aria-labelledby="tab-drift" tabIndex={0} hidden={activeTab !== "drift"}>
@@ -177,7 +175,7 @@ export function AGIPage() {
       <Modal open={resolveOpen} onClose={() => { setResolveOpen(false); setSelectedAlert(null); }} title="Resolve drift alert">
         {selectedAlert && (
           <>
-            <div className={clsx("rounded-lg p-3 mb-4", isDark ? "bg-[#071526] border border-[#1e3a5a]" : "bg-[#f8fafc] border border-[#e2e8f0]")}>
+            <div className={clsx("rounded-lg p-3 mb-4", "bg-(--bg-surface) border border-(--bg-border)")}>
               <div className="flex items-center gap-2 flex-wrap mb-1">{driftSevBadge(selectedAlert.severity)}<Badge variant="gray">{selectedAlert.type}</Badge></div>
               <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>{selectedAlert.description}</p>
             </div>

@@ -34,11 +34,9 @@ interface EditCAPAModalProps {
   onClose: () => void;
   onSave: (data: EditForm) => void;
   capa: CAPA | null;
-  users: UserConfig[];
-  isDark: boolean;
-}
+  users: UserConfig[];}
 
-export function EditCAPAModal({ isOpen, onClose, onSave, capa, users, isDark }: EditCAPAModalProps) {
+export function EditCAPAModal({ isOpen, onClose, onSave, capa, users }: EditCAPAModalProps) {
   const form = useForm<EditForm>({ resolver: zodResolver(editSchema) });
 
   useEffect(() => {
@@ -87,14 +85,14 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users, isDark }: 
             <label htmlFor="edit-due" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Due date <span className="text-(--danger)">*</span></label>
             <input id="edit-due" type="date" className="input text-[12px]" {...form.register("dueDate")} />
           </div>
-          <div className={clsx("flex items-center justify-between p-3 rounded-lg border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+          <div className={clsx("flex items-center justify-between p-3 rounded-lg border", "bg-(--bg-surface) border-(--bg-border)")}>
             <Controller name="diGate" control={form.control} render={({ field }) => <Toggle id="edit-di" checked={field.value} onChange={field.onChange} label="DI gate required" description="Data integrity review needed" />} />
           </div>
         </div>
 
         {/* DI Gate review section — only visible when diGate is true */}
         {form.watch("diGate") && (
-          <div className="border-t pt-4" style={{ borderColor: isDark ? "#1e3a5a" : "#f1f5f9" }}>
+          <div className="border-t pt-4" style={{ borderColor: "var(--bg-border)" }}>
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>DI Gate — Data Integrity Review</p>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -121,14 +119,14 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users, isDark }: 
           </div>
         )}
 
-        <div className="border-t pt-4" style={{ borderColor: isDark ? "#1e3a5a" : "#f1f5f9" }}>
+        <div className="border-t pt-4" style={{ borderColor: "var(--bg-border)" }}>
           <p className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>Root cause analysis</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">RCA method</p>
               <Controller name="rcaMethod" control={form.control} render={({ field }) => <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select method..." width="w-full" options={[{ value: "5 Why", label: "5 Why" }, { value: "Fishbone", label: "Fishbone" }, { value: "Fault Tree", label: "Fault Tree" }, { value: "Other", label: "Other" }]} />} />
             </div>
-            <div className={clsx("flex items-center justify-between p-3 rounded-lg border", isDark ? "bg-[#071526] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+            <div className={clsx("flex items-center justify-between p-3 rounded-lg border", "bg-(--bg-surface) border-(--bg-border)")}>
               <Controller name="effectivenessCheck" control={form.control} render={({ field }) => <Toggle id="edit-eff" checked={field.value} onChange={field.onChange} label="Effectiveness check" description="90-day monitoring planned" />} />
             </div>
             <div className="col-span-2">

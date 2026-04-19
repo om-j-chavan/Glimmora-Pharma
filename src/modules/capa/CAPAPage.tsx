@@ -62,7 +62,6 @@ export function CAPAPage() {
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const user = useAppSelector((s) => s.auth.user);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
 
@@ -250,8 +249,7 @@ export function CAPAPage() {
       {/* Tab panels */}
       {activeTab === "blueprint" && (
         <QMSBlueprintTab
-          openCAPAs={openCAPAs} noRCACount={noRCACount} pendingReviewCount={pendingReviewCount}
-          isDark={isDark} selectedStep={selectedStep} onSelectStep={setSelectedStep}
+          openCAPAs={openCAPAs} noRCACount={noRCACount} pendingReviewCount={pendingReviewCount} selectedStep={selectedStep} onSelectStep={setSelectedStep}
           lifecycleSteps={LIFECYCLE_STEPS} qmsProcesses={QMS_PROCESSES}
           stepHasProblem={stepHasProblem} getProcessMetrics={getProcessMetrics}
         />
@@ -260,8 +258,8 @@ export function CAPAPage() {
       {activeTab === "tracker" && (
         <CAPATrackerTab
           capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
-          isDark={isDark} isViewOnly={isViewOnly || isCustomerAdmin} users={users} user={user} sites={allSites}
-          timezone={timezone} dateFormat={dateFormat} canSign={isCustomerAdmin ? false : canSign} canCloseCapa={isCustomerAdmin ? false : canCloseCapa}
+          isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
+          timezone={timezone} dateFormat={dateFormat} canSign={canSign} canCloseCapa={canCloseCapa}
           onAddOpen={() => setAddOpen(true)} onEditOpen={() => setEditModalOpen(true)}
           onSignOpen={() => setSignOpen(true)} onSubmitForReview={handleSubmitForReview}
           onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
@@ -278,14 +276,14 @@ export function CAPAPage() {
           onTimeRate={onTimeRate} overdueRate={overdueRate} overdueCount={overdueCAPAs.length}
           diExceptions={diExceptions} effectivenessCount={effectivenessCount}
           riskSignalData={riskSignalData} hasTrendData={hasTrendData}
-          statusDonut={statusDonut} sourceBreakdown={sourceBreakdown} maxSrcCount={maxSrcCount} isDark={isDark}
+          statusDonut={statusDonut} sourceBreakdown={sourceBreakdown} maxSrcCount={maxSrcCount}
         />
       )}
 
       {/* Modals */}
-      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} isDark={isDark} lockedSiteId={selectedSiteId} />
-      <EditCAPAModal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} onSave={handleEditSave} capa={selectedCAPA} users={complianceUsers} isDark={isDark} />
-      <SignCloseModal isOpen={signOpen} onClose={() => setSignOpen(false)} onSign={handleSignClose} capa={selectedCAPA} isDark={isDark} />
+      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} lockedSiteId={selectedSiteId} />
+      <EditCAPAModal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} onSave={handleEditSave} capa={selectedCAPA} users={complianceUsers} />
+      <SignCloseModal isOpen={signOpen} onClose={() => setSignOpen(false)} onSign={handleSignClose} capa={selectedCAPA} />
 
       {/* Popups */}
       <Popup isOpen={editSavedPopup} variant="success" title="CAPA updated" description="Changes saved. Submit for QA review when RCA and corrective actions are complete." onDismiss={() => setEditSavedPopup(false)} />

@@ -1,19 +1,16 @@
 import { useNavigate } from "react-router";
 import clsx from "clsx";
 import { CheckCircle2 } from "lucide-react";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 
 export function SetupChecklist() {
-  const navigate = useNavigate();
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const { steps, completedCount, totalSteps, setupNeeded, progressPct } = useSetupStatus();
+  const navigate = useNavigate();  const { steps, completedCount, totalSteps, setupNeeded, progressPct } = useSetupStatus();
 
   if (!setupNeeded) return null;
 
   return (
     <div
-      className={clsx("p-5 rounded-xl mb-6 border", isDark ? "bg-[rgba(14,165,233,0.06)] border-[rgba(14,165,233,0.15)]" : "bg-[#eff6ff] border-[#bfdbfe]")}
+      className={clsx("p-5 rounded-xl mb-6 border", "bg-(--brand-muted) border-(--brand)")}
       role="status"
       aria-label="Platform setup progress"
     >
@@ -28,7 +25,7 @@ export function SetupChecklist() {
         </div>
       </div>
 
-      <div className={clsx("h-1.5 rounded-full mb-4", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")} role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
+      <div className={clsx("h-1.5 rounded-full mb-4", "bg-(--bg-border)")} role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
         <div className="h-full rounded-full bg-[#0ea5e9] transition-all duration-500" style={{ width: `${progressPct}%` }} />
       </div>
 

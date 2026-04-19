@@ -19,21 +19,19 @@ interface GapSummaryTabProps {
   closedCount: number;
   overdueCount: number;
   topDrivers: { name: string; count: number; critical: number; high: number }[];
-  severityData: { name: string; value: number; fill: string }[];
-  isDark: boolean;
-  renderFilters: (compact?: boolean) => ReactNode;
+  severityData: { name: string; value: number; fill: string }[];  renderFilters: (compact?: boolean) => ReactNode;
   lastClosedFinding?: { id: string; closedAt?: string } | null;
 }
 
 export function GapSummaryTab({
   findingsTotal, baseCount, criticalCount, highCount, lowCount,
-  openCount, closedCount, overdueCount, topDrivers, severityData, isDark, renderFilters, lastClosedFinding,
+  openCount, closedCount, overdueCount, topDrivers, severityData, renderFilters, lastClosedFinding,
 }: GapSummaryTabProps) {
   return (
     <div role="tabpanel" id="panel-summary" aria-labelledby="tab-summary" tabIndex={0}>
       {/* Filters */}
       <section aria-label="Finding filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-xl border"
-        style={{ background: isDark ? "#0a1f38" : "#f8fafc", borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
+        style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
         <Filter className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         {renderFilters()}

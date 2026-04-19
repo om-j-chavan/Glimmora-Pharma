@@ -11,10 +11,9 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import dayjs from "@/lib/dayjs";
 import { chartDefaults } from "@/lib/chartColors";
 import { useAppSelector } from "@/hooks/useAppSelector";
-
+import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { useRole } from "@/hooks/useRole";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
@@ -113,8 +112,19 @@ export function DashboardPage() {
     }).length;
     // High-risk systems in this site (for CSV/IT area)
     const sysRisk = area === "CSV/IT" ? filteredSystems.filter((s) => (!siteId || s.siteId === siteId) && (s.riskLevel === "HIGH" && s.validationStatus !== "Validated")).length : 0;
+    // "Has data" = something has actually been logged for this area+site.
+    // Without this, an untouched site shows as 100% green everywhere, which
+    // reads as "fully compliant" when it really means "never assessed".
+    const totalFindingsForArea = findings.filter((f) => f.area === area && (!siteId || f.siteId === siteId)).length;
+    const totalCapasForArea = capas.filter((c) => {
+      if (siteId && c.siteId !== siteId) return false;
+      const lf = findings.find((f) => f.id === c.findingId);
+      return lf ? lf.area === area : false;
+    }).length;
+    const totalSystemsForArea = area === "CSV/IT" ? systems.filter((s) => !siteId || s.siteId === siteId).length : 0;
+    const hasData = totalFindingsForArea + totalCapasForArea + totalSystemsForArea > 0;
     const score = Math.max(0, 100 - cr * 30 - mj * 15 - areaCapaOverdue * 20 - sysRisk * 25);
-    return { score, open: af.length, critical: cr };
+    return { score, open: af.length, critical: cr, hasData };
   }
   const displayedSites = siteFilter ? visibleSites.filter((s) => s.id === siteFilter) : visibleSites;
 
@@ -213,7 +223,11 @@ export function DashboardPage() {
                     <tbody>{AREAS.map((area) => (
                       <tr key={area}><td className="py-1 pr-3 font-medium whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{area}</td>
                         {displayedSites.map((site) => {
-                          const { score, open, critical } = getAreaScore(area, site.id);
+                          const { score, open, critical, hasData } = getAreaScore(area, site.id);
+                          if (!hasData) {
+                            const neutral = "#64748b";
+                            return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nNot assessed yet \u2014 no findings, CAPAs or systems logged for this area.`} onClick={() => navigate("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: neutral + "1a", color: neutral, border: `1px dashed ${neutral}55` }} aria-label={`${area} ${site.name}: not assessed yet`}>\u2014</button></td>;
+                          }
                           const bg = score >= 80 ? "#10b981" : score >= 60 ? "#f59e0b" : "#ef4444";
                           return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nScore: ${score}%\nOpen: ${open}\nCritical: ${critical}`} onClick={() => navigate("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: bg + "22", color: bg, border: `1px solid ${bg}44` }} aria-label={`${area} ${site.name}: ${score}%`}>{open === 0 ? "\u2713" : `${score}%`}</button></td>;
                         })}
@@ -221,7 +235,7 @@ export function DashboardPage() {
                     ))}</tbody>
                   </table>
                 </div>
-                <div className="flex gap-4 mt-3 text-[10px]" style={{ color: "var(--text-muted)" }}>{[["#10b981", "\u2265 80% ready"], ["#f59e0b", "60\u201379%"], ["#ef4444", "< 60%"]].map(([c, l]) => <div key={l} className="flex items-center gap-1"><div className="w-2 h-2 rounded-full" style={{ background: c }} />{l}</div>)}</div>
+                <div className="flex gap-4 mt-3 text-[10px] flex-wrap" style={{ color: "var(--text-muted)" }}>{[["#10b981", "\u2265 80% ready"], ["#f59e0b", "60\u201379%"], ["#ef4444", "< 60%"], ["#64748b", "not assessed"]].map(([c, l]) => <div key={l} className="flex items-center gap-1"><div className="w-2 h-2 rounded-full" style={{ background: c }} />{l}</div>)}</div>
                 {visibleSites.length > displayedSites.length && !siteFilter && <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>Showing {displayedSites.length} of {visibleSites.length} sites. Use site filter to view a specific site.</p>}
               </>
             )}
@@ -276,7 +290,7 @@ export function DashboardPage() {
               ) : filteredFindings.length === 0 && filteredCAPAs.length === 0 ? (
                 <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No findings match current filters. Adjust filters to see insights.</p>
               ) : insights.slice(0, 5).map((ins, i) => (
-                <div key={i} className={clsx("flex items-start gap-2 p-2.5 rounded-lg", ins.type === "warning" ? isDark ? "bg-[rgba(245,158,11,0.06)] border border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border border-[#fde68a]" : ins.type === "success" ? isDark ? "bg-[rgba(16,185,129,0.06)] border border-[rgba(16,185,129,0.15)]" : "bg-[#f0fdf4] border border-[#a7f3d0]" : isDark ? "bg-[#071526] border border-[#1e3a5a]" : "bg-[#f8fafc] border border-[#e2e8f0]")}>
+                <div key={i} className={clsx("flex items-start gap-2 p-2.5 rounded-lg", ins.type === "warning" ? isDark ? "bg-(--warning-bg) border border-(--warning)" : "bg-[#fffbeb] border border-[#fde68a]" : ins.type === "success" ? isDark ? "bg-(--success-bg) border border-(--success)" : "bg-[#f0fdf4] border border-[#a7f3d0]" : "bg-(--bg-surface) border border-(--bg-border)")}>
                   {ins.type === "warning" ? <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" /> : ins.type === "success" ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981] flex-shrink-0 mt-0.5" aria-hidden="true" /> : <Info className="w-3.5 h-3.5 text-[#0ea5e9] flex-shrink-0 mt-0.5" aria-hidden="true" />}
                   <div className="flex-1 min-w-0"><p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{ins.text}</p>{ins.action && ins.link && <button onClick={() => navigate(ins.link!)} className="text-[10px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer mt-1">{ins.action} &rarr;</button>}</div>
                 </div>
@@ -288,7 +302,7 @@ export function DashboardPage() {
           <CardSection icon={Activity} iconColor="#ef4444" title="Risk signals">
             {/* By severity */}
             {(["Critical", "High", "Low"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "High" ? "#f59e0b" : "#10b981"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
-              <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: isDark ? "#0f2039" : "#f1f5f9" }}>
+              <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ background: dot }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{sev}</span></div>
                 <span className="text-[14px] font-bold" style={{ color: valCol }}>{cnt}</span>
               </div>
@@ -296,7 +310,7 @@ export function DashboardPage() {
             {/* By area */}
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-muted)" }}>By area</p>
             {["Manufacturing", "QC Lab", "QMS", "CSV/IT"].map((area) => { const cnt = filteredFindings.filter((f) => f.area === area && f.status !== "Closed").length; const max = Math.max(...["Manufacturing", "QC Lab", "QMS", "CSV/IT"].map((a) => filteredFindings.filter((f) => f.area === a && f.status !== "Closed").length), 1); return (
-              <div key={area} className="mb-2"><div className="flex justify-between mb-1"><span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{area}</span><span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>{cnt}</span></div><div className={clsx("h-1 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}><div className="h-full rounded-full bg-[#0ea5e9]" style={{ width: `${Math.round((cnt / max) * 100)}%` }} /></div></div>
+              <div key={area} className="mb-2"><div className="flex justify-between mb-1"><span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{area}</span><span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>{cnt}</span></div><div className={clsx("h-1 rounded-full", "bg-(--bg-border)")}><div className="h-full rounded-full bg-[#0ea5e9]" style={{ width: `${Math.round((cnt / max) * 100)}%` }} /></div></div>
             ); })}
             {/* Quick links */}
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-muted)" }}>Quick links</p>
@@ -306,7 +320,7 @@ export function DashboardPage() {
               { label: "CSV / CSA", path: "/csv-csa", Icon: Database, badge: csvHighRisk, color: "#f59e0b" },
               { label: "FDA 483", path: "/fda-483", Icon: FileWarning, badge: fda483Events.filter((e) => e.status !== "Closed").length, color: "#ef4444" },
             ].map((lk) => (
-              <button key={lk.path} type="button" onClick={() => navigate(lk.path)} title={lk.tip} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.06)] transition-colors text-left">
+              <button key={lk.path} type="button" onClick={() => navigate(lk.path)} title={lk.tip} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-(--brand-muted) transition-colors text-left">
                 <div className="flex items-center gap-2"><lk.Icon className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><span style={{ color: "var(--text-primary)" }}>{lk.label}</span></div>
                 {lk.badge > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ background: lk.color }}>{lk.badge}</span>}
               </button>

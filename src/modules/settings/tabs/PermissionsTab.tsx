@@ -28,9 +28,7 @@ function cycleLevel(current: AccessLevel): AccessLevel {
 
 export function PermissionsTab() {
   const dispatch = useAppDispatch();
-  const matrix = useAppSelector((s) => s.permissions?.matrix);
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const user = useAppSelector((s) => s.auth.user);
+  const matrix = useAppSelector((s) => s.permissions?.matrix);  const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
   const isSuperAdmin = role === "super_admin" || role === "customer_admin";
 
@@ -47,7 +45,7 @@ export function PermissionsTab() {
 
       {/* Read-only banner */}
       {!isSuperAdmin && (
-        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
+        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", "bg-(--warning-bg) border-(--warning)")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Only Super Admin can edit permissions. You are viewing read-only.</p>
         </div>
@@ -64,14 +62,14 @@ export function PermissionsTab() {
       {/* Matrix */}
       <div className="card overflow-hidden"><div className="overflow-x-auto">
         <table className="w-full" aria-label="Role permissions matrix"><caption className="sr-only">Role-based access levels \u2014 click to edit</caption>
-          <thead><tr className={clsx("border-b", isDark ? "border-[#3d362c]" : "border-[#e8e4dd]")}>
+          <thead><tr className="border-b border-(--bg-border)">
             <th scope="col" className="text-left py-3 px-4 w-44 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Role</th>
             {MODULES.map((m) => <th key={m.key} scope="col" className="text-center py-3 px-2 text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: "var(--text-muted)" }}>{m.label}</th>)}
             {isSuperAdmin && <th scope="col" className="text-center py-3 px-2 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Reset</th>}
           </tr></thead>
           <tbody>
             {ROLES.map((rk) => (
-              <tr key={rk} className={clsx("border-b last:border-0", isDark ? "border-[#3d362c] hover:bg-[#2e2820]" : "border-[#f5f3ef] hover:bg-[#faf9f7]")}>
+              <tr key={rk} className="border-b last:border-0 border-(--bg-border) hover:bg-(--bg-hover)">
                 <th scope="row" className="py-3 px-4">
                   <div className="flex items-center gap-2">
                     <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{ROLE_LABELS[rk]}</span>
@@ -112,7 +110,7 @@ export function PermissionsTab() {
             { color: "#0ea5e9", title: "Read only", desc: "Can view all data in this module. Cannot create, edit or delete any record." },
             { color: "#334155", title: "No access", desc: "Module is hidden from sidebar. User cannot navigate to this screen." },
           ]).map((item) => (
-            <div key={item.title} className={clsx("flex items-start gap-3 p-3 rounded-lg", isDark ? "bg-[#242019]" : "bg-[#faf9f7]")}>
+            <div key={item.title} className="flex items-start gap-3 p-3 rounded-lg bg-(--bg-elevated)">
               <div className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0" style={{ background: item.color }} />
               <div><p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{item.title}</p><p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>{item.desc}</p></div>
             </div>
@@ -121,7 +119,7 @@ export function PermissionsTab() {
       </div></div>
 
       {/* GxP note */}
-      <div className={clsx("flex items-start gap-2 p-4 rounded-xl border", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.15)]" : "bg-[#f5f3ff] border-[#a5b4fc]")}>
+      <div className={clsx("flex items-start gap-2 p-4 rounded-xl border", "bg-(--info-bg) border-(--info)")}>
         <ShieldCheck className="w-4 h-4 text-[#6366f1] flex-shrink-0 mt-0.5" aria-hidden="true" />
         <div><p className="text-[12px] font-medium text-[#6366f1]">GxP Signatory &mdash; separate from module access</p><p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Even with Full access to CAPA or FDA 483, users must have GxP Signatory toggle ON (Settings &rarr; Users) to electronically sign under 21 CFR Part 11.</p></div>
       </div>

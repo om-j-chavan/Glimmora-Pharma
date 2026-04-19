@@ -27,14 +27,12 @@ export interface AGIOverviewTabProps {
   actionsTriggered: number;
   hitlApprovals: number;
   openAlertsCount: number;
-  capabilities: Capability[];
-  isDark: boolean;
-  onNavigateSettings: () => void;
+  capabilities: Capability[];  onNavigateSettings: () => void;
 }
 
 export function AGIOverviewTab({
   isManualMode, isAutoMode, insightsGenerated, actionsTriggered,
-  hitlApprovals, openAlertsCount, capabilities, isDark, onNavigateSettings,
+  hitlApprovals, openAlertsCount, capabilities, onNavigateSettings,
 }: AGIOverviewTabProps) {
   return (
     <>
@@ -75,7 +73,7 @@ export function AGIOverviewTab({
       </div>
 
       {/* Prohibited */}
-      <div className={clsx("card p-4", isDark ? "bg-[rgba(239,68,68,0.04)] border-[rgba(239,68,68,0.15)]" : "bg-[#fef2f2] border-[#fca5a5]")}>
+      <div className={clsx("card p-4", "bg-(--danger-bg) border-(--danger)")}>
         <div className="flex items-center gap-2 mb-3"><Ban className="w-4 h-4 text-[#ef4444]" aria-hidden="true" /><span className="text-[12px] font-semibold text-[#ef4444]">AGI will NEVER perform these actions &mdash; by design</span></div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
           {PROHIBITED.map((item) => (<div key={item} className="flex items-center gap-2 text-[12px]"><X className="w-3.5 h-3.5 text-[#ef4444] flex-shrink-0" aria-hidden="true" /><span style={{ color: "var(--text-secondary)" }}>{item}</span></div>))}
