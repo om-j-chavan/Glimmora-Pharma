@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { GitBranch, Plus, Save } from "lucide-react";
 import type {
@@ -53,7 +53,7 @@ export function RCATab({
   onSaveFreeform,
   onRaiseCAPA,
 }: RCATabProps) {
-  const navigate = useNavigate();
+  const router = useRouter();
 
   if (!liveEvent) {
     return (
@@ -404,7 +404,7 @@ export function RCATab({
               </span>
               <button
                 onClick={() =>
-                  navigate("/capa", {
+                  router.push("/capa", {
                     state: { openCapaId: selectedObs.capaId },
                   })
                 }

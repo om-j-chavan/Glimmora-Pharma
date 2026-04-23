@@ -1,3 +1,5 @@
+"use client";
+
 import { Sun, Moon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -5,23 +7,15 @@ import { toggleTheme } from "@/store/theme.slice";
 
 export function ThemeToggle() {
   const dispatch = useAppDispatch();
-  const mode = useAppSelector((s) => s.theme.mode);
-
-  const handleToggle = () => {
-    dispatch(toggleTheme());
-    const next = mode === "dark" ? "light" : "dark";
-    localStorage.setItem("glimmora-theme", next);
-    document.documentElement.setAttribute("data-theme", next);
-  };
+  const mode = useAppSelector((s) => s.theme?.mode ?? "light");
+  const isDark = mode === "dark";
 
   return (
     <button
       type="button"
-      onClick={handleToggle}
-      aria-label={
-        mode === "dark" ? "Switch to light mode" : "Switch to dark mode"
-      }
-      aria-pressed={mode === "light"}
+      onClick={() => dispatch(toggleTheme())}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-pressed={!isDark}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -37,7 +31,7 @@ export function ThemeToggle() {
         color: "var(--text-secondary)",
       }}
     >
-      {mode === "dark" ? (
+      {isDark ? (
         <>
           <Sun size={13} aria-hidden="true" /> Light
         </>

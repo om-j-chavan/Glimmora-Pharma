@@ -1,0 +1,482 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ── AUTH / TENANTS ──
+
+model Tenant {
+  id           String   @id @default(cuid())
+  customerCode String   @unique
+  name         String
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         String   @default("CustomerAdministrator")
+  language     String   @default("en")
+  timezone     String   @default("Asia/Kolkata")
+  logoUrl      String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  subscription  Subscription?
+  sites         Site[]
+  users         User[]
+  findings      Finding[]
+  capas         CAPA[]
+  deviations    Deviation[]
+  fda483Events  FDA483Event[]
+  systems       GxPSystem[]
+  documents     Document[]
+  raidItems     RAIDItem[]
+  auditLogs     AuditLog[]
+  inspections   Inspection[]
+}
+
+model Subscription {
+  id          String   @id @default(cuid())
+  tenantId    String   @unique
+  maxAccounts Int      @default(5)
+  startDate   DateTime
+  expiryDate  DateTime
+  status      String   @default("Active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// ── SETTINGS ──
+
+model Site {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  location  String?
+  gmpScope  String?
+  risk      String   @default("MEDIUM")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users      User[]
+  findings   Finding[]
+  capas      CAPA[]
+  deviations Deviation[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  tenantId     String
+  siteId       String?
+  name         String
+  email        String
+  username     String
+  passwordHash String
+  role         String
+  gxpSignatory Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  lastLogin    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id])
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, username])
+}
+
+// ── GAP ASSESSMENT ──
+
+model Finding {
+  id           String    @id @default(cuid())
+  tenantId     String
+  siteId       String?
+  requirement  String
+  area         String
+  framework    String?
+  severity     String
+  status       String    @default("Open")
+  owner        String
+  targetDate   DateTime?
+  rootCause    String?
+  evidenceLink String?
+  linkedCAPAId String?
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id])
+  capa   CAPA?
+}
+
+// ── CAPA ──
+
+model CAPA {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  siteId             String?
+  findingId          String?   @unique
+  source             String
+  description        String
+  risk               String
+  owner              String
+  dueDate            DateTime?
+  status             String    @default("Open")
+  rca                String?
+  rcaMethod          String?
+  correctiveActions  String?
+  effectivenessCheck Boolean   @default(false)
+  effectivenessDate  DateTime?
+  diGate             Boolean   @default(false)
+  diGateStatus       String?
+  diGateNotes        String?
+  diGateReviewedBy   String?
+  diGateReviewDate   DateTime?
+  closedBy           String?
+  closedAt           DateTime?
+  createdBy          String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site      Site?         @relation(fields: [siteId], references: [id])
+  finding   Finding?      @relation(fields: [findingId], references: [id])
+  documents CAPADocument[]
+}
+
+model CAPADocument {
+  id          String    @id @default(cuid())
+  capaId      String
+  fileName    String
+  fileSize    String?
+  fileType    String?
+  version     String    @default("v1.0")
+  status      String    @default("current")
+  uploadedBy  String
+  approvedBy  String?
+  approvedAt  DateTime?
+  description String?
+  createdAt   DateTime  @default(now())
+
+  capa CAPA @relation(fields: [capaId], references: [id], onDelete: Cascade)
+}
+
+// ── DEVIATION ──
+
+model Deviation {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  siteId               String?
+  title                String
+  description          String
+  type                 String
+  category             String
+  severity             String
+  area                 String
+  detectedBy           String
+  detectedDate         DateTime
+  owner                String
+  dueDate              DateTime?
+  status               String    @default("open")
+  immediateAction      String?
+  rootCause            String?
+  rcaMethod            String?
+  patientSafetyImpact  String?
+  productQualityImpact String?
+  regulatoryImpact     String?
+  batchesAffected      String?
+  linkedCAPAId         String?
+  closedBy             String?
+  closedDate           DateTime?
+  closureNotes         String?
+  createdBy            String
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id])
+}
+
+// ── FDA 483 ──
+
+model FDA483Event {
+  id               String    @id @default(cuid())
+  tenantId         String
+  referenceNumber  String
+  eventType        String
+  agency           String
+  siteId           String
+  inspectionDate   DateTime
+  responseDeadline DateTime
+  status           String    @default("Open")
+  responseDraft    String?
+  agiDraft         String?
+  submittedAt      DateTime?
+  submittedBy      String?
+  signatureMeaning String?
+  closedAt         DateTime?
+  createdBy        String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  observations FDA483Observation[]
+  commitments  FDA483Commitment[]
+}
+
+model FDA483Observation {
+  id           String   @id @default(cuid())
+  eventId      String
+  number       Int
+  text         String
+  severity     String
+  area         String?
+  regulation   String?
+  rcaMethod    String?
+  rootCause    String?
+  capaId       String?
+  responseText String?
+  status       String   @default("Open")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  event FDA483Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model FDA483Commitment {
+  id      String    @id @default(cuid())
+  eventId String
+  text    String
+  dueDate DateTime?
+  owner   String?
+  status  String    @default("Pending")
+
+  event FDA483Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+// ── CSV/CSA ──
+
+model GxPSystem {
+  id               String   @id @default(cuid())
+  tenantId         String
+  name             String
+  type             String
+  vendor           String?
+  version          String?
+  gxpRelevance     String   @default("Major")
+  part11Status     String   @default("N/A")
+  annex11Status    String   @default("N/A")
+  gamp5Category    String   @default("4")
+  validationStatus String   @default("Not Started")
+  riskLevel        String   @default("MEDIUM")
+  siteId           String?
+  intendedUse      String?
+  gxpScope         String?
+  plannedActions   String?
+  owner            String?
+  createdBy        String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  validationStages  ValidationStage[]
+  rtmEntries        RTMEntry[]
+  roadmapActivities RoadmapActivity[]
+}
+
+model ValidationStage {
+  id              String    @id @default(cuid())
+  systemId        String
+  stageName       String
+  status          String    @default("not_started")
+  notes           String?
+  submittedBy     String?
+  submittedDate   DateTime?
+  approvedBy      String?
+  approvedDate    DateTime?
+  rejectedBy      String?
+  rejectionReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  system GxPSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+}
+
+model RTMEntry {
+  id                 String   @id @default(cuid())
+  systemId           String
+  ursId              String
+  ursRequirement     String
+  ursRegulation      String?
+  ursPriority        String   @default("high")
+  fsReference        String?
+  fsStatus           String   @default("missing")
+  dsReference        String?
+  dsStatus           String   @default("na")
+  iqTestId           String?
+  iqResult           String?
+  oqTestId           String?
+  oqResult           String?
+  pqTestId           String?
+  pqResult           String?
+  evidenceStatus     String   @default("missing")
+  traceabilityStatus String   @default("broken")
+  linkedFindingId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  system GxPSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+}
+
+model RoadmapActivity {
+  id             String    @id @default(cuid())
+  systemId       String
+  title          String
+  type           String
+  status         String    @default("Planned")
+  startDate      DateTime?
+  endDate        DateTime?
+  owner          String?
+  completionType String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  system GxPSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+}
+
+// ── EVIDENCE ──
+
+model Document {
+  id             String    @id @default(cuid())
+  tenantId       String
+  fileName       String
+  fileType       String?
+  fileSize       String?
+  version        String    @default("v1.0")
+  status         String    @default("draft")
+  description    String?
+  linkedModule   String?
+  linkedRecordId String?
+  uploadedBy     String
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// ── GOVERNANCE ──
+
+model RAIDItem {
+  id           String    @id @default(cuid())
+  tenantId     String
+  type         String
+  title        String
+  description  String
+  priority     String
+  owner        String
+  dueDate      DateTime?
+  status       String    @default("Open")
+  impact       String?
+  mitigation   String?
+  closedBy     String?
+  closedAt     DateTime?
+  reopenedBy   String?
+  reopenedAt   DateTime?
+  reopenReason String?
+  createdBy    String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// ── INSPECTION READINESS ──
+
+model Inspection {
+  id             String    @id @default(cuid())
+  tenantId       String
+  title          String
+  siteName       String
+  agency         String
+  type           String
+  status         String    @default("planning")
+  expectedDate   DateTime?
+  startDate      DateTime?
+  endDate        DateTime?
+  inspectionLead String?
+  notes          String?
+  linkedFDA483Id String?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actions     ReadinessAction[]
+  simulations Simulation[]
+}
+
+model ReadinessAction {
+  id           String    @id @default(cuid())
+  inspectionId String
+  title        String
+  lane         String
+  bucket       String
+  priority     String    @default("Medium")
+  status       String    @default("Not Started")
+  owner        String?
+  dueDate      DateTime?
+  completedBy  String?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+model Simulation {
+  id           String    @id @default(cuid())
+  inspectionId String
+  title        String
+  type         String
+  duration     Int?
+  scheduledAt  DateTime?
+  participants String?
+  status       String    @default("Scheduled")
+  score        Int?
+  notes        String?
+  createdBy    String
+  createdAt    DateTime  @default(now())
+
+  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+}
+
+// ── AUDIT TRAIL ──
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String?
+  userName    String
+  userRole    String?
+  module      String
+  action      String
+  recordId    String?
+  recordTitle String?
+  oldValue    String?
+  newValue    String?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}

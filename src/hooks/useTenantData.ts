@@ -53,6 +53,15 @@ export function useTenantData() {
     }),
   );
 
+  const deviations = useAppSelector((s) =>
+    (s.deviation?.items ?? []).filter((d) => {
+      if (d.tenantId && d.tenantId !== tenantId) return false;
+      if (d.siteId && !accessibleSiteIds.includes(d.siteId)) return false;
+      if (selectedSiteId && d.siteId !== selectedSiteId) return false;
+      return true;
+    }),
+  );
+
   const evidenceDocs = useAppSelector((s) =>
     (s.evidence?.documents ?? []).filter((d) => {
       if (d.tenantId && d.tenantId !== tenantId) return false;
@@ -83,6 +92,7 @@ export function useTenantData() {
     systems,
     roadmap,
     fda483Events,
+    deviations,
     evidenceDocs,
     evidencePacks,
     raidItems,

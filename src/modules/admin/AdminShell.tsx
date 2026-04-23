@@ -1,5 +1,7 @@
-import { useState } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router";
+"use client";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
 import {
   Shield,
   Users,
@@ -17,16 +19,27 @@ const NAV_ITEMS = [
   { path: "/admin", label: "Customer Accounts", icon: Users, end: true },
 ];
 
-export function AdminShell() {
+export function AdminShell({ children }: { children?: React.ReactNode }) {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
+  const router = useRouter();
+  const pathname = usePathname();
   const user = useAppSelector((s) => s.auth.user);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const initials = mounted && user?.name
+    ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
+    : "SA";
+  const displayName = mounted && user?.name ? user.name : "Super Admin";
 
   const handleLogout = async () => {
     try { await nextAuthLogout(); } catch { /* ignore */ }
     dispatch(logout());
-    navigate("/login");
+    router.push("/login");
   };
 
   return (
@@ -101,24 +114,25 @@ export function AdminShell() {
           {/* Nav items */}
           <nav aria-label="Admin navigation" style={{ flex: 1, padding: "12px 0", overflowY: "auto" }}>
             <ul role="list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {NAV_ITEMS.map((item) => (
-                <li key={item.path}>
-                  <NavLink
-                    to={item.path}
-                    end={item.end}
-                    className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
-                    onClick={() => setSidebarOpen(false)}
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <item.icon className="w-4 h-4" aria-hidden="true" />
-                        {item.label}
-                        {isActive && <span className="sr-only">(current page)</span>}
-                      </>
-                    )}
-                  </NavLink>
-                </li>
-              ))}
+              {NAV_ITEMS.map((item) => {
+                const isActive = item.end
+                  ? pathname === item.path
+                  : pathname?.startsWith(item.path) ?? false;
+                return (
+                  <li key={item.path}>
+                    <Link
+                      href={item.path}
+                      className={`nav-item${isActive ? " active" : ""}`}
+                      aria-current={isActive ? "page" : undefined}
+                      onClick={() => setSidebarOpen(false)}
+                    >
+                      <item.icon className="w-4 h-4" aria-hidden="true" />
+                      {item.label}
+                      {isActive && <span className="sr-only">(current page)</span>}
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </nav>
 
@@ -194,10 +208,10 @@ export function AdminShell() {
                 className="flex items-center justify-center w-8 h-8 rounded-full text-[11px] font-bold shrink-0"
                 style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "2px solid rgba(239,68,68,0.25)" }}
               >
-                {user?.name?.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2) ?? "SA"}
+                {initials}
               </div>
               <span className="hidden sm:block text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
-                {user?.name ?? "Super Admin"}
+                {displayName}
               </span>
             </div>
           </header>
@@ -209,7 +223,7 @@ export function AdminShell() {
             className="flex-1 overflow-y-auto p-4 sm:p-6"
             style={{ background: "var(--bg-base)" }}
           >
-            <Outlet />
+            {children}
           </main>
         </div>
       </div>

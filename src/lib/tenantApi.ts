@@ -1,18 +1,35 @@
 import type { Tenant } from "@/store/auth.slice";
+import { getSession } from "next-auth/react";
 
 const BASE = "/api";
 
+/**
+ * Ensures a valid next-auth session exists before making an API call.
+ * Returns headers with the session cookie (credentials: include handles that)
+ * but also adds a custom header the API can use as a fallback.
+ */
+async function authHeaders(): Promise<HeadersInit> {
+  const session = await getSession();
+  if (!session) throw new Error("Not authenticated");
+  return { "Content-Type": "application/json" };
+}
+
 export async function fetchTenants(): Promise<Tenant[]> {
-  const res = await fetch(`${BASE}/tenants`);
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/tenants`, { credentials: "include", headers });
+  if (res.status === 401) throw new Error("Not authenticated — please log in again");
+  if (res.status === 403) throw new Error("Insufficient permissions — Super Admin only");
   if (!res.ok) throw new Error(`Failed to fetch tenants: ${res.status}`);
   const data = await res.json();
   return data.tenants as Tenant[];
 }
 
 export async function createTenantApi(tenant: Tenant): Promise<void> {
+  const headers = await authHeaders();
   const res = await fetch(`${BASE}/tenants`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    headers,
     body: JSON.stringify(tenant),
   });
   if (!res.ok) {
@@ -25,9 +42,11 @@ export async function updateTenantApi(
   id: string,
   patch: Partial<Tenant>,
 ): Promise<void> {
+  const headers = await authHeaders();
   const res = await fetch(`${BASE}/tenants`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    headers,
     body: JSON.stringify({ id, ...patch }),
   });
   if (!res.ok) {
@@ -37,8 +56,10 @@ export async function updateTenantApi(
 }
 
 export async function deleteTenantApi(id: string): Promise<void> {
+  await authHeaders(); // ensure session
   const res = await fetch(`${BASE}/tenants?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
+    credentials: "include",
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -66,17 +87,13 @@ export async function loginApi(
 ): Promise<LoginResult | null> {
   const res = await fetch(`${BASE}/auth/login`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
   if (res.status === 401) return null;
   if (res.status === 403) {
-    // Gated login — inactive user, expired subscription, etc. Surface the
-    // tagged reason so the UI can show a specific message.
-    const body = (await res.json().catch(() => ({}))) as {
-      reason?: string;
-      error?: string;
-    };
+    const body = (await res.json().catch(() => ({}))) as { reason?: string; error?: string };
     const err = new Error(body.reason ?? body.error ?? "Login blocked");
     (err as Error & { reason?: string }).reason = body.reason;
     throw err;

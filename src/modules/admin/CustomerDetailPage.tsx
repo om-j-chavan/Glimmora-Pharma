@@ -1,4 +1,5 @@
-import { useParams, useNavigate, Link } from "react-router";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Building2,
@@ -57,13 +58,13 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const router = useRouter();
   const tenant = useAppSelector((s) => s.auth.tenants.find((t) => t.id === id));
 
   if (!tenant) {
     return (
       <div className="w-full max-w-[1200px] mx-auto">
-        <Link to="/admin" className="inline-flex items-center gap-2 text-[13px] mb-4" style={{ color: "var(--brand)" }}>
+        <Link href="/admin" className="inline-flex items-center gap-2 text-[13px] mb-4" style={{ color: "var(--brand)" }}>
           <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back to Customer Accounts
         </Link>
         <div className="card">
@@ -123,7 +124,7 @@ export function CustomerDetailPage() {
             </div>
           </div>
         </div>
-        <Button variant="primary" icon={Pencil} onClick={() => navigate(`/admin?edit=${tenant.id}`)}>
+        <Button variant="primary" icon={Pencil} onClick={() => router.push(`/admin?edit=${tenant.id}`)}>
           Edit Account
         </Button>
       </div>

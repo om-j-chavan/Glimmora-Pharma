@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import {
   MapPin,
   Search,
@@ -40,7 +40,7 @@ const riskStyles = {
 
 export function SitePicker() {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
+  const router = useRouter();
   const user = useAppSelector((s) => s.auth.user);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { sites } = useTenantConfig();
@@ -49,9 +49,9 @@ export function SitePicker() {
   // Guard: admin roles should never land here — redirect to dashboard
   useEffect(() => {
     if (user?.role === "super_admin" || user?.role === "customer_admin") {
-      navigate("/", { replace: true });
+      router.replace("/");
     }
-  }, [user, navigate]);
+  }, [user, router]);
   const [selectedSite, setSelectedSite] = useState<(typeof sites)[number] | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -67,7 +67,7 @@ export function SitePicker() {
     // selectedSiteId is the filter the Topbar/Sidebar render from.
     dispatch(setActiveSite(selectedSite.id));
     dispatch(setSelectedSiteAction(selectedSite.id));
-    navigate("/");
+    router.push("/");
   };
 
   return (
@@ -100,7 +100,7 @@ export function SitePicker() {
           </div>
           <button
             type="button"
-            onClick={() => navigate("/login")}
+            onClick={() => router.push("/login")}
             aria-label="Close"
             className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent border-none cursor-pointer transition-colors duration-150"
             style={{ color: "var(--text-muted)" }}
@@ -123,7 +123,7 @@ export function SitePicker() {
               <p className="text-[12px] mb-4" style={{ color: "var(--text-secondary)" }}>
                 Your workspace has no sites yet. You can add sites after logging in from Settings &rarr; Sites.
               </p>
-              <Button variant="primary" fullWidth onClick={() => navigate("/")}>
+              <Button variant="primary" fullWidth onClick={() => router.push("/")}>
                 Continue to Dashboard
               </Button>
             </div>

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -64,7 +64,7 @@ type AddForm = z.infer<typeof addSchema>;
 
 export function DeviationPage() {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
+  const router = useRouter();
   const deviations = useAppSelector((s) => s.deviation.items);
   const user = useAppSelector((s) => s.auth.user);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
@@ -86,7 +86,11 @@ export function DeviationPage() {
   const canReport = !isCustomerAdmin && !isViewer;
 
   // State
-  const [selected, setSelected] = useState<Deviation | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = useMemo(
+    () => (selectedId ? tenantDevs.find((d) => d.id === selectedId) ?? null : null),
+    [tenantDevs, selectedId],
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [closeModal, setCloseModal] = useState(false);
   const [rejectModal, setRejectModal] = useState(false);
@@ -164,7 +168,6 @@ export function DeviationPage() {
     }));
     dispatch(linkCAPAToDeviation({ deviationId: selected.id, capaId }));
     auditLog({ action: "CAPA_RAISED_FROM_DEVIATION", module: "Deviation Management", recordId: selected.id, recordTitle: `${selected.id} \u2192 ${capaId}`, newValue: capaId });
-    setSelected({ ...selected, linkedCAPAId: capaId });
     setSuccessMsg(`CAPA ${capaId} raised from ${selected.id}`);
     setSuccessPopup(true);
   }
@@ -175,7 +178,7 @@ export function DeviationPage() {
     auditLog({ action: "DEVIATION_CLOSED", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Closed" });
     setCloseModal(false);
     setCloseNotes("");
-    setSelected(null);
+    setSelectedId(null);
     setSuccessMsg(`${selected.id} closed`);
     setSuccessPopup(true);
   }
@@ -186,7 +189,7 @@ export function DeviationPage() {
     auditLog({ action: "DEVIATION_REJECTED", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Rejected" });
     setRejectModal(false);
     setRejectReason("");
-    setSelected(null);
+    setSelectedId(null);
     setSuccessMsg(`${selected.id} rejected — returned to investigation`);
     setSuccessPopup(true);
   }
@@ -195,14 +198,12 @@ export function DeviationPage() {
     if (!selected) return;
     dispatch(updateDeviation({ id: selected.id, patch: { status: "pending_qa_review" } }));
     auditLog({ action: "DEVIATION_SUBMITTED_FOR_REVIEW", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Pending QA Review" });
-    setSelected({ ...selected, status: "pending_qa_review" });
   }
 
   function handleStartInvestigation() {
     if (!selected) return;
     dispatch(updateDeviation({ id: selected.id, patch: { status: "under_investigation" } }));
     auditLog({ action: "DEVIATION_INVESTIGATION_STARTED", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Under Investigation" });
-    setSelected({ ...selected, status: "under_investigation" });
   }
 
   return (
@@ -274,7 +275,7 @@ export function DeviationPage() {
                 ) : filtered.map((dev) => {
                   const isOd = dev.status !== "closed" && dev.status !== "rejected" && dayjs.utc(dev.dueDate).isBefore(dayjs());
                   return (
-                    <tr key={dev.id} className={clsx("cursor-pointer", selected?.id === dev.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))} onClick={() => setSelected(dev)} style={dev.status === "closed" ? { opacity: 0.6 } : undefined}>
+                    <tr key={dev.id} className={clsx("cursor-pointer", selected?.id === dev.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))} onClick={() => setSelectedId(dev.id)} style={dev.status === "closed" ? { opacity: 0.6 } : undefined}>
                       <td className="font-mono text-[11px]" style={{ color: "var(--brand)" }}>{dev.id}</td>
                       <td className="text-[12px] font-medium max-w-[180px] truncate" style={{ color: "var(--text-primary)" }}>{dev.title}</td>
                       <td className="text-[11px] capitalize" style={{ color: "var(--text-secondary)" }}>{dev.category}</td>
@@ -305,7 +306,7 @@ export function DeviationPage() {
                   <Badge variant={SEV_VARIANT[selected.severity]}>{selected.severity.charAt(0).toUpperCase() + selected.severity.slice(1)}</Badge>
                 </div>
               </div>
-              <button type="button" onClick={() => setSelected(null)} className="p-1 cursor-pointer border-none bg-transparent" style={{ color: "var(--text-muted)" }} aria-label="Close detail panel"><X className="w-4 h-4" /></button>
+              <button type="button" onClick={() => setSelectedId(null)} className="p-1 cursor-pointer border-none bg-transparent" style={{ color: "var(--text-muted)" }} aria-label="Close detail panel"><X className="w-4 h-4" /></button>
             </div>
 
             <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.title}</p>
@@ -357,7 +358,7 @@ export function DeviationPage() {
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Linked CAPA</p>
               {selected.linkedCAPAId ? (
-                <button type="button" onClick={() => navigate("/capa", { state: { openCapaId: selected.linkedCAPAId } })} className="text-[12px] font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button>
+                <button type="button" onClick={() => router.push("/capa", { state: { openCapaId: selected.linkedCAPAId } })} className="text-[12px] font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button>
               ) : selected.status !== "closed" && selected.status !== "rejected" && canReport ? (
                 <Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA</Button>
               ) : (

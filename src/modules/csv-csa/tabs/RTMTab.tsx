@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   CheckCircle2, AlertTriangle, X, ChevronRight, Search, Download,
@@ -50,13 +50,10 @@ function borderColor(s: TraceabilityStatus): string {
 
 /* ── Component ── */
 
-export interface RTMTabProps {
-  isDark: boolean;
-}
-
-export function RTMTab({ isDark }: RTMTabProps) {
+export function RTMTab() {
+  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
+  const router = useRouter();
   const entries = useAppSelector((s) => s.rtm.items);
   const { isQAHead } = usePermissions();
   const { tenantId } = useTenantConfig();
@@ -240,7 +237,15 @@ export function RTMTab({ isDark }: RTMTabProps) {
                   <div key={i} className="flex gap-3">
                     <div className="flex flex-col items-center shrink-0">
                       <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: step.skip ? "#94a3b818" : step.ok ? "#10b98118" : step.pending ? "#f59e0b18" : step.missing ? "#ef444418" : "#64748b18", color: step.skip ? "#94a3b8" : step.ok ? "#10b981" : step.pending ? "#f59e0b" : step.missing ? "#ef4444" : "#64748b" }}>
-                        {step.skip ? <SkipForward className="w-3 h-3" /> : step.ok ? <CheckCircle2 className="w-3 h-3" /> : step.pending ? <Clock className="w-3 h-3" /> : step.missing ? <AlertTriangle className="w-3 h-3" /> : <span>\u25CB</span>}
+                        {step.skip
+                          ? <SkipForward className="w-3 h-3" />
+                          : step.ok
+                            ? <CheckCircle2 className="w-3 h-3" />
+                            : step.pending
+                              ? <Clock className="w-3 h-3" />
+                              : step.missing
+                                ? <AlertTriangle className="w-3 h-3" />
+                                : <span>{"\u25CB"}</span>}
                       </div>
                       {i < arr.length - 1 && <div className="w-0.5 flex-1 min-h-3" style={{ background: isDark ? "#1e3a5a" : "#e2e8f0" }} />}
                     </div>
@@ -273,11 +278,11 @@ export function RTMTab({ isDark }: RTMTabProps) {
             <div className="grid grid-cols-2 gap-3 text-[11px]">
               <div>
                 <p style={{ color: "var(--text-muted)" }}>Finding</p>
-                {selected.linkedFindingId ? <button type="button" onClick={() => navigate("/gap-assessment", { state: { openFindingId: selected.linkedFindingId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedFindingId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
+                {selected.linkedFindingId ? <button type="button" onClick={() => router.push("/gap-assessment", { state: { openFindingId: selected.linkedFindingId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedFindingId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
               </div>
               <div>
                 <p style={{ color: "var(--text-muted)" }}>CAPA</p>
-                {selected.linkedCAPAId ? <button type="button" onClick={() => navigate("/capa", { state: { openCapaId: selected.linkedCAPAId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
+                {selected.linkedCAPAId ? <button type="button" onClick={() => router.push("/capa", { state: { openCapaId: selected.linkedCAPAId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
               </div>
             </div>
           </aside>

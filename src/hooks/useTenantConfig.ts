@@ -37,15 +37,21 @@ export function useTenantConfig() {
 
   // ── Subscription helpers ──
   const subscriptionPlans: SubscriptionPlan[] = tenant?.subscriptionPlans ?? [];
-  const activePlan = subscriptionPlans.find((p) => p.status === "Active") ?? null;
+  const activePlan = subscriptionPlans.find((p) => (p.status ?? "").toLowerCase() === "active") ?? null;
 
-  const daysRemaining = activePlan
-    ? Math.max(0, dayjs.utc(activePlan.endDate).diff(dayjs(), "day"))
+  // Plans created via admin UI use `expiryDate`; the TS type says `endDate`.
+  // Check both to avoid field-name mismatch causing false "expired" state.
+  const planExpiry = activePlan
+    ? (activePlan as SubscriptionPlan & { expiryDate?: string }).expiryDate ?? activePlan.endDate
     : null;
 
-  const isExpired = activePlan
-    ? dayjs().isAfter(dayjs.utc(activePlan.endDate))
-    : true;
+  const daysRemaining = planExpiry
+    ? Math.max(0, dayjs.utc(planExpiry).diff(dayjs(), "day"))
+    : null;
+
+  const isExpired = planExpiry
+    ? dayjs().isAfter(dayjs.utc(planExpiry))
+    : !activePlan;
 
   const isNearExpiry = daysRemaining !== null && daysRemaining <= 14 && daysRemaining > 0;
 

@@ -95,9 +95,10 @@ export default async function handler(
           });
         }
         // Subscription gate — block login when the tenant has no active or
-        // non-expired subscription plan, regardless of the user's own
-        // per-record status.
-        if (!isTenantEffectivelyActive(tenant)) {
+        // non-expired subscription plan. Customer admins and super admins
+        // are exempt because they are the ones who renew the subscription.
+        const isAdmin = match.role === "customer_admin" || match.role === "super_admin";
+        if (!isAdmin && !isTenantEffectivelyActive(tenant)) {
           return res.status(403).json({
             error: getInactiveReason(tenant) ?? "Account is inactive.",
             reason: "SUBSCRIPTION_INACTIVE",

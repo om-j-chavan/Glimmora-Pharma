@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import {
   FileText, Upload, Trash2, CheckCircle2, X, File,
-  FileSpreadsheet, Image,
+  FileSpreadsheet, Image, Download,
 } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
@@ -33,6 +33,18 @@ export interface LinkedDocument {
   description?: string;
   approvedBy?: string;
   approvedAt?: string;
+  /** base64 data URL of the uploaded file — enables view/download */
+  dataUrl?: string;
+}
+
+function downloadLinkedDocument(doc: LinkedDocument) {
+  if (!doc.dataUrl) return;
+  const a = document.createElement("a");
+  a.href = doc.dataUrl;
+  a.download = doc.fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /* ── Helpers ── */
@@ -107,7 +119,7 @@ export function DocumentUpload({
   const timezone = org.timezone;
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<{ name: string; size: number; type: DocFileType } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{ name: string; size: number; type: DocFileType; dataUrl: string } | null>(null);
   const [description, setDescription] = useState("");
   const [versionMode, setVersionMode] = useState<"new_version" | "separate">("new_version");
   const [existingMatch, setExistingMatch] = useState<LinkedDocument | null>(null);
@@ -124,11 +136,16 @@ export function DocumentUpload({
       return;
     }
     const ft = fileTypeFromName(file.name);
-    setSelectedFile({ name: file.name, size: file.size, type: ft });
-    setDescription("");
-    const match = activeDocs.find((d) => d.fileName === file.name);
-    setExistingMatch(match ?? null);
-    setVersionMode("new_version");
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelectedFile({ name: file.name, size: file.size, type: ft, dataUrl: String(reader.result ?? "") });
+      setDescription("");
+      const match = activeDocs.find((d) => d.fileName === file.name);
+      setExistingMatch(match ?? null);
+      setVersionMode("new_version");
+    };
+    reader.onerror = () => alert("Failed to read file. Please try again.");
+    reader.readAsDataURL(file);
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -167,6 +184,7 @@ export function DocumentUpload({
       status: "current",
       linkedTo: { module, recordId, recordTitle },
       description: description.trim() || undefined,
+      dataUrl: selectedFile.dataUrl || undefined,
     };
 
     onUpload(doc);
@@ -243,6 +261,17 @@ export function DocumentUpload({
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {statusBadge(doc.status)}
+                  <button
+                    type="button"
+                    onClick={() => downloadLinkedDocument(doc)}
+                    disabled={!doc.dataUrl}
+                    title={doc.dataUrl ? `Download ${doc.fileName}` : "File not available for download"}
+                    aria-label={`Download ${doc.fileName}`}
+                    className="p-1 rounded cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.1)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ color: "var(--brand)" }}
+                  >
+                    <Download className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
                   {isQAHead && doc.status !== "approved" && doc.status !== "superseded" && onApprove && (
                     <button
                       type="button"

@@ -19,10 +19,23 @@ export type ColorTheme =
   | "slate-gray";
 
 function getInitialTheme(): Theme {
+  if (typeof window === "undefined") return "light";
   try {
-    return (localStorage.getItem("glimmora-theme") as Theme) ?? "light";
+    const stored = localStorage.getItem("glimmora-theme");
+    if (stored === "dark" || stored === "light") return stored;
   } catch {
-    return "light";
+    // ignore
+  }
+  return "light";
+}
+
+function persistTheme(next: Theme) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("glimmora-theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+  } catch {
+    // ignore
   }
 }
 
@@ -44,10 +57,13 @@ const themeSlice = createSlice({
   } as { mode: Theme; colorTheme: ColorTheme },
   reducers: {
     toggleTheme(state) {
-      state.mode = state.mode === "dark" ? "light" : "dark";
+      const next: Theme = state.mode === "dark" ? "light" : "dark";
+      state.mode = next;
+      persistTheme(next);
     },
     setTheme(state, { payload }: PayloadAction<Theme>) {
       state.mode = payload;
+      persistTheme(payload);
     },
     setColorTheme(state, { payload }: PayloadAction<ColorTheme>) {
       state.colorTheme = payload;

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   Bell, X, AlertTriangle, Clock, Search,
@@ -71,7 +71,7 @@ export function NotificationBell() {
   const notifications = useAppSelector((s) => s.notifications.items);
   const unreadCount = notifications.filter((n) => !n.read).length;
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
+  const router = useRouter();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
 
   const [open, setOpen] = useState(false);
@@ -178,7 +178,7 @@ export function NotificationBell() {
                     !notif.read && (isDark ? "bg-(--brand-muted)" : "bg-[#fafbff]"),
                     isDark ? "border-(--bg-border) hover:bg-(--bg-surface)" : "border-[#f1f5f9] hover:bg-[#f8fafc]",
                   )}
-                  onClick={() => { dispatch(markRead(notif.id)); if (notif.link) navigate(notif.link, { state: notif.linkState }); setOpen(false); }}
+                  onClick={() => { dispatch(markRead(notif.id)); if (notif.link) router.push(notif.link, { state: notif.linkState }); setOpen(false); }}
                   role="button"
                   aria-label={notif.title}
                 >

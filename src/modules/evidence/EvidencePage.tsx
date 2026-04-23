@@ -1,18 +1,25 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import {
-  Package, Plus, Download,
-} from "lucide-react";
+import { Package, Plus, Download } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addDocument, addPack, updatePack, type EvidenceDocument, type EvidencePack, type DocType, type DocArea, type DocStatus } from "@/store/evidence.slice";
+import {
+  addDocument,
+  addPack,
+  updatePack,
+  type EvidenceDocument,
+  type EvidencePack,
+  type DocType,
+  type DocArea,
+  type DocStatus,
+} from "@/store/evidence.slice";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -23,58 +30,277 @@ import { DocumentLibraryTab } from "./tabs/DocumentLibraryTab";
 
 /* ── Constants ── */
 
-const DOC_TYPES: DocType[] = ["SOP", "Record", "Audit Trail", "Validation", "Report", "Protocol", "Certificate", "Policy", "Other"];
-const DOC_AREAS: DocArea[] = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT", "Regulatory", "Training", "HR"];
-const DOC_STATUSES: DocStatus[] = ["Current", "Draft", "Superseded", "Missing", "Under Review"];
+const DOC_TYPES: DocType[] = [
+  "SOP",
+  "Record",
+  "Audit Trail",
+  "Validation",
+  "Report",
+  "Protocol",
+  "Certificate",
+  "Policy",
+  "Other",
+];
+const DOC_AREAS: DocArea[] = [
+  "Manufacturing",
+  "QC Lab",
+  "Warehouse",
+  "Utilities",
+  "QMS",
+  "CSV/IT",
+  "Regulatory",
+  "Training",
+  "HR",
+];
+const DOC_STATUSES: DocStatus[] = [
+  "Current",
+  "Draft",
+  "Superseded",
+  "Missing",
+  "Under Review",
+];
 
 /* ── Schemas ── */
 
 const docSchema = z.object({
-  title: z.string().min(2, "Title required"), reference: z.string().min(1, "Reference required"),
-  type: z.enum(["SOP", "Record", "Audit Trail", "Validation", "Report", "Protocol", "Certificate", "Policy", "Other"]),
-  area: z.enum(["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT", "Regulatory", "Training", "HR"]),
-  version: z.string().min(1, "Version required"), status: z.enum(["Current", "Draft", "Superseded", "Missing", "Under Review"]),
-  author: z.string().min(1, "Author required"), effectiveDate: z.string().min(1, "Effective date required"),
-  expiryDate: z.string().optional(), systemId: z.string().optional(), findingId: z.string().optional(),
-  capaId: z.string().optional(), url: z.string().optional(), tags: z.string().optional(),
+  title: z.string().min(2, "Title required"),
+  reference: z.string().min(1, "Reference required"),
+  type: z.enum([
+    "SOP",
+    "Record",
+    "Audit Trail",
+    "Validation",
+    "Report",
+    "Protocol",
+    "Certificate",
+    "Policy",
+    "Other",
+  ]),
+  area: z.enum([
+    "Manufacturing",
+    "QC Lab",
+    "Warehouse",
+    "Utilities",
+    "QMS",
+    "CSV/IT",
+    "Regulatory",
+    "Training",
+    "HR",
+  ]),
+  version: z.string().min(1, "Version required"),
+  status: z.enum(["Current", "Draft", "Superseded", "Missing", "Under Review"]),
+  author: z.string().min(1, "Author required"),
+  effectiveDate: z.string().min(1, "Effective date required"),
+  expiryDate: z.string().optional(),
+  systemId: z.string().optional(),
+  findingId: z.string().optional(),
+  capaId: z.string().optional(),
+  url: z.string().optional(),
+  tags: z.string().optional(),
 });
 type DocForm = z.infer<typeof docSchema>;
-
 
 /* ══════════════════════════════════════ */
 
 export function EvidencePage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const dispatch = useAppDispatch();
-  const { findings, capas, systems, fda483Events, evidenceDocs, evidencePacks, tenantId } = useTenantData();
+  const {
+    findings,
+    capas,
+    systems,
+    fda483Events,
+    deviations,
+    evidenceDocs,
+    evidencePacks,
+    tenantId,
+  } = useTenantData();
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const evidence = { documents: evidenceDocs, packs: evidencePacks };
   const { org, users } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const companyName = org.companyName;  const user = useAppSelector((s) => s.auth.user);
+  const companyName = org.companyName;
+  const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
 
   /* ── Aggregate documents ── */
   function getAllDocuments(): EvidenceDocument[] {
     const docs: EvidenceDocument[] = [...evidence.documents];
     findings.forEach((f) => {
-      if (f.evidenceLink?.trim() && !docs.find((d) => d.reference === f.evidenceLink)) {
-        docs.push({ id: `finding-${f.id}`, title: f.requirement, reference: f.evidenceLink, type: "Record", area: (f.area as DocArea) || "QMS", findingId: f.id, version: "1.0", status: f.status === "Closed" ? "Current" : "Under Review", author: f.owner, effectiveDate: f.createdAt, tags: [f.framework, f.severity].filter(Boolean), complianceTags: [f.framework], createdAt: f.createdAt, tenantId: f.tenantId ?? "", siteId: "" });
+      if (
+        f.evidenceLink?.trim() &&
+        !docs.find((d) => d.reference === f.evidenceLink)
+      ) {
+        docs.push({
+          id: `finding-${f.id}`,
+          title: f.requirement,
+          reference: f.evidenceLink,
+          type: "Record",
+          area: (f.area as DocArea) || "QMS",
+          findingId: f.id,
+          version: "1.0",
+          status: f.status === "Closed" ? "Current" : "Under Review",
+          author: f.owner,
+          effectiveDate: f.createdAt,
+          tags: [f.framework, f.severity].filter(Boolean),
+          complianceTags: [f.framework],
+          createdAt: f.createdAt,
+          tenantId: f.tenantId ?? "",
+          siteId: "",
+        });
       }
     });
     capas.forEach((c) => {
       c.evidenceLinks.forEach((link, i) => {
         if (!docs.find((d) => d.reference === link)) {
-          docs.push({ id: `capa-${c.id}-${i}`, title: `${c.id} \u2014 Evidence ${i + 1}`, reference: link, type: "Record", area: "QMS", capaId: c.id, version: "1.0", status: c.status === "Closed" ? "Current" : "Under Review", author: c.owner, effectiveDate: c.createdAt, tags: ["CAPA", c.source], complianceTags: [c.source], createdAt: c.createdAt, tenantId: c.tenantId ?? "", siteId: "" });
+          docs.push({
+            id: `capa-${c.id}-${i}`,
+            title: `${c.id} \u2014 Evidence ${i + 1}`,
+            reference: link,
+            type: "Record",
+            area: "QMS",
+            capaId: c.id,
+            version: "1.0",
+            status: c.status === "Closed" ? "Current" : "Under Review",
+            author: c.owner,
+            effectiveDate: c.createdAt,
+            tags: ["CAPA", c.source],
+            complianceTags: [c.source],
+            createdAt: c.createdAt,
+            tenantId: c.tenantId ?? "",
+            siteId: "",
+          });
         }
       });
     });
     fda483Events.forEach((e) => {
       if (e.responseDraft?.trim() && !docs.find((d) => d.eventId === e.id)) {
-        docs.push({ id: `event-${e.id}`, title: `${e.referenceNumber} \u2014 Response Draft`, reference: e.referenceNumber, type: "Record", area: "Regulatory", eventId: e.id, version: "1.0", status: e.status === "Response Submitted" ? "Current" : "Draft", author: "", effectiveDate: e.createdAt, tags: [e.type, e.agency], complianceTags: [e.type], createdAt: e.createdAt, tenantId: e.tenantId ?? "", siteId: "" });
+        docs.push({
+          id: `event-${e.id}`,
+          title: `${e.referenceNumber} \u2014 Response Draft`,
+          reference: e.referenceNumber,
+          type: "Record",
+          area: "Regulatory",
+          eventId: e.id,
+          version: "1.0",
+          status: e.status === "Response Submitted" ? "Current" : "Draft",
+          author: "",
+          effectiveDate: e.createdAt,
+          tags: [e.type, e.agency],
+          complianceTags: [e.type],
+          createdAt: e.createdAt,
+          tenantId: e.tenantId ?? "",
+          siteId: "",
+        });
       }
     });
+
+    /* \u2500\u2500 Aggregate uploaded files (LinkedDocument) from CAPA / Deviation / FDA-483 \u2500\u2500 */
+    const mapStatus = (s: string): DocStatus =>
+      s === "approved" || s === "current" ? "Current"
+      : s === "under_review" ? "Under Review"
+      : s === "superseded" ? "Superseded"
+      : "Current";
+
+    const pushUploaded = (
+      doc: { id: string; fileName: string; fileType: string; fileSize: string; uploadedBy: string; uploadedAt: string; version: string; status: string; description?: string; approvedBy?: string; dataUrl?: string },
+      opts: { sourcePrefix: string; recordId: string; area: DocArea; complianceTags: string[]; tenantId: string; siteId: string; capaId?: string; eventId?: string; findingId?: string; systemId?: string; recordTitle?: string },
+    ) => {
+      docs.push({
+        id: `${opts.sourcePrefix}-${opts.recordId}-${doc.id}`,
+        title: doc.fileName,
+        reference: opts.recordTitle ? `${opts.recordId} / ${doc.fileName}` : doc.fileName,
+        type: "Record",
+        area: opts.area,
+        version: doc.version.replace(/^v/, ""),
+        status: mapStatus(doc.status),
+        author: doc.approvedBy ?? doc.uploadedBy,
+        effectiveDate: doc.uploadedAt,
+        tags: [doc.fileType.toUpperCase(), opts.recordId],
+        complianceTags: opts.complianceTags,
+        createdAt: doc.uploadedAt,
+        tenantId: opts.tenantId,
+        siteId: opts.siteId,
+        capaId: opts.capaId,
+        eventId: opts.eventId,
+        findingId: opts.findingId,
+        systemId: opts.systemId,
+        sizeKb: undefined,
+        url: doc.dataUrl,
+      });
+    };
+
+    capas.forEach((c) => {
+      (c.documents ?? []).forEach((doc) =>
+        pushUploaded(doc, {
+          sourcePrefix: "capa-doc",
+          recordId: c.id,
+          recordTitle: c.description,
+          area: "QMS",
+          complianceTags: ["CAPA", c.source],
+          tenantId: c.tenantId ?? "",
+          siteId: c.siteId ?? "",
+          capaId: c.id,
+        }),
+      );
+    });
+
+    deviations.forEach((d) => {
+      (d.documents ?? []).forEach((doc) =>
+        pushUploaded(doc, {
+          sourcePrefix: "dev-doc",
+          recordId: d.id,
+          recordTitle: d.title,
+          area: (d.area as DocArea) || "QMS",
+          complianceTags: ["Deviation", d.severity],
+          tenantId: d.tenantId ?? "",
+          siteId: d.siteId ?? "",
+        }),
+      );
+    });
+
+    fda483Events.forEach((e) => {
+      (e.documents ?? []).forEach((doc) =>
+        pushUploaded(doc, {
+          sourcePrefix: "483-doc",
+          recordId: e.id,
+          recordTitle: e.referenceNumber,
+          area: "Regulatory",
+          complianceTags: [e.type, e.agency],
+          tenantId: e.tenantId ?? "",
+          siteId: e.siteId ?? "",
+          eventId: e.id,
+        }),
+      );
+      (e.responseDocuments ?? []).forEach((doc) =>
+        pushUploaded(doc, {
+          sourcePrefix: "483-resp",
+          recordId: e.id,
+          recordTitle: `${e.referenceNumber} Response`,
+          area: "Regulatory",
+          complianceTags: [e.type, "Response"],
+          tenantId: e.tenantId ?? "",
+          siteId: e.siteId ?? "",
+          eventId: e.id,
+        }),
+      );
+      (e.observations ?? []).forEach((obs) => {
+        (obs.documents ?? []).forEach((doc) =>
+          pushUploaded(doc, {
+            sourcePrefix: "483-obs",
+            recordId: `${e.id}-O${obs.number}`,
+            recordTitle: `${e.referenceNumber} Obs ${obs.number}`,
+            area: "Regulatory",
+            complianceTags: [e.type, obs.severity],
+            tenantId: e.tenantId ?? "",
+            siteId: e.siteId ?? "",
+            eventId: e.id,
+          }),
+        );
+      });
+    });
+
     return docs;
   }
 
@@ -94,12 +320,28 @@ export function EvidencePage() {
 
   const allDocs = getAllDocuments();
 
-  function ownerName(id: string) { return users.find((u) => u.id === id)?.name ?? id; }
+  function ownerName(id: string) {
+    return users.find((u) => u.id === id)?.name ?? id;
+  }
 
   function exportPack(pack: EvidencePack) {
-    const docs = pack.documentIds.map((id) => allDocs.find((d) => d.id === id)).filter((d): d is EvidenceDocument => Boolean(d));
-    const sc = (s: DocStatus) => ({ Current: "#10b981", Draft: "#0ea5e9", Superseded: "#94a3b8", Missing: "#ef4444", "Under Review": "#f59e0b" }[s] ?? "#94a3b8");
-    const rows = docs.map((d, i) => `<tr style="background:${i % 2 === 0 ? "#fff" : "#f8fafc"}"><td style="padding:8px 12px;border:1px solid #e2e8f0;font-family:monospace;font-size:11px;color:#0ea5e9">${d.reference}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:12px;color:#0a1628;font-weight:500">${d.title}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">${d.type}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">${d.area}</td><td style="padding:8px 12px;border:1px solid #e2e8f0"><span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;background:${sc(d.status)}18;color:${sc(d.status)}">${d.status}</span></td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">v${d.version}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">${d.effectiveDate ? dayjs.utc(d.effectiveDate).format(dateFormat) : "\u2014"}</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${d.complianceTags.map((t) => `<span style="display:inline-block;margin:1px;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:600;background:rgba(99,102,241,0.1);color:#6366f1">${t}</span>`).join("")}</td></tr>`).join("");
+    const docs = pack.documentIds
+      .map((id) => allDocs.find((d) => d.id === id))
+      .filter((d): d is EvidenceDocument => Boolean(d));
+    const sc = (s: DocStatus) =>
+      ({
+        Current: "#10b981",
+        Draft: "#0ea5e9",
+        Superseded: "#94a3b8",
+        Missing: "#ef4444",
+        "Under Review": "#f59e0b",
+      })[s] ?? "#94a3b8";
+    const rows = docs
+      .map(
+        (d, i) =>
+          `<tr style="background:${i % 2 === 0 ? "#fff" : "#f8fafc"}"><td style="padding:8px 12px;border:1px solid #e2e8f0;font-family:monospace;font-size:11px;color:#0ea5e9">${d.reference}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:12px;color:#0a1628;font-weight:500">${d.title}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">${d.type}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">${d.area}</td><td style="padding:8px 12px;border:1px solid #e2e8f0"><span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;background:${sc(d.status)}18;color:${sc(d.status)}">${d.status}</span></td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">v${d.version}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px;color:#475569">${d.effectiveDate ? dayjs.utc(d.effectiveDate).format(dateFormat) : "\u2014"}</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${d.complianceTags.map((t) => `<span style="display:inline-block;margin:1px;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:600;background:rgba(99,102,241,0.1);color:#6366f1">${t}</span>`).join("")}</td></tr>`,
+      )
+      .join("");
     const cc = docs.filter((d) => d.status === "Current").length;
     const mc = docs.filter((d) => d.status === "Missing").length;
     const areas = [...new Set(docs.map((d) => d.area))].join(", ");
@@ -117,41 +359,130 @@ export function EvidencePage() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    dispatch(updatePack({ id: pack.id, patch: { exportedAt: dayjs().toISOString() } }));
-    auditLog({ action: "EVIDENCE_PACK_EXPORTED", module: "evidence", recordId: pack.id, newValue: { documentCount: docs.length, exportedBy: user?.id, exportedAt: dayjs().toISOString() } });
+    dispatch(
+      updatePack({ id: pack.id, patch: { exportedAt: dayjs().toISOString() } }),
+    );
+    auditLog({
+      action: "EVIDENCE_PACK_EXPORTED",
+      module: "evidence",
+      recordId: pack.id,
+      newValue: {
+        documentCount: docs.length,
+        exportedBy: user?.id,
+        exportedAt: dayjs().toISOString(),
+      },
+    });
   }
 
   const currentCount = allDocs.filter((d) => d.status === "Current").length;
   const missingCount = allDocs.filter((d) => d.status === "Missing").length;
-  const anyFilter = !!(search || areaFilter || typeFilter || systemFilter || statusFilter || dateFrom || dateTo);
-  function clearFilters() { setSearch(""); setAreaFilter(""); setTypeFilter(""); setSystemFilter(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); }
+  const anyFilter = !!(
+    search ||
+    areaFilter ||
+    typeFilter ||
+    systemFilter ||
+    statusFilter ||
+    dateFrom ||
+    dateTo
+  );
+  function clearFilters() {
+    setSearch("");
+    setAreaFilter("");
+    setTypeFilter("");
+    setSystemFilter("");
+    setStatusFilter("");
+    setDateFrom("");
+    setDateTo("");
+  }
 
   const filteredDocs = allDocs.filter((d) => {
-    if (search && !d.title.toLowerCase().includes(search.toLowerCase()) && !d.reference.toLowerCase().includes(search.toLowerCase())) return false;
+    if (
+      search &&
+      !d.title.toLowerCase().includes(search.toLowerCase()) &&
+      !d.reference.toLowerCase().includes(search.toLowerCase())
+    )
+      return false;
     if (areaFilter && d.area !== areaFilter) return false;
     if (typeFilter && d.type !== typeFilter) return false;
     if (systemFilter && d.systemId !== systemFilter) return false;
     if (statusFilter && d.status !== statusFilter) return false;
-    if (dateFrom && d.effectiveDate && dayjs(d.effectiveDate).isBefore(dayjs(dateFrom))) return false;
-    if (dateTo && d.effectiveDate && dayjs(d.effectiveDate).isAfter(dayjs(dateTo))) return false;
+    if (
+      dateFrom &&
+      d.effectiveDate &&
+      dayjs(d.effectiveDate).isBefore(dayjs(dateFrom))
+    )
+      return false;
+    if (
+      dateTo &&
+      d.effectiveDate &&
+      dayjs(d.effectiveDate).isAfter(dayjs(dateTo))
+    )
+      return false;
     return true;
   });
 
-  function toggleDocSelection(id: string) { setSelectedDocs((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
+  function toggleDocSelection(id: string) {
+    setSelectedDocs((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
 
   /* ── Forms ── */
-  const docForm = useForm<DocForm>({ resolver: zodResolver(docSchema), defaultValues: { type: "SOP", area: "QMS", status: "Current", version: "1.0" } });
+  const docForm = useForm<DocForm>({
+    resolver: zodResolver(docSchema),
+    defaultValues: {
+      type: "SOP",
+      area: "QMS",
+      status: "Current",
+      version: "1.0",
+    },
+  });
 
   function onDocSave(data: DocForm) {
     const id = crypto.randomUUID();
     const complianceTags: string[] = [];
-    if (data.area === "CSV/IT") { complianceTags.push("Part 11", "Annex 11"); }
+    if (data.area === "CSV/IT") {
+      complianceTags.push("Part 11", "Annex 11");
+    }
     if (data.type === "Audit Trail") complianceTags.push("ALCOA+");
     if (data.type === "Validation") complianceTags.push("GAMP 5");
-    const tagsList = data.tags ? data.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
-    dispatch(addDocument({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", complianceTags, tags: tagsList, effectiveDate: dayjs(data.effectiveDate).utc().toISOString(), expiryDate: data.expiryDate ? dayjs(data.expiryDate).utc().toISOString() : undefined, systemId: data.systemId || undefined, findingId: data.findingId || undefined, capaId: data.capaId || undefined, url: data.url || undefined, version: data.version || "v1.0", createdAt: new Date().toISOString() }));
-    auditLog({ action: "EVIDENCE_DOCUMENT_ADDED", module: "evidence", recordId: id, newValue: data });
-    setAddDocOpen(false); setAddedPopup(true); docForm.reset();
+    const tagsList = data.tags
+      ? data.tags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
+    dispatch(
+      addDocument({
+        ...data,
+        id,
+        tenantId: tenantId ?? "",
+        siteId: selectedSiteId ?? "",
+        complianceTags,
+        tags: tagsList,
+        effectiveDate: dayjs(data.effectiveDate).utc().toISOString(),
+        expiryDate: data.expiryDate
+          ? dayjs(data.expiryDate).utc().toISOString()
+          : undefined,
+        systemId: data.systemId || undefined,
+        findingId: data.findingId || undefined,
+        capaId: data.capaId || undefined,
+        url: data.url || undefined,
+        version: data.version || "v1.0",
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    auditLog({
+      action: "EVIDENCE_DOCUMENT_ADDED",
+      module: "evidence",
+      recordId: id,
+      newValue: data,
+    });
+    setAddDocOpen(false);
+    setAddedPopup(true);
+    docForm.reset();
   }
 
   const lbl = "text-[11px] font-semibold uppercase tracking-wider block mb-1";
@@ -159,30 +490,85 @@ export function EvidencePage() {
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="Evidence and document workspace" className="w-full space-y-5">
+    <main
+      id="main-content"
+      aria-label="Evidence and document workspace"
+      className="w-full space-y-5"
+    >
       {/* Header */}
       <header className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="page-title">Evidence &amp; Document Workspace</h1>
-          <p className="page-subtitle mt-1">{allDocs.length === 0 ? "No documents yet" : `${allDocs.length} documents \u00b7 ${currentCount} current \u00b7 ${missingCount} missing`}</p>
+          <p className="page-subtitle mt-1">
+            {allDocs.length === 0
+              ? "No documents yet"
+              : `${allDocs.length} documents \u00b7 ${currentCount} current \u00b7 ${missingCount} missing`}
+          </p>
         </div>
         <div className="flex gap-2">
-          {role !== "viewer" && <Button variant="primary" icon={Plus} onClick={() => setAddDocOpen(true)}>Add document</Button>}
+          {role !== "viewer" && (
+            <Button
+              variant="primary"
+              icon={Plus}
+              onClick={() => setAddDocOpen(true)}
+            >
+              Add document
+            </Button>
+          )}
         </div>
       </header>
 
       {/* Document Library — main view (no tabs) */}
-      <DocumentLibraryTab allDocs={allDocs} filteredDocs={filteredDocs} search={search} setSearch={setSearch} areaFilter={areaFilter} setAreaFilter={setAreaFilter} typeFilter={typeFilter} setTypeFilter={setTypeFilter} systemFilter={systemFilter} setSystemFilter={setSystemFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} anyFilter={anyFilter} clearFilters={clearFilters} viewMode={viewMode} setViewMode={setViewMode} selectedDocs={selectedDocs} toggleDocSelection={toggleDocSelection} setSelectedDocs={setSelectedDocs} systems={systems} role={role} timezone={timezone} dateFormat={dateFormat} onAddDocOpen={() => setAddDocOpen(true)} onNavigate={navigate} />
+      <DocumentLibraryTab
+        allDocs={allDocs}
+        filteredDocs={filteredDocs}
+        search={search}
+        setSearch={setSearch}
+        areaFilter={areaFilter}
+        setAreaFilter={setAreaFilter}
+        typeFilter={typeFilter}
+        setTypeFilter={setTypeFilter}
+        systemFilter={systemFilter}
+        setSystemFilter={setSystemFilter}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+        dateFrom={dateFrom}
+        setDateFrom={setDateFrom}
+        dateTo={dateTo}
+        setDateTo={setDateTo}
+        anyFilter={anyFilter}
+        clearFilters={clearFilters}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        selectedDocs={selectedDocs}
+        toggleDocSelection={toggleDocSelection}
+        setSelectedDocs={setSelectedDocs}
+        systems={systems}
+        role={role}
+        timezone={timezone}
+        dateFormat={dateFormat}
+        onAddDocOpen={() => setAddDocOpen(true)}
+        onNavigate={(path: string) => router.push(path)}
+      />
 
       {/* Floating selection bar */}
       {selectedDocs.size > 0 && (
         <div
           className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 px-5 py-3 rounded-xl shadow-lg"
-          style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}
+          style={{
+            background: "var(--bg-surface)",
+            border: "1px solid var(--bg-border)",
+          }}
           role="status"
         >
           <Package className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" />
-          <span className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>{selectedDocs.size} document{selectedDocs.size !== 1 ? "s" : ""} selected</span>
+          <span
+            className="text-[13px] font-medium"
+            style={{ color: "var(--text-primary)" }}
+          >
+            {selectedDocs.size} document{selectedDocs.size !== 1 ? "s" : ""}{" "}
+            selected
+          </span>
           <input
             type="text"
             value={packNameInput}
@@ -190,43 +576,329 @@ export function EvidencePage() {
             placeholder="Pack name..."
             className="input text-[12px] w-48"
           />
-          <Button variant="ghost" size="sm" onClick={() => { setSelectedDocs(new Set()); setPackNameInput(""); }}>Clear</Button>
-          <Button variant="primary" size="sm" icon={Download} onClick={() => {
-            const packName = packNameInput.trim() || `Evidence Pack ${dayjs().format("DD MMM YYYY")}`;
-            const newPack: EvidencePack = { id: crypto.randomUUID(), tenantId: tenantId ?? "", name: packName, purpose: "", documentIds: [...selectedDocs], createdBy: user?.id ?? "", createdAt: dayjs().toISOString() };
-            dispatch(addPack(newPack));
-            exportPack(newPack);
-            auditLog({ action: "EVIDENCE_PACK_EXPORTED", module: "evidence", recordId: newPack.id, newValue: { name: packName, count: selectedDocs.size } });
-            setSelectedDocs(new Set()); setPackNameInput(""); setAddedPopup(true);
-          }}>Export Pack</Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSelectedDocs(new Set());
+              setPackNameInput("");
+            }}
+          >
+            Clear
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Download}
+            onClick={() => {
+              const packName =
+                packNameInput.trim() ||
+                `Evidence Pack ${dayjs().format("DD MMM YYYY")}`;
+              const newPack: EvidencePack = {
+                id: crypto.randomUUID(),
+                tenantId: tenantId ?? "",
+                name: packName,
+                purpose: "",
+                documentIds: [...selectedDocs],
+                createdBy: user?.id ?? "",
+                createdAt: dayjs().toISOString(),
+              };
+              dispatch(addPack(newPack));
+              exportPack(newPack);
+              auditLog({
+                action: "EVIDENCE_PACK_EXPORTED",
+                module: "evidence",
+                recordId: newPack.id,
+                newValue: { name: packName, count: selectedDocs.size },
+              });
+              setSelectedDocs(new Set());
+              setPackNameInput("");
+              setAddedPopup(true);
+            }}
+          >
+            Export Pack
+          </Button>
         </div>
       )}
 
       {/* Add Document Modal */}
-      <Modal open={addDocOpen} onClose={() => setAddDocOpen(false)} title="Add document">
-        <form onSubmit={docForm.handleSubmit(onDocSave)} noValidate className="space-y-4">
+      <Modal
+        open={addDocOpen}
+        onClose={() => setAddDocOpen(false)}
+        title="Add document"
+      >
+        <form
+          onSubmit={docForm.handleSubmit(onDocSave)}
+          noValidate
+          className="space-y-4"
+        >
           <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2"><label htmlFor="doc-title" className={lbl} style={{ color: "var(--text-muted)" }}>Document title *</label><input id="doc-title" className="input text-[12px]" placeholder="e.g. SOP-QC-042 OOS Investigation Procedure" {...docForm.register("title")} />{docForm.formState.errors.title && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{docForm.formState.errors.title.message}</p>}</div>
-            <div><label htmlFor="doc-ref" className={lbl} style={{ color: "var(--text-muted)" }}>Reference *</label><input id="doc-ref" className="input text-[12px]" placeholder="e.g. SOP-QC-042-v3" {...docForm.register("reference")} /></div>
-            <div><label htmlFor="doc-ver" className={lbl} style={{ color: "var(--text-muted)" }}>Version *</label><input id="doc-ver" className="input text-[12px]" placeholder="e.g. 3.0" {...docForm.register("version")} /></div>
-            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Type *</label><Controller name="type" control={docForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={DOC_TYPES.map((t) => ({ value: t, label: t }))} />} /></div>
-            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Area *</label><Controller name="area" control={docForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={DOC_AREAS.map((a) => ({ value: a, label: a }))} />} /></div>
-            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Status *</label><Controller name="status" control={docForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={DOC_STATUSES.map((s) => ({ value: s, label: s }))} />} /></div>
-            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Author *</label><Controller name="author" control={docForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select author" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} /></div>
-            <div><label htmlFor="doc-eff" className={lbl} style={{ color: "var(--text-muted)" }}>Effective date *</label><input id="doc-eff" type="date" className="input text-[12px]" {...docForm.register("effectiveDate")} /></div>
-            <div><label htmlFor="doc-exp" className={lbl} style={{ color: "var(--text-muted)" }}>Expiry date</label><input id="doc-exp" type="date" className="input text-[12px]" {...docForm.register("expiryDate")} /></div>
-            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Linked system</label><Controller name="systemId" control={docForm.control} render={({ field }) => <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select system" width="w-full" options={[{ value: "", label: "None" }, ...systems.map((s) => ({ value: s.id, label: s.name }))]} />} /></div>
-            <div><label htmlFor="doc-find" className={lbl} style={{ color: "var(--text-muted)" }}>Linked finding</label><input id="doc-find" className="input text-[12px]" placeholder="e.g. FIND-001" {...docForm.register("findingId")} /></div>
-            <div><label htmlFor="doc-capa" className={lbl} style={{ color: "var(--text-muted)" }}>Linked CAPA</label><input id="doc-capa" className="input text-[12px]" placeholder="e.g. CAPA-0042" {...docForm.register("capaId")} /></div>
-            <div className="col-span-2"><label htmlFor="doc-url" className={lbl} style={{ color: "var(--text-muted)" }}>Document URL</label><input id="doc-url" className="input text-[12px]" placeholder="https://docs.company.com/..." {...docForm.register("url")} /></div>
-            <div className="col-span-2"><label htmlFor="doc-tags" className={lbl} style={{ color: "var(--text-muted)" }}>Tags (comma separated)</label><input id="doc-tags" className="input text-[12px]" placeholder="e.g. Part 11, LIMS, Audit Trail" {...docForm.register("tags")} /></div>
+            <div className="col-span-2">
+              <label
+                htmlFor="doc-title"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Document title *
+              </label>
+              <input
+                id="doc-title"
+                className="input text-[12px]"
+                placeholder="e.g. SOP-QC-042 OOS Investigation Procedure"
+                {...docForm.register("title")}
+              />
+              {docForm.formState.errors.title && (
+                <p role="alert" className="text-[11px] text-[#ef4444] mt-1">
+                  {docForm.formState.errors.title.message}
+                </p>
+              )}
+            </div>
+            <div>
+              <label
+                htmlFor="doc-ref"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Reference *
+              </label>
+              <input
+                id="doc-ref"
+                className="input text-[12px]"
+                placeholder="e.g. SOP-QC-042-v3"
+                {...docForm.register("reference")}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="doc-ver"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Version *
+              </label>
+              <input
+                id="doc-ver"
+                className="input text-[12px]"
+                placeholder="e.g. 3.0"
+                {...docForm.register("version")}
+              />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
+                Type *
+              </label>
+              <Controller
+                name="type"
+                control={docForm.control}
+                render={({ field }) => (
+                  <Dropdown
+                    value={field.value}
+                    onChange={field.onChange}
+                    width="w-full"
+                    options={DOC_TYPES.map((t) => ({ value: t, label: t }))}
+                  />
+                )}
+              />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
+                Area *
+              </label>
+              <Controller
+                name="area"
+                control={docForm.control}
+                render={({ field }) => (
+                  <Dropdown
+                    value={field.value}
+                    onChange={field.onChange}
+                    width="w-full"
+                    options={DOC_AREAS.map((a) => ({ value: a, label: a }))}
+                  />
+                )}
+              />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
+                Status *
+              </label>
+              <Controller
+                name="status"
+                control={docForm.control}
+                render={({ field }) => (
+                  <Dropdown
+                    value={field.value}
+                    onChange={field.onChange}
+                    width="w-full"
+                    options={DOC_STATUSES.map((s) => ({ value: s, label: s }))}
+                  />
+                )}
+              />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
+                Author *
+              </label>
+              <Controller
+                name="author"
+                control={docForm.control}
+                render={({ field }) => (
+                  <Dropdown
+                    value={field.value}
+                    onChange={field.onChange}
+                    placeholder="Select author"
+                    width="w-full"
+                    options={users
+                      .filter((u) => u.status === "Active")
+                      .map((u) => ({ value: u.id, label: u.name }))}
+                  />
+                )}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="doc-eff"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Effective date *
+              </label>
+              <input
+                id="doc-eff"
+                type="date"
+                className="input text-[12px]"
+                {...docForm.register("effectiveDate")}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="doc-exp"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Expiry date
+              </label>
+              <input
+                id="doc-exp"
+                type="date"
+                className="input text-[12px]"
+                {...docForm.register("expiryDate")}
+              />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
+                Linked system
+              </label>
+              <Controller
+                name="systemId"
+                control={docForm.control}
+                render={({ field }) => (
+                  <Dropdown
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    placeholder="Select system"
+                    width="w-full"
+                    options={[
+                      { value: "", label: "None" },
+                      ...systems.map((s) => ({ value: s.id, label: s.name })),
+                    ]}
+                  />
+                )}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="doc-find"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Linked finding
+              </label>
+              <input
+                id="doc-find"
+                className="input text-[12px]"
+                placeholder="e.g. FIND-001"
+                {...docForm.register("findingId")}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="doc-capa"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Linked CAPA
+              </label>
+              <input
+                id="doc-capa"
+                className="input text-[12px]"
+                placeholder="e.g. CAPA-0042"
+                {...docForm.register("capaId")}
+              />
+            </div>
+            <div className="col-span-2">
+              <label
+                htmlFor="doc-url"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Document URL
+              </label>
+              <input
+                id="doc-url"
+                className="input text-[12px]"
+                placeholder="https://docs.company.com/..."
+                {...docForm.register("url")}
+              />
+            </div>
+            <div className="col-span-2">
+              <label
+                htmlFor="doc-tags"
+                className={lbl}
+                style={{ color: "var(--text-muted)" }}
+              >
+                Tags (comma separated)
+              </label>
+              <input
+                id="doc-tags"
+                className="input text-[12px]"
+                placeholder="e.g. Part 11, LIMS, Audit Trail"
+                {...docForm.register("tags")}
+              />
+            </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => setAddDocOpen(false)}>Cancel</Button><Button variant="primary" type="submit" loading={docForm.formState.isSubmitting}>Add document</Button></div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={() => setAddDocOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              loading={docForm.formState.isSubmitting}
+            >
+              Add document
+            </Button>
+          </div>
         </form>
       </Modal>
 
       {/* Popups */}
-      <Popup isOpen={addedPopup} variant="success" title={selectedDocs.size === 0 ? "Document added" : "Evidence pack exported"} description={selectedDocs.size === 0 ? "Added to the evidence library." : "Pack exported successfully."} onDismiss={() => setAddedPopup(false)} />
+      <Popup
+        isOpen={addedPopup}
+        variant="success"
+        title={
+          selectedDocs.size === 0 ? "Document added" : "Evidence pack exported"
+        }
+        description={
+          selectedDocs.size === 0
+            ? "Added to the evidence library."
+            : "Pack exported successfully."
+        }
+        onDismiss={() => setAddedPopup(false)}
+      />
     </main>
   );
 }

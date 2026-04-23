@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   ShieldCheck, AlertTriangle, Clock, Database, GraduationCap, TrendingUp,
@@ -22,7 +22,7 @@ import { StatCard, CardSection, SetupChecklist } from "@/components/shared";
 /* ══════════════════════════════════════ */
 
 export function DashboardPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { findings, capas, systems, roadmap, fda483Events, tenantId } = useTenantData();
   const { org, sites, users } = useTenantConfig();
   const agiSettings = useAppSelector((s) => s.settings.agi);
@@ -211,7 +211,7 @@ export function DashboardPage() {
                 <MapPin className="w-8 h-8 mx-auto mb-2" style={{ color: "#334155" }} aria-hidden="true" />
                 <p className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>No sites configured yet</p>
                 <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>Go to Settings &rarr; Sites to add your sites.</p>
-                <button type="button" onClick={() => navigate("/settings")} className="text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer mt-2">Add sites in Settings &rarr;</button>
+                <button type="button" onClick={() => router.push("/settings")} className="text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer mt-2">Add sites in Settings &rarr;</button>
               </div>
             ) : (
               <>
@@ -226,10 +226,10 @@ export function DashboardPage() {
                           const { score, open, critical, hasData } = getAreaScore(area, site.id);
                           if (!hasData) {
                             const neutral = "#64748b";
-                            return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nNot assessed yet \u2014 no findings, CAPAs or systems logged for this area.`} onClick={() => navigate("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: neutral + "1a", color: neutral, border: `1px dashed ${neutral}55` }} aria-label={`${area} ${site.name}: not assessed yet`}>\u2014</button></td>;
+                            return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nNot assessed yet \u2014 no findings, CAPAs or systems logged for this area.`} onClick={() => router.push("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: neutral + "1a", color: neutral, border: `1px dashed ${neutral}55` }} aria-label={`${area} ${site.name}: not assessed yet`}>\u2014</button></td>;
                           }
                           const bg = score >= 80 ? "#10b981" : score >= 60 ? "#f59e0b" : "#ef4444";
-                          return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nScore: ${score}%\nOpen: ${open}\nCritical: ${critical}`} onClick={() => navigate("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: bg + "22", color: bg, border: `1px solid ${bg}44` }} aria-label={`${area} ${site.name}: ${score}%`}>{open === 0 ? "\u2713" : `${score}%`}</button></td>;
+                          return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nScore: ${score}%\nOpen: ${open}\nCritical: ${critical}`} onClick={() => router.push("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: bg + "22", color: bg, border: `1px solid ${bg}44` }} aria-label={`${area} ${site.name}: ${score}%`}>{open === 0 ? "\u2713" : `${score}%`}</button></td>;
                         })}
                       </tr>
                     ))}</tbody>
@@ -255,13 +255,13 @@ export function DashboardPage() {
           {/* ③ Action plan */}
           <CardSection icon={Calendar} iconColor="#f59e0b" title="90-day action plan" badge={actionPlan.length > 0 ? <Badge variant="amber">{actionPlan.length}</Badge> : undefined}>
             {actionPlan.length === 0 ? (
-              <div className="flex flex-col items-center py-8"><ClipboardList className="w-10 h-10 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px] mb-2" style={{ color: "var(--text-muted)" }}>No open actions</p><Button variant="ghost" size="sm" onClick={() => navigate("/gap-assessment")}>Log a finding</Button></div>
+              <div className="flex flex-col items-center py-8"><ClipboardList className="w-10 h-10 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px] mb-2" style={{ color: "var(--text-muted)" }}>No open actions</p><Button variant="ghost" size="sm" onClick={() => router.push("/gap-assessment")}>Log a finding</Button></div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="data-table" aria-label="90 day action plan"><caption className="sr-only">Priority actions due within 90 days</caption>
                   <thead><tr><th scope="col">Priority</th><th scope="col">Area</th><th scope="col">Action</th><th scope="col">Owner</th><th scope="col">Due date</th><th scope="col">Status</th><th scope="col">AGI risk</th><th scope="col"><span className="sr-only">Nav</span></th></tr></thead>
                   <tbody>{actionPlan.slice(0, 10).map((item) => (
-                    <tr key={item.id} className="cursor-pointer" onClick={() => { if (item.module === "gap-assessment") navigate("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") navigate("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") navigate("/csv-csa", { state: { systemId: item.refId } }); }}>
+                    <tr key={item.id} className="cursor-pointer" onClick={() => { if (item.module === "gap-assessment") router.push("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") router.push("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") router.push("/csv-csa", { state: { systemId: item.refId } }); }}>
                       <td><Badge variant={item.priority === "Critical" ? "red" : item.priority === "High" ? "amber" : "green"}>{item.priority}</Badge></td>
                       <td><Badge variant="gray">{item.area}</Badge></td>
                       <td><p className="text-[12px]" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{item.action}</p></td>
@@ -269,7 +269,7 @@ export function DashboardPage() {
                       <td>{item.dueDate ? (<><div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(item.dueDate).tz(timezone).format(dateFormat)}</div>{dayjs.utc(item.dueDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Overdue</div>}</>) : <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>&mdash;</span>}</td>
                       <td><Badge variant={item.status === "Closed" ? "green" : item.status === "In Progress" ? "amber" : item.status === "Pending QA Review" ? "purple" : "blue"}>{item.status}</Badge></td>
                       <td><Badge variant={item.agiRisk === "High" ? "red" : item.agiRisk === "Medium" ? "amber" : "green"}>{item.agiRisk}</Badge></td>
-                      <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${item.refId}`} onClick={() => { if (item.module === "gap-assessment") navigate("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") navigate("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") navigate("/csv-csa", { state: { systemId: item.refId } }); }} /></td>
+                      <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${item.refId}`} onClick={() => { if (item.module === "gap-assessment") router.push("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") router.push("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") router.push("/csv-csa", { state: { systemId: item.refId } }); }} /></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -286,13 +286,13 @@ export function DashboardPage() {
             <div className="card-header"><div className="flex items-center gap-2"><Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">AGI Insights</span></div>{(() => { const activeAgents = Object.values(agiSettings.agents).filter(Boolean).length; const totalAgents = Object.values(agiSettings.agents).length; if (agiSettings.mode === "manual" || activeAgents === 0) return <Badge variant="gray">inactive</Badge>; if (activeAgents === totalAgents) return <Badge variant="green">autonomous</Badge>; return <Badge variant="amber">{activeAgents}/{totalAgents} active</Badge>; })()}</div>
             <div className="card-body space-y-2">
               {agiSettings.mode === "manual" ? (
-                <><p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>AGI is in manual mode. Enable agents in Settings &rarr; AGI Policy.</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => navigate("/settings")}>Configure &rarr;</Button></>
+                <><p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>AGI is in manual mode. Enable agents in Settings &rarr; AGI Policy.</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => router.push("/settings")}>Configure &rarr;</Button></>
               ) : filteredFindings.length === 0 && filteredCAPAs.length === 0 ? (
                 <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No findings match current filters. Adjust filters to see insights.</p>
               ) : insights.slice(0, 5).map((ins, i) => (
                 <div key={i} className={clsx("flex items-start gap-2 p-2.5 rounded-lg", ins.type === "warning" ? isDark ? "bg-(--warning-bg) border border-(--warning)" : "bg-[#fffbeb] border border-[#fde68a]" : ins.type === "success" ? isDark ? "bg-(--success-bg) border border-(--success)" : "bg-[#f0fdf4] border border-[#a7f3d0]" : "bg-(--bg-surface) border border-(--bg-border)")}>
                   {ins.type === "warning" ? <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" /> : ins.type === "success" ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981] flex-shrink-0 mt-0.5" aria-hidden="true" /> : <Info className="w-3.5 h-3.5 text-[#0ea5e9] flex-shrink-0 mt-0.5" aria-hidden="true" />}
-                  <div className="flex-1 min-w-0"><p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{ins.text}</p>{ins.action && ins.link && <button onClick={() => navigate(ins.link!)} className="text-[10px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer mt-1">{ins.action} &rarr;</button>}</div>
+                  <div className="flex-1 min-w-0"><p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{ins.text}</p>{ins.action && ins.link && <button onClick={() => router.push(ins.link!)} className="text-[10px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer mt-1">{ins.action} &rarr;</button>}</div>
                 </div>
               ))}
             </div>
@@ -320,7 +320,7 @@ export function DashboardPage() {
               { label: "CSV / CSA", path: "/csv-csa", Icon: Database, badge: csvHighRisk, color: "#f59e0b" },
               { label: "FDA 483", path: "/fda-483", Icon: FileWarning, badge: fda483Events.filter((e) => e.status !== "Closed").length, color: "#ef4444" },
             ].map((lk) => (
-              <button key={lk.path} type="button" onClick={() => navigate(lk.path)} title={lk.tip} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-(--brand-muted) transition-colors text-left">
+              <button key={lk.path} type="button" onClick={() => router.push(lk.path)} title={lk.tip} className="w-full flex items-center justify-between p-2 rounded-lg text-[12px] cursor-pointer border-none bg-transparent hover:bg-(--brand-muted) transition-colors text-left">
                 <div className="flex items-center gap-2"><lk.Icon className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><span style={{ color: "var(--text-primary)" }}>{lk.label}</span></div>
                 {lk.badge > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ background: lk.color }}>{lk.badge}</span>}
               </button>

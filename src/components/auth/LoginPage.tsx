@@ -2,7 +2,7 @@ import { useState, useEffect, Fragment } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import {
   Shield,
   Mail,
@@ -63,6 +63,13 @@ const MOCK_ACCOUNTS: Record<string, { password: string; user: AuthUser }> = {
 
 const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
   {
+    org: "Platform (bootstrap)",
+    rows: [
+      ["Super Admin", "superadmin", "1", "#ef4444"],
+      ["Super Admin", "superadmin@glimmora.com", "1", "#ef4444"],
+    ],
+  },
+  {
     org: "Pharma Glimmora International",
     rows: [
       ["Super Admin", "admin@pharmaglimmora.com", "Admin@123", "#ef4444"],
@@ -93,7 +100,7 @@ const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
 
 export function LoginPage() {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
+  const router = useRouter();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const tenants = useAppSelector((s) => s.auth.tenants);
   const [showCreds, setShowCreds] = useState(false);
@@ -179,7 +186,7 @@ export function LoginPage() {
 
     setLoadingName(displayName);
     setLoadingTenant(true);
-    navigate("/");
+    router.push("/");
   };
 
   const onSubmit = async (data: FormValues) => {
@@ -220,7 +227,7 @@ export function LoginPage() {
     // render the raw JSON in the browser.
     try {
       if (typeof window !== "undefined" && window.location.search) {
-        window.history.replaceState({}, "", window.location.pathname);
+        window.history.replaceState({}, "", window.pathname);
       }
     } catch { /* ignore */ }
 
@@ -383,8 +390,16 @@ export function LoginPage() {
         >
           {/* Root error */}
           {errors.root && (
-            <div className="rounded-lg px-3 py-2 bg-[#fef2f2] border border-[#fecaca] text-[12px] text-[#dc2626]">
-              {errors.root.message}
+            <div role="alert" className="rounded-lg px-3 py-2.5 bg-[#fef2f2] border border-[#fecaca] text-[12px] text-[#dc2626] flex items-start gap-2">
+              <span aria-hidden="true" className="mt-0.5">⚠️</span>
+              <div className="min-w-0">
+                <p className="font-medium">{errors.root.message}</p>
+                {process.env.NODE_ENV === "development" && (
+                  <p className="text-[11px] mt-0.5 text-[#ef4444]">
+                    Tip: click &quot;Show dev credentials&quot; below to auto-fill a working account.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 

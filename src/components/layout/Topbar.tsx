@@ -70,9 +70,15 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
     dispatch(setSelectedSite(id));
   };
 
-  const initials = user?.name
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  const initials = mounted && user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
     : "?";
+  const displayName = mounted ? (user?.name ?? "\u2014") : "\u2014";
+  const displayRole = mounted ? (ROLE_LABELS[role as UserRole] ?? "") : "";
+  const avatarLabel = mounted ? (user?.name ?? "User avatar") : "User avatar";
 
   const badge = roleBadge[role as UserRole] ?? roleBadge.viewer;
 
@@ -166,7 +172,7 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
         {/* User */}
         <div className="flex items-center gap-2">
           <div
-            aria-label={user?.name ?? "User avatar"}
+            aria-label={avatarLabel}
             className="flex items-center justify-center w-8 h-8 sm:w-[34px] sm:h-[34px] rounded-full text-[11px] sm:text-[12px] font-bold shrink-0"
             style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "2px solid var(--brand-border)" }}
           >
@@ -174,10 +180,10 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
           </div>
           <div className="hidden sm:flex flex-col items-start">
             <span className="text-[12px] font-semibold leading-tight" style={{ color: "var(--text-primary)" }}>
-              {user?.name ?? "—"}
+              {displayName}
             </span>
             <span className="text-[10px] font-semibold px-1.5 py-px rounded-full" style={{ background: badge.bg, color: badge.color }}>
-              {ROLE_LABELS[role as UserRole]}
+              {displayRole}
             </span>
           </div>
         </div>

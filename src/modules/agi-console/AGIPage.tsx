@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -53,7 +53,7 @@ type AlertForm = z.infer<typeof alertSchema>;
 /* ══════════════════════════════════════ */
 
 export function AGIPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const dispatch = useAppDispatch();
   const agiSettings = useAppSelector((s) => s.settings.agi);
   const { driftAlerts, driftMetrics, capas, findings, systems, fda483Events, tenantId } = useTenantData();
@@ -117,7 +117,7 @@ export function AGIPage() {
         </div>
         <div className="flex items-center gap-2">
           {isManualMode ? <Badge variant="gray">Manual mode</Badge> : isAutoMode ? <Badge variant="green">Autonomous mode</Badge> : <Badge variant="blue">Assisted mode</Badge>}
-          <Button variant="ghost" size="sm" icon={Settings} onClick={() => navigate("/settings")}>AGI settings</Button>
+          <Button variant="ghost" size="sm" icon={Settings} onClick={() => router.push("/settings")}>AGI settings</Button>
         </div>
       </header>
 
@@ -126,7 +126,7 @@ export function AGIPage() {
         <div className={clsx("flex items-start gap-3 p-4 rounded-xl border", "bg-(--warning-bg) border-(--warning)")} role="status">
           <AlertTriangle className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1"><p className="text-[13px] font-medium text-[#f59e0b]">AGI is in manual mode</p><p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>All AGI capabilities are disabled. Enable agents in Settings &rarr; AGI Policy to activate intelligence features.</p></div>
-          <Button variant="ghost" size="sm" onClick={() => navigate("/settings")}>Configure</Button>
+          <Button variant="ghost" size="sm" onClick={() => router.push("/settings")}>Configure</Button>
         </div>
       )}
 
@@ -142,11 +142,11 @@ export function AGIPage() {
 
       {/* Tab panels */}
       <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabIndex={0} hidden={activeTab !== "overview"}>
-        <AGIOverviewTab isManualMode={isManualMode} isAutoMode={isAutoMode} insightsGenerated={insightsGenerated} actionsTriggered={actionsTriggered} hitlApprovals={hitlApprovals} openAlertsCount={openAlerts.length} capabilities={capabilities} onNavigateSettings={() => navigate("/settings")} />
+        <AGIOverviewTab isManualMode={isManualMode} isAutoMode={isAutoMode} insightsGenerated={insightsGenerated} actionsTriggered={actionsTriggered} hitlApprovals={hitlApprovals} openAlertsCount={openAlerts.length} capabilities={capabilities} onNavigateSettings={() => router.push("/settings")} />
       </div>
 
       <div role="tabpanel" id="panel-intended" aria-labelledby="tab-intended" tabIndex={0} hidden={activeTab !== "intended"}>
-        <IntendedUseTab isManualMode={isManualMode} agiAgents={agiSettings.agents} confidence={agiSettings.confidence} onNavigateSettings={() => navigate("/settings")} />
+        <IntendedUseTab isManualMode={isManualMode} agiAgents={agiSettings.agents} confidence={agiSettings.confidence} onNavigateSettings={() => router.push("/settings")} />
       </div>
 
       <div role="tabpanel" id="panel-oversight" aria-labelledby="tab-oversight" tabIndex={0} hidden={activeTab !== "oversight"}>

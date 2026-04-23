@@ -2,7 +2,7 @@ import clsx from "clsx";
 import {
   FolderOpen, Plus, Search, Filter, LayoutGrid, List,
   FileText, ClipboardList, Shield, CheckSquare, BarChart3, GitBranch,
-  Award, BookOpen, File, ClipboardCheck, FileWarning,
+  Award, BookOpen, File, ClipboardCheck, FileWarning, Download,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { EvidenceDocument, DocType, DocArea, DocStatus } from "@/store/evidence.slice";
@@ -21,6 +21,19 @@ const DOC_STATUSES: DocStatus[] = ["Current", "Draft", "Superseded", "Missing", 
 function docStatusBadge(s: DocStatus) {
   const m: Record<DocStatus, "green" | "blue" | "gray" | "red" | "amber"> = { Current: "green", Draft: "blue", Superseded: "gray", Missing: "red", "Under Review": "amber" };
   return <Badge variant={m[s]}>{s}</Badge>;
+}
+
+function downloadEvidenceDoc(doc: EvidenceDocument) {
+  if (!doc.url) return;
+  const isDataUrl = doc.url.startsWith("data:");
+  const a = document.createElement("a");
+  a.href = doc.url;
+  if (isDataUrl) a.download = doc.title;
+  else a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 export interface DocumentLibraryTabProps {
@@ -136,6 +149,7 @@ export function DocumentLibraryTab({
                   <div className="flex items-center justify-between mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
                     <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>v{doc.version} &middot; {doc.effectiveDate ? dayjs.utc(doc.effectiveDate).tz(timezone).format(dateFormat) : "\u2014"}</span>
                     <div className="flex items-center gap-1.5">
+                      {doc.url && <button type="button" onClick={(e) => { e.stopPropagation(); downloadEvidenceDoc(doc); }} title={`Download ${doc.title}`} aria-label={`Download ${doc.title}`} className="opacity-70 hover:opacity-100 border-none bg-transparent cursor-pointer"><Download className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
                       {doc.findingId && <button onClick={() => onNavigate("/gap-assessment", { state: { openFindingId: doc.findingId } })} title={`Finding: ${doc.findingId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><Search className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
                       {doc.capaId && <button onClick={() => onNavigate("/capa", { state: { openCapaId: doc.capaId } })} title={`CAPA: ${doc.capaId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><ClipboardCheck className="w-3.5 h-3.5 text-[#10b981]" /></button>}
                       {doc.eventId && <button onClick={() => onNavigate("/fda-483")} title="FDA 483 response" className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><FileWarning className="w-3.5 h-3.5 text-[#ef4444]" /></button>}
@@ -169,6 +183,7 @@ export function DocumentLibraryTab({
                     <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{doc.effectiveDate ? dayjs.utc(doc.effectiveDate).tz(timezone).format(dateFormat) : "\u2014"}{doc.expiryDate && dayjs.utc(doc.expiryDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Expired</div>}</td>
                     <td><div className="flex gap-1 flex-wrap">{doc.complianceTags.map((tag) => <span key={tag} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-(--info-bg) text-[#6366f1]">{tag}</span>)}</div></td>
                     <td><div className="flex items-center gap-1.5">
+                      {doc.url && <button type="button" onClick={() => downloadEvidenceDoc(doc)} title={`Download ${doc.title}`} aria-label={`Download ${doc.title}`} className="opacity-70 hover:opacity-100 border-none bg-transparent cursor-pointer"><Download className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
                       {doc.findingId && <button onClick={() => onNavigate("/gap-assessment", { state: { openFindingId: doc.findingId } })} title={`Finding: ${doc.findingId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><Search className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
                       {doc.capaId && <button onClick={() => onNavigate("/capa", { state: { openCapaId: doc.capaId } })} title={`CAPA: ${doc.capaId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><ClipboardCheck className="w-3.5 h-3.5 text-[#10b981]" /></button>}
                       {doc.eventId && <button onClick={() => onNavigate("/fda-483")} title="FDA 483" className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><FileWarning className="w-3.5 h-3.5 text-[#ef4444]" /></button>}

@@ -48,6 +48,9 @@ const capaSlice = createSlice({
   name: "capa",
   initialState,
   reducers: {
+    setCAPAs(state, { payload }: PayloadAction<CAPA[]>) {
+      state.items = payload;
+    },
     addCAPA(state, { payload }: PayloadAction<CAPA>) {
       state.items.push(payload);
     },
@@ -86,5 +89,5 @@ const capaSlice = createSlice({
   },
 });
 
-export const { addCAPA, updateCAPA, closeCAPA, addEvidence, addCAPADocument, removeCAPADocument, approveCAPADocument } = capaSlice.actions;
+export const { setCAPAs, addCAPA, updateCAPA, closeCAPA, addEvidence, addCAPADocument, removeCAPADocument, approveCAPADocument } = capaSlice.actions;
 export default capaSlice.reducer;

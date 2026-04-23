@@ -1,5 +1,7 @@
+"use client";
 import { useState, useEffect } from "react";
-import { NavLink, useNavigate, useLocation } from "react-router";
+import Link from "next/link";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard,
   Search,
@@ -44,13 +46,13 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Core Compliance",
     icon: Layers,
     items: [
-      { path: "/",              label: "Dashboard",              icon: LayoutDashboard },
-      { path: "gap-assessment", label: "Gap Assessment",         icon: Search },
-      { path: "deviation",      label: "Deviation Management",   icon: AlertTriangle },
-      { path: "capa",           label: "CAPA Tracker",           icon: ClipboardList },
-      { path: "csv-csa",        label: "CSV / CSA Validation",   icon: Monitor },
-      { path: "fda-483",        label: "FDA 483 & Regulatory",   icon: Building2 },
-      { path: "evidence",       label: "Evidence & Documents",   icon: FileText },
+      { path: "/", label: "Dashboard", icon: LayoutDashboard },
+      { path: "gap-assessment", label: "Gap Assessment", icon: Search },
+      { path: "deviation", label: "Deviation Management", icon: AlertTriangle },
+      { path: "capa", label: "CAPA Tracker", icon: ClipboardList },
+      { path: "csv-csa", label: "CSV / CSA Validation", icon: Monitor },
+      { path: "fda-483", label: "FDA 483 & Regulatory", icon: Building2 },
+      { path: "evidence", label: "Evidence & Documents", icon: FileText },
     ],
   },
   {
@@ -58,19 +60,16 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Readiness & Governance",
     icon: FlaskConical,
     items: [
-      { path: "readiness",  label: "Inspection Readiness",  icon: ShieldCheck },
-      { path: "governance",  label: "Governance & KPIs",    icon: BarChart3 },
-      { path: "audit-trail", label: "Audit Trail",          icon: ClipboardList },
+      { path: "readiness", label: "Inspection Readiness", icon: ShieldCheck },
+      { path: "governance", label: "Governance & KPIs", icon: BarChart3 },
+      { path: "audit-trail", label: "Audit Trail", icon: ClipboardList },
     ],
   },
   {
     id: "admin",
     label: "System & Config",
     icon: SlidersHorizontal,
-    items: [
-      { path: "settings",    label: "Settings",    icon: Settings },
-      { path: "audit-trail", label: "Audit Trail", icon: ClipboardList },
-    ],
+    items: [{ path: "settings", label: "Settings", icon: Settings }],
   },
 ];
 
@@ -84,24 +83,24 @@ function getGroupForPath(pathname: string): string {
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
-  const location = useLocation();
+  const router = useRouter();
+  const pathname = usePathname();
   const activeSite = useActiveSite();
   const { allowedPaths, role } = useRole();
   const { setupNeeded, completedCount, totalSteps } = useSetupStatus();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
-    () => new Set([getGroupForPath(location.pathname)])
+    () => new Set([getGroupForPath(pathname)]),
   );
 
   // Auto-expand the group containing the active page on route change
   useEffect(() => {
-    const active = getGroupForPath(location.pathname);
+    const active = getGroupForPath(pathname);
     setOpenGroups((prev) => {
       if (prev.has(active)) return prev;
       return new Set([...prev, active]);
     });
-  }, [location.pathname]);
+  }, [pathname]);
 
   const toggleGroup = (id: string) => {
     setOpenGroups((prev) => {
@@ -116,7 +115,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     ...g,
     items: g.items.filter((item) => {
       if (item.path === "readiness" || item.path === "deviation") return true;
-      if (item.path === "audit-trail") return role === "qa_head" || role === "customer_admin" || role === "super_admin";
+      if (item.path === "audit-trail")
+        return (
+          role === "qa_head" ||
+          role === "customer_admin" ||
+          role === "super_admin"
+        );
       return allowedPaths.includes(item.path);
     }),
   })).filter((g) => g.items.length > 0);
@@ -131,14 +135,17 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       console.warn("[logout] next-auth signOut failed", err);
     }
     dispatch(logout());
-    navigate("/login");
+    router.push("/login");
   };
 
   return (
     <aside
       aria-label="Application navigation"
       className="w-60 h-screen flex flex-col shrink-0"
-      style={{ background: "var(--bg-surface)", borderRight: "1px solid var(--bg-border)" }}
+      style={{
+        background: "var(--bg-surface)",
+        borderRight: "1px solid var(--bg-border)",
+      }}
     >
       {/* ── Logo ── */}
       <div
@@ -164,10 +171,21 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             flexShrink: 0,
           }}
         >
-          <ShieldCheck size={16} style={{ color: "var(--brand)" }} aria-hidden="true" />
+          <ShieldCheck
+            size={16}
+            style={{ color: "var(--brand)" }}
+            aria-hidden="true"
+          />
         </div>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: "var(--brand)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
+          <div
+            style={{
+              color: "var(--brand)",
+              fontWeight: 700,
+              fontSize: 14,
+              lineHeight: 1.2,
+            }}
+          >
             Pharma Glimmora
           </div>
           <div
@@ -186,7 +204,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       {/* ── Nav groups ── */}
-      <nav aria-label="Main navigation" style={{ flex: 1, padding: "8px 0", overflowY: "auto" }}>
+      <nav
+        aria-label="Main navigation"
+        style={{ flex: 1, padding: "8px 0", overflowY: "auto" }}
+      >
         <ul role="list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {visibleGroups.map((group) => {
             const isOpen = openGroups.has(group.id);
@@ -215,11 +236,22 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     letterSpacing: "0.02em",
                     textTransform: "uppercase" as const,
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--sidebar-accent)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.background =
+                      "var(--sidebar-accent)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.background = "none";
+                  }}
                 >
-                  <group.icon size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
-                  <span style={{ flex: 1, textAlign: "left" }}>{group.label}</span>
+                  <group.icon
+                    size={14}
+                    aria-hidden="true"
+                    style={{ flexShrink: 0 }}
+                  />
+                  <span style={{ flex: 1, textAlign: "left" }}>
+                    {group.label}
+                  </span>
                   <ChevronDown
                     size={13}
                     aria-hidden="true"
@@ -243,33 +275,43 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                       marginLeft: 24,
                     }}
                   >
-                    {group.items.map((item) => (
-                      <li key={item.path}>
-                        <NavLink
-                          to={item.path === "/" ? "/" : `/${item.path}`}
-                          end={item.path === "/"}
-                          className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
-                          style={{ marginLeft: 0, marginRight: 8, paddingLeft: 10 }}
-                          onClick={onNavigate}
-                        >
-                          {({ isActive }) => (
-                            <>
-                              <item.icon className="w-4 h-4" aria-hidden="true" />
-                              {item.label}
-                              {item.path === "settings" && setupNeeded && (
-                                <span
-                                  className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#0ea5e9] text-white min-w-[32px] text-center"
-                                  aria-label={`Setup: ${completedCount} of ${totalSteps} complete`}
-                                >
-                                  {completedCount}/{totalSteps}
-                                </span>
-                              )}
-                              {isActive && <span className="sr-only">(current page)</span>}
-                            </>
-                          )}
-                        </NavLink>
-                      </li>
-                    ))}
+                    {group.items.map((item) => {
+                      const href = item.path === "/" ? "/" : `/${item.path}`;
+                      const isActive =
+                        item.path === "/"
+                          ? pathname === "/"
+                          : pathname === href ||
+                            (pathname?.startsWith(`${href}/`) ?? false);
+                      return (
+                        <li key={item.path}>
+                          <Link
+                            href={href}
+                            className={`nav-item${isActive ? " active" : ""}`}
+                            aria-current={isActive ? "page" : undefined}
+                            style={{
+                              marginLeft: 0,
+                              marginRight: 8,
+                              paddingLeft: 10,
+                            }}
+                            onClick={() => onNavigate?.()}  
+                          >
+                            <item.icon className="w-4 h-4" aria-hidden="true" />
+                            {item.label}
+                            {item.path === "settings" && setupNeeded && (
+                              <span
+                                className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#0ea5e9] text-white min-w-[32px] text-center"
+                                aria-label={`Setup: ${completedCount} of ${totalSteps} complete`}
+                              >
+                                {completedCount}/{totalSteps}
+                              </span>
+                            )}
+                            {isActive && (
+                              <span className="sr-only">(current page)</span>
+                            )}
+                          </Link>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </li>

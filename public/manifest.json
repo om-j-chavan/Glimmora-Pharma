@@ -1,0 +1,9 @@
+{
+  "name": "Pharma Glimmora",
+  "short_name": "Glimmora",
+  "description": "GxP Compliance Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#040e1e",
+  "theme_color": "#0F6E56"
+}

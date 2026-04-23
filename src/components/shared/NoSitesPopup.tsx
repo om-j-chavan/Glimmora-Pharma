@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import { Popup } from "@/components/ui/Popup";
 
 interface NoSitesPopupProps {
@@ -12,7 +12,7 @@ export function NoSitesPopup({
   onClose,
   feature = "this feature",
 }: NoSitesPopupProps) {
-  const navigate = useNavigate();
+  const router = useRouter();
 
   return (
     <Popup
@@ -27,7 +27,7 @@ export function NoSitesPopup({
           style: "primary",
           onClick: () => {
             onClose();
-            navigate("/settings");
+            router.push("/settings");
           },
         },
         {

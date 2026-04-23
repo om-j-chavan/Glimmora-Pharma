@@ -1,10 +1,10 @@
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { CheckCircle2 } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 
 export function SetupChecklist() {
-  const navigate = useNavigate();  const { steps, completedCount, totalSteps, setupNeeded, progressPct } = useSetupStatus();
+  const router = useRouter();  const { steps, completedCount, totalSteps, setupNeeded, progressPct } = useSetupStatus();
 
   if (!setupNeeded) return null;
 
@@ -44,7 +44,7 @@ export function SetupChecklist() {
               </div>
             </div>
             {!step.done && (
-              <button type="button" onClick={() => navigate(step.link)} className="text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer flex-shrink-0 ml-3">
+              <button type="button" onClick={() => router.push(step.link)} className="text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer flex-shrink-0 ml-3">
                 {step.action} &rarr;
               </button>
             )}

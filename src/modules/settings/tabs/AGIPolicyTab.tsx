@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -70,7 +70,7 @@ function computeMode(agents: AGISettings["agents"]): AGISettings["mode"] {
 export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
   const agi = useAppSelector((s) => s.settings.agi);
-  const navigate = useNavigate();
+  const router = useRouter();
   const activeAgentCount = Object.values(agi.agents).filter(Boolean).length;
   const computedMode = computeMode(agi.agents);
   const [saved, setSaved] = useState(false);
@@ -107,7 +107,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
             </div>
             <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: isDark ? "rgba(99,102,241,0.2)" : "#c7d2fe" }}>
               <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>All AI suggestions require human review before any action is taken.</p>
-              <button type="button" onClick={() => navigate("/ai-policy")} className="text-[11px] font-medium text-[#6366f1] hover:underline border-none bg-transparent cursor-pointer">View full policy</button>
+              <button type="button" onClick={() => router.push("/ai-policy")} className="text-[11px] font-medium text-[#6366f1] hover:underline border-none bg-transparent cursor-pointer">View full policy</button>
             </div>
           </div>
         </div>

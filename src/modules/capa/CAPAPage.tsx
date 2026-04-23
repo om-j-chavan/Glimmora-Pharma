@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router";
+"use client";
+import { useState, useEffect, useMemo, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
@@ -14,13 +15,19 @@ import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
-  addCAPA, updateCAPA, closeCAPA,
+  addCAPA, updateCAPA as updateCAPAAction, closeCAPA,
   addCAPADocument, removeCAPADocument, approveCAPADocument,
   type CAPA, type RCAMethod,
 } from "@/store/capa.slice";
 import { closeFinding } from "@/store/findings.slice";
 import { updateObservation } from "@/store/fda483.slice";
 import { auditLog } from "@/lib/audit";
+import {
+  createCAPA as createCAPAServer,
+  updateCAPA as updateCAPAServer,
+  submitForReview as submitForReviewServer,
+  signAndCloseCAPA as signAndCloseCAPAServer,
+} from "@/actions/capas";
 import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
 import { StatusGuide } from "@/components/shared";
@@ -50,10 +57,14 @@ const QMS_PROCESSES = [
 
 /* ══════════════════════════════════════ */
 
-export function CAPAPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
+interface CAPAPageProps {
+  openCapaId?: string;
+}
+
+export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
+  const router = useRouter();
   const dispatch = useAppDispatch();
+  const [, startTransition] = useTransition();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
   const { isCustomerAdmin, canCreateCAPAs } = usePermissions();
 
@@ -62,6 +73,7 @@ export function CAPAPage() {
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
+  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const user = useAppSelector((s) => s.auth.user);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
 
@@ -81,12 +93,11 @@ export function CAPAPage() {
 
   /* ── Open from route ── */
   useEffect(() => {
-    const openId = (location.state as { openCapaId?: string } | null)?.openCapaId;
-    if (openId) {
-      const found = capas.find((c) => c.id === openId);
+    if (openCapaId) {
+      const found = capas.find((c) => c.id === openCapaId);
       if (found) { setActiveTab("tracker"); setSelectedCAPA(found); }
     }
-  }, []);
+  }, [openCapaId, capas]);
 
   /* ── Computed ── */
   const openCAPAs = capas.filter((c) => c.status !== "Closed");
@@ -155,16 +166,30 @@ export function CAPAPage() {
   /* ── Handlers ── */
   function handleAddCAPA(data: CAPAForm) {
     const newId = `CAPA-${String(Date.now()).slice(-4)}`;
-    dispatch(addCAPA({ ...data, id: newId, tenantId: tenantId ?? "", evidenceLinks: [], status: "Open", createdAt: "", rcaMethod: data.rcaMethod as RCAMethod | undefined, rca: undefined, correctiveActions: undefined, findingId: data.findingId || undefined }));
-    auditLog({ action: "CAPA_CREATED", module: "capa", recordId: newId, newValue: data });
+    // Optimistic Redux update so UI feels instant.
+    dispatch(addCAPA({ ...data, id: newId, tenantId: tenantId ?? "", evidenceLinks: [], status: "Open", createdAt: dayjs().toISOString(), rcaMethod: data.rcaMethod as RCAMethod | undefined, rca: undefined, correctiveActions: undefined, findingId: data.findingId || undefined }));
     setAddOpen(false);
     setAddedPopup(true);
+    startTransition(async () => {
+      const res = await createCAPAServer({
+        description: data.description,
+        source: data.source as never,
+        risk: data.risk as never,
+        owner: data.owner,
+        dueDate: data.dueDate,
+        siteId: data.siteId,
+        linkedFindingId: data.findingId || undefined,
+        diGateRequired: data.diGate,
+      });
+      if (!res.success) console.error("[CAPA] create failed:", res.error);
+      router.refresh();
+    });
   }
 
   function handleEditSave(data: EditForm) {
     if (!selectedCAPA) return;
     const autoAdvance = selectedCAPA.status === "Open" && data.rca?.trim();
-    dispatch(updateCAPA({
+    dispatch(updateCAPAAction({
       id: selectedCAPA.id,
       patch: {
         description: data.description, owner: data.owner,
@@ -179,16 +204,34 @@ export function CAPAPage() {
         ...(autoAdvance ? { status: "In Progress" as const } : {}),
       },
     }));
-    auditLog({ action: "CAPA_UPDATED", module: "capa", recordId: selectedCAPA.id, newValue: data });
     setEditModalOpen(false);
     setEditSavedPopup(true);
+    const capaId = selectedCAPA.id;
+    startTransition(async () => {
+      const res = await updateCAPAServer(capaId, {
+        description: data.description,
+        owner: data.owner,
+        dueDate: data.dueDate,
+        risk: data.risk as never,
+        rcaMethod: (data.rcaMethod as string) || undefined,
+        rca: data.rca ?? "",
+        correctiveActions: data.correctiveActions ?? "",
+        status: autoAdvance ? "In Progress" : undefined,
+      });
+      if (!res.success) console.error("[CAPA] update failed:", res.error);
+      router.refresh();
+    });
   }
 
   function handleSubmitForReview(id: string) {
-    dispatch(updateCAPA({ id, patch: { status: "Pending QA Review" } }));
-    auditLog({ action: "CAPA_SUBMITTED_FOR_REVIEW", module: "capa", recordId: id });
+    dispatch(updateCAPAAction({ id, patch: { status: "Pending QA Review" } }));
     setSubmittedPopup(true);
     setSelectedCAPA(null);
+    startTransition(async () => {
+      const res = await submitForReviewServer(id);
+      if (!res.success) console.error("[CAPA] submit for review failed:", res.error);
+      router.refresh();
+    });
   }
 
   const [diGateBlockPopup, setDiGateBlockPopup] = useState(false);
@@ -200,24 +243,30 @@ export function CAPAPage() {
       setDiGateBlockPopup(true);
       return;
     }
+    const capaId = selectedCAPA.id;
+    const findingId = selectedCAPA.findingId;
+    const source = selectedCAPA.source;
     const now = dayjs().toISOString();
-    dispatch(closeCAPA({ id: selectedCAPA.id, closedBy: user?.id ?? "", closedAt: now }));
-    if (selectedCAPA.findingId) { dispatch(closeFinding(selectedCAPA.findingId)); auditLog({ action: "FINDING_CLOSED_VIA_CAPA", module: "capa", recordId: selectedCAPA.findingId, newValue: { closedByCapaId: selectedCAPA.id } }); }
-    // If this CAPA was raised from an FDA 483 observation, mark that observation as Closed too
-    if (selectedCAPA.source === "483") {
+    dispatch(closeCAPA({ id: capaId, closedBy: user?.id ?? "", closedAt: now }));
+    if (findingId) { dispatch(closeFinding(findingId)); }
+    if (source === "483") {
       for (const ev of fda483Events) {
-        const matchingObs = ev.observations.find((o) => o.capaId === selectedCAPA.id);
+        const matchingObs = ev.observations.find((o) => o.capaId === capaId);
         if (matchingObs) {
           dispatch(updateObservation({ eventId: ev.id, obsId: matchingObs.id, patch: { status: "Closed" } }));
-          auditLog({ action: "FDA483_OBS_CLOSED_VIA_CAPA", module: "capa", recordId: matchingObs.id, newValue: { closedByCapaId: selectedCAPA.id } });
           break;
         }
       }
     }
-    auditLog({ action: "CAPA_CLOSED", module: "capa", recordId: selectedCAPA.id, newValue: { closedBy: user?.id, closedAt: now, meaning: data.meaning } });
+    auditLog({ action: "CAPA_CLOSED_MEANING", module: "capa", recordId: capaId, newValue: { meaning: data.meaning } });
     setSignOpen(false);
     setSignedPopup(true);
     setSelectedCAPA(null);
+    startTransition(async () => {
+      const res = await signAndCloseCAPAServer(capaId);
+      if (!res.success) console.error("[CAPA] sign & close failed:", res.error);
+      router.refresh();
+    });
   }
 
   /* ══════════════════════════════════════ */
@@ -262,8 +311,8 @@ export function CAPAPage() {
           timezone={timezone} dateFormat={dateFormat} canSign={canSign} canCloseCapa={canCloseCapa}
           onAddOpen={() => setAddOpen(true)} onEditOpen={() => setEditModalOpen(true)}
           onSignOpen={() => setSignOpen(true)} onSubmitForReview={handleSubmitForReview}
-          onNavigateGap={(fid) => navigate("/gap-assessment", { state: { openFindingId: fid } })}
-          onNavigateCapa={() => navigate("/gap-assessment")}
+          onNavigateGap={(fid) => router.push(`/gap-assessment?openFindingId=${encodeURIComponent(fid)}`)}
+          onNavigateCapa={() => router.push("/gap-assessment")}
           onDocUpload={(capaId, doc) => dispatch(addCAPADocument({ capaId, doc }))}
           onDocDelete={(capaId, docId) => dispatch(removeCAPADocument({ capaId, docId }))}
           onDocApprove={(capaId, docId, approvedBy) => dispatch(approveCAPADocument({ capaId, docId, approvedBy }))}

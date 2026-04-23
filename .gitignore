@@ -38,3 +38,5 @@ playwright-run-*.log
 
 # Claude
 .claude
+
+/generated/prisma

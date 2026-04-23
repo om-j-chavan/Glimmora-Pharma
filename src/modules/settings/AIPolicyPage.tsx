@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, ShieldCheck, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import clsx from "clsx";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -37,12 +37,12 @@ const REGULATORY = [
 ];
 
 export function AIPolicyPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
 
   return (
     <main id="main-content" aria-label="AI usage policy" className="w-full space-y-6 max-w-4xl">
-      <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => navigate("/settings")}>Settings</Button>
+      <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => router.push("/settings")}>Settings</Button>
       <PageHeader title="AI Usage Policy" subtitle={`Glimmora Platform \u00b7 ${dayjs().format("MMMM YYYY")}`} />
 
       {/* Philosophy */}

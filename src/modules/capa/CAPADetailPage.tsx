@@ -1,13 +1,14 @@
-import { useParams, useNavigate } from "react-router";
+"use client";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export function CAPADetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const router = useRouter();
 
   useEffect(() => {
-    navigate("/capa", { state: { openCapaId: id } });
-  }, [id, navigate]);
+    router.push(`/capa?openCapaId=${encodeURIComponent(String(id))}`);
+  }, [id, router]);
 
   return null;
 }

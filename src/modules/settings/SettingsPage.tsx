@@ -1,23 +1,12 @@
 import { useState } from "react";
-<<<<<<< HEAD
 import { Building2, MapPin, Users, BookOpen, Bot, Shield, Info } from "lucide-react";
-=======
-import { Building2, MapPin, Users, BookOpen, Bot } from "lucide-react";
->>>>>>> 21ab890b6aefc93457f3a82fd19e6298bb7a5a7d
 import { OrgTab } from "./tabs/OrgTab";
 import { SitesTab } from "./tabs/SitesTab";
 import { UsersTab } from "./tabs/UsersTab";
 import { FrameworksTab } from "./tabs/FrameworksTab";
 import { AGIPolicyTab } from "./tabs/AGIPolicyTab";
-<<<<<<< HEAD
 import { PermissionsTab } from "./tabs/PermissionsTab";
 import { usePermissions } from "@/hooks/usePermissions";
-=======
-// Permissions tab hidden — to re-enable, also uncomment the TABS entry + panel below.
-// import { Shield } from "lucide-react";
-// import { PermissionsTab } from "./tabs/PermissionsTab";
-import { useRole } from "@/hooks/useRole";
->>>>>>> 21ab890b6aefc93457f3a82fd19e6298bb7a5a7d
 
 const ALL_TABS = [
   { id: "org", label: "Organization", icon: Building2 },
@@ -25,9 +14,7 @@ const ALL_TABS = [
   { id: "users", label: "Users & Roles", icon: Users },
   { id: "frameworks", label: "Frameworks", icon: BookOpen },
   { id: "agi", label: "AGI Policy", icon: Bot },
-  // Permissions tab hidden from UI but retained in code for future use.
-  // To re-enable: uncomment the line below.
-  // { id: "permissions", label: "Permissions", icon: Shield },
+  { id: "permissions", label: "Permissions", icon: Shield },
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
@@ -89,22 +76,12 @@ export function SettingsPage() {
             hidden={active !== tab.id}
             className="focus:outline-none"
           >
-<<<<<<< HEAD
             {tab.id === "org" && <OrgTab readOnly={readOnly} />}
             {tab.id === "sites" && <SitesTab readOnly={readOnly} />}
             {tab.id === "users" && <UsersTab readOnly={readOnly} />}
             {tab.id === "frameworks" && <FrameworksTab readOnly={readOnly} />}
             {tab.id === "agi" && <AGIPolicyTab readOnly={readOnly && role !== "it_cdo"} />}
             {tab.id === "permissions" && <PermissionsTab />}
-=======
-            {tab.id === "org" && <OrgTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "sites" && <SitesTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "users" && <UsersTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "frameworks" && <FrameworksTab readOnly={role !== "super_admin" && role !== "customer_admin"} />}
-            {tab.id === "agi" && <AGIPolicyTab readOnly={role !== "super_admin" && role !== "customer_admin" && role !== "it_cdo"} />}
-            {/* Permissions panel hidden — re-enable the tab entry above to restore. */}
-            {/* {tab.id === "permissions" && <PermissionsTab />} */}
->>>>>>> 21ab890b6aefc93457f3a82fd19e6298bb7a5a7d
           </section>
         ))}
       </div>
