@@ -44,6 +44,9 @@ prisma/dev.db.backup-*
 *.db
 *.db-journal
 
+# User-uploaded evidence files (local fileStorage backend)
+uploads/
+
 # Playwright
 test-results/
 playwright-report/

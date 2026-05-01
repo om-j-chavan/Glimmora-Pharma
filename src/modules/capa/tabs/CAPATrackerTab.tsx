@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   ClipboardCheck, Plus, Search, ChevronRight, Link2, Pencil,
   AlertCircle, AlertTriangle, CheckCircle2, TrendingUp,
-  ShieldCheck, Send,
+  ShieldCheck, Send, FileSearch,
 } from "lucide-react";
 import { DocumentUpload, type LinkedDocument } from "@/components/shared";
 import clsx from "clsx";
@@ -15,6 +15,15 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { EvidenceCollectionPanel } from "./EvidenceCollectionPanel";
+
+/* Sub-tabs inside the selected-CAPA panel. v1 has Overview + Evidence;
+ * future substages (RCA, Action Plan, Effectiveness) plug in here. */
+type CAPADetailSubTab = "overview" | "evidence";
+const DETAIL_SUB_TABS: { id: CAPADetailSubTab; label: string; Icon: typeof ClipboardCheck }[] = [
+  { id: "overview", label: "Overview", Icon: ClipboardCheck },
+  { id: "evidence", label: "Evidence", Icon: FileSearch },
+];
 
 /* ── Helpers ── */
 const SOURCE_LABEL: Record<string, string> = { "483": "FDA 483 Observation", "Gap Assessment": "Gap Assessment Finding", Deviation: "Deviation Report", "Internal Audit": "Internal Audit", Complaint: "Complaint", OOS: "OOS", "Change Control": "Change Control" };
@@ -73,6 +82,11 @@ export function CAPATrackerTab({
   const [statusFilter, setStatusFilter] = useState("");
   const [riskFilter, setRiskFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+  const [detailSubTab, setDetailSubTab] = useState<CAPADetailSubTab>("overview");
+  // Reset to overview every time a different CAPA is opened.
+  useEffect(() => {
+    setDetailSubTab("overview");
+  }, [selectedCAPA?.id]);
 
   const anyFilterActive = !!(search || siteFilter || statusFilter || riskFilter || sourceFilter);
   function clearFilters() { setSearch(""); setSiteFilter(""); setStatusFilter(""); setRiskFilter(""); setSourceFilter(""); }
@@ -184,6 +198,42 @@ export function CAPATrackerTab({
                 <Button variant="ghost" size="xs" icon={Pencil} aria-label={`Edit ${selectedCAPA.id}`} onClick={onEditOpen} />
               )}
             </div>
+
+            {/* Sub-tabs */}
+            <div role="tablist" aria-label="CAPA detail sections" className="flex gap-1 border-b border-(--bg-border)">
+              {DETAIL_SUB_TABS.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  id={`subtab-${t.id}`}
+                  aria-selected={detailSubTab === t.id}
+                  aria-controls={`subpanel-${t.id}`}
+                  onClick={() => setDetailSubTab(t.id)}
+                  className={clsx(
+                    "inline-flex items-center gap-2 px-3 py-2 text-[12px] font-semibold border-b-2 -mb-px bg-transparent border-x-0 border-t-0 cursor-pointer outline-none transition-colors duration-150",
+                    detailSubTab === t.id
+                      ? "border-b-(--brand) text-(--brand)"
+                      : "border-b-transparent text-(--text-muted) hover:text-(--text-secondary)",
+                  )}
+                >
+                  <t.Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {detailSubTab === "evidence" && (
+              <div role="tabpanel" id="subpanel-evidence" aria-labelledby="subtab-evidence" tabIndex={0}>
+                <EvidenceCollectionPanel
+                  capaId={selectedCAPA.id}
+                  readOnly={isViewOnly || selectedCAPA.status === "Closed"}
+                />
+              </div>
+            )}
+
+            {detailSubTab === "overview" && (
+            <div role="tabpanel" id="subpanel-overview" aria-labelledby="subtab-overview" tabIndex={0} className="space-y-4">
 
             {/* Description */}
             <div>
@@ -314,6 +364,8 @@ export function CAPATrackerTab({
             {/* Sign & Close */}
             {canSign && canCloseCapa && selectedCAPA.status === "Pending QA Review" && (
               <Button variant="primary" icon={ShieldCheck} fullWidth onClick={onSignOpen}>Sign &amp; Close CAPA</Button>
+            )}
+            </div>
             )}
           </div>
         )}
