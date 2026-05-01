@@ -40,6 +40,67 @@ const MFA_TEST_TENANT = {
 let mfaTestTenantId: string | null = null;
 
 test.beforeAll(async () => {
+  // ── Seed-state precondition assertions ──
+  // Fail loudly here rather than mid-suite with a cryptic Playwright timeout
+  // when interactive testing leaves the seed tenants in an unexpected state
+  // (e.g. someone toggled MFA on the customer_admin via the admin UI; tests
+  // that depend on its non-MFA state then time out at the OTP modal).
+  const issues: string[] = [];
+
+  const superAdmin = await prisma.tenant.findUnique({
+    where: { email: SEED.superAdmin.email },
+    select: { mfaEnabled: true, isActive: true },
+  });
+  if (!superAdmin) {
+    issues.push(`Tenant ${SEED.superAdmin.email} is missing.`);
+  } else if (!superAdmin.isActive) {
+    issues.push(`Tenant ${SEED.superAdmin.email} has isActive=false; expected true.`);
+  }
+  // super_admin's mfaEnabled is intentionally toggled by test 6; afterEach
+  // resets it. We only require it be false at suite start, not assert mid-run.
+  if (superAdmin && superAdmin.mfaEnabled) {
+    issues.push(
+      `Tenant ${SEED.superAdmin.email} has mfaEnabled=true at suite start; ` +
+        `expected false. (afterEach normally resets this — a prior crash may ` +
+        `have skipped cleanup.)`,
+    );
+  }
+
+  const customerAdmin = await prisma.tenant.findUnique({
+    where: { email: SEED.customerAdmin.email },
+    include: { subscription: true },
+  });
+  if (!customerAdmin) {
+    issues.push(`Tenant ${SEED.customerAdmin.email} is missing.`);
+  } else {
+    if (!customerAdmin.isActive) {
+      issues.push(`Tenant ${SEED.customerAdmin.email} has isActive=false; expected true.`);
+    }
+    if (customerAdmin.mfaEnabled) {
+      issues.push(
+        `Tenant ${SEED.customerAdmin.email} has mfaEnabled=true; test 4 expects ` +
+          `non-MFA login. Run: sqlite3 prisma/dev.db "UPDATE Tenant SET ` +
+          `mfaEnabled=0 WHERE email='${SEED.customerAdmin.email}';"`,
+      );
+    }
+    const sub = customerAdmin.subscription;
+    const subActive =
+      !!sub && sub.status === "Active" && sub.expiryDate.getTime() > Date.now();
+    if (!subActive) {
+      issues.push(
+        `Tenant ${SEED.customerAdmin.email} has no active, non-expired subscription; ` +
+          `the subscription gate will block login. Run: npm run db:seed`,
+      );
+    }
+  }
+
+  if (issues.length > 0) {
+    throw new Error(
+      `Smoke suite seed state corrupted:\n  - ${issues.join("\n  - ")}\n\n` +
+        `Fix the items above (or run: npm run db:seed) and try again.`,
+    );
+  }
+
   // Clean any prior run that crashed mid-suite.
   await prisma.tenant.deleteMany({ where: { email: MFA_TEST_TENANT.email } });
 
@@ -68,6 +129,15 @@ test.beforeAll(async () => {
     },
   });
   mfaTestTenantId = created.id;
+
+  // Belt-and-braces: assert the just-created MFA tenant has the flag we set,
+  // in case something silently rewrote it (Prisma default override, etc.).
+  if (!created.mfaEnabled) {
+    throw new Error(
+      `MFA test tenant created with mfaEnabled=${created.mfaEnabled}; expected true. ` +
+        `Test 5 will not see an OTP modal.`,
+    );
+  }
 });
 
 test.afterAll(async () => {
@@ -85,8 +155,13 @@ test.afterAll(async () => {
 
 test.afterEach(async () => {
   // Belt-and-braces. Cheaper than a flake at 2am.
+  // Reset BOTH the super_admin tenant (test 6 toggles it) AND the
+  // customer_admin tenant (interactive admin-UI testing can leave its
+  // mfaEnabled flipped on; test 4 then times out at the OTP modal).
+  // Scoped to seed tenants only — does not touch MFA_TEST_TENANT (which
+  // is supposed to keep mfaEnabled=true for the duration of the suite).
   await prisma.tenant.updateMany({
-    where: { email: SEED.superAdmin.email },
+    where: { email: { in: [SEED.superAdmin.email, SEED.customerAdmin.email] } },
     data: { mfaEnabled: false },
   });
 });
