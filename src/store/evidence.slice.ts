@@ -45,9 +45,7 @@ interface EvidenceState {
   packs: EvidencePack[];
 }
 
-import { MOCK_EVIDENCE_DOCS, MOCK_EVIDENCE_PACKS } from "@/mock";
-
-const initialState: EvidenceState = { documents: MOCK_EVIDENCE_DOCS, packs: MOCK_EVIDENCE_PACKS };
+const initialState: EvidenceState = { documents: [], packs: [] };
 
 const evidenceSlice = createSlice({
   name: "evidence",

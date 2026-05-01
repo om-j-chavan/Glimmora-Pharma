@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import clsx from "clsx";
@@ -32,6 +34,8 @@ export function Modal({ open, onClose, title, children, className, persistent }:
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && !persistent) onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
+    // `persistent` is intentionally read inside the handler closure; no need to re-bind on flip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, onClose]);
 
   if (!open) return null;

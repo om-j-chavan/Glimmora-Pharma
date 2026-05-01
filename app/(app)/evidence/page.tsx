@@ -1,12 +1,22 @@
-"use client";
-
 import { EvidencePage } from "@/modules/evidence/EvidencePage";
 import { ErrorBoundary } from "@/components/errors";
+import { requireAuth } from "@/lib/auth";
+import { getDocuments, getDocumentStats } from "@/lib/queries";
 
-export default function Page() {
+export const metadata = {
+  title: "Evidence & Documents — Pharma Glimmora",
+};
+
+export default async function Page() {
+  const session = await requireAuth();
+  const [docs, stats] = await Promise.all([
+    getDocuments(session.user.tenantId),
+    getDocumentStats(session.user.tenantId),
+  ]);
+
   return (
     <ErrorBoundary moduleName="Evidence & Documents">
-      <EvidencePage />
+      <EvidencePage docs={docs} stats={stats} />
     </ErrorBoundary>
   );
 }

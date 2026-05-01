@@ -40,9 +40,7 @@ interface CAPAState {
   items: CAPA[];
 }
 
-import { MOCK_CAPAS } from "@/mock";
-
-const initialState: CAPAState = { items: MOCK_CAPAS };
+const initialState: CAPAState = { items: [] };
 
 const capaSlice = createSlice({
   name: "capa",

@@ -1,3 +1,5 @@
+"use client";
+
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -41,6 +43,8 @@ export function AddSubscriptionPlanModal({ isOpen, onClose, onSave }: AddSubscri
     reset,
     formState: { errors, isSubmitting },
   } = useForm({
+    // react-hook-form + zod resolver type incompatibility — known upstream issue.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(schema) as any,
     defaultValues: {
       startDate: dayjs().format("YYYY-MM-DD"),
@@ -67,6 +71,7 @@ export function AddSubscriptionPlanModal({ isOpen, onClose, onSave }: AddSubscri
 
   return (
     <Modal open={isOpen} onClose={handleClose} title="New subscription plan">
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
       <form onSubmit={handleSubmit(submit as any)} noValidate className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           {/* Start date */}

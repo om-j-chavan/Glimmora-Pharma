@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useRef } from "react";
 import {
   FileText, Upload, Trash2, CheckCircle2, X, File,

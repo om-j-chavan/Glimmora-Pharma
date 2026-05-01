@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { CreditCard, Plus } from "lucide-react";
 import dayjs from "@/lib/dayjs";

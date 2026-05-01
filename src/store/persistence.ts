@@ -2,24 +2,24 @@ import type { Middleware } from "@reduxjs/toolkit";
 
 const STORAGE_KEY = "glimmora-state";
 const VERSION_KEY = "glimmora-version";
-const CURRENT_VERSION = "44";
+// Bump this whenever PERSIST_SLICES or shape of any persisted slice changes —
+// older clients will discard their cached state on the next load.
+const CURRENT_VERSION = "45";
 
-/** Slices to persist. Excludes large/transient slices (auditTrail, notifications) for performance. */
+/**
+ * Slices to persist to localStorage.
+ *
+ * Only UI / session slices are persisted — data slices (findings, capa,
+ * deviation, systems, evidence, raid, readiness)
+ * are loaded fresh from the database on every visit, so caching them
+ * just risks stale data and bloated storage.
+ */
 const PERSIST_SLICES = [
   "auth",
   "settings",
   "theme",
-  "findings",
-  "capa",
-  "systems",
-  "fda483",
-  "evidence",
-  "agiDrift",
-  "raid",
   "permissions",
-  "readiness",
-  "deviation",
-  "rtm",
+  "notifications",
 ] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +33,15 @@ export function loadPersistedState(): Record<string, any> | undefined {
     }
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return undefined;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+
+    // Defensive: even if older code wrote data slices into the cache, only
+    // hand back the UI keys so data slices always start from `[]`.
+    const out: Record<string, unknown> = {};
+    for (const key of PERSIST_SLICES) {
+      if (parsed[key] !== undefined) out[key] = parsed[key];
+    }
+    return out;
   } catch {
     return undefined;
   }

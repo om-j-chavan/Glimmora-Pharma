@@ -35,14 +35,15 @@ interface FindingsState {
   items: Finding[];
 }
 
-import { MOCK_FINDINGS } from "@/mock";
-
-const initialState: FindingsState = { items: MOCK_FINDINGS };
+const initialState: FindingsState = { items: [] };
 
 const findingsSlice = createSlice({
   name: "findings",
   initialState,
   reducers: {
+    setFindings(state, { payload }: PayloadAction<Finding[]>) {
+      state.items = payload;
+    },
     addFinding(state, { payload }: PayloadAction<Finding>) {
       state.items.push(payload);
     },
@@ -90,5 +91,5 @@ const findingsSlice = createSlice({
   },
 });
 
-export const { addFinding, updateFinding, closeFinding, linkCapa, editFinding } = findingsSlice.actions;
+export const { setFindings, addFinding, updateFinding, closeFinding, linkCapa, editFinding } = findingsSlice.actions;
 export default findingsSlice.reducer;

@@ -1,5 +1,8 @@
 import { useAppSelector } from "./useAppSelector";
 import { useTenantConfig } from "./useTenantConfig";
+import type { GxPSystem, RoadmapActivity } from "@/types/csv-csa";
+import type { FDA483Event } from "@/types/fda483";
+import type { DriftAlert, DriftMetric } from "@/types/agi";
 
 export function useTenantData() {
   const tenantId = useAppSelector((s) => s.auth.currentTenant);
@@ -25,33 +28,16 @@ export function useTenantData() {
     }),
   );
 
-  const systems = useAppSelector((s) =>
-    (s.systems?.items ?? []).filter((sys) => {
-      if (sys.tenantId && sys.tenantId !== tenantId) return false;
-      if (sys.siteId && !accessibleSiteIds.includes(sys.siteId)) return false;
-      if (selectedSiteId && sys.siteId !== selectedSiteId) return false;
-      return true;
-    }),
-  );
-
-  // Roadmap: filter via system's siteId
-  const systemIds = new Set(systems.map((s) => s.id));
-  const roadmap = useAppSelector((s) =>
-    (s.systems?.roadmap ?? []).filter((r) => {
-      if (r.tenantId && r.tenantId !== tenantId) return false;
-      if (selectedSiteId && r.systemId && !systemIds.has(r.systemId)) return false;
-      return true;
-    }),
-  );
-
-  const fda483Events = useAppSelector((s) =>
-    (s.fda483?.items ?? []).filter((e) => {
-      if (e.tenantId && e.tenantId !== tenantId) return false;
-      if (e.siteId && !accessibleSiteIds.includes(e.siteId)) return false;
-      if (selectedSiteId && e.siteId !== selectedSiteId) return false;
-      return true;
-    }),
-  );
+  // The systems / roadmap / fda483 / agiDrift slices were deleted in the
+  // server-first migration. /csv-csa, /fda-483, etc. each fetch their own
+  // Prisma data server-side now. We return empty arrays here typed as the
+  // real entity types so consumers (Dashboard, Governance, AGI, Evidence,
+  // useNotificationEngine) type-check correctly even though the data is
+  // empty. Wiring those consumers to server-fetched props is a separate
+  // (deferred) project — until then their UIs render zero values.
+  const systems: GxPSystem[] = [];
+  const roadmap: RoadmapActivity[] = [];
+  const fda483Events: FDA483Event[] = [];
 
   const deviations = useAppSelector((s) =>
     (s.deviation?.items ?? []).filter((d) => {
@@ -82,8 +68,10 @@ export function useTenantData() {
     }),
   );
 
-  const driftAlerts = useAppSelector((s) => (s.agiDrift?.alerts ?? []).filter((a) => !a.tenantId || a.tenantId === tenantId));
-  const driftMetrics = useAppSelector((s) => s.agiDrift?.metrics ?? []);
+  // Same migration story as above — typed as the real entities so consumers
+  // type-check; AGI Console derives drift signals server-side from AuditLog.
+  const driftAlerts: DriftAlert[] = [];
+  const driftMetrics: DriftMetric[] = [];
 
   return {
     tenantId: tenantId ?? "",

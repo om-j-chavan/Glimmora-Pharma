@@ -49,14 +49,15 @@ interface DeviationState {
   items: Deviation[];
 }
 
-import { MOCK_DEVIATIONS } from "@/mock";
-
-const initialState: DeviationState = { items: MOCK_DEVIATIONS };
+const initialState: DeviationState = { items: [] };
 
 const deviationSlice = createSlice({
   name: "deviation",
   initialState,
   reducers: {
+    setDeviations(state, { payload }: PayloadAction<Deviation[]>) {
+      state.items = payload;
+    },
     addDeviation(state, { payload }: PayloadAction<Deviation>) {
       state.items.push(payload);
     },
@@ -100,7 +101,7 @@ const deviationSlice = createSlice({
 });
 
 export const {
-  addDeviation, updateDeviation, closeDeviation, rejectDeviation,
+  setDeviations, addDeviation, updateDeviation, closeDeviation, rejectDeviation,
   linkCAPAToDeviation, addDeviationDocument, removeDeviationDocument,
 } = deviationSlice.actions;
 export default deviationSlice.reducer;

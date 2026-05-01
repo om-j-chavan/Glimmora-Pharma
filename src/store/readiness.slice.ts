@@ -79,8 +79,6 @@ interface ReadinessState {
   total: number;
 }
 
-import { MOCK_READINESS_CARDS, MOCK_PLAYBOOKS, MOCK_SIMULATIONS, MOCK_TRAINING_RECORDS, MOCK_INSPECTIONS } from "@/mock";
-
 function calcScore(cards: ReadinessCard[]) {
   if (cards.length === 0) return { score: 0, complete: 0, total: 0 };
   let sum = 0;
@@ -97,20 +95,16 @@ function calcScore(cards: ReadinessCard[]) {
   return { score: Math.round((sum / cards.length) * 100), complete, total: cards.length };
 }
 
-const init = calcScore(MOCK_READINESS_CARDS);
-
-const activeId = MOCK_INSPECTIONS.find((i) => i.status !== "completed" && i.status !== "cancelled")?.id ?? null;
-
 const initialState: ReadinessState = {
-  inspections: MOCK_INSPECTIONS,
-  activeInspectionId: activeId,
-  cards: MOCK_READINESS_CARDS,
-  playbooks: MOCK_PLAYBOOKS,
-  simulations: MOCK_SIMULATIONS,
-  training: MOCK_TRAINING_RECORDS,
-  score: init.score,
-  complete: init.complete,
-  total: init.total,
+  inspections: [],
+  activeInspectionId: null,
+  cards: [],
+  playbooks: [],
+  simulations: [],
+  training: [],
+  score: 0,
+  complete: 0,
+  total: 0,
 };
 
 const readinessSlice = createSlice({

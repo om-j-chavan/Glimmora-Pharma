@@ -1,42 +1,17 @@
-import { signIn, signOut } from "next-auth/react";
+import { signOut } from "next-auth/react";
 
 /**
- * Client-side auth helpers that wrap next-auth.
+ * Client-side auth helpers that wrap NextAuth.
  *
- * The SPA login page calls `login()` with a username and password. This
- * delegates to next-auth's Credentials provider which verifies against
- * Neon, issues a real JWT, and sets an HttpOnly session cookie.
- *
- * `logout()` clears that cookie via next-auth's /api/auth/signout.
+ * Login is handled directly by `src/components/auth/LoginPage.tsx` via
+ * `signIn("credentials", …)` from `next-auth/react`. This module only
+ * exposes the helpers used by the rest of the app (sign-out + current
+ * user fetch).
  */
 
-export interface LoginResult {
-  ok: boolean;
-  error?: string;
-}
-
-export async function login(
-  username: string,
-  password: string,
-): Promise<LoginResult> {
-  const result = await signIn("credentials", {
-    redirect: false,
-    username: username.trim(),
-    password,
-  });
-
-  if (!result) {
-    return { ok: false, error: "No response from auth server" };
-  }
-  if (result.error) {
-    return { ok: false, error: result.error };
-  }
-  return { ok: true };
-}
-
 export async function logout(): Promise<void> {
-  // `redirect: false` — we handle navigation manually from the caller so
-  // React Router state can be reset first.
+  // `redirect: false` — caller handles navigation so React state can be
+  // reset before leaving the page.
   await signOut({ redirect: false });
 }
 

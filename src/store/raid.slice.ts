@@ -30,14 +30,15 @@ interface RAIDState {
   items: RAIDItem[];
 }
 
-import { MOCK_RAID_ITEMS } from "@/mock";
-
-const initialState: RAIDState = { items: MOCK_RAID_ITEMS };
+const initialState: RAIDState = { items: [] };
 
 const raidSlice = createSlice({
   name: "raid",
   initialState,
   reducers: {
+    setRAIDItems(state, { payload }: PayloadAction<RAIDItem[]>) {
+      state.items = payload;
+    },
     addItem(state, { payload }: PayloadAction<RAIDItem>) {
       state.items.push(payload);
     },
@@ -69,5 +70,5 @@ const raidSlice = createSlice({
   },
 });
 
-export const { addItem, updateItem, closeItem, removeItem, reopenItem } = raidSlice.actions;
+export const { setRAIDItems, addItem, updateItem, closeItem, removeItem, reopenItem } = raidSlice.actions;
 export default raidSlice.reducer;

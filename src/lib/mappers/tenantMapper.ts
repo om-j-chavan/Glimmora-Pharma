@@ -10,6 +10,7 @@ type PrismaTenantRow = {
   language: string;
   timezone: string;
   isActive: boolean;
+  mfaEnabled: boolean;
   createdAt: Date;
   subscription?: {
     id: string;
@@ -100,6 +101,7 @@ export function mapTenantFromPrisma(row: PrismaTenantRow): Tenant {
     adminEmail: row.email,
     createdAt: row.createdAt.toISOString(),
     active: row.isActive,
+    mfaEnabled: row.mfaEnabled,
     config: {
       org: {
         companyName: row.name,

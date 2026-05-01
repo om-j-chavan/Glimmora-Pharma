@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { HelpCircle } from "lucide-react";
 import { type StatusDef } from "@/constants/statusTaxonomy";

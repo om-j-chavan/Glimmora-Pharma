@@ -178,7 +178,7 @@ export function NotificationBell() {
                     !notif.read && (isDark ? "bg-(--brand-muted)" : "bg-[#fafbff]"),
                     isDark ? "border-(--bg-border) hover:bg-(--bg-surface)" : "border-[#f1f5f9] hover:bg-[#f8fafc]",
                   )}
-                  onClick={() => { dispatch(markRead(notif.id)); if (notif.link) router.push(notif.link, { state: notif.linkState }); setOpen(false); }}
+                  onClick={() => { dispatch(markRead(notif.id)); if (notif.link) router.push(notif.link); setOpen(false); }}
                   role="button"
                   aria-label={notif.title}
                 >

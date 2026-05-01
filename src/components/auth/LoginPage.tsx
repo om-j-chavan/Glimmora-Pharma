@@ -1,359 +1,284 @@
-import { useState, useEffect, Fragment } from "react";
+"use client";
+
+import { useState, useEffect, useRef, useCallback, Fragment } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import {
-  Shield,
-  Mail,
-  Lock,
-  LogIn,
-  Building2,
-  ChevronDown,
+  Shield, Mail, Lock, LogIn, Building2, ChevronDown, KeyRound,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { setCredentials, setActiveSite, setSelectedSite, setTenants, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
-import { loginApi } from "@/lib/tenantApi";
-import { login as nextAuthLogin } from "@/lib/authClient";
+import {
+  setCredentials, setActiveSite, setSelectedSite,
+  type AuthUser,
+} from "@/store/auth.slice";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 
 const schema = z.object({
-  email: z.string().min(1, "Username or email is required"),
+  email: z.string().min(1, "Email is required").email("Enter a valid email"),
   password: z.string().min(1, "Password is required"),
 });
 type FormValues = z.infer<typeof schema>;
 
-const SUPER_ADMIN_SEED: { username: string; password: string; user: AuthUser } = {
-  username: "superadmin",
-  password: "1",
-  user: {
-    id: "u-platform-sa",
-    name: "Platform Super Admin",
-    email: "superadmin",
-    role: "super_admin",
-    gxpSignatory: true,
-    orgId: "org-platform",
-    tenantId: "tenant-glimmora",
-  },
-};
-
-const MOCK_ACCOUNTS: Record<string, { password: string; user: AuthUser }> = {
-  // Pharma Glimmora International
-  "admin@pharmaglimmora.com": { password: "Admin@123", user: { id: "u-001", name: "System Administrator", email: "admin@pharmaglimmora.com", role: "super_admin", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "custadmin@pharmaglimmora.com": { password: "CustAdmin@123", user: { id: "u-009", name: "Customer Administrator", email: "custadmin@pharmaglimmora.com", role: "customer_admin", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "qa@pharmaglimmora.com": { password: "QaHead@123", user: { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", role: "qa_head", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "ra@pharmaglimmora.com": { password: "RegAff@123", user: { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", role: "regulatory_affairs", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "csv@pharmaglimmora.com": { password: "CsvVal@123", user: { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", role: "csv_val_lead", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "qc@pharmaglimmora.com": { password: "QcLab@123", user: { id: "u-005", name: "Dr. Nisha Rao", email: "qc@pharmaglimmora.com", role: "qc_lab_director", gxpSignatory: true, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "it@pharmaglimmora.com": { password: "ItCdo@123", user: { id: "u-006", name: "Vikram Singh", email: "it@pharmaglimmora.com", role: "it_cdo", gxpSignatory: false, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "ops@pharmaglimmora.com": { password: "OpsHead@123", user: { id: "u-007", name: "Suresh Kumar", email: "ops@pharmaglimmora.com", role: "operations_head", gxpSignatory: false, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  "viewer@pharmaglimmora.com": { password: "Viewer@123", user: { id: "u-008", name: "View Only User", email: "viewer@pharmaglimmora.com", role: "viewer", gxpSignatory: false, orgId: "org-1", tenantId: "tenant-glimmora" } },
-  // ABC Pharma Ltd
-  "admin@abcpharma.com": { password: "Admin@123", user: { id: "u-abc-001", name: "ABC Admin", email: "admin@abcpharma.com", role: "super_admin", gxpSignatory: true, orgId: "org-2", tenantId: "tenant-abc" } },
-  "custadmin@abcpharma.com": { password: "CustAdmin@123", user: { id: "u-cust-abc", name: "ABC Customer Admin", email: "custadmin@abcpharma.com", role: "customer_admin", gxpSignatory: false, orgId: "org-2", tenantId: "tenant-abc" } },
-  "qa@abcpharma.com": { password: "QaHead@123", user: { id: "u-abc-002", name: "Dr. Sunita Rao", email: "qa@abcpharma.com", role: "qa_head", gxpSignatory: true, orgId: "org-2", tenantId: "tenant-abc" } },
-  // XYZ Biotech
-  "admin@xyzbiotech.com": { password: "Admin@123", user: { id: "u-xyz-001", name: "XYZ Admin", email: "admin@xyzbiotech.com", role: "super_admin", gxpSignatory: true, orgId: "org-3", tenantId: "tenant-xyz" } },
-  "custadmin@xyzbiotech.com": { password: "CustAdmin@123", user: { id: "u-cust-xyz", name: "XYZ Customer Admin", email: "custadmin@xyzbiotech.com", role: "customer_admin", gxpSignatory: false, orgId: "org-3", tenantId: "tenant-xyz" } },
-  "qa@xyzbiotech.com": { password: "QaHead@123", user: { id: "u-xyz-002", name: "Dr. Arjun Das", email: "qa@xyzbiotech.com", role: "qa_head", gxpSignatory: true, orgId: "org-3", tenantId: "tenant-xyz" } },
-};
-
+/**
+ * Seeded credentials shown in the "dev credentials" panel.
+ * Mirrors prisma/seed.ts — keep in sync if seed changes.
+ */
 const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
   {
-    org: "Platform (bootstrap)",
+    org: "Platform",
     rows: [
-      ["Super Admin", "superadmin", "1", "#ef4444"],
       ["Super Admin", "superadmin@glimmora.com", "1", "#ef4444"],
     ],
   },
   {
     org: "Pharma Glimmora International",
     rows: [
-      ["Super Admin", "admin@pharmaglimmora.com", "Admin@123", "#ef4444"],
-      ["Customer Admin", "custadmin@pharmaglimmora.com", "CustAdmin@123", "#8b6914"],
-      ["QA Head", "qa@pharmaglimmora.com", "QaHead@123", "#a78bfa"],
-      ["CSV/Val Lead", "csv@pharmaglimmora.com", "CsvVal@123", "#38bdf8"],
-      ["QC/Lab Director", "qc@pharmaglimmora.com", "QcLab@123", "#10b981"],
-      ["Viewer", "viewer@pharmaglimmora.com", "Viewer@123", "#94a3b8"],
-    ],
-  },
-  {
-    org: "ABC Pharma Ltd",
-    rows: [
-      ["Super Admin", "admin@abcpharma.com", "Admin@123", "#ef4444"],
-      ["Customer Admin", "custadmin@abcpharma.com", "CustAdmin@123", "#8b6914"],
-      ["QA Head", "qa@abcpharma.com", "QaHead@123", "#a78bfa"],
-    ],
-  },
-  {
-    org: "XYZ Biotech",
-    rows: [
-      ["Super Admin", "admin@xyzbiotech.com", "Admin@123", "#ef4444"],
-      ["Customer Admin", "custadmin@xyzbiotech.com", "CustAdmin@123", "#8b6914"],
-      ["QA Head", "qa@xyzbiotech.com", "QaHead@123", "#a78bfa"],
+      ["Customer Admin", "admin@pharmaglimmora.com", "Admin@123", "#8b6914"],
+      ["QA Head", "qa@pharmaglimmora.com", "Demo@123", "#a78bfa"],
+      ["Regulatory Affairs", "ra@pharmaglimmora.com", "Demo@123", "#a78bfa"],
+      ["CSV/Val Lead", "csv@pharmaglimmora.com", "Demo@123", "#38bdf8"],
+      ["QC/Lab Director", "qc@pharmaglimmora.com", "Demo@123", "#10b981"],
+      ["IT/CDO", "it@pharmaglimmora.com", "Demo@123", "#94a3b8"],
+      ["Operations Head", "ops@pharmaglimmora.com", "Demo@123", "#94a3b8"],
     ],
   },
 ];
 
 export function LoginPage() {
   const dispatch = useAppDispatch();
-  const router = useRouter();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const tenants = useAppSelector((s) => s.auth.tenants);
   const [showCreds, setShowCreds] = useState(false);
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [loadingName, setLoadingName] = useState("");
 
-
-  // Bootstrap: ensure platform super_admin account exists
-  useEffect(() => {
-    const key = SUPER_ADMIN_SEED.username.toLowerCase();
-    if (!MOCK_ACCOUNTS[key]) {
-      MOCK_ACCOUNTS[key] = {
-        password: SUPER_ADMIN_SEED.password,
-        user: SUPER_ADMIN_SEED.user,
-      };
-    }
-  }, []);
+  // ── MFA / OTP state ──
+  // otpEmail + otpPassword are captured at the moment OTP_REQUIRED is thrown,
+  // so we can re-call signIn for resend + verify without forcing the user to
+  // re-type credentials. They live only in component state for the duration
+  // of the modal flow and are cleared by resetOtpState.
+  const [otpRequired, setOtpRequired] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpResendCooldown, setOtpResendCooldown] = useState(0);
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpPassword, setOtpPassword] = useState("");
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpResending, setOtpResending] = useState(false);
+  const cooldownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const otpInputRef = useRef<HTMLInputElement>(null);
 
   const {
-    register,
-    handleSubmit,
-    setError,
-    setValue,
+    register, handleSubmit, setError, setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
-  /**
-   * Get the sites a user can access. allSites / customer_admin / qa_head
-   * see all active sites; others see only their assignedSites.
-   */
-  const getAccessibleSites = (user: AuthUser, tenant: Tenant | undefined): TenantSiteConfig[] => {
-    const tenantSites = tenant?.config?.sites?.filter((s) => s.status === "Active") ?? [];
-    const tenantUser = tenant?.config?.users?.find(
-      (u) => u.id === user.id || u.email.toLowerCase() === user.email.toLowerCase(),
-    );
-
-    // Super admin and customer admin always see all sites
-    if (user.role === "super_admin" || user.role === "customer_admin") {
-      return tenantSites;
+  const stopCooldownTimer = useCallback(() => {
+    if (cooldownIntervalRef.current) {
+      clearInterval(cooldownIntervalRef.current);
+      cooldownIntervalRef.current = null;
     }
+  }, []);
 
-    // allSites flag — see everything
-    if (tenantUser?.allSites === true) {
-      return tenantSites;
-    }
-
-    // Otherwise only show the sites assigned to this user
-    if (tenantUser && tenantUser.assignedSites.length > 0) {
-      return tenantSites.filter((s) => tenantUser.assignedSites.includes(s.id));
-    }
-
-    // No user record or no sites assigned — empty
-    return [];
-  };
-
-  /**
-   * Non-super-admin login: auto-select the first accessible site and go
-   * directly to the dashboard. Users with multiple sites can switch via
-   * the site dropdown in the topbar header.
-   */
-  const finishLogin = async (
-    user: AuthUser,
-    tenant: Tenant | undefined,
-    displayName: string,
-  ) => {
-    const accessible = getAccessibleSites(user, tenant);
-
-    if (accessible.length === 0) {
-      // No sites at all — go straight to dashboard with no site filter
-      dispatch(setSelectedSite(null));
-      const anySite = tenant?.config?.sites?.[0];
-      if (anySite) dispatch(setActiveSite(anySite.id));
-    } else if (accessible.length === 1) {
-      // Exactly one site — auto-select it (no switcher will be shown)
-      const only = accessible[0];
-      dispatch(setActiveSite(only.id));
-      dispatch(setSelectedSite(only.id));
-    } else {
-      // Multiple sites — default to "All Sites" and keep first as the active fallback
-      dispatch(setActiveSite(accessible[0].id));
-      dispatch(setSelectedSite(null));
-    }
-
-    setLoadingName(displayName);
-    setLoadingTenant(true);
-    router.push("/");
-  };
-
-  const onSubmit = async (data: FormValues) => {
-    const key = data.email.toLowerCase().trim();
-
-    // 0. Establish a real next-auth session (real JWT, HttpOnly cookie).
-    //    We do this BEFORE the legacy Redux flow so the session cookie is in
-    //    place by the time API calls go out. If next-auth rejects, fall back
-    //    to the legacy paths so dev/demo flows keep working.
-    try {
-      const result = await nextAuthLogin(data.email.trim(), data.password);
-      if (!result.ok) {
-        // Surface specific auth errors back to the form (subscription, etc.)
-        if (result.error && result.error.includes("SUBSCRIPTION_INACTIVE")) {
-          setError("root", {
-            message:
-              "Your subscription has expired or no active plan is configured. Please contact your administrator.",
-          });
-          return;
+  const startCooldownTimer = useCallback(() => {
+    stopCooldownTimer();
+    setOtpResendCooldown(60);
+    cooldownIntervalRef.current = setInterval(() => {
+      setOtpResendCooldown((s) => {
+        if (s <= 1) {
+          if (cooldownIntervalRef.current) {
+            clearInterval(cooldownIntervalRef.current);
+            cooldownIntervalRef.current = null;
+          }
+          return 0;
         }
-        if (result.error && result.error.includes("USER_INACTIVE")) {
-          setError("root", {
-            message:
-              "Your account is inactive. Please contact your administrator to reactivate it.",
-          });
-          return;
-        }
-        console.warn("[login] next-auth rejected credentials:", result.error);
-      }
-    } catch (err) {
-      console.warn("[login] next-auth signIn failed", err);
-    }
+        return s - 1;
+      });
+    }, 1000);
+  }, [stopCooldownTimer]);
 
-    // Strip any ?callbackUrl=... query param that next-auth may have placed on
-    // the URL (e.g. when the user hit a protected route before signing in).
-    // We navigate explicitly based on role below, so we never want to honor
-    // a callback URL — especially one pointing at an /api/* route which would
-    // render the raw JSON in the browser.
-    try {
-      if (typeof window !== "undefined" && window.location.search) {
-        window.history.replaceState({}, "", window.pathname);
-      }
-    } catch { /* ignore */ }
+  // Single reset path used by Esc, backdrop click, Cancel button, and unmount.
+  // Stale state across attempts has bitten us before — always reset everything.
+  const resetOtpState = useCallback(() => {
+    stopCooldownTimer();
+    setOtpRequired(false);
+    setOtpCode("");
+    setOtpError(null);
+    setOtpResendCooldown(0);
+    setOtpEmail("");
+    setOtpPassword("");
+    setOtpVerifying(false);
+    setOtpResending(false);
+  }, [stopCooldownTimer]);
 
-    // 1. Check static mock accounts first
-    const mockAccount = MOCK_ACCOUNTS[key];
-    if (mockAccount && mockAccount.password === data.password) {
-      dispatch(setCredentials({ token: "mock-token-" + Date.now(), user: mockAccount.user }));
+  // Cleanup on unmount.
+  useEffect(() => () => stopCooldownTimer(), [stopCooldownTimer]);
 
-      if (mockAccount.user.role === "super_admin") {
-        setLoadingName("Platform Admin");
-        setLoadingTenant(true);
-          // Full page navigation — guarantees URL is exactly /admin with no
-        // leftover query params, and rehydrates the SPA shell cleanly.
-        window.location.assign("/admin");
-        return;
-      }
+  // Auto-focus the OTP input when the modal opens. Defer one frame past
+  // Modal's own panel-focus so we end up on the input, not the panel.
+  useEffect(() => {
+    if (!otpRequired) return;
+    const id = setTimeout(() => otpInputRef.current?.focus(), 50);
+    return () => clearTimeout(id);
+  }, [otpRequired]);
 
-      if (mockAccount.user.role === "customer_admin") {
-        const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
-        const firstSite = userTenant?.config?.sites?.[0];
-        if (firstSite) dispatch(setActiveSite(firstSite.id));
-        dispatch(setSelectedSite(null));
-        setLoadingName(userTenant?.name ?? "workspace");
-        setLoadingTenant(true);
-          window.location.assign("/");
-        return;
-      }
+  const finishLogin = useCallback(async (loginEmail: string) => {
+    // ── Hydrate Redux from the verified NextAuth session ──
+    const sessionRes = await fetch("/api/auth/session", { credentials: "include" });
+    const session = await sessionRes.json();
+    const u = session?.user;
 
-      const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
-      await finishLogin(mockAccount.user, userTenant, userTenant?.name ?? "workspace");
+    if (!u?.id) {
+      setError("root", { message: "Session could not be loaded. Try again." });
       return;
     }
 
-    // 2. Try the backend API (Neon) — handles cross-browser sync
+    const authUser: AuthUser = {
+      id: u.id,
+      name: u.name ?? "",
+      email: u.email ?? loginEmail,
+      role: u.role,
+      gxpSignatory: !!u.gxpSignatory,
+      orgId: u.orgId ?? u.tenantId,
+      tenantId: u.tenantId,
+    };
+    dispatch(setCredentials({ token: "nextauth-session", user: authUser }));
+    if (u.siteId) {
+      dispatch(setActiveSite(u.siteId));
+      dispatch(setSelectedSite(u.siteId));
+    } else {
+      dispatch(setSelectedSite(null));
+    }
+
+    setLoadingName(u.role === "super_admin" ? "Platform Admin" : "workspace");
+    setLoadingTenant(true);
+
+    // Honour ?callbackUrl=... preserved by middleware.ts; otherwise role-default.
+    const params = new URLSearchParams(window.location.search);
+    const callbackUrl = params.get("callbackUrl");
+
+    if (callbackUrl && callbackUrl.startsWith("/")) {
+      window.location.assign(callbackUrl);
+    } else if (u.role === "super_admin") {
+      window.location.assign("/admin");
+    } else if (u.role === "customer_admin" || u.siteId) {
+      window.location.assign("/");
+    } else {
+      window.location.assign("/site-picker");
+    }
+  }, [dispatch, setError]);
+
+  const onSubmit = async (data: FormValues) => {
+    const email = data.email.toLowerCase().trim();
+
+    // ── Single auth path: NextAuth Credentials provider ──
+    const result = await signIn("credentials", {
+      email,
+      password: data.password,
+      redirect: false,
+    });
+
+    if (!result?.ok) {
+      switch (result?.error) {
+        case "OTP_REQUIRED":
+          setOtpEmail(email);
+          setOtpPassword(data.password);
+          setOtpRequired(true);
+          setOtpCode("");
+          setOtpError(null);
+          startCooldownTimer();
+          return;
+        case "AMBIGUOUS_EMAIL":
+          // Don't leak the multi-tenant detail — generic guidance only.
+          setError("root", { message: "Account lookup failed — please contact support." });
+          return;
+        case "SUBSCRIPTION_INACTIVE":
+          setError("root", { message: "No active subscription. Please contact your administrator to renew." });
+          return;
+        default:
+          setError("root", { message: "Invalid email or password." });
+          return;
+      }
+    }
+
+    await finishLogin(email);
+  };
+
+  const handleOtpVerify = async () => {
+    if (otpCode.length !== 6 || otpVerifying) return;
+    setOtpError(null);
+    setOtpVerifying(true);
     try {
-      const apiResult = await loginApi(data.email.trim(), data.password);
-      if (apiResult) {
-        const user = apiResult.user as AuthUser;
-        // Refresh local tenant cache with the authoritative one from the server
-        dispatch(setTenants([apiResult.tenant]));
-        dispatch(setCredentials({ token: "api-token-" + Date.now(), user }));
-
-        if (user.role === "super_admin") {
-          setLoadingName("Platform Admin");
-          setLoadingTenant(true);
-              window.location.assign("/admin");
-          return;
-        }
-
-        await finishLogin(user, apiResult.tenant, apiResult.tenant.name);
+      const result = await signIn("credentials", {
+        email: otpEmail,
+        password: otpPassword,
+        otp: otpCode,
+        redirect: false,
+      });
+      if (result?.ok) {
+        const email = otpEmail;
+        resetOtpState();
+        await finishLogin(email);
         return;
       }
-    } catch (err) {
-      const reason = (err as Error & { reason?: string })?.reason;
-      if (reason === "USER_INACTIVE") {
-        setError("root", {
-          message:
-            "Your account is inactive. Please contact your administrator to reactivate it.",
-        });
-        return;
+      switch (result?.error) {
+        case "OTP_INVALID":
+          setOtpError("Incorrect code. Please try again.");
+          setOtpCode("");
+          break;
+        case "OTP_EXPIRED":
+          setOtpError("Code expired. Click Resend to get a new one.");
+          break;
+        case "OTP_LOCKED":
+          setOtpError("Too many failed attempts. Click Resend to get a new code.");
+          break;
+        case "OTP_NO_OTP":
+          setOtpError("No active code. Click Resend to get one.");
+          break;
+        default:
+          setOtpError("Verification failed. Please try again.");
       }
-      if (reason === "SUBSCRIPTION_INACTIVE") {
-        setError("root", {
-          message:
-            "Your subscription has expired or no active plan is configured. Please contact your administrator.",
-        });
-        return;
-      }
-      console.warn("[login] API unreachable, falling back to local cache", err);
+    } finally {
+      setOtpVerifying(false);
     }
+  };
 
-    // 3. Fallback: check the local Redux cache (for offline / seed data)
-    for (const tenant of tenants) {
-      const tenantUser = tenant.config.users.find(
-        (u) =>
-          u.username?.toLowerCase() === key ||
-          u.email.toLowerCase() === key ||
-          u.name.toLowerCase() === key,
-      );
-      if (tenantUser && (!tenantUser.password || tenantUser.password === data.password)) {
-        if (tenantUser.status !== "Active") {
-          setError("root", {
-            message:
-              "Your account is inactive. Please contact your administrator to reactivate it.",
-          });
-          return;
-        }
-        const user: AuthUser = {
-          id: tenantUser.id,
-          name: tenantUser.name,
-          email: tenantUser.email,
-          role: tenantUser.role as AuthUser["role"],
-          gxpSignatory: tenantUser.gxpSignatory,
-          orgId: tenant.id,
-          tenantId: tenant.id,
-        };
-        dispatch(setCredentials({ token: "mock-token-" + Date.now(), user }));
-
-        if (user.role === "super_admin") {
-          setLoadingName("Platform Admin");
-          setLoadingTenant(true);
-              window.location.assign("/admin");
-          return;
-        }
-
-        if (user.role === "customer_admin") {
-          const firstSite = tenant.config?.sites?.[0];
-          if (firstSite) dispatch(setActiveSite(firstSite.id));
-          dispatch(setSelectedSite(null));
-          setLoadingName(tenant.name);
-          setLoadingTenant(true);
-              window.location.assign("/");
-          return;
-        }
-
-        await finishLogin(user, tenant, tenant.name);
+  const handleOtpResend = async () => {
+    if (otpResendCooldown > 0 || otpResending) return;
+    setOtpError(null);
+    setOtpResending(true);
+    try {
+      const result = await signIn("credentials", {
+        email: otpEmail,
+        password: otpPassword,
+        redirect: false,
+      });
+      if (result?.error === "OTP_REQUIRED") {
+        setOtpCode("");
+        startCooldownTimer();
+        otpInputRef.current?.focus();
         return;
       }
+      if (result?.ok) {
+        // Edge case: tenant disabled MFA between request and resend; treat as success.
+        const email = otpEmail;
+        resetOtpState();
+        await finishLogin(email);
+        return;
+      }
+      setOtpError("Could not resend code. Please try again.");
+    } finally {
+      setOtpResending(false);
     }
-
-    setError("root", { message: "Invalid username or password" });
   };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-white px-4">
-
       <div className="w-full max-w-[420px] pt-12 pb-10 px-10">
         {/* Logo — hidden during loading */}
         {!loadingTenant && (
@@ -364,9 +289,7 @@ export function LoginPage() {
             <h1 className="text-[28px] font-extrabold text-[#302d29] tracking-tight mb-1">
               Welcome Back !
             </h1>
-            <p className="text-[14px] text-[#7a736a]">
-              Log into your account
-            </p>
+            <p className="text-[14px] text-[#7a736a]">Log into your account</p>
           </div>
         )}
 
@@ -443,7 +366,7 @@ export function LoginPage() {
             )}
           </div>
 
-          <Button type="submit" icon={LogIn} loading={isSubmitting} fullWidth className="py-2.75">
+          <Button type="submit" icon={LogIn} loading={isSubmitting} fullWidth className="py-2.75" suppressHydrationWarning>
             {isSubmitting ? "Signing in..." : "Sign in"}
           </Button>
 
@@ -454,7 +377,7 @@ export function LoginPage() {
             <div className="flex-1 h-px bg-[#e8e4dd]" />
           </div>
 
-          <Button variant="secondary" icon={Building2} fullWidth>
+          <Button variant="secondary" icon={Building2} fullWidth suppressHydrationWarning>
             Single Sign-On (SSO)
           </Button>
         </form>
@@ -472,6 +395,7 @@ export function LoginPage() {
         <div className="mt-4" style={{ display: loadingTenant ? "none" : undefined }}>
           <button
             type="button"
+            suppressHydrationWarning
             onClick={() => setShowCreds((v) => !v)}
             className={clsx(
               "w-full flex items-center justify-center gap-2",
@@ -530,6 +454,99 @@ export function LoginPage() {
           )}
         </div>
       </div>
+
+      {/* ── MFA / OTP modal ── */}
+      <Modal
+        open={otpRequired}
+        onClose={resetOtpState}
+        title="Enter verification code"
+      >
+        <div className="space-y-4">
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            We sent a 6-digit code to <strong>{otpEmail}</strong>. The code expires in 10 minutes.
+          </p>
+
+          <div>
+            <label
+              htmlFor="otp-input"
+              className="block text-[11px] font-medium mb-1.5"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              Verification code <span className="text-[#dc2626]" aria-hidden="true">*</span>
+            </label>
+            <div className="relative">
+              <KeyRound
+                className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                style={{ color: "var(--text-muted)" }}
+                aria-hidden="true"
+              />
+              <input
+                id="otp-input"
+                ref={otpInputRef}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                autoComplete="one-time-code"
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && otpCode.length === 6) {
+                    e.preventDefault();
+                    void handleOtpVerify();
+                  }
+                }}
+                placeholder="123456"
+                aria-required="true"
+                aria-invalid={otpError ? true : undefined}
+                aria-describedby={otpError ? "otp-error" : undefined}
+                className="input pl-9 text-center font-mono text-[18px] tracking-[6px]"
+              />
+            </div>
+          </div>
+
+          {otpError && (
+            <div
+              id="otp-error"
+              role="alert"
+              className="rounded-lg px-3 py-2 text-[12px]"
+              style={{
+                background: "var(--danger-bg)",
+                color: "var(--danger)",
+                border: "1px solid var(--danger)",
+              }}
+            >
+              {otpError}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={resetOtpState} disabled={otpVerifying}>
+              Cancel
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={handleOtpResend}
+                disabled={otpResendCooldown > 0 || otpResending || otpVerifying}
+                loading={otpResending}
+              >
+                {otpResendCooldown > 0 ? `Resend in ${otpResendCooldown}s` : "Resend code"}
+              </Button>
+              <Button
+                variant="primary"
+                type="button"
+                onClick={handleOtpVerify}
+                disabled={otpCode.length !== 6 || otpVerifying || otpResending}
+                loading={otpVerifying}
+              >
+                Verify
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
