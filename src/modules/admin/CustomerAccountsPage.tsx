@@ -330,15 +330,27 @@ function AccountDrawer({
 
 interface CustomerAccountsPageProps {
   initialTenants?: Tenant[];
+  /** Role of the viewing user, resolved server-side and forwarded by
+   *  app/(admin)/admin/page.tsx. Required to render the MFA column
+   *  consistently between SSR and client (the Redux `auth.user` slice is
+   *  empty during SSR and only populates after the AdminShell hydration
+   *  effect runs — reading from Redux causes a hydration mismatch on the
+   *  MFA <th>). */
+  isSuperAdmin?: boolean;
 }
 
-export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPageProps = {}) {
+export function CustomerAccountsPage({
+  initialTenants,
+  isSuperAdmin: isSuperAdminProp,
+}: CustomerAccountsPageProps = {}) {
   const dispatch = useAppDispatch();
   const tenants = useAppSelector((s) => s.auth.tenants);
   // MFA toggle column is super-admin-only — customer_admin can see /admin
   // (per E1) but must NOT control tenant-level MFA on themselves or others.
-  const currentRole = useAppSelector((s) => s.auth.user?.role);
-  const isSuperAdmin = currentRole === "super_admin";
+  // Server-passed prop is the source of truth for SSR-affected branches;
+  // Redux fallback covers any caller that doesn't supply the prop yet.
+  const reduxRole = useAppSelector((s) => s.auth.user?.role);
+  const isSuperAdmin = isSuperAdminProp ?? reduxRole === "super_admin";
   const [mfaUpdatingId, setMfaUpdatingId] = useState<string | null>(null);
   // Confirmation gate for false→true (server invalidates active sessions on enable).
   const [mfaConfirmTenant, setMfaConfirmTenant] = useState<Tenant | null>(null);

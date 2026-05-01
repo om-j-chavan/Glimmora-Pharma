@@ -48,16 +48,21 @@ export async function proxy(req: NextRequest) {
 
 /**
  * Matcher excludes:
- *   - /login              (public sign-in)
- *   - /api/*              (each route handles its own auth; NextAuth must be reachable)
+ *   - /login                                      (public sign-in)
+ *   - /api/*                                      (each route handles its own auth; NextAuth must be reachable)
  *   - /_next/static, /_next/image, favicon.ico
- *   - any static asset by extension (images, css, js, sourcemaps)
+ *   - manifest.json, robots.txt, sitemap.xml      (well-known static metadata; browsers fetch these unauthenticated)
+ *   - any static asset by extension               (images, css, js, sourcemaps, json/txt/xml as defense-in-depth)
  *
  * Everything else — including /site-picker (E2), /(app)/*, and /(admin)/* —
  * passes through this middleware.
+ *
+ * Without the manifest.json carve-out, the browser's PWA-manifest fetch
+ * round-trips through the auth gate and shows up in dev logs as
+ * "GET /login?callbackUrl=%2Fmanifest.json 200" on every page load.
  */
 export const config = {
   matcher: [
-    "/((?!login|api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|map)$).*)",
+    "/((?!login|api|_next/static|_next/image|favicon.ico|manifest.json|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|map|json|txt|xml)$).*)",
   ],
 };
