@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
@@ -5,22 +7,58 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
 import { BarChart3, AlertTriangle, Download, BarChart2, Shield } from "lucide-react";
+import type { RAIDItem as PrismaRAIDItem } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addItem, closeItem, removeItem, updateItem, reopenItem, type RAIDItem } from "@/store/raid.slice";
+import { setRAIDItems, type RAIDItem, type RAIDType, type RAIDStatus, type RAIDPriority } from "@/store/raid.slice";
+import {
+  createRAIDItem as createRAIDAction,
+  updateRAIDItem as updateRAIDAction,
+  closeRAIDItem as closeRAIDAction,
+  reopenRAIDItem as reopenRAIDAction,
+  deleteRAIDItem as deleteRAIDAction,
+} from "@/actions/raid";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 
-import { KPIScorecardTab } from "./tabs/KPIScorecardTab";
-import { MOCK_SITE_KPIS, MOCK_SITE_TREND } from "@/mock/governance.mock";
+/* ── Adapt Prisma RAIDItem → slice RAIDItem shape ── */
+function adaptRAID(p: PrismaRAIDItem): RAIDItem {
+  return {
+    id: p.id,
+    tenantId: p.tenantId,
+    siteId: "",
+    type: p.type as RAIDType,
+    title: p.title,
+    description: p.description,
+    priority: p.priority as RAIDPriority,
+    status: p.status as RAIDStatus,
+    owner: p.owner,
+    dueDate: p.dueDate ? p.dueDate.toISOString() : "",
+    impact: p.impact ?? "",
+    mitigation: p.mitigation ?? "",
+    resolution: p.mitigation ?? "",
+    raisedBy: p.createdBy,
+    createdAt: p.createdAt.toISOString(),
+    closedAt: p.closedAt ? p.closedAt.toISOString() : undefined,
+    reopenedBy: p.reopenedBy ?? undefined,
+    reopenedDate: p.reopenedAt ? p.reopenedAt.toISOString() : undefined,
+    reopenReason: p.reopenReason ?? undefined,
+  };
+}
+
+import { KPIScorecardTab, type SiteKPI } from "./tabs/KPIScorecardTab";
 import { RAIDTab } from "./tabs/RAIDTab";
+
+// TODO: replace with /api/governance/kpis fetch once the route exists.
+const MOCK_SITE_KPIS: SiteKPI[] = [];
+const MOCK_SITE_TREND: { month: string; chennai: number; mumbai: number; bangalore: number; hyderabad: number }[] = [];
 
 type TabId = "kpis" | "raid";
 const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
@@ -42,10 +80,25 @@ type RaidForm = z.infer<typeof raidSchema>;
 
 /* ══════════════════════════════════════ */
 
-export function GovernancePage() {
+export interface GovernancePageProps {
+  /** Lowest readiness % across active inspections — server-computed. */
+  readinessScore?: number;
+  /** Server-fetched RAID items (Prisma rows) — seeded into Redux on mount. */
+  raidItems?: PrismaRAIDItem[];
+}
+
+export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: serverRaidItems }: GovernancePageProps = {}) {
   const router = useRouter();
   const dispatch = useAppDispatch();
-  const { raidItems, capas, findings, systems, fda483Events: fda483, tenantId } = useTenantData();
+
+  // Seed Redux from server-fetched RAID items on mount / when props change.
+  useEffect(() => {
+    if (serverRaidItems) {
+      dispatch(setRAIDItems(serverRaidItems.map(adaptRAID)));
+    }
+  }, [serverRaidItems, dispatch]);
+
+  const { raidItems, capas, findings, systems, fda483Events: fda483 } = useTenantData();
   const { org, users, allSites } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -71,7 +124,10 @@ export function GovernancePage() {
   const overdueCommitments = fda483.reduce((sum, e) => sum + e.commitments.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length, 0);
   const repeatObservationRisk = fda483.reduce((sum, e) => sum + e.observations.filter((o) => o.status !== "Closed").length, 0);
   const auditTrailCoverage = systems.length === 0 ? 0 : Math.round((systems.filter((s) => s.part11Status === "Compliant" || s.part11Status === "N/A").length / systems.length) * 100);
-  const readinessScore = useAppSelector((s) => s.readiness.score);
+  // Prefer server-computed score (Prisma actions completion %); fall back to
+  // the legacy Redux card-based score for backward-compat during migration.
+  const reduxReadinessScore = useAppSelector((s) => s.readiness.score);
+  const readinessScore = readinessScoreProp ?? reduxReadinessScore;
   const noData = capas.length === 0 && findings.length === 0;
 
   /* ── State ── */
@@ -114,22 +170,38 @@ export function GovernancePage() {
   });
   const raidForm = useForm<RaidForm>({ resolver: zodResolver(raidSchema), defaultValues: { type: "Risk", priority: "Medium" } });
 
-  function onRaidSave(data: RaidForm) {
-    if (editingRaid) {
-      dispatch(updateItem({ id: editingRaid.id, patch: { ...data, dueDate: dayjs(data.dueDate).utc().toISOString(), impact: data.impact ?? "", mitigation: data.mitigation ?? "" } }));
-      auditLog({ action: "RAID_ITEM_UPDATED", module: "governance", recordId: editingRaid.id, newValue: data });
-      setEditingRaid(null);
-    } else {
-      const id = crypto.randomUUID();
-      dispatch(addItem({ ...data, id, tenantId: tenantId ?? "", siteId: selectedSiteId ?? "", status: "Open", impact: data.impact ?? "", mitigation: data.mitigation ?? "", raisedBy: user?.id ?? "", dueDate: dayjs(data.dueDate).utc().toISOString(), createdAt: "" }));
-      auditLog({ action: "RAID_ITEM_ADDED", module: "governance", recordId: id, newValue: data });
+  async function onRaidSave(data: RaidForm) {
+    const payload = {
+      type: data.type,
+      title: data.title,
+      description: data.description,
+      priority: data.priority,
+      owner: data.owner,
+      dueDate: dayjs(data.dueDate).utc().toISOString(),
+      impact: data.impact ?? "",
+      mitigation: data.mitigation ?? "",
+    };
+    const result = editingRaid
+      ? await updateRAIDAction(editingRaid.id, payload)
+      : await createRAIDAction(payload);
+    if (!result.success) {
+      console.error("[governance] saveRaid failed:", result.error);
+      return;
     }
-    setAddRaidOpen(false); setRaidAddedPopup(true); raidForm.reset();
+    setEditingRaid(null);
+    setAddRaidOpen(false);
+    setRaidAddedPopup(true);
+    raidForm.reset();
+    router.refresh();
   }
 
-  function handleDeleteRaid(item: RAIDItem) {
-    dispatch(removeItem(item.id));
-    auditLog({ action: "RAID_ITEM_DELETED", module: "governance", recordId: item.id, oldValue: item });
+  async function handleDeleteRaid(item: RAIDItem) {
+    const result = await deleteRAIDAction(item.id);
+    if (!result.success) {
+      console.error("[governance] deleteRaid failed:", result.error);
+      return;
+    }
+    router.refresh();
   }
 
   function handleEditRaid(item: RAIDItem) {
@@ -146,16 +218,32 @@ export function GovernancePage() {
     });
     setAddRaidOpen(true);
   }
-  function handleCloseRaid() { if (!selectedRaid) return; dispatch(closeItem({ id: selectedRaid.id, resolution: "" })); auditLog({ action: "RAID_ITEM_CLOSED", module: "governance", recordId: selectedRaid.id }); setCloseRaidOpen(false); setSelectedRaid(null); setRaidClosedPopup(true); }
 
-  function handleReopenRaid() {
+  async function handleCloseRaid() {
+    if (!selectedRaid) return;
+    const result = await closeRAIDAction(selectedRaid.id, "");
+    if (!result.success) {
+      console.error("[governance] closeRaid failed:", result.error);
+      return;
+    }
+    setCloseRaidOpen(false);
+    setSelectedRaid(null);
+    setRaidClosedPopup(true);
+    router.refresh();
+  }
+
+  async function handleReopenRaid() {
     if (!selectedRaid || !reopenReason.trim()) return;
-    dispatch(reopenItem({ id: selectedRaid.id, reopenedBy: user?.id ?? "", reason: reopenReason.trim() }));
-    auditLog({ action: "RAID_ITEM_REOPENED", module: "governance", recordId: selectedRaid.id, newValue: { reason: reopenReason.trim() } });
+    const result = await reopenRAIDAction(selectedRaid.id, reopenReason.trim());
+    if (!result.success) {
+      console.error("[governance] reopenRaid failed:", result.error);
+      return;
+    }
     setReopenRaidOpen(false);
     setSelectedRaid(null);
     setReopenReason("");
     setReopenedPopup(true);
+    router.refresh();
   }
 
   /* ── Chart data ── */

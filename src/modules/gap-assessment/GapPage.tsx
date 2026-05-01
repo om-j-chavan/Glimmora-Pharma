@@ -1,6 +1,9 @@
+"use client";
+
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { BarChart3, ClipboardList, FolderOpen, Plus } from "lucide-react";
+import type { Finding as PrismaFinding } from "@prisma/client";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
 import { NoSitesPopup, TabBar, PlanLimitPopup, PageHeader, StatusGuide } from "@/components/shared";
@@ -14,12 +17,15 @@ import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
-  addFinding, updateFinding,
+  setFindings,
   type Finding,
+  type FindingSeverity,
 } from "@/store/findings.slice";
-import { addCAPA } from "@/store/capa.slice";
-import { addDocument, type DocArea, type DocType } from "@/store/evidence.slice";
-import { auditLog } from "@/lib/audit";
+import {
+  createFinding as createFindingAction,
+  updateFinding as updateFindingAction,
+} from "@/actions/findings";
+import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
@@ -29,6 +35,26 @@ import { GapRegisterTab } from "./tabs/GapRegisterTab";
 import { GapEvidenceTab } from "./tabs/GapEvidenceTab";
 import { AddFindingModal, type FindingForm } from "./modals/AddFindingModal";
 import { EvidenceLinkModal } from "./modals/EvidenceLinkModal";
+
+/* ── Adapt Prisma Finding → slice Finding shape ── */
+function adaptFinding(p: PrismaFinding): Finding {
+  return {
+    id: p.id,
+    tenantId: p.tenantId,
+    siteId: p.siteId ?? "",
+    area: p.area,
+    requirement: p.requirement,
+    framework: p.framework ?? "",
+    severity: p.severity as FindingSeverity,
+    status: (p.status ?? "Open") as Finding["status"],
+    owner: p.owner,
+    targetDate: p.targetDate ? p.targetDate.toISOString() : "",
+    evidenceLink: p.evidenceLink ?? "",
+    rootCause: p.rootCause ?? undefined,
+    capaId: p.linkedCAPAId ?? undefined,
+    createdAt: p.createdAt.toISOString(),
+  };
+}
 
 /* ── Constants ── */
 
@@ -80,16 +106,28 @@ function getAreaStatus(rows: { status: "Complete" | "Partial" | "Missing" }[]): 
 
 /* ══════════════════════════════════════ */
 
-export function GapPage() {
+export interface GapPageProps {
+  /** Server-fetched findings (Prisma rows) — seeded into Redux on mount. */
+  findings?: PrismaFinding[];
+}
+
+export function GapPage({ findings: serverFindings }: GapPageProps = {}) {
   const router = useRouter();
   const dispatch = useAppDispatch();
+
+  // Seed Redux from server-fetched findings on mount / when props change.
+  useEffect(() => {
+    if (serverFindings) {
+      dispatch(setFindings(serverFindings.map(adaptFinding)));
+    }
+  }, [serverFindings, dispatch]);
   const { isViewOnly } = useRole();
   const { canCreateFindings, isCustomerAdmin } = usePermissions();
   const { hasSites } = useSetupStatus();
   const { isAtLimit, getLimit, tenantPlan } = usePlanLimits();
   const atFindingLimit = isAtLimit("findings");
 
-  const { findings, capas, systems, tenantId } = useTenantData();
+  const { findings, capas, systems } = useTenantData();
   const { org, sites, users } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
@@ -98,7 +136,6 @@ export function GapPage() {
   const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const agiCapa = useAppSelector((s) => s.settings.agi.agents.capa);
-  const user = useAppSelector((s) => s.auth.user);
 
   const activeFrameworks = useMemo(
     () => (Object.keys(frameworks) as (keyof typeof frameworks)[]).filter((k) => frameworks[k]),
@@ -136,6 +173,7 @@ export function GapPage() {
       const found = findings.find((f) => f.id === openId);
       if (found) { setActiveTab("register"); setSelectedFinding(found); }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ── Filtered ── */
@@ -217,75 +255,69 @@ export function GapPage() {
   }
 
   /* ── Handlers ── */
-  function handleRaiseCapa(finding: Finding) {
-    const capaId = `CAPA-${String(Date.now()).slice(-4)}`;
-    dispatch(updateFinding({ id: finding.id, patch: { capaId } }));
-    dispatch(addCAPA({
-      id: capaId, findingId: finding.id, source: "Gap Assessment",
-      risk: finding.severity, owner: finding.owner, dueDate: finding.targetDate,
-      status: "Open", description: finding.requirement,
-      rca: finding.rootCause ?? "", rcaMethod: undefined, correctiveActions: "",
-      effectivenessCheck: finding.severity !== "Low",
-      evidenceLinks: [], diGate: ["p11", "annex11"].includes(finding.framework), createdAt: new Date().toISOString(),
-      tenantId: tenantId ?? "", siteId: finding.siteId,
-      linkedSystemId: finding.linkedSystemId,
-      linkedSystemName: finding.linkedSystemName,
-    }));
-    auditLog({ action: "CAPA_RAISED_FROM_FINDING", module: "gap-assessment", recordId: finding.id, newValue: { capaId, findingId: finding.id } });
-    setSelectedFinding((prev) => prev ? { ...prev, capaId } : null);
-    setRaisedCapaId(capaId);
-    setCapaRaisedPopup(true);
+  // CAPA risk type tolerates "Medium" too; map slice severity → server risk enum.
+  function severityToRisk(s: FindingSeverity): "Critical" | "High" | "Medium" | "Low" {
+    if (s === "Critical") return "Critical";
+    if (s === "High") return "High";
+    return "Low";
   }
 
-  function handleAddFinding(data: FindingForm) {
-    const { raiseCapaImmediately, evidenceFile, ...rest } = data;
-    const createdAt = new Date().toISOString();
-    const evidenceReference = rest.evidenceLink?.trim() || evidenceFile?.name || "";
-    const nf: Finding = {
-      ...rest,
-      id: `FIND-${String(findings.length + 1).padStart(3, "0")}`,
-      status: "Open",
-      evidenceLink: evidenceReference,
-      rootCause: rest.rootCause ?? "",
-      createdAt,
-      capaId: undefined,
-      agiSummary: undefined,
-      tenantId: tenantId ?? "",
-    };
-    dispatch(addFinding(nf));
-    if (evidenceFile && evidenceReference) {
-      dispatch(addDocument({
-        id: `evidence-${Date.now()}`,
-        tenantId: tenantId ?? "",
-        siteId: nf.siteId,
-        title: nf.requirement,
-        reference: evidenceReference,
-        type: (DOC_TYPE_MAP[nf.framework] as DocType | undefined) ?? evidenceFile.type,
-        area: nf.area as DocArea,
-        findingId: nf.id,
-        version: "1.0",
-        status: "Under Review",
-        author: user?.name ?? "",
-        effectiveDate: createdAt,
-        tags: [nf.framework, nf.severity, "Gap Assessment"],
-        sizeKb: evidenceFile.sizeKb,
-        complianceTags: [nf.framework],
-        createdAt,
-      }));
+  async function handleRaiseCapa(finding: Finding) {
+    const result = await createCAPAAction({
+      description: finding.requirement,
+      source: "Gap Assessment",
+      risk: severityToRisk(finding.severity),
+      owner: finding.owner,
+      dueDate: finding.targetDate,
+      siteId: finding.siteId || undefined,
+      linkedFindingId: finding.id,
+      diGateRequired: ["p11", "annex11"].includes(finding.framework),
+    });
+    if (!result.success) {
+      console.error("[gap] handleRaiseCapa failed:", result.error);
+      return;
     }
-    auditLog({ action: "FINDING_CREATED", module: "gap-assessment", recordId: nf.id, newValue: nf });
+    const capaData = result.data as { id: string };
+    setRaisedCapaId(capaData.id);
+    setCapaRaisedPopup(true);
+    router.refresh();
+  }
+
+  async function handleAddFinding(data: FindingForm) {
+    const { raiseCapaImmediately, evidenceFile, ...rest } = data;
+    const evidenceReference = rest.evidenceLink?.trim() || evidenceFile?.name || "";
+    const result = await createFindingAction({
+      requirement: rest.requirement,
+      area: rest.area,
+      framework: rest.framework,
+      severity: rest.severity,
+      owner: rest.owner,
+      targetDate: rest.targetDate,
+      siteId: rest.siteId || undefined,
+      evidenceLink: evidenceReference || undefined,
+    });
+    if (!result.success) {
+      console.error("[gap] handleAddFinding failed:", result.error);
+      return;
+    }
     setAddOpen(false);
     setAddedPopup(true);
-    if (raiseCapaImmediately) {
-      // Auto-raise CAPA linked to the new finding
-      handleRaiseCapa(nf);
+    if (raiseCapaImmediately && result.data) {
+      const created = result.data as PrismaFinding;
+      await handleRaiseCapa(adaptFinding(created));
+    } else {
+      router.refresh();
     }
   }
 
-  function handleLinkEvidence(findingId: string, evidenceLink: string) {
-    dispatch(updateFinding({ id: findingId, patch: { evidenceLink } }));
-    auditLog({ action: "EVIDENCE_LINKED", module: "gap-assessment", recordId: findingId, newValue: { evidenceLink } });
+  async function handleLinkEvidence(findingId: string, evidenceLink: string) {
+    const result = await updateFindingAction(findingId, { evidenceLink });
+    if (!result.success) {
+      console.error("[gap] handleLinkEvidence failed:", result.error);
+      return;
+    }
     setEvidenceLinkedPopup(true);
+    router.refresh();
   }
 
   function toggleArea(a: string) {
@@ -336,7 +368,7 @@ export function GapPage() {
           agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
           renderFilters={renderFilters}
           onAddOpen={() => setAddOpen(true)} onRaiseCapa={handleRaiseCapa}
-          onNavigateCapa={(capaId) => router.push("/capa", { state: { openCapaId: capaId } })}
+          onNavigateCapa={() => router.push("/capa")}
         />
       )}
 
@@ -371,7 +403,7 @@ export function GapPage() {
       <Popup isOpen={capaRaisedPopup} variant="success" title="CAPA raised"
         description={`${raisedCapaId} created and linked. Go to CAPA Tracker to add RCA.`}
         onDismiss={() => setCapaRaisedPopup(false)}
-        actions={[{ label: "Go to CAPA Tracker", style: "primary", onClick: () => { setCapaRaisedPopup(false); router.push("/capa", { state: { openCapaId: raisedCapaId } }); } }]} />
+        actions={[{ label: "Go to CAPA Tracker", style: "primary", onClick: () => { setCapaRaisedPopup(false); router.push("/capa"); } }]} />
       <Popup isOpen={evidenceLinkedPopup} variant="success" title="Evidence linked" description="Document reference saved. Close the finding to mark evidence as Complete." onDismiss={() => setEvidenceLinkedPopup(false)} />
       <Popup isOpen={exportPopup} variant="success" title="Evidence pack exported"
         description={`${allEvidenceRows.length} evidence items across ${evidenceAreas.length} areas. ${missingCount > 0 ? `${missingCount} items still missing.` : "All areas have evidence linked."}`}

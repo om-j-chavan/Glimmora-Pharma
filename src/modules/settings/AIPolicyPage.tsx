@@ -1,3 +1,5 @@
+"use client";
+
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ShieldCheck, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import clsx from "clsx";

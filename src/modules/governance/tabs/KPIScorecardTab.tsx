@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import clsx from "clsx";
 import {
@@ -8,7 +10,27 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { chartDefaults } from "@/lib/chartColors";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import type { SiteKPI } from "@/mock/governance.mock";
+
+export interface SiteKPI {
+  siteId: string;
+  siteName: string;
+  riskLevel: "HIGH" | "MEDIUM" | "LOW";
+  readinessScore: number;
+  openFindings: number;
+  criticalFindings: number;
+  openCAPAs: number;
+  overdueCAPAs: number;
+  activeFDA483: number;
+  systemsValidated: number;
+  systemsTotal: number;
+  diExceptions: number;
+  openDeviations: number;
+  inspectionReadiness: number;
+  nextInspection?: string;
+  nextInspectionDate?: string;
+  capaTimeliness: number;
+  auditTrailCoverage: number;
+}
 
 interface Site {
   id: string;
@@ -86,7 +108,7 @@ export function KPIScorecardTab({
         </div></div>
         <div className="card"><div className="card-header"><div className="flex items-center gap-2"><Activity className="w-4 h-4 text-[#f59e0b]" aria-hidden="true" /><span className="card-title">Validation &amp; CSV drift</span></div></div><div className="card-body">
           {systemsCount === 0 ? <div className="flex flex-col items-center py-10"><Database className="w-8 h-8 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No systems registered</p></div> : valBreakdown.length === 0 ? <p className="text-center py-10 text-[12px]" style={{ color: "var(--text-muted)" }}>No data</p> : (
-            <div className="flex items-center gap-6"><PieChart width={160} height={160}><Pie data={valBreakdown} cx={75} cy={75} innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={2}>{valBreakdown.map((d, i) => <Cell key={i} fill={d.color} />)}</Pie><Tooltip formatter={(v: any, n: any) => [v, n]} /></PieChart><div className="flex-1 space-y-2">{valBreakdown.map((d) => (<div key={d.name} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{d.name}</span></div><span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{d.value}</span></div>))}</div></div>
+            <div className="flex items-center gap-6"><PieChart width={160} height={160}><Pie data={valBreakdown} cx={75} cy={75} innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={2}>{valBreakdown.map((d, i) => <Cell key={i} fill={d.color} />)}</Pie><Tooltip formatter={(v, n) => [v as string | number, n as string]} /></PieChart><div className="flex-1 space-y-2">{valBreakdown.map((d) => (<div key={d.name} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{d.name}</span></div><span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{d.value}</span></div>))}</div></div>
           )}
         </div></div>
       </div>

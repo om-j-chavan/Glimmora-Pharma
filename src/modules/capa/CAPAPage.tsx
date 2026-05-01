@@ -6,6 +6,7 @@ import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
   AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare,
 } from "lucide-react";
+import type { CAPA as PrismaCAPA, CAPADocument as PrismaCAPADocument } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -15,12 +16,13 @@ import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
+  setCAPAs,
   addCAPA, updateCAPA as updateCAPAAction, closeCAPA,
   addCAPADocument, removeCAPADocument, approveCAPADocument,
-  type CAPA, type RCAMethod,
+  type CAPA, type CAPARisk, type CAPAStatus, type CAPASource, type RCAMethod,
 } from "@/store/capa.slice";
 import { closeFinding } from "@/store/findings.slice";
-import { updateObservation } from "@/store/fda483.slice";
+import { updateObservation } from "@/actions/fda483";
 import { auditLog } from "@/lib/audit";
 import {
   createCAPA as createCAPAServer,
@@ -57,13 +59,57 @@ const QMS_PROCESSES = [
 
 /* ══════════════════════════════════════ */
 
-interface CAPAPageProps {
-  openCapaId?: string;
+type PrismaCAPAWithDocuments = PrismaCAPA & { documents?: PrismaCAPADocument[] };
+
+/* ── Adapt Prisma CAPA → slice CAPA shape ── */
+function adaptCAPA(p: PrismaCAPAWithDocuments): CAPA {
+  // Slice CAPARisk is "Critical" | "High" | "Low" — coerce "Medium" to "High".
+  const risk: CAPARisk = (p.risk === "Medium" ? "High" : (p.risk as CAPARisk)) ?? "Low";
+  return {
+    id: p.id,
+    tenantId: p.tenantId,
+    siteId: p.siteId ?? "",
+    findingId: p.findingId ?? undefined,
+    source: p.source as CAPASource,
+    risk,
+    owner: p.owner,
+    dueDate: p.dueDate ? p.dueDate.toISOString() : "",
+    status: p.status as CAPAStatus,
+    description: p.description,
+    rca: p.rca ?? undefined,
+    rcaMethod: (p.rcaMethod ?? undefined) as RCAMethod | undefined,
+    correctiveActions: p.correctiveActions ?? undefined,
+    effectivenessCheck: p.effectivenessCheck,
+    effectivenessDate: p.effectivenessDate ? p.effectivenessDate.toISOString() : undefined,
+    evidenceLinks: [],
+    diGate: p.diGate,
+    diGateStatus: (p.diGateStatus ?? undefined) as CAPA["diGateStatus"],
+    diGateNotes: p.diGateNotes ?? undefined,
+    diGateReviewedBy: p.diGateReviewedBy ?? undefined,
+    diGateReviewDate: p.diGateReviewDate ? p.diGateReviewDate.toISOString() : undefined,
+    closedAt: p.closedAt ? p.closedAt.toISOString() : undefined,
+    closedBy: p.closedBy ?? undefined,
+    createdAt: p.createdAt.toISOString(),
+    documents: undefined,
+  };
 }
 
-export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
+interface CAPAPageProps {
+  openCapaId?: string;
+  /** Server-fetched CAPAs (Prisma rows) — seeded into Redux on mount. */
+  capas?: PrismaCAPAWithDocuments[];
+}
+
+export function CAPAPage({ openCapaId, capas: serverCAPAs }: CAPAPageProps = {}) {
   const router = useRouter();
   const dispatch = useAppDispatch();
+
+  // Seed Redux from server-fetched CAPAs on mount / when props change.
+  useEffect(() => {
+    if (serverCAPAs) {
+      dispatch(setCAPAs(serverCAPAs.map(adaptCAPA)));
+    }
+  }, [serverCAPAs, dispatch]);
   const [, startTransition] = useTransition();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
   const { isCustomerAdmin, canCreateCAPAs } = usePermissions();
@@ -95,6 +141,8 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
   useEffect(() => {
     if (openCapaId) {
       const found = capas.find((c) => c.id === openCapaId);
+      // Sync route-prop → local state; intentional setState in effect.
+       
       if (found) { setActiveTab("tracker"); setSelectedCAPA(found); }
     }
   }, [openCapaId, capas]);
@@ -236,7 +284,7 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
 
   const [diGateBlockPopup, setDiGateBlockPopup] = useState(false);
 
-  function handleSignClose(data: { meaning: string }) {
+  async function handleSignClose(data: { meaning: string }) {
     if (!selectedCAPA) return;
     if (selectedCAPA.diGate && selectedCAPA.diGateStatus !== "cleared") {
       setSignOpen(false);
@@ -253,7 +301,10 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
       for (const ev of fda483Events) {
         const matchingObs = ev.observations.find((o) => o.capaId === capaId);
         if (matchingObs) {
-          dispatch(updateObservation({ eventId: ev.id, obsId: matchingObs.id, patch: { status: "Closed" } }));
+          // Cross-module: when a CAPA from a 483 source closes, mark the
+          // linked observation Closed too. Server action; refresh handled by
+          // revalidatePath inside the action.
+          await updateObservation(matchingObs.id, { status: "Closed" });
           break;
         }
       }

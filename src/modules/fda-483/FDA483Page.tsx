@@ -1,12 +1,20 @@
-import { useState, useEffect } from "react";
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   Plus,
   AlertCircle,
 } from "lucide-react";
+import type {
+  FDA483Event as PrismaFDA483Event,
+  FDA483Observation as PrismaObservation,
+  FDA483Commitment as PrismaCommitment,
+  FDA483Document as PrismaFDA483Document,
+} from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import { StatusGuide } from "@/components/shared";
@@ -14,21 +22,17 @@ import { FDA483_EVENT_STATUSES } from "@/constants/statusTaxonomy";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
+import type { FDA483Event, EventStatus, Observation } from "@/types/fda483";
 import {
-  addEvent,
-  updateEvent,
-  addObservation,
-  updateObservation,
-  addCommitment,
-  setResponseDraft,
-  setAGIDraft,
-  linkCAPAToEvent,
-  type FDA483Event,
-  type EventStatus,
-  type Observation,
-} from "@/store/fda483.slice";
-import { addCAPA } from "@/store/capa.slice";
-import { auditLog } from "@/lib/audit";
+  createFDA483Event,
+  addObservation as addObservationServer,
+  updateObservation as updateObservationServer,
+  addCommitment as addCommitmentServer,
+  saveResponseDraft as saveResponseDraftServer,
+  saveAGIDraft as saveAGIDraftServer,
+  signSubmitFDA483Response,
+  raiseCAPAFromObservation,
+} from "@/actions/fda483";
 import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
@@ -72,11 +76,107 @@ export function computeReadiness(e: FDA483Event): number {
 
 type Step = 1 | 2 | 3 | 4;
 
+/* ── Server Component props ── */
+
+type PrismaEventWithRelations = PrismaFDA483Event & {
+  observations: PrismaObservation[];
+  commitments: PrismaCommitment[];
+  documents: PrismaFDA483Document[];
+};
+
+export interface FDA483PageStats {
+  total: number;
+  open: number;
+  responseDue: number;
+  overdue: number;
+  closed: number;
+  warningLetter: number;
+  totalObservations: number;
+}
+
+export interface FDA483PageProps {
+  events: PrismaEventWithRelations[];
+  stats: FDA483PageStats;
+}
+
+/**
+ * Adapt a Prisma FDA483Event into the richer slice `FDA483Event` shape
+ * the existing UI is built around. Prisma is missing the LinkedDocument
+ * arrays (`documents`, `responseDocuments`) and `linkedCapas` — fill
+ * with empty defaults; the UI degrades gracefully via optional chaining.
+ *
+ * Slice Observation has `capaIds`/`severity` (Critical|High|Low) and
+ * a stricter status union; we cast through and let runtime values flow.
+ */
+function adaptEvent(p: PrismaEventWithRelations): FDA483Event {
+  return {
+    id: p.id,
+    tenantId: p.tenantId,
+    type: p.eventType as FDA483Event["type"],
+    referenceNumber: p.referenceNumber,
+    agency: p.agency,
+    siteId: p.siteId,
+    inspectionDate: p.inspectionDate.toISOString(),
+    responseDeadline: p.responseDeadline.toISOString(),
+    status: p.status as EventStatus,
+    observations: p.observations.map((o) => ({
+      id: o.id,
+      number: o.number,
+      text: o.text,
+      severity: (o.severity ?? "Low") as Observation["severity"],
+      area: o.area ?? "",
+      regulation: o.regulation ?? "",
+      rcaMethod: (o.rcaMethod ?? undefined) as Observation["rcaMethod"],
+      rootCause: o.rootCause ?? undefined,
+      capaId: o.capaId ?? undefined,
+      capaIds: o.capaId ? [o.capaId] : undefined,
+      responseText: o.responseText ?? undefined,
+      status: (o.status ?? "Open") as Observation["status"],
+    })),
+    commitments: p.commitments.map((c) => ({
+      id: c.id,
+      eventId: c.eventId,
+      text: c.text,
+      dueDate: c.dueDate ? c.dueDate.toISOString() : "",
+      owner: c.owner ?? "",
+      status: (c.status ?? "Pending") as "Pending" | "In Progress" | "Complete" | "Overdue",
+    })),
+    responseDraft: p.responseDraft ?? "",
+    agiDraft: p.agiDraft ?? "",
+    submittedAt: p.submittedAt ? p.submittedAt.toISOString() : undefined,
+    submittedBy: p.submittedBy ?? undefined,
+    signatureMeaning: p.signatureMeaning ?? undefined,
+    closedAt: p.closedAt ? p.closedAt.toISOString() : undefined,
+    createdAt: p.createdAt.toISOString(),
+    documents: [],
+    // Map Prisma FDA483Document → LinkedDocument shape so the existing
+    // <DocumentUpload> consumer can render them. `dataUrl` carries the
+    // Prisma `fileUrl` so download/view buttons keep working.
+    responseDocuments: p.documents.map((d) => ({
+      id: d.id,
+      fileName: d.fileName,
+      fileType: ((d.fileType ?? "txt").toLowerCase()) as "pdf" | "doc" | "docx" | "xls" | "xlsx" | "jpg" | "png" | "txt",
+      fileSize: d.fileSize ?? "",
+      uploadedBy: d.uploadedBy,
+      uploadedByRole: "",
+      uploadedAt: d.createdAt.toISOString(),
+      version: "v1.0",
+      status: "current" as const,
+      linkedTo: { module: "FDA 483 Response", recordId: p.id, recordTitle: p.referenceNumber },
+      dataUrl: d.fileUrl,
+    })),
+    linkedCapas: [],
+  };
+}
+
 /* ══════════════════════════════════════ */
 
-export function FDA483Page() {
-  const dispatch = useAppDispatch();
-  const { fda483Events: events, capas, tenantId } = useTenantData();
+export function FDA483Page({ events: prismaEvents, stats: _stats }: FDA483PageProps) {
+  // _stats prop accepted for forward-compat (future KPI surface);
+  // existing layout derives counts from the events list itself.
+  const router = useRouter();
+  const { capas } = useTenantData();
+  const events = useMemo(() => prismaEvents.map(adaptEvent), [prismaEvents]);
   const { org, sites, users } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
@@ -193,87 +293,70 @@ export function FDA483Page() {
 
   /* ── Handlers ── */
 
-  function onEventSave(data: EventFormData) {
-    const id = crypto.randomUUID();
-    dispatch(
-      addEvent({
-        ...data,
-        id,
-        tenantId: tenantId ?? "",
-        observations: [],
-        commitments: [],
-        responseDraft: "",
-        agiDraft: "",
-        inspectionDate: data.inspectionDate
-          ? dayjs(data.inspectionDate).utc().toISOString()
-          : "",
-        responseDeadline: data.responseDeadline
-          ? dayjs(data.responseDeadline).utc().toISOString()
-          : "",
-        createdAt: dayjs().toISOString(),
-      }),
-    );
-    auditLog({
-      action: "FDA483_EVENT_LOGGED",
-      module: "fda-483",
-      recordId: id,
-      newValue: data,
+  async function onEventSave(data: EventFormData) {
+    // Server action writes to Prisma + emits audit log; no client-side
+    // dispatch needed — router.refresh() pulls the fresh row into props.
+    const result = await createFDA483Event({
+      referenceNumber: data.referenceNumber,
+      eventType: data.type,
+      agency: data.agency,
+      siteId: data.siteId,
+      inspectionDate: data.inspectionDate
+        ? dayjs(data.inspectionDate).utc().toISOString()
+        : "",
+      responseDeadline: data.responseDeadline
+        ? dayjs(data.responseDeadline).utc().toISOString()
+        : "",
     });
+    if (!result.success) {
+      console.error("[fda-483] createFDA483Event failed:", result.error);
+      return;
+    }
     setAddEventOpen(false);
     setEventAddedPopup(true);
+    router.refresh();
   }
 
-  function onObsSave(data: ObsFormData) {
+  async function onObsSave(data: ObsFormData) {
     if (!liveEvent) return;
-    if (editingObs) {
-      dispatch(
-        updateObservation({
+    const result = editingObs
+      ? await updateObservationServer(editingObs.id, {
+          text: data.text,
+          area: data.area ?? "",
+          regulation: data.regulation ?? "",
+          severity: data.severity,
+        })
+      : await addObservationServer({
           eventId: liveEvent.id,
-          obsId: editingObs.id,
-          patch: data,
-        }),
-      );
-    } else {
-      dispatch(
-        addObservation({
-          eventId: liveEvent.id,
-          obs: {
-            ...data,
-            id: crypto.randomUUID(),
-            area: data.area ?? "",
-            regulation: data.regulation ?? "",
-          },
-        }),
-      );
+          number: data.number,
+          text: data.text,
+          area: data.area ?? "",
+          regulation: data.regulation ?? "",
+          severity: data.severity,
+        });
+    if (!result.success) {
+      console.error("[fda-483] save observation failed:", result.error);
+      return;
     }
-    auditLog({
-      action: editingObs ? "FDA483_OBS_UPDATED" : "FDA483_OBS_ADDED",
-      module: "fda-483",
-      recordId: liveEvent.id,
-    });
     setAddObsOpen(false);
     setEditingObs(null);
     setObsAddedPopup(true);
+    router.refresh();
   }
 
-  function onCommitSave(data: CommitFormData) {
+  async function onCommitSave(data: CommitFormData) {
     if (!liveEvent) return;
-    dispatch(
-      addCommitment({
-        eventId: liveEvent.id,
-        commitment: {
-          ...data,
-          id: crypto.randomUUID(),
-          eventId: liveEvent.id,
-          dueDate: dayjs(data.dueDate).utc().toISOString(),
-        },
-      }),
-    );
-    auditLog({
-      action: "FDA483_COMMITMENT_ADDED",
-      module: "fda-483",
-      recordId: liveEvent.id,
+    const result = await addCommitmentServer({
+      eventId: liveEvent.id,
+      text: data.text,
+      dueDate: data.dueDate ? dayjs(data.dueDate).utc().toISOString() : undefined,
+      owner: data.owner,
     });
+    if (!result.success) {
+      console.error("[fda-483] addCommitment failed:", result.error);
+      return;
+    }
+    router.refresh();
     setAddCommitOpen(false);
   }
 
@@ -461,50 +544,82 @@ export function FDA483Page() {
                       onFishboneAnswersChange={setFishboneAnswers}
                       onFishboneRootChange={setFishboneRoot}
                       onFreeformRCAChange={setFreeformRCA}
-                      onSelectRCAMethod={(method) => {
+                      onSelectRCAMethod={async (method) => {
                         if (!selectedObs) return;
-                        dispatch(updateObservation({ eventId: liveEvent.id, obsId: selectedObs.id, patch: { rcaMethod: method } }));
+                        const result = await updateObservationServer(selectedObs.id, { rcaMethod: method });
+                        if (!result.success) {
+                          console.error("[fda-483] selectRCAMethod failed:", result.error);
+                          return;
+                        }
+                        router.refresh();
                       }}
-                      onSave5Why={() => {
+                      onSave5Why={async () => {
                         if (!selectedObs) return;
                         if (liveEvent.status === "Response Submitted" || liveEvent.status === "Closed") return;
                         const text = whyAnswers.filter((w) => w.trim()).map((w, i) => `Why ${i + 1}: ${w}`).join("\n");
-                        dispatch(updateObservation({ eventId: liveEvent.id, obsId: selectedObs.id, patch: { rootCause: text, status: "Response Drafted" } }));
-                        auditLog({ action: "FDA483_RCA_SAVED", module: "fda-483", recordId: selectedObs.id, newValue: { rootCause: text } });
+                        const result = await updateObservationServer(selectedObs.id, {
+                          rootCause: text,
+                          rcaMethod: "5 Why",
+                          status: "Response Drafted",
+                        });
+                        if (!result.success) {
+                          console.error("[fda-483] save5Why failed:", result.error);
+                          return;
+                        }
                         setRcaSavedPopup(true);
+                        router.refresh();
                       }}
-                      onSaveFishbone={() => {
+                      onSaveFishbone={async () => {
                         if (!selectedObs) return;
                         if (liveEvent.status === "Response Submitted" || liveEvent.status === "Closed") return;
                         const text = Object.entries(fishboneAnswers).filter(([, v]) => v.trim()).map(([k, v]) => `${k}: ${v}`).join("\n") + `\n\nRoot cause: ${fishboneRoot}`;
-                        dispatch(updateObservation({ eventId: liveEvent.id, obsId: selectedObs.id, patch: { rootCause: text, status: "Response Drafted" } }));
-                        auditLog({ action: "FDA483_RCA_SAVED", module: "fda-483", recordId: selectedObs.id });
+                        const result = await updateObservationServer(selectedObs.id, {
+                          rootCause: text,
+                          rcaMethod: "Fishbone",
+                          status: "Response Drafted",
+                        });
+                        if (!result.success) {
+                          console.error("[fda-483] saveFishbone failed:", result.error);
+                          return;
+                        }
                         setRcaSavedPopup(true);
+                        router.refresh();
                       }}
-                      onSaveFreeform={() => {
+                      onSaveFreeform={async () => {
                         if (!selectedObs) return;
                         if (liveEvent.status === "Response Submitted" || liveEvent.status === "Closed") return;
-                        dispatch(updateObservation({ eventId: liveEvent.id, obsId: selectedObs.id, patch: { rootCause: freeformRCA.trim(), status: "Response Drafted" } }));
-                        auditLog({ action: "FDA483_RCA_SAVED", module: "fda-483", recordId: selectedObs.id });
+                        const result = await updateObservationServer(selectedObs.id, {
+                          rootCause: freeformRCA.trim(),
+                          status: "Response Drafted",
+                        });
+                        if (!result.success) {
+                          console.error("[fda-483] saveFreeform failed:", result.error);
+                          return;
+                        }
                         setRcaSavedPopup(true);
+                        router.refresh();
                       }}
-                      onRaiseCAPA={() => {
+                      onRaiseCAPA={async () => {
                         if (!selectedObs) return;
-                        const capaId = `CAPA-${String(Date.now()).slice(-4)}`;
-                        dispatch(addCAPA({
-                          id: capaId, tenantId: tenantId ?? "", siteId: liveEvent.siteId,
-                          source: "483", risk: selectedObs.severity, owner: user?.id ?? "",
-                          dueDate: liveEvent.responseDeadline, status: "Open",
-                          description: `${liveEvent.referenceNumber} Obs #${selectedObs.number}: ${selectedObs.text}`,
-                          rca: selectedObs.rootCause ?? "",
-                          rcaMethod: selectedObs.rcaMethod as "5 Why" | "Fishbone" | "Fault Tree" | "Other" | undefined,
-                          correctiveActions: "", effectivenessCheck: selectedObs.severity === "Critical",
-                          evidenceLinks: [], diGate: false, createdAt: "",
-                        }));
-                        dispatch(updateObservation({ eventId: liveEvent.id, obsId: selectedObs.id, patch: { capaId } }));
-                        dispatch(linkCAPAToEvent({ eventId: liveEvent.id, capaId, observationNumber: selectedObs.number }));
-                        auditLog({ action: "CAPA_RAISED_FROM_483", module: "fda-483", recordId: selectedObs.id, newValue: { capaId } });
+                        const result = await raiseCAPAFromObservation({
+                          eventId: liveEvent.id,
+                          observationId: selectedObs.id,
+                          observationNumber: selectedObs.number,
+                          observationText: selectedObs.text,
+                          observationSeverity: selectedObs.severity,
+                          referenceNumber: liveEvent.referenceNumber,
+                          siteId: liveEvent.siteId,
+                          owner: user?.id ?? user?.name ?? "system",
+                          dueDate: liveEvent.responseDeadline,
+                          rootCause: selectedObs.rootCause,
+                          rcaMethod: selectedObs.rcaMethod,
+                        });
+                        if (!result.success) {
+                          console.error("[fda-483] raiseCAPA failed:", result.error);
+                          return;
+                        }
                         setCapaRaisedPopup(true);
+                        router.refresh();
                       }}
                     />
 
@@ -532,34 +647,29 @@ export function FDA483Page() {
             setResponseText(liveEvent?.responseDraft ?? "");
             setEditingResponse(false);
           }}
-          onSaveDraft={() => {
+          onSaveDraft={async () => {
             if (!liveEvent) return;
-            dispatch(
-              setResponseDraft({
-                eventId: liveEvent.id,
-                text: responseText.trim(),
-              }),
-            );
-            auditLog({
-              action: "FDA483_RESPONSE_DRAFT_SAVED",
-              module: "fda-483",
-              recordId: liveEvent.id,
-            });
+            const result = await saveResponseDraftServer(liveEvent.id, responseText.trim());
+            if (!result.success) {
+              console.error("[fda-483] saveResponseDraft failed:", result.error);
+              return;
+            }
             setEditingResponse(false);
             setResponseSavedPopup(true);
+            router.refresh();
           }}
-          onUseAGIDraft={() => {
+          onUseAGIDraft={async () => {
             if (!liveEvent) return;
-            dispatch(
-              setResponseDraft({
-                eventId: liveEvent.id,
-                text: liveEvent.agiDraft,
-              }),
-            );
+            const result = await saveResponseDraftServer(liveEvent.id, liveEvent.agiDraft);
+            if (!result.success) {
+              console.error("[fda-483] saveResponseDraft (from AGI) failed:", result.error);
+              return;
+            }
             setResponseText(liveEvent.agiDraft);
             setEditingResponse(true);
+            router.refresh();
           }}
-          onGenerateAGIDraft={() => {
+          onGenerateAGIDraft={async () => {
             if (!liveEvent) return;
             const obsText = liveEvent.observations
               .map((o) => `Obs ${o.number}: ${o.text}`)
@@ -573,12 +683,13 @@ export function FDA483Page() {
                   : o.capaId;
               })
               .join("\n");
-            dispatch(
-              setAGIDraft({
-                eventId: liveEvent.id,
-                text: `REGULATORY RESPONSE \u2014 ${liveEvent.referenceNumber}\n\nDear ${liveEvent.agency},\n\nWe have received and reviewed the ${liveEvent.type} dated ${dayjs.utc(liveEvent.inspectionDate).format(dateFormat)}. We take these observations seriously and have initiated corrective actions as described below.\n\nOBSERVATIONS AND CORRECTIVE ACTIONS:\n\n${obsText}\n\nLINKED CAPAs:\n\n${capaText || "CAPAs being raised."}\n\nRespectfully submitted,\n[QA Head]\n[Company Name]`,
-              }),
-            );
+            const drafted = `REGULATORY RESPONSE \u2014 ${liveEvent.referenceNumber}\n\nDear ${liveEvent.agency},\n\nWe have received and reviewed the ${liveEvent.type} dated ${dayjs.utc(liveEvent.inspectionDate).format(dateFormat)}. We take these observations seriously and have initiated corrective actions as described below.\n\nOBSERVATIONS AND CORRECTIVE ACTIONS:\n\n${obsText}\n\nLINKED CAPAs:\n\n${capaText || "CAPAs being raised."}\n\nRespectfully submitted,\n[QA Head]\n[Company Name]`;
+            const result = await saveAGIDraftServer(liveEvent.id, drafted);
+            if (!result.success) {
+              console.error("[fda-483] saveAGIDraft failed:", result.error);
+              return;
+            }
+            router.refresh();
           }}
           onSignSubmit={() => setSignOpen(true)}
             />
@@ -619,29 +730,24 @@ export function FDA483Page() {
         onClose={() => setSignOpen(false)}
         onSignMeaningChange={setSignMeaning}
         onSignPasswordChange={setSignPassword}
-        onSubmit={() => {
+        onSubmit={async () => {
           if (!liveEvent) return;
-          dispatch(
-            updateEvent({
-              id: liveEvent.id,
-              patch: {
-                status: "Response Submitted",
-                submittedAt: dayjs().toISOString(),
-                submittedBy: user?.id ?? "",
-                signatureMeaning: signMeaning,
-              },
-            }),
+          // Server action sets status, draft, submittedAt, submittedBy
+          // (from session), signatureMeaning, and writes the audit log.
+          const result = await signSubmitFDA483Response(
+            liveEvent.id,
+            liveEvent.responseDraft ?? "",
+            signMeaning,
           );
-          auditLog({
-            action: "FDA483_RESPONSE_SUBMITTED",
-            module: "fda-483",
-            recordId: liveEvent.id,
-            newValue: { submittedBy: user?.id, meaning: signMeaning },
-          });
+          if (!result.success) {
+            console.error("[fda-483] signSubmit failed:", result.error);
+            return;
+          }
           setSignOpen(false);
           setSignedPopup(true);
           setSignMeaning("");
           setSignPassword("");
+          router.refresh();
           // Stay on the current event so the user sees the submitted success view
         }}
       />

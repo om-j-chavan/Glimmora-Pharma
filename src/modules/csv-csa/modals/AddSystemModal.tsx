@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Save } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import type { SystemType } from "@/store/systems.slice";
+import type { SystemType } from "@/types/csv-csa";
 import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";

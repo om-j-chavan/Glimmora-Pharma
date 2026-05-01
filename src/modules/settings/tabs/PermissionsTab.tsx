@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import clsx from "clsx";
 import { Info, ShieldCheck, RotateCw } from "lucide-react";

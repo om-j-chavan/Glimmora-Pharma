@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   FileText,
@@ -12,12 +12,9 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import { addResponseDocument, removeResponseDocument } from "@/store/fda483.slice";
+import { addResponseDocument, removeResponseDocument } from "@/actions/fda483";
 import { DocumentUpload } from "@/components/shared";
-import type {
-  FDA483Event,
-  EventStatus,
-} from "@/store/fda483.slice";
+import type { FDA483Event, EventStatus } from "@/types/fda483";
 import type { CAPA } from "@/store/capa.slice";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -79,7 +76,7 @@ export function ResponseTab({
   onGenerateAGIDraft,
   onSignSubmit,
 }: ResponseTabProps) {
-  const dispatch = useAppDispatch();
+  const router = useRouter();
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   // Local UI state for modals
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -354,8 +351,32 @@ export function ResponseTab({
             recordTitle="Response Package"
             module="FDA 483 Response"
             existingDocs={liveEvent.responseDocuments ?? []}
-            onUpload={(doc) => dispatch(addResponseDocument({ eventId: liveEvent.id, doc }))}
-            onDelete={(docId) => dispatch(removeResponseDocument({ eventId: liveEvent.id, docId }))}
+            onUpload={async (doc) => {
+              // <DocumentUpload> hands us a fully-formed LinkedDocument; map
+              // its fields onto the FDA483Document schema. `dataUrl` (base64
+              // for in-app uploads) becomes `fileUrl`.
+              const result = await addResponseDocument({
+                eventId: liveEvent.id,
+                fileName: doc.fileName,
+                fileUrl: doc.dataUrl ?? doc.fileName,
+                fileType: doc.fileType,
+                fileSize: doc.fileSize,
+                type: "response",
+              });
+              if (!result.success) {
+                console.error("[fda-483] addResponseDocument failed:", result.error);
+                return;
+              }
+              router.refresh();
+            }}
+            onDelete={async (docId) => {
+              const result = await removeResponseDocument(docId, liveEvent.id);
+              if (!result.success) {
+                console.error("[fda-483] removeResponseDocument failed:", result.error);
+                return;
+              }
+              router.refresh();
+            }}
             readOnly={isSubmitted}
           />
           <p className="text-[10px] italic mt-2" style={{ color: "var(--text-muted)" }}>

@@ -1,9 +1,6 @@
 import clsx from "clsx";
 import { ShieldCheck } from "lucide-react";
-import type {
-  FDA483Event,
-  EventType,
-} from "@/store/fda483.slice";
+import type { FDA483Event, EventType } from "@/types/fda483";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";

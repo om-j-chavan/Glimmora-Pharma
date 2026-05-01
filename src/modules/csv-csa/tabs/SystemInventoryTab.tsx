@@ -4,7 +4,7 @@ import {
   ChevronRight, Pencil, Trash2,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import type { GxPSystem, ValidationStatus, ComplianceStatus, RiskLevel, GAMP5Category, GxPRelevance, SystemType } from "@/store/systems.slice";
+import type { GxPSystem, ValidationStatus, ComplianceStatus, RiskLevel, GAMP5Category, GxPRelevance, SystemType } from "@/types/csv-csa";
 import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";

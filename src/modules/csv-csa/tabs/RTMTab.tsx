@@ -6,11 +6,10 @@ import {
   Plus, FileText, SkipForward, Clock,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addRTMEntry, type RTMEntry, type TraceabilityStatus, type TestResult } from "@/store/rtm.slice";
-import { auditLog } from "@/lib/audit";
+import { createRTMEntry } from "@/actions/rtm";
+import type { RTMEntry, TraceabilityStatus, TestResult } from "@/types/csv-csa";
 import dayjs from "@/lib/dayjs";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -50,15 +49,28 @@ function borderColor(s: TraceabilityStatus): string {
 
 /* ── Component ── */
 
-export function RTMTab() {
+/**
+ * `entries` and `systemsOverride` come from CSVPage (server-fetched +
+ * adapted). When omitted, fall back to Redux selectors so the component
+ * still works in any future standalone usage. Both fallbacks are now
+ * empty arrays (slices delivered but data lives in props).
+ */
+export interface RTMTabProps {
+  entries?: RTMEntry[];
+  systemsOverride?: { id: string; name: string; tenantId: string }[];
+}
+
+export function RTMTab({ entries: entriesProp, systemsOverride }: RTMTabProps = {}) {
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const dispatch = useAppDispatch();
   const router = useRouter();
-  const entries = useAppSelector((s) => s.rtm.items);
-  const { isQAHead } = usePermissions();
+  // rtm slice was deleted — entries come from CSVPage props (server-fetched).
+  const entries = entriesProp ?? [];
+  const permissions = usePermissions();
+  const { isQAHead } = permissions;
   const { tenantId } = useTenantConfig();
-  const systems = useAppSelector((s) => s.systems.items).filter((s) => s.tenantId === tenantId);
-  const canEdit = isQAHead || usePermissions().role === "csv_val_lead";
+  // systems slice was deleted — systems come from CSVPage props.
+  const systems = systemsOverride ?? [];
+  const canEdit = isQAHead || permissions.role === "csv_val_lead";
 
   const tenantEntries = entries.filter((e) => e.tenantId === tenantId);
 
@@ -88,23 +100,24 @@ export function RTMTab() {
   const [formReg, setFormReg] = useState("");
   const [formPriority, setFormPriority] = useState<"critical" | "high" | "medium">("high");
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!formUrsId.trim() || !formReq.trim() || !formReg.trim()) return;
-    const id = `RTM-${String(tenantEntries.length + 1).padStart(3, "0")}`;
-    const sys = systems.find((s) => s.id === selectedSystem);
-    const entry: RTMEntry = {
-      id, tenantId: tenantId ?? "", systemId: selectedSystem,
-      systemName: sys?.name ?? selectedSystem,
-      ursId: formUrsId, ursRequirement: formReq, ursRegulation: formReg, ursPriority: formPriority,
-      fsStatus: "missing", dsStatus: "missing",
-      evidenceStatus: "missing", traceabilityStatus: "broken",
-    };
-    dispatch(addRTMEntry(entry));
-    auditLog({ action: "RTM_ENTRY_ADDED", module: "CSV/CSA", recordId: id, recordTitle: formReq.slice(0, 50) });
+    const result = await createRTMEntry({
+      systemId: selectedSystem,
+      ursId: formUrsId,
+      ursRequirement: formReq,
+      ursRegulation: formReg,
+      ursPriority: formPriority,
+    });
+    if (!result.success) {
+      console.error("[csv-csa] createRTMEntry failed:", result.error);
+      return;
+    }
     setAddOpen(false);
     setFormUrsId(""); setFormReq(""); setFormReg("");
-    setSuccessMsg(`${id} added to RTM`);
+    setSuccessMsg(`Requirement ${formUrsId} added to RTM`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
   function exportCSV() {
@@ -278,11 +291,11 @@ export function RTMTab() {
             <div className="grid grid-cols-2 gap-3 text-[11px]">
               <div>
                 <p style={{ color: "var(--text-muted)" }}>Finding</p>
-                {selected.linkedFindingId ? <button type="button" onClick={() => router.push("/gap-assessment", { state: { openFindingId: selected.linkedFindingId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedFindingId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
+                {selected.linkedFindingId ? <button type="button" onClick={() => router.push("/gap-assessment")} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedFindingId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
               </div>
               <div>
                 <p style={{ color: "var(--text-muted)" }}>CAPA</p>
-                {selected.linkedCAPAId ? <button type="button" onClick={() => router.push("/capa", { state: { openCapaId: selected.linkedCAPAId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
+                {selected.linkedCAPAId ? <button type="button" onClick={() => router.push("/capa")} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
               </div>
             </div>
           </aside>

@@ -1,7 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Plus,
   Pencil,
@@ -13,18 +12,23 @@ import {
   X,
   Save,
   Upload,
-  FileText,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import {
   addTenant,
-  updateTenant,
+  updateTenant as updateTenantLocal,
   removeTenant,
   setTenants,
   type Tenant,
 } from "@/store/auth.slice";
-import { fetchTenants, createTenantApi, updateTenantApi, deleteTenantApi } from "@/lib/tenantApi";
+import {
+  createTenant as createTenantServer,
+  updateTenant as updateTenantServer,
+  deleteTenant as deleteTenantServer,
+  createSubscription as createSubscriptionServer,
+  toggleTenantMFA,
+} from "@/actions/tenants";
 import { isTenantEffectivelyActive, getInactiveReason } from "@/lib/tenantStatus";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -94,230 +98,6 @@ interface SubPlan {
   expiryDate: string;
   maxAccounts: number;
   status: "Active" | "Inactive";
-}
-
-function SubscriptionPlansModal({
-  open,
-  onClose,
-  plans,
-  onSave,
-}: {
-  open: boolean;
-  onClose: () => void;
-  plans: SubPlan[];
-  onSave: (plans: SubPlan[]) => void;
-}) {
-  const [items, setItems] = useState<SubPlan[]>(plans);
-  const [editModal, setEditModal] = useState<SubPlan | null>(null);
-  const [isNew, setIsNew] = useState(false);
-
-  // Sync local items with props only when modal opens, not on every render
-  useEffect(() => {
-    if (open) setItems(plans);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const [planErrors, setPlanErrors] = useState<Record<string, string>>({});
-
-  const openNew = () => {
-    setEditModal({
-      id: `sp-${Date.now()}`,
-      startDate: "",
-      expiryDate: "",
-      maxAccounts: 0,
-      status: "Active",
-    });
-    setIsNew(true);
-    setPlanErrors({});
-  };
-
-  const openEdit = (p: SubPlan) => {
-    setEditModal({ ...p });
-    setIsNew(false);
-    setPlanErrors({});
-  };
-
-  const handleDelete = (id: string) => {
-    const next = items.filter((i) => i.id !== id);
-    setItems(next);
-    onSave(next);
-  };
-
-  const validatePlan = (): boolean => {
-    if (!editModal) return false;
-    const e: Record<string, string> = {};
-    if (!editModal.startDate) e.startDate = "Start date is required";
-    if (!editModal.expiryDate) e.expiryDate = "Expiry date is required";
-    if (editModal.startDate && editModal.expiryDate && editModal.expiryDate <= editModal.startDate) {
-      e.expiryDate = "Expiry must be after start date";
-    }
-    if (editModal.maxAccounts < 1) e.maxAccounts = "Must be at least 1";
-    setPlanErrors(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const handleSavePlan = () => {
-    if (!editModal || !validatePlan()) return;
-    let next: SubPlan[];
-    if (isNew) {
-      next = [...items, editModal];
-    } else {
-      next = items.map((i) => (i.id === editModal.id ? editModal : i));
-    }
-    setItems(next);
-    onSave(next);
-    setEditModal(null);
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title="Subscription Plans">
-      {/* Plans table */}
-      <div className="card mb-4">
-        <div className="overflow-x-auto">
-          <table className="data-table" aria-label="Subscription plans">
-            <thead>
-              <tr>
-                <th scope="col">Accounts Available</th>
-                <th scope="col">Expiry Date</th>
-                <th scope="col">Status</th>
-                <th scope="col">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center py-10">
-                    <FileText className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                    <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>No Subscription Plans Found</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>Add a subscription plan to get started.</p>
-                  </td>
-                </tr>
-              ) : (
-                items.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.maxAccounts}</td>
-                    <td>{p.expiryDate || "—"}</td>
-                    <td>
-                      <Badge variant={p.status === "Active" ? "green" : "gray"}>{p.status}</Badge>
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(p)}
-                          className="p-1 rounded border-none cursor-pointer bg-transparent"
-                          style={{ color: "var(--text-secondary)" }}
-                          aria-label="Edit plan"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(p.id)}
-                          className="p-1 rounded border-none cursor-pointer bg-transparent"
-                          style={{ color: "var(--danger)" }}
-                          aria-label="Delete plan"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="flex gap-3">
-        <Button variant="primary" size="sm" icon={Plus} onClick={openNew}>New Subscription Plan</Button>
-        <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
-      </div>
-
-      {/* New / Edit subscription modal */}
-      {editModal && (
-        <Modal open onClose={() => setEditModal(null)} title={isNew ? "New Subscription" : "Edit Subscription"}>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
-                  Start date <span style={{ color: "var(--danger)" }}>*</span>
-                </label>
-                <input
-                  type="date"
-                  value={editModal.startDate}
-                  onChange={(e) => setEditModal({ ...editModal, startDate: e.target.value })}
-                  className="input"
-                  style={planErrors.startDate ? { borderColor: "var(--danger)" } : undefined}
-                />
-                {planErrors.startDate && <p className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{planErrors.startDate}</p>}
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
-                  Expiry date <span style={{ color: "var(--danger)" }}>*</span>
-                </label>
-                <input
-                  type="date"
-                  value={editModal.expiryDate}
-                  onChange={(e) => setEditModal({ ...editModal, expiryDate: e.target.value })}
-                  className="input"
-                  style={planErrors.expiryDate ? { borderColor: "var(--danger)" } : undefined}
-                />
-                {planErrors.expiryDate && <p className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{planErrors.expiryDate}</p>}
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>
-                Max accounts <span style={{ color: "var(--danger)" }}>*</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                value={editModal.maxAccounts}
-                onChange={(e) => setEditModal({ ...editModal, maxAccounts: Number(e.target.value) })}
-                className="input"
-                style={planErrors.maxAccounts ? { borderColor: "var(--danger)" } : undefined}
-              />
-              {planErrors.maxAccounts && <p className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{planErrors.maxAccounts}</p>}
-            </div>
-            <div>
-              <span className="block text-[11px] font-medium mb-1.5" style={{ color: "var(--text-secondary)" }}>Status</span>
-              <div className="flex gap-0 rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)", display: "inline-flex" }}>
-                <button
-                  type="button"
-                  onClick={() => setEditModal({ ...editModal, status: "Active" })}
-                  className="px-4 py-1.5 text-[12px] font-semibold border-none cursor-pointer transition-all"
-                  style={{
-                    background: editModal.status === "Active" ? "var(--brand)" : "var(--bg-surface)",
-                    color: editModal.status === "Active" ? "#fff" : "var(--text-muted)",
-                  }}
-                >
-                  Active
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditModal({ ...editModal, status: "Inactive" })}
-                  className="px-4 py-1.5 text-[12px] font-semibold border-none cursor-pointer transition-all"
-                  style={{
-                    background: editModal.status === "Inactive" ? "var(--danger)" : "var(--bg-surface)",
-                    color: editModal.status === "Inactive" ? "#fff" : "var(--text-muted)",
-                    borderLeft: "1px solid var(--bg-border)",
-                  }}
-                >
-                  Inactive
-                </button>
-              </div>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <Button variant="primary" size="sm" icon={Save} onClick={handleSavePlan}>Save</Button>
-              <Button variant="secondary" size="sm" onClick={() => setEditModal(null)}>Cancel</Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </Modal>
-  );
 }
 
 /* ── Account form data ── */
@@ -555,6 +335,13 @@ interface CustomerAccountsPageProps {
 export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPageProps = {}) {
   const dispatch = useAppDispatch();
   const tenants = useAppSelector((s) => s.auth.tenants);
+  // MFA toggle column is super-admin-only — customer_admin can see /admin
+  // (per E1) but must NOT control tenant-level MFA on themselves or others.
+  const currentRole = useAppSelector((s) => s.auth.user?.role);
+  const isSuperAdmin = currentRole === "super_admin";
+  const [mfaUpdatingId, setMfaUpdatingId] = useState<string | null>(null);
+  // Confirmation gate for false→true (server invalidates active sessions on enable).
+  const [mfaConfirmTenant, setMfaConfirmTenant] = useState<Tenant | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -562,52 +349,22 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
   const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   // Post-create subscription flow
   const [postCreateSubOpen, setPostCreateSubOpen] = useState(false);
   const [postCreateTenantId, setPostCreateTenantId] = useState<string | null>(null);
   const [postCreateSubData, setPostCreateSubData] = useState<{ startDate: string; expiryDate: string; maxAccounts: number; status: "Active" | "Inactive" }>({ startDate: dayjs().format("YYYY-MM-DD"), expiryDate: dayjs().add(1, "year").format("YYYY-MM-DD"), maxAccounts: 15, status: "Active" });
   const [savedPopup, setSavedPopup] = useState<string | null>(null);
 
-  const router = useRouter();
-
-  // Hydrate Redux from server-fetched tenants (provided by the async Server Component).
-  // Falls back to client-side fetch only if initialTenants was not supplied.
+  // Hydrate Redux from server-fetched tenants (provided by the async Server Component
+  // at app/(admin)/admin/page.tsx via getTenants()). The previous client-side fetch
+  // fallback was deleted as part of the /api/tenants lockdown (audit finding 1.10).
   const initialSeeded = useRef(false);
   useEffect(() => {
     if (initialTenants && !initialSeeded.current) {
       dispatch(setTenants(initialTenants));
       initialSeeded.current = true;
-      return;
     }
-    if (initialSeeded.current) return;
-    let cancelled = false;
-    setSyncing(true);
-    fetchTenants()
-      .then((remote) => {
-        if (cancelled) return;
-        dispatch(setTenants(remote));
-        setSyncError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const msg = err?.message ?? "";
-        if (msg.includes("Not authenticated")) {
-          router.push("/login");
-          return;
-        }
-        if (msg.includes("Insufficient permissions")) {
-          router.push("/");
-          return;
-        }
-        console.error("[admin] tenant sync failed", err);
-        setSyncError(
-          "Could not sync customers from the database. Showing local cache only.",
-        );
-      })
-      .finally(() => { if (!cancelled) setSyncing(false); });
-    return () => { cancelled = true; };
-  }, [dispatch, initialTenants, router]);
+  }, [dispatch, initialTenants]);
 
   const filtered = tenants.filter(
     (t) =>
@@ -627,7 +384,10 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
 
   const handleSave = async (data: AccountFormData) => {
     if (editingTenant) {
-      // Update existing admin user in the tenant's user list
+      // ── EDIT existing tenant ──
+      // Server action accepts a subset of fields (name, email, isActive, language,
+      // timezone, optional password). User/site/subscription cascades from the
+      // legacy patch are no longer mirrored here — those have their own actions.
       const updatedUsers = editingTenant.config.users.map((u) =>
         u.role === "customer_admin" || u.role === "super_admin"
           ? {
@@ -635,24 +395,15 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
               name: data.customerName,
               email: data.email,
               username: data.username,
-              // Only overwrite password if a new one was entered
               ...(data.newPassword ? { password: data.newPassword } : {}),
               status: data.active ? "Active" as const : "Inactive" as const,
             }
           : u,
       );
-      const patch: Partial<Tenant> = {
+      const localPatch: Partial<Tenant> = {
         name: data.customerName,
         adminEmail: data.email,
         active: data.active,
-        subscriptionPlans: data.subscriptionPlans.map((sp) => ({
-          id: sp.id,
-          startDate: sp.startDate,
-          endDate: sp.expiryDate,
-          maxAccounts: sp.maxAccounts,
-          status: sp.status,
-          createdAt: new Date().toISOString(),
-        })),
         config: {
           ...editingTenant.config,
           org: {
@@ -663,19 +414,46 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
           users: updatedUsers,
         },
       };
-      // Optimistic local update
-      dispatch(updateTenant({ id: editingTenant.id, patch }));
-      try {
-        await updateTenantApi(editingTenant.id, patch);
-      } catch (err) {
-        console.error("[admin] failed to persist tenant update", err);
-        setSyncError("Saved locally but failed to sync to the database.");
+      // Optimistic local update for snappy UI; server response will reconcile via revalidatePath.
+      dispatch(updateTenantLocal({ id: editingTenant.id, patch: localPatch }));
+      const result = await updateTenantServer(editingTenant.id, {
+        name: data.customerName,
+        email: data.email,
+        username: data.username,
+        timezone: data.timezone,
+        isActive: data.active,
+        ...(data.newPassword ? { password: data.newPassword } : {}),
+      });
+      if (!result.success) {
+        console.error("[admin] updateTenant failed:", result.error);
+        setSyncError(result.error ?? "Saved locally but failed to sync to the database.");
+      } else {
+        setSyncError(null);
       }
     } else {
-      const tenantId = `tenant-${Date.now()}`;
-      const adminUserId = `u-ca-${Date.now()}`;
+      // ── CREATE new tenant ──
+      // Call server first so we get the real cuid back; then mirror into Redux.
+      const result = await createTenantServer({
+        name: data.customerName,
+        email: data.email,
+        username: data.username,
+        customerCode: data.customerCode,
+        password: data.newPassword,
+        timezone: data.timezone,
+        isActive: data.active,
+      });
+      if (!result.success) {
+        console.error("[admin] createTenant failed:", result.error);
+        setSyncError(result.error ?? "Failed to create account.");
+        return;
+      }
+      const created = result.data as { id: string };
+      const realId = created.id;
+
+      // Mirror into Redux with the server-issued id so the UI list updates
+      // without waiting for router.refresh().
       const newTenant: Tenant = {
-        id: tenantId,
+        id: realId,
         name: data.customerName,
         plan: "enterprise",
         adminEmail: data.email,
@@ -699,7 +477,7 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
           sites: [],
           users: [
             {
-              id: adminUserId,
+              id: `u-ca-${Date.now()}`,
               name: data.customerName,
               email: data.email,
               username: data.username,
@@ -713,23 +491,52 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
           ],
         },
       };
-      // Optimistic local insert
       dispatch(addTenant(newTenant));
-      try {
-        await createTenantApi(newTenant);
-      } catch (err) {
-        console.error("[admin] failed to persist new tenant", err);
-        setSyncError("Saved locally but failed to sync to the database.");
-      }
 
-      // Auto-open subscription modal if no plan was added in the drawer
-      if (data.subscriptionPlans.length === 0) {
-        setPostCreateTenantId(tenantId);
+      // If a subscription was filled in the drawer, persist it now via the
+      // server action (the legacy PATCH route silently dropped subscriptionPlans).
+      const drawerSub = data.subscriptionPlans[0];
+      if (drawerSub) {
+        const subResult = await createSubscriptionServer({
+          tenantId: realId,
+          maxAccounts: drawerSub.maxAccounts,
+          startDate: drawerSub.startDate,
+          expiryDate: drawerSub.expiryDate,
+          status: drawerSub.status,
+        });
+        if (!subResult.success) {
+          console.error("[admin] createSubscription failed:", subResult.error);
+          setSyncError(subResult.error ?? "Account created but subscription save failed.");
+          return;
+        }
+        setSavedPopup("Account and subscription created");
+      } else {
+        // Open the post-create subscription modal with the REAL tenant id.
+        setPostCreateTenantId(realId);
         setPostCreateSubData({ startDate: dayjs().format("YYYY-MM-DD"), expiryDate: dayjs().add(1, "year").format("YYYY-MM-DD"), maxAccounts: 15, status: "Active" });
         setPostCreateSubOpen(true);
-      } else {
-        setSavedPopup("Account and subscription created");
       }
+    }
+  };
+
+  const handleToggleMFA = async (tenant: Tenant, next: boolean) => {
+    if (!isSuperAdmin) return;
+    setMfaUpdatingId(tenant.id);
+    // Optimistic local flip — server result will revalidate via revalidatePath.
+    dispatch(updateTenantLocal({ id: tenant.id, patch: { mfaEnabled: next } }));
+    try {
+      const result = await toggleTenantMFA(tenant.id, next);
+      if (!result.success) {
+        // Roll back the optimistic update.
+        dispatch(updateTenantLocal({ id: tenant.id, patch: { mfaEnabled: !next } }));
+        setSyncError(result.error ?? "Failed to update MFA setting.");
+      }
+    } catch (err) {
+      console.error("[admin] toggleTenantMFA failed", err);
+      dispatch(updateTenantLocal({ id: tenant.id, patch: { mfaEnabled: !next } }));
+      setSyncError("Failed to update MFA setting.");
+    } finally {
+      setMfaUpdatingId(null);
     }
   };
 
@@ -740,13 +547,16 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
     // Optimistic local removal
     dispatch(removeTenant(id));
     try {
-      await deleteTenantApi(id);
-      setDeletingTenant(null);
+      const result = await deleteTenantServer(id);
+      if (!result.success) {
+        console.error("[admin] deleteTenant failed:", result.error);
+        setSyncError(result.error ?? "Removed locally but failed to delete from the database.");
+      }
     } catch (err) {
-      console.error("[admin] failed to delete tenant", err);
+      console.error("[admin] deleteTenant threw:", err);
       setSyncError("Removed locally but failed to delete from the database.");
-      setDeletingTenant(null);
     } finally {
+      setDeletingTenant(null);
       setDeleting(false);
     }
   };
@@ -794,16 +604,6 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
         </Button>
       </div>
 
-      {/* Sync status banner */}
-      {syncing && (
-        <div
-          role="status"
-          className="mb-4 px-3 py-2 rounded-lg text-[12px]"
-          style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "1px solid var(--brand-border)" }}
-        >
-          Syncing customers from database…
-        </div>
-      )}
       {syncError && (
         <div
           role="alert"
@@ -886,6 +686,7 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
                 <th scope="col">Plan</th>
                 <th scope="col">Users / Sites</th>
                 <th scope="col">Status</th>
+                {isSuperAdmin && <th scope="col">MFA</th>}
                 <th scope="col">Created</th>
                 <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
@@ -895,7 +696,8 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
                 const effective = isTenantEffectivelyActive(tenant);
                 const reason = getInactiveReason(tenant);
                 const activeSub = (tenant.subscriptionPlans ?? []).find((p) => (p.status ?? "").toLowerCase() === "active");
-                const expiry = activeSub ? ((activeSub as Record<string, unknown>).expiryDate ?? activeSub.endDate) as string | undefined : undefined;
+                // Legacy plans had `expiryDate` (Prisma name); current slice uses `endDate`. Support both shapes.
+                const expiry = activeSub ? ((activeSub as unknown as Record<string, unknown>).expiryDate ?? activeSub.endDate) as string | undefined : undefined;
                 const initial = tenant.name.charAt(0).toUpperCase();
                 return (
                   <tr key={tenant.id}>
@@ -938,6 +740,44 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
                         </span>
                       )}
                     </td>
+                    {/* MFA — super_admin only */}
+                    {isSuperAdmin && (
+                      <td>
+                        {(() => {
+                          const on = !!tenant.mfaEnabled;
+                          const updating = mfaUpdatingId === tenant.id;
+                          return (
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={on}
+                              aria-label={`MFA Required for ${tenant.name}: ${on ? "on" : "off"}`}
+                              disabled={updating}
+                              onClick={() => {
+                                if (on) {
+                                  handleToggleMFA(tenant, false);
+                                } else {
+                                  setMfaConfirmTenant(tenant);
+                                }
+                              }}
+                              className="toggle-track"
+                              style={{
+                                background: on ? "var(--brand)" : "var(--bg-elevated)",
+                                borderColor: on ? "var(--brand)" : "var(--bg-border)",
+                                opacity: updating ? 0.6 : 1,
+                                cursor: updating ? "wait" : "pointer",
+                              }}
+                            >
+                              <span
+                                className="toggle-thumb"
+                                style={{ transform: on ? "translateX(16px)" : "translateX(2px)" }}
+                              />
+                              <span className="sr-only">{on ? "On" : "Off"}</span>
+                            </button>
+                          );
+                        })()}
+                      </td>
+                    )}
                     {/* Created */}
                     <td>
                       <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
@@ -969,7 +809,7 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="text-center py-10">
+                  <td colSpan={isSuperAdmin ? 7 : 6} className="text-center py-10">
                     <Building2 className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
                     <p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
                       {searchQuery ? "No organizations match your search" : "No customer accounts yet"}
@@ -1097,13 +937,49 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
               const tenant = tenants.find((t) => t.id === postCreateTenantId);
               if (!tenant) return;
               const plan = { id: `sp-${Date.now()}`, startDate: postCreateSubData.startDate, endDate: postCreateSubData.expiryDate, maxAccounts: postCreateSubData.maxAccounts, status: postCreateSubData.status, createdAt: new Date().toISOString() };
-              const patch: Partial<Tenant> = { subscriptionPlans: [...(tenant.subscriptionPlans ?? []), plan] };
-              dispatch(updateTenant({ id: postCreateTenantId, patch }));
-              try { await updateTenantApi(postCreateTenantId, patch); } catch { setSyncError("Saved locally but failed to sync."); }
+              // Optimistic Redux mirror
+              const localPatch: Partial<Tenant> = { subscriptionPlans: [...(tenant.subscriptionPlans ?? []), plan] };
+              dispatch(updateTenantLocal({ id: postCreateTenantId, patch: localPatch }));
+              // Persist via server action — the legacy PATCH route silently dropped subscriptionPlans.
+              const result = await createSubscriptionServer({
+                tenantId: postCreateTenantId,
+                maxAccounts: postCreateSubData.maxAccounts,
+                startDate: postCreateSubData.startDate,
+                expiryDate: postCreateSubData.expiryDate,
+                status: postCreateSubData.status,
+              });
+              if (!result.success) {
+                console.error("[admin] createSubscription failed:", result.error);
+                setSyncError(result.error ?? "Saved locally but failed to sync subscription.");
+              }
               setPostCreateSubOpen(false);
               setPostCreateTenantId(null);
               setSavedPopup("Account and subscription created");
             }}>Save Plan</Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* MFA enable confirmation — toggleTenantMFA bumps sessionsValidAfter,
+          which signs out every active user in the tenant. */}
+      {mfaConfirmTenant && (
+        <Modal open onClose={() => setMfaConfirmTenant(null)} title="Enable MFA Required?">
+          <p className="text-[13px] mb-4" style={{ color: "var(--text-secondary)" }}>
+            Enabling MFA will sign out all current users in <strong style={{ color: "var(--text-primary)" }}>{mfaConfirmTenant.name}</strong>. They&apos;ll need to sign in again with email OTP. Continue?
+          </p>
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: "1px solid var(--bg-border)" }}>
+            <Button variant="secondary" size="sm" onClick={() => setMfaConfirmTenant(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                const t = mfaConfirmTenant;
+                setMfaConfirmTenant(null);
+                handleToggleMFA(t, true);
+              }}
+            >
+              Enable MFA
+            </Button>
           </div>
         </Modal>
       )}

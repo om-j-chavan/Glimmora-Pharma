@@ -1,9 +1,12 @@
+"use client";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Package, Plus, Download } from "lucide-react";
+import type { Document as PrismaDocument } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -11,7 +14,6 @@ import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import {
-  addDocument,
   addPack,
   updatePack,
   type EvidenceDocument,
@@ -20,6 +22,7 @@ import {
   type DocArea,
   type DocStatus,
 } from "@/store/evidence.slice";
+import { createDocument } from "@/actions/documents";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -27,6 +30,61 @@ import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 
 import { DocumentLibraryTab } from "./tabs/DocumentLibraryTab";
+
+/* ── Props (Server Component data) ── */
+
+export interface EvidencePageStats {
+  total: number;
+  approved: number;
+  underReview: number;
+  draft: number;
+  rejected: number;
+}
+
+export interface EvidencePageProps {
+  docs: PrismaDocument[];
+  stats: EvidencePageStats;
+}
+
+/**
+ * Adapt a Prisma `Document` row into the richer `EvidenceDocument` shape
+ * the existing UI expects. The Prisma schema is intentionally minimal —
+ * the rich metadata (title, type, area, tags, dates) lives in
+ * `description` as JSON when written by this page's form. We try to
+ * recover it; otherwise fall back to safe defaults derived from filename.
+ */
+function adaptPrismaDoc(d: PrismaDocument): EvidenceDocument {
+  let meta: Record<string, unknown> = {};
+  if (d.description) {
+    try { meta = JSON.parse(d.description); } catch { /* plain text description */ }
+  }
+  const status: DocStatus =
+    d.status === "approved" ? "Current"
+    : d.status === "under_review" ? "Under Review"
+    : d.status === "rejected" ? "Superseded"
+    : "Draft";
+
+  return {
+    id: d.id,
+    tenantId: d.tenantId,
+    siteId: "",
+    title: typeof meta.title === "string" ? meta.title : d.fileName,
+    reference: typeof meta.reference === "string" ? meta.reference : (d.linkedRecordId ?? d.fileName),
+    type: (typeof meta.type === "string" ? meta.type : "Other") as DocType,
+    area: (typeof meta.area === "string" ? meta.area : (d.linkedModule ?? "QMS")) as DocArea,
+    version: d.version,
+    status,
+    author: d.uploadedBy,
+    reviewedBy: d.approvedBy ?? undefined,
+    effectiveDate: typeof meta.effectiveDate === "string" ? meta.effectiveDate : d.createdAt.toISOString(),
+    expiryDate: typeof meta.expiryDate === "string" ? meta.expiryDate : undefined,
+    tags: Array.isArray(meta.tags) ? meta.tags as string[] : [],
+    url: typeof meta.url === "string" ? meta.url : undefined,
+    sizeKb: undefined,
+    complianceTags: Array.isArray(meta.complianceTags) ? meta.complianceTags as string[] : [],
+    createdAt: d.createdAt.toISOString(),
+  };
+}
 
 /* ── Constants ── */
 
@@ -102,7 +160,10 @@ type DocForm = z.infer<typeof docSchema>;
 
 /* ══════════════════════════════════════ */
 
-export function EvidencePage() {
+export function EvidencePage({ docs: prismaDocs }: EvidencePageProps) {
+  // `stats` prop is accepted by EvidencePageProps but not destructured here —
+  // the page derives richer counts (currentCount/missingCount) from the full
+  // cross-module aggregation, so the standalone Prisma stats would be misleading.
   const router = useRouter();
   const dispatch = useAppDispatch();
   const {
@@ -111,12 +172,12 @@ export function EvidencePage() {
     systems,
     fda483Events,
     deviations,
-    evidenceDocs,
     evidencePacks,
     tenantId,
   } = useTenantData();
-  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
-  const evidence = { documents: evidenceDocs, packs: evidencePacks };
+  // Server-fetched Prisma docs are the source of truth for standalone evidence.
+  // Packs still live in Redux (no Prisma model yet — separate migration).
+  const evidence = { documents: prismaDocs.map(adaptPrismaDoc), packs: evidencePacks };
   const { org, users } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -424,7 +485,7 @@ export function EvidencePage() {
   function toggleDocSelection(id: string) {
     setSelectedDocs((prev) => {
       const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
+      if (n.has(id)) n.delete(id); else n.add(id);
       return n;
     });
   }
@@ -440,49 +501,53 @@ export function EvidencePage() {
     },
   });
 
-  function onDocSave(data: DocForm) {
-    const id = crypto.randomUUID();
+  async function onDocSave(data: DocForm) {
     const complianceTags: string[] = [];
-    if (data.area === "CSV/IT") {
-      complianceTags.push("Part 11", "Annex 11");
-    }
+    if (data.area === "CSV/IT") complianceTags.push("Part 11", "Annex 11");
     if (data.type === "Audit Trail") complianceTags.push("ALCOA+");
     if (data.type === "Validation") complianceTags.push("GAMP 5");
     const tagsList = data.tags
-      ? data.tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean)
+      ? data.tags.split(",").map((t) => t.trim()).filter(Boolean)
       : [];
-    dispatch(
-      addDocument({
-        ...data,
-        id,
-        tenantId: tenantId ?? "",
-        siteId: selectedSiteId ?? "",
-        complianceTags,
-        tags: tagsList,
-        effectiveDate: dayjs(data.effectiveDate).utc().toISOString(),
-        expiryDate: data.expiryDate
-          ? dayjs(data.expiryDate).utc().toISOString()
-          : undefined,
-        systemId: data.systemId || undefined,
-        findingId: data.findingId || undefined,
-        capaId: data.capaId || undefined,
-        url: data.url || undefined,
-        version: data.version || "v1.0",
-        createdAt: new Date().toISOString(),
-      }),
-    );
-    auditLog({
-      action: "EVIDENCE_DOCUMENT_ADDED",
-      module: "evidence",
-      recordId: id,
-      newValue: data,
+
+    // Prisma `Document` is intentionally narrow. The page collects the rich
+    // metadata the existing UI displays (title/type/area/version/tags/dates)
+    // and stuffs it into `description` as JSON so adaptPrismaDoc() can rehydrate
+    // it on the next render. Schema can be extended later to give these their
+    // own columns.
+    const meta = {
+      title: data.title,
+      reference: data.reference,
+      type: data.type,
+      area: data.area,
+      version: data.version,
+      author: data.author,
+      effectiveDate: dayjs(data.effectiveDate).utc().toISOString(),
+      expiryDate: data.expiryDate ? dayjs(data.expiryDate).utc().toISOString() : undefined,
+      tags: tagsList,
+      complianceTags,
+      url: data.url || undefined,
+      systemId: data.systemId || undefined,
+      findingId: data.findingId || undefined,
+      capaId: data.capaId || undefined,
+    };
+
+    const result = await createDocument({
+      fileName: data.title,
+      description: JSON.stringify(meta),
+      linkedModule: data.area,
+      linkedRecordId: data.reference,
     });
+
+    if (!result.success) {
+      console.error("[evidence] createDocument failed:", result.error);
+      return;
+    }
+
     setAddDocOpen(false);
     setAddedPopup(true);
     docForm.reset();
+    router.refresh(); // Re-runs the Server Component → fresh `docs` prop arrives.
   }
 
   const lbl = "text-[11px] font-semibold uppercase tracking-wider block mb-1";

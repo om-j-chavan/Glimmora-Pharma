@@ -13,7 +13,7 @@ import type {
   EventStatus,
   Observation,
   ObservationSeverity,
-} from "@/store/fda483.slice";
+} from "@/types/fda483";
 import type { CAPA } from "@/store/capa.slice";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -353,9 +353,7 @@ export function ObservationsTab({
                           <div className="flex items-center gap-1.5">
                             <button
                               onClick={() =>
-                                router.push("/capa", {
-                                  state: { openCapaId: obs.capaId },
-                                })
+                                router.push("/capa")
                               }
                               className="font-mono text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer shrink-0"
                               aria-label={`Open ${obs.capaId}`}
@@ -533,7 +531,7 @@ export function ObservationsTab({
                   borderColor: isDark ? "#0f2039" : "#f1f5f9",
                 }}
                 onClick={() =>
-                  router.push("/capa", { state: { openCapaId: c.id } })
+                  router.push("/capa")
                 }
                 role="button"
                 aria-label={`Open ${c.id}`}

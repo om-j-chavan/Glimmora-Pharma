@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
@@ -21,7 +23,40 @@ import { StatCard, CardSection, SetupChecklist } from "@/components/shared";
 
 /* ══════════════════════════════════════ */
 
-export function DashboardPage() {
+export interface DashboardServerStats {
+  complianceScore: number;
+  criticalFindings: number;
+  openFindings: number;
+  overdueCAPAs: number;
+  openCAPAs: number;
+  openDeviations: number;
+  criticalDeviations: number;
+  overdueEvents: number;
+  lowestReadiness: number;
+  recentFindings: unknown[];
+  recentCAPAs: unknown[];
+  recentLogs: unknown[];
+  totalFindings: number;
+  totalCAPAs: number;
+  totalDeviations: number;
+  totalEvents: number;
+}
+
+export interface DashboardPageProps {
+  /** Lowest readiness % across active inspections — server-computed. */
+  readinessScore?: number;
+  /**
+   * Server-computed dashboard stats (counts + recent items).
+   * Currently accepted but not consumed: the page still derives KPIs from
+   * `useTenantData()` (now empty Redux). Wiring `stats` into the existing
+   * KPI cards / heatmap / activity widgets is its own focused turn — the
+   * component is ~840 lines of inline computation deeply integrated with
+   * the slice-shaped data.
+   */
+  stats?: DashboardServerStats;
+}
+
+export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardPageProps = {}) {
   const router = useRouter();
   const { findings, capas, systems, roadmap, fda483Events, tenantId } = useTenantData();
   const { org, sites, users } = useTenantConfig();
@@ -81,7 +116,10 @@ export function DashboardPage() {
   const csvHighRisk = filteredSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").length;
   const trainingCompliance = users.length === 0 ? null : Math.round((users.filter((u) => u.status === "Active").length / users.length) * 100);
 
-  const readinessScore = useAppSelector((s) => s.readiness.score);
+  // Prefer server-computed score (Prisma actions completion %); fall back to
+  // the legacy Redux card-based score for backward-compat during migration.
+  const reduxReadinessScore = useAppSelector((s) => s.readiness.score);
+  const readinessScore = readinessScoreProp ?? reduxReadinessScore;
 
   function getReadinessLabel(score: number | null, overdueCapaCount: number): { label: string; color: string } {
     if (score === null) return { label: "Log findings to calculate", color: "#64748b" };
@@ -261,7 +299,7 @@ export function DashboardPage() {
                 <table className="data-table" aria-label="90 day action plan"><caption className="sr-only">Priority actions due within 90 days</caption>
                   <thead><tr><th scope="col">Priority</th><th scope="col">Area</th><th scope="col">Action</th><th scope="col">Owner</th><th scope="col">Due date</th><th scope="col">Status</th><th scope="col">AGI risk</th><th scope="col"><span className="sr-only">Nav</span></th></tr></thead>
                   <tbody>{actionPlan.slice(0, 10).map((item) => (
-                    <tr key={item.id} className="cursor-pointer" onClick={() => { if (item.module === "gap-assessment") router.push("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") router.push("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") router.push("/csv-csa", { state: { systemId: item.refId } }); }}>
+                    <tr key={item.id} className="cursor-pointer" onClick={() => { if (item.module === "gap-assessment") router.push("/gap-assessment"); else if (item.module === "capa") router.push("/capa"); else if (item.module === "csv-csa") router.push("/csv-csa"); }}>
                       <td><Badge variant={item.priority === "Critical" ? "red" : item.priority === "High" ? "amber" : "green"}>{item.priority}</Badge></td>
                       <td><Badge variant="gray">{item.area}</Badge></td>
                       <td><p className="text-[12px]" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{item.action}</p></td>
@@ -269,7 +307,7 @@ export function DashboardPage() {
                       <td>{item.dueDate ? (<><div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(item.dueDate).tz(timezone).format(dateFormat)}</div>{dayjs.utc(item.dueDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Overdue</div>}</>) : <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>&mdash;</span>}</td>
                       <td><Badge variant={item.status === "Closed" ? "green" : item.status === "In Progress" ? "amber" : item.status === "Pending QA Review" ? "purple" : "blue"}>{item.status}</Badge></td>
                       <td><Badge variant={item.agiRisk === "High" ? "red" : item.agiRisk === "Medium" ? "amber" : "green"}>{item.agiRisk}</Badge></td>
-                      <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${item.refId}`} onClick={() => { if (item.module === "gap-assessment") router.push("/gap-assessment", { state: { openFindingId: item.refId } }); else if (item.module === "capa") router.push("/capa", { state: { openCapaId: item.refId } }); else if (item.module === "csv-csa") router.push("/csv-csa", { state: { systemId: item.refId } }); }} /></td>
+                      <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${item.refId}`} onClick={() => { if (item.module === "gap-assessment") router.push("/gap-assessment"); else if (item.module === "capa") router.push("/capa"); else if (item.module === "csv-csa") router.push("/csv-csa"); }} /></td>
                     </tr>
                   ))}</tbody>
                 </table>

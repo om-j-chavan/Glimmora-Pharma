@@ -1,4 +1,6 @@
-import { useState, useMemo } from "react";
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -8,6 +10,7 @@ import {
   AlertTriangle, Plus, Search, ChevronRight, Clock, CheckCircle2,
   ClipboardList, ShieldCheck, X, Info,
 } from "lucide-react";
+import type { Deviation as PrismaDeviation } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -16,12 +19,16 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
-  addDeviation, updateDeviation, closeDeviation, rejectDeviation,
-  linkCAPAToDeviation, addDeviationDocument, removeDeviationDocument,
-  type Deviation, type DeviationStatus, type DeviationSeverity,
+  setDeviations, addDeviationDocument, removeDeviationDocument,
+  type Deviation, type DeviationStatus, type DeviationSeverity, type ImpactLevel,
 } from "@/store/deviation.slice";
-import { addCAPA, type CAPARisk } from "@/store/capa.slice";
-import { auditLog } from "@/lib/audit";
+import {
+  createDeviation as createDeviationAction,
+  updateDeviation as updateDeviationAction,
+  closeDeviation as closeDeviationAction,
+  rejectDeviation as rejectDeviationAction,
+} from "@/actions/deviations";
+import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
@@ -29,6 +36,44 @@ import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
 import { PageHeader, StatCard, DocumentUpload, StatusGuide } from "@/components/shared";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
+
+/* ── Adapt Prisma Deviation → slice Deviation shape ── */
+function adaptDeviation(p: PrismaDeviation): Deviation {
+  return {
+    id: p.id,
+    tenantId: p.tenantId,
+    siteId: p.siteId ?? "",
+    title: p.title,
+    description: p.description,
+    type: p.type as Deviation["type"],
+    category: p.category as Deviation["category"],
+    severity: p.severity as DeviationSeverity,
+    area: p.area,
+    detectedBy: p.detectedBy,
+    detectedDate: p.detectedDate.toISOString(),
+    reportedBy: p.detectedBy,
+    reportedDate: p.detectedDate.toISOString(),
+    owner: p.owner,
+    dueDate: p.dueDate ? p.dueDate.toISOString() : "",
+    status: p.status as DeviationStatus,
+    immediateAction: p.immediateAction ?? "",
+    rootCause: p.rootCause ?? undefined,
+    rcaMethod: (p.rcaMethod ?? undefined) as Deviation["rcaMethod"],
+    patientSafetyImpact: (p.patientSafetyImpact ?? "none") as ImpactLevel,
+    productQualityImpact: (p.productQualityImpact ?? "none") as ImpactLevel,
+    regulatoryImpact: (p.regulatoryImpact ?? "none") as ImpactLevel,
+    batchesAffected: p.batchesAffected
+      ? p.batchesAffected.split(",").map((b) => b.trim()).filter(Boolean)
+      : undefined,
+    linkedCAPAId: p.linkedCAPAId ?? undefined,
+    documents: [],
+    closedBy: p.closedBy ?? undefined,
+    closedDate: p.closedDate ? p.closedDate.toISOString() : undefined,
+    closureNotes: p.closureNotes ?? undefined,
+    createdAt: p.createdAt.toISOString(),
+    updatedAt: p.updatedAt.toISOString(),
+  };
+}
 
 /* ── Constants ── */
 const STATUS_VARIANT: Record<DeviationStatus, "gray" | "blue" | "amber" | "purple" | "green" | "red"> = {
@@ -62,9 +107,22 @@ type AddForm = z.infer<typeof addSchema>;
 
 /* ══════════════════════════════════════ */
 
-export function DeviationPage() {
+export interface DeviationPageProps {
+  /** Server-fetched deviations (Prisma rows) — seeded into Redux on mount. */
+  deviations?: PrismaDeviation[];
+}
+
+export function DeviationPage({ deviations: serverDeviations }: DeviationPageProps = {}) {
   const dispatch = useAppDispatch();
   const router = useRouter();
+
+  // Seed Redux from server-fetched deviations on mount / when props change.
+  useEffect(() => {
+    if (serverDeviations) {
+      dispatch(setDeviations(serverDeviations.map(adaptDeviation)));
+    }
+  }, [serverDeviations, dispatch]);
+
   const deviations = useAppSelector((s) => s.deviation.items);
   const user = useAppSelector((s) => s.auth.user);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
@@ -117,93 +175,124 @@ export function DeviationPage() {
     defaultValues: { type: "unplanned", severity: "major", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium", raiseCAPA: false },
   });
 
-  function onReport(data: AddForm) {
-    const id = `DEV-${String(tenantDevs.length + 1).padStart(3, "0")}`;
-    const now = new Date().toISOString();
-    const dev: Deviation = {
-      ...data,
-      id, tenantId: tenantId ?? "", siteId: allSites[0]?.id ?? "",
-      detectedBy: user?.id ?? "", detectedDate: now,
-      reportedBy: user?.id ?? "", reportedDate: now,
-      status: "open", documents: [],
-      batchesAffected: data.batchesAffected ? data.batchesAffected.split(",").map((b) => b.trim()).filter(Boolean) : undefined,
+  function severityToRisk(s: DeviationSeverity): "Critical" | "High" | "Medium" | "Low" {
+    if (s === "critical") return "Critical";
+    if (s === "major") return "High";
+    return "Low";
+  }
+
+  async function onReport(data: AddForm) {
+    const result = await createDeviationAction({
+      title: data.title,
+      description: data.description,
+      type: data.type,
+      category: data.category,
+      severity: data.severity,
+      area: data.area,
+      immediateAction: data.immediateAction,
+      patientSafetyImpact: data.patientSafetyImpact,
+      productQualityImpact: data.productQualityImpact,
+      regulatoryImpact: data.regulatoryImpact,
+      owner: data.owner,
       dueDate: dayjs(data.dueDate).utc().toISOString(),
-      createdAt: now, updatedAt: now,
-    };
-    dispatch(addDeviation(dev));
-    auditLog({ action: "DEVIATION_CREATED", module: "Deviation Management", recordId: id, recordTitle: data.title, newValue: data.severity });
-
-    if (data.raiseCAPA) {
-      const capaId = `CAPA-${Date.now().toString().slice(-4)}`;
-      const risk: CAPARisk = data.severity === "critical" ? "Critical" : data.severity === "major" ? "High" : "Low";
-      dispatch(addCAPA({
-        id: capaId, tenantId: tenantId ?? "", siteId: dev.siteId,
-        source: "Deviation", risk, owner: data.owner,
-        dueDate: dev.dueDate, status: "Open",
-        description: `${data.title} (from ${id})`,
-        effectivenessCheck: false, evidenceLinks: [], diGate: false,
-        createdAt: now,
-      }));
-      dispatch(linkCAPAToDeviation({ deviationId: id, capaId }));
-      auditLog({ action: "CAPA_RAISED_FROM_DEVIATION", module: "Deviation Management", recordId: id, recordTitle: `${id} \u2192 ${capaId}`, newValue: capaId });
+      siteId: allSites[0]?.id || undefined,
+      batchesAffected: data.batchesAffected || undefined,
+    });
+    if (!result.success) {
+      console.error("[deviation] createDeviation failed:", result.error);
+      return;
     }
-
+    const created = result.data as PrismaDeviation;
+    let capaMsg = "";
+    if (data.raiseCAPA) {
+      const capaResult = await createCAPAAction({
+        description: `${data.title} (from ${created.id})`,
+        source: "Deviation",
+        risk: severityToRisk(data.severity),
+        owner: data.owner,
+        dueDate: dayjs(data.dueDate).utc().toISOString(),
+        siteId: created.siteId ?? undefined,
+        linkedDeviationId: created.id,
+      });
+      if (capaResult.success) capaMsg = " + CAPA raised";
+    }
     setAddOpen(false);
     reset();
-    setSuccessMsg(data.raiseCAPA ? `${id} reported + CAPA raised` : `${id} reported`);
+    setSuccessMsg(`${created.id} reported${capaMsg}`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
-  function handleRaiseCAPAFromDetail() {
+
+  async function handleRaiseCAPAFromDetail() {
     if (!selected || !user) return;
-    const capaId = `CAPA-${Date.now().toString().slice(-4)}`;
-    const risk: CAPARisk = selected.severity === "critical" ? "Critical" : selected.severity === "major" ? "High" : "Low";
-    dispatch(addCAPA({
-      id: capaId, tenantId: tenantId ?? "", siteId: selected.siteId,
-      source: "Deviation", risk, owner: selected.owner,
-      dueDate: selected.dueDate, status: "Open",
+    const result = await createCAPAAction({
       description: `${selected.title} (from ${selected.id})`,
-      effectivenessCheck: false, evidenceLinks: [], diGate: false,
-      createdAt: new Date().toISOString(),
-    }));
-    dispatch(linkCAPAToDeviation({ deviationId: selected.id, capaId }));
-    auditLog({ action: "CAPA_RAISED_FROM_DEVIATION", module: "Deviation Management", recordId: selected.id, recordTitle: `${selected.id} \u2192 ${capaId}`, newValue: capaId });
-    setSuccessMsg(`CAPA ${capaId} raised from ${selected.id}`);
+      source: "Deviation",
+      risk: severityToRisk(selected.severity),
+      owner: selected.owner,
+      dueDate: selected.dueDate,
+      siteId: selected.siteId || undefined,
+      linkedDeviationId: selected.id,
+    });
+    if (!result.success) {
+      console.error("[deviation] createCAPA failed:", result.error);
+      return;
+    }
+    const capaData = result.data as { id: string };
+    setSuccessMsg(`CAPA ${capaData.id} raised from ${selected.id}`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
-  function handleClose() {
+  async function handleClose() {
     if (!selected || !user) return;
-    dispatch(closeDeviation({ id: selected.id, closedBy: user.name, notes: closeNotes }));
-    auditLog({ action: "DEVIATION_CLOSED", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Closed" });
+    const result = await closeDeviationAction(selected.id, closeNotes);
+    if (!result.success) {
+      console.error("[deviation] closeDeviation failed:", result.error);
+      return;
+    }
     setCloseModal(false);
     setCloseNotes("");
     setSelectedId(null);
     setSuccessMsg(`${selected.id} closed`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
-  function handleReject() {
+  async function handleReject() {
     if (!selected || !user || !rejectReason.trim()) return;
-    dispatch(rejectDeviation({ id: selected.id, rejectedBy: user.name, reason: rejectReason }));
-    auditLog({ action: "DEVIATION_REJECTED", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Rejected" });
+    const result = await rejectDeviationAction(selected.id, { reason: rejectReason });
+    if (!result.success) {
+      console.error("[deviation] rejectDeviation failed:", result.error);
+      return;
+    }
     setRejectModal(false);
     setRejectReason("");
     setSelectedId(null);
     setSuccessMsg(`${selected.id} rejected — returned to investigation`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
-  function handleSubmitForReview() {
+  async function handleSubmitForReview() {
     if (!selected) return;
-    dispatch(updateDeviation({ id: selected.id, patch: { status: "pending_qa_review" } }));
-    auditLog({ action: "DEVIATION_SUBMITTED_FOR_REVIEW", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Pending QA Review" });
+    const result = await updateDeviationAction(selected.id, { status: "pending_qa_review" });
+    if (!result.success) {
+      console.error("[deviation] submitForReview failed:", result.error);
+      return;
+    }
+    router.refresh();
   }
 
-  function handleStartInvestigation() {
+  async function handleStartInvestigation() {
     if (!selected) return;
-    dispatch(updateDeviation({ id: selected.id, patch: { status: "under_investigation" } }));
-    auditLog({ action: "DEVIATION_INVESTIGATION_STARTED", module: "Deviation Management", recordId: selected.id, recordTitle: selected.title, newValue: "Under Investigation" });
+    const result = await updateDeviationAction(selected.id, { status: "under_investigation" });
+    if (!result.success) {
+      console.error("[deviation] startInvestigation failed:", result.error);
+      return;
+    }
+    router.refresh();
   }
 
   return (
@@ -358,7 +447,7 @@ export function DeviationPage() {
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Linked CAPA</p>
               {selected.linkedCAPAId ? (
-                <button type="button" onClick={() => router.push("/capa", { state: { openCapaId: selected.linkedCAPAId } })} className="text-[12px] font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button>
+                <button type="button" onClick={() => router.push("/capa")} className="text-[12px] font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button>
               ) : selected.status !== "closed" && selected.status !== "rejected" && canReport ? (
                 <Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA</Button>
               ) : (

@@ -1,19 +1,18 @@
 import { useState, useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import {
   ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, History,
 } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import type { Finding, FindingSeverity, FindingStatus } from "@/store/findings.slice";
-import { editFinding } from "@/store/findings.slice";
+import { updateFinding as updateFindingAction } from "@/actions/findings";
 import type { CAPA } from "@/store/capa.slice";
 import type { UserConfig } from "@/store/settings.slice";
-import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
@@ -78,7 +77,7 @@ export function GapRegisterTab({
   onAddOpen, onRaiseCapa, onNavigateCapa,
 }: GapRegisterTabProps) {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-  const dispatch = useAppDispatch();
+  const router = useRouter();
   const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
@@ -116,8 +115,11 @@ export function GapRegisterTab({
         evidenceLink: selectedFinding.evidenceLink ?? "",
       });
     }
+    // Reset edit form when the selected finding changes.
+     
     setIsEditing(false);
     setEditReason("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFinding?.id]);
 
   function ownerName(uid: string) { return users.find((u) => u.id === uid)?.name ?? uid; }
@@ -129,45 +131,38 @@ export function GapRegisterTab({
       })
     : filteredFindings;
 
-  function onSave(data: EditForm) {
+  async function onSave(data: EditForm) {
     if (!selectedFinding || !user) return;
 
-    const changes: { field: string; oldValue: unknown; newValue: unknown }[] = [];
     const targetDateISO = dayjs(data.targetDate).utc().toISOString();
 
-    if (data.requirement !== selectedFinding.requirement) changes.push({ field: "requirement", oldValue: selectedFinding.requirement, newValue: data.requirement });
-    if (data.owner !== selectedFinding.owner) changes.push({ field: "owner", oldValue: ownerName(selectedFinding.owner), newValue: ownerName(data.owner) });
-    if (targetDateISO !== selectedFinding.targetDate) changes.push({ field: "targetDate", oldValue: selectedFinding.targetDate, newValue: targetDateISO });
-    if (data.evidenceLink !== (selectedFinding.evidenceLink ?? "")) changes.push({ field: "evidenceLink", oldValue: selectedFinding.evidenceLink ?? "", newValue: data.evidenceLink });
+    const noChange =
+      data.requirement === selectedFinding.requirement &&
+      data.owner === selectedFinding.owner &&
+      targetDateISO === selectedFinding.targetDate &&
+      data.evidenceLink === (selectedFinding.evidenceLink ?? "");
 
-    if (changes.length === 0) {
+    if (noChange) {
       setIsEditing(false);
       return;
     }
 
-    dispatch(editFinding({
-      id: selectedFinding.id,
-      patch: {
-        requirement: data.requirement,
-        owner: data.owner,
-        targetDate: targetDateISO,
-        evidenceLink: data.evidenceLink,
-      },
-      editedBy: user.id,
-      editedAt: dayjs().toISOString(),
-      editReason: editReason || undefined,
-    }));
-
-    auditLog({
-      action: "FINDING_EDITED",
-      module: "findings",
-      recordId: selectedFinding.id,
-      newValue: { changes, editedBy: user.id, reason: editReason },
+    const result = await updateFindingAction(selectedFinding.id, {
+      requirement: data.requirement,
+      owner: data.owner,
+      targetDate: targetDateISO,
+      evidenceLink: data.evidenceLink,
     });
+
+    if (!result.success) {
+      console.error("[gap] updateFinding failed:", result.error);
+      return;
+    }
 
     setIsEditing(false);
     setEditReason("");
     setSavedPopup(true);
+    router.refresh();
   }
 
   const isOverdue = selectedFinding ? selectedFinding.status !== "Closed" && dayjs.utc(selectedFinding.targetDate).isBefore(dayjs()) : false;

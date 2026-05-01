@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useRef, useEffect } from "react";
 import dayjs from "@/lib/dayjs";
 import { AlertTriangle, Plus, MoreVertical, Pencil, CheckCircle2, Trash2, Eye, RotateCcw } from "lucide-react";

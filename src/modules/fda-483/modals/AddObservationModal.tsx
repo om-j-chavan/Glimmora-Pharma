@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import type { Observation } from "@/store/fda483.slice";
+import type { Observation } from "@/types/fda483";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -60,6 +60,7 @@ export function AddObservationModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editingObs?.id]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function handleSubmit(data: any) {
     onSave(data);
     form.reset();

@@ -2,7 +2,6 @@ import { useState, useRef } from "react";
 import clsx from "clsx";
 import { ClipboardList, Pencil, X, Save, FileText, Upload, CheckCircle2, AlertCircle, SkipForward, Info, ShieldCheck } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { usePermissions } from "@/hooks/usePermissions";
 import { auditLog } from "@/lib/audit";
 import type {
@@ -12,11 +11,20 @@ import type {
   ValidationStage,
   ValidationStageKey,
   StageDocument,
-} from "@/store/systems.slice";
+} from "@/types/csv-csa";
+import { VALIDATION_STAGE_KEYS, VALIDATION_STAGE_LABELS, getStageId } from "@/types/csv-csa";
+import { useRouter } from "next/navigation";
+// Slice import removed — `addStageDocument` dispatch was stripped (no
+// Prisma `StageDocument` model). `dispatch` itself is still used by
+// other tabs that import this file's pattern; check usage before removing
+// useAppDispatch.
 import {
-  VALIDATION_STAGE_KEYS, VALIDATION_STAGE_LABELS,
-  submitStageForReview, approveStage, rejectStage, skipStage, addStageDocument, updateStageNotes,
-} from "@/store/systems.slice";
+  submitStageForReview as submitStageForReviewServer,
+  approveStage as approveStageServer,
+  rejectStage as rejectStageServer,
+  skipStage as skipStageServer,
+  updateStageNotes as updateStageNotesServer,
+} from "@/actions/systems";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -91,7 +99,7 @@ export function ValidationPanel({
   onSavePlannedActions, onSaveStage: _onSaveStage, onSaveNextReview,
 }: ValidationPanelProps) {
   void _onSaveStage; // kept for interface compat; stage saves now use dispatch directly
-  const dispatch = useAppDispatch();
+  const router = useRouter();
   const { isQAHead } = usePermissions();
   const user = { name: users.find((u) => u.role === role)?.name ?? "User" };
   const canSubmitStages = role === "csv_val_lead" || role === "it_cdo" || isQAHead;
@@ -134,38 +142,67 @@ export function ValidationPanel({
     try { return localStorage.getItem("glimmora-csv-completion-banner-dismissed") !== "1"; } catch { return true; }
   });
 
-  function handleSubmitForReview(key: ValidationStageKey) {
-    dispatch(submitStageForReview({ systemId: system.id, stageKey: key, submittedBy: user.name }));
-    auditLog({ action: "STAGE_SUBMITTED_FOR_REVIEW", module: "CSV/CSA", recordId: system.id, recordTitle: `${system.name} \u2014 ${key}`, newValue: "In Review" });
+  // Each handler maps the legacy stage `key` ("URS"/"IQ"/etc.) to the
+  // Prisma row id via `getStageId()`, then dispatches the server action.
+  // Audit logging happens inside the server action \u2014 no client `auditLog`
+  // call needed. `router.refresh()` re-fetches the page Server Component
+  // so the updated stage state arrives via props.
+  async function handleSubmitForReview(key: ValidationStageKey) {
+    const stageId = getStageId(system, key);
+    if (!stageId) { setSuccessMsg(`Stage ${key} not found`); setSuccessPopup(true); return; }
+    const result = await submitStageForReviewServer(stageId);
+    if (!result.success) {
+      console.error("[csv-csa] submitStageForReview failed:", result.error);
+      return;
+    }
     setSuccessMsg(`${key} submitted for QA review`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
-  function handleApprove() {
+  async function handleApprove() {
     if (!approveModal) return;
-    dispatch(approveStage({ systemId: system.id, stageKey: approveModal, approvedBy: user.name }));
-    auditLog({ action: "STAGE_APPROVED", module: "CSV/CSA", recordId: system.id, recordTitle: `${system.name} \u2014 ${approveModal}`, newValue: "Approved" });
+    const stageId = getStageId(system, approveModal);
+    if (!stageId) return;
+    const result = await approveStageServer(stageId);
+    if (!result.success) {
+      console.error("[csv-csa] approveStage failed:", result.error);
+      return;
+    }
     setSuccessMsg(`${approveModal} stage approved \u2014 ${system.name}`);
     setApproveModal(null);
     setSuccessPopup(true);
+    router.refresh();
   }
 
-  function handleReject() {
+  async function handleReject() {
     if (!rejectModal || !rejectReason.trim()) return;
-    dispatch(rejectStage({ systemId: system.id, stageKey: rejectModal, rejectedBy: user.name, reason: rejectReason }));
-    auditLog({ action: "STAGE_REJECTED", module: "CSV/CSA", recordId: system.id, recordTitle: `${system.name} \u2014 ${rejectModal}`, newValue: rejectReason });
+    const stageId = getStageId(system, rejectModal);
+    if (!stageId) return;
+    const result = await rejectStageServer(stageId, rejectReason);
+    if (!result.success) {
+      console.error("[csv-csa] rejectStage failed:", result.error);
+      return;
+    }
     setRejectModal(null);
     setRejectReason("");
+    router.refresh();
   }
 
-  function handleSkip() {
+  async function handleSkip() {
     if (!skipModal || !skipReason.trim()) return;
-    dispatch(skipStage({ systemId: system.id, stageKey: skipModal, approvedBy: user.name, reason: skipReason }));
-    auditLog({ action: "STAGE_SKIPPED", module: "CSV/CSA", recordId: system.id, recordTitle: `${system.name} \u2014 ${skipModal}`, newValue: skipReason });
+    const stageId = getStageId(system, skipModal);
+    if (!stageId) return;
+    const result = await skipStageServer(stageId, skipReason);
+    if (!result.success) {
+      console.error("[csv-csa] skipStage failed:", result.error);
+      return;
+    }
     setSkipModal(null);
     setSkipReason("");
     setSuccessMsg(`${skipModal} marked as skipped`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
   function handleUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -181,15 +218,26 @@ export function ValidationPanel({
       uploadedBy: user.name,
       uploadedAt: new Date().toISOString(),
     };
-    dispatch(addStageDocument({ systemId: system.id, stageKey: uploadStageKey, doc }));
+    // Document persistence requires a `StageDocument` Prisma model + server
+    // action \u2014 neither exists today. Audit-log the upload so it appears in
+    // the activity trail; the file metadata itself is dropped until the
+    // schema is extended. (Slice dispatch removed; was writing to dead Redux.)
+    void doc;
     auditLog({ action: "STAGE_DOCUMENT_UPLOADED", module: "CSV/CSA", recordId: system.id, recordTitle: `${system.name} \u2014 ${uploadStageKey} \u2014 ${file.name}` });
     setUploadStageKey(null);
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  function handleSaveNotes(key: ValidationStageKey) {
-    dispatch(updateStageNotes({ systemId: system.id, stageKey: key, notes: notesText }));
+  async function handleSaveNotes(key: ValidationStageKey) {
+    const stageId = getStageId(system, key);
+    if (!stageId) return;
+    const result = await updateStageNotesServer(stageId, notesText);
+    if (!result.success) {
+      console.error("[csv-csa] updateStageNotes failed:", result.error);
+      return;
+    }
     setEditingNotes(null);
+    router.refresh();
   }
 
   return (
@@ -246,7 +294,7 @@ export function ValidationPanel({
             <p className="mt-1"><strong>Approval complete</strong> (QA Head): All stages reviewed, documents verified, QA Head formally approved.</p>
             <p className="mt-1 font-semibold" style={{ color: "var(--brand)" }}>System validated = Both complete \u2713</p>
           </div>
-          <button type="button" onClick={() => { setShowBanner(false); try { localStorage.setItem("glimmora-csv-completion-banner-dismissed", "1"); } catch {} }} className="p-1 rounded cursor-pointer border-none bg-transparent" style={{ color: "var(--brand)" }} aria-label="Dismiss">
+          <button type="button" onClick={() => { setShowBanner(false); try { localStorage.setItem("glimmora-csv-completion-banner-dismissed", "1"); } catch { /* ignore */ } }} className="p-1 rounded cursor-pointer border-none bg-transparent" style={{ color: "var(--brand)" }} aria-label="Dismiss">
             <X className="w-3.5 h-3.5" aria-hidden="true" />
           </button>
         </div>

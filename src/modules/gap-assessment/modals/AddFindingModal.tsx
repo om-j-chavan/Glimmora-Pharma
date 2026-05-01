@@ -6,7 +6,7 @@ import { Plus, Upload, X } from "lucide-react";
 import type { FindingSeverity } from "@/store/findings.slice";
 import type { DocType } from "@/store/evidence.slice";
 import type { UserConfig, SiteConfig } from "@/store/settings.slice";
-import type { GxPSystem } from "@/store/systems.slice";
+import type { GxPSystem } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -11,13 +12,18 @@ import {
   Globe,
   Clock,
   Shield,
+  ShieldCheck,
   CheckCircle2,
   XCircle,
   Pencil,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { updateTenant as updateTenantLocal } from "@/store/auth.slice";
+import { toggleTenantMFA } from "@/actions/tenants";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import dayjs from "@/lib/dayjs";
 
 const planVariant: Record<string, "green" | "blue" | "amber" | "gray"> = {
@@ -57,9 +63,46 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export function CustomerDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const params = useParams<{ id: string }>();
+  const id = params?.id ?? "";
   const router = useRouter();
+  const dispatch = useAppDispatch();
   const tenant = useAppSelector((s) => s.auth.tenants.find((t) => t.id === id));
+  const currentRole = useAppSelector((s) => s.auth.user?.role);
+  const isSuperAdmin = currentRole === "super_admin";
+
+  const [mfaUpdating, setMfaUpdating] = useState(false);
+  const [mfaError, setMfaError] = useState<string | null>(null);
+  const [mfaConfirmOpen, setMfaConfirmOpen] = useState(false);
+
+  const applyMfa = async (next: boolean) => {
+    if (!isSuperAdmin || !tenant) return;
+    setMfaUpdating(true);
+    setMfaError(null);
+    dispatch(updateTenantLocal({ id: tenant.id, patch: { mfaEnabled: next } }));
+    try {
+      const result = await toggleTenantMFA(tenant.id, next);
+      if (!result.success) {
+        dispatch(updateTenantLocal({ id: tenant.id, patch: { mfaEnabled: !next } }));
+        setMfaError(result.error ?? "Failed to update MFA setting.");
+      }
+    } catch (err) {
+      console.error("[admin] toggleTenantMFA failed", err);
+      dispatch(updateTenantLocal({ id: tenant.id, patch: { mfaEnabled: !next } }));
+      setMfaError("Failed to update MFA setting.");
+    } finally {
+      setMfaUpdating(false);
+    }
+  };
+
+  const handleMfaToggleClick = () => {
+    if (!tenant) return;
+    if (tenant.mfaEnabled) {
+      applyMfa(false);
+    } else {
+      setMfaConfirmOpen(true);
+    }
+  };
 
   if (!tenant) {
     return (
@@ -91,7 +134,7 @@ export function CustomerDetailPage() {
     <div className="w-full max-w-[1200px] mx-auto">
       {/* Back link */}
       <Link
-        to="/admin"
+        href="/admin"
         className="inline-flex items-center gap-2 text-[13px] mb-4"
         style={{ color: "var(--brand)" }}
       >
@@ -194,6 +237,54 @@ export function CustomerDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Security — super_admin only. customer_admin must NOT control their own MFA. */}
+      {isSuperAdmin && (
+        <div className="card mb-6">
+          <div className="card-header">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" />
+              <span className="card-title">Security</span>
+            </div>
+          </div>
+          <div className="card-body">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>MFA Required</p>
+                <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>
+                  When enabled, all users in this tenant (except super_admin) must complete email OTP verification on sign-in.
+                </p>
+                {mfaError && (
+                  <p role="alert" className="text-[12px] mt-2" style={{ color: "var(--danger)" }}>
+                    {mfaError}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!tenant.mfaEnabled}
+                aria-label={`MFA Required for ${tenant.name}: ${tenant.mfaEnabled ? "on" : "off"}`}
+                disabled={mfaUpdating}
+                onClick={handleMfaToggleClick}
+                className="toggle-track shrink-0"
+                style={{
+                  background: tenant.mfaEnabled ? "var(--brand)" : "var(--bg-elevated)",
+                  borderColor: tenant.mfaEnabled ? "var(--brand)" : "var(--bg-border)",
+                  opacity: mfaUpdating ? 0.6 : 1,
+                  cursor: mfaUpdating ? "wait" : "pointer",
+                }}
+              >
+                <span
+                  className="toggle-thumb"
+                  style={{ transform: tenant.mfaEnabled ? "translateX(16px)" : "translateX(2px)" }}
+                />
+                <span className="sr-only">{tenant.mfaEnabled ? "On" : "Off"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Customer Admin */}
       {adminUser && (
@@ -374,6 +465,7 @@ export function CustomerDetailPage() {
                   </td>
                 </tr>
               ) : (
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 tenant.subscriptionPlans.map((plan: any) => (
                   <tr key={plan.id}>
                     <td>{plan.startDate || plan.start_date || "—"}</td>
@@ -387,6 +479,29 @@ export function CustomerDetailPage() {
           </table>
         </div>
       </div>
+
+      {/* MFA enable confirmation — toggleTenantMFA bumps sessionsValidAfter,
+          which signs out every active user in the tenant. */}
+      {mfaConfirmOpen && (
+        <Modal open onClose={() => setMfaConfirmOpen(false)} title="Enable MFA Required?">
+          <p className="text-[13px] mb-4" style={{ color: "var(--text-secondary)" }}>
+            Enabling MFA will sign out all current users in <strong style={{ color: "var(--text-primary)" }}>{tenant.name}</strong>. They&apos;ll need to sign in again with email OTP. Continue?
+          </p>
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: "1px solid var(--bg-border)" }}>
+            <Button variant="secondary" size="sm" onClick={() => setMfaConfirmOpen(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setMfaConfirmOpen(false);
+                applyMfa(true);
+              }}
+            >
+              Enable MFA
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

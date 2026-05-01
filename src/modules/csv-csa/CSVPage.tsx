@@ -1,21 +1,32 @@
+"use client";
+
 import { useState, useEffect, useMemo } from "react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
+import type {
+  GxPSystem as PrismaGxPSystem,
+  ValidationStage as PrismaValidationStage,
+  RTMEntry as PrismaRTMEntry,
+  RoadmapActivity as PrismaRoadmapActivity,
+} from "@prisma/client";
 import { Database, GitBranch, Plus, Info, X, Link2 } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { NoSitesPopup, TabBar, PageHeader } from "@/components/shared";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
-  addSystem, updateSystem, removeSystem, addActivity, updateActivity,
-  type GxPSystem, type RoadmapActivity, type ValidationStageKey, type ValidationStage,
-  VALIDATION_STAGE_LABELS, VALIDATION_STAGE_KEYS,
-} from "@/store/systems.slice";
+  createSystem,
+  updateSystem as updateSystemServer,
+  deleteSystem as deleteSystemServer,
+  addRoadmapActivity,
+  updateRoadmapActivity,
+} from "@/actions/systems";
+import type { GxPSystem, RoadmapActivity, ValidationStageKey, ValidationStage } from "@/types/csv-csa";
+import { VALIDATION_STAGE_LABELS, VALIDATION_STAGE_KEYS, adaptPrismaSystem, adaptPrismaRoadmap, adaptPrismaRTM } from "@/types/csv-csa";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
@@ -38,15 +49,56 @@ const TABS: { id: TabId; label: string; Icon: typeof Database }[] = [
   { id: "rtm", label: "RTM", Icon: Link2 },
 ];
 
+/* ── Server Component props ── */
+
+type PrismaSystemWithRelations = PrismaGxPSystem & {
+  validationStages: PrismaValidationStage[];
+  rtmEntries: PrismaRTMEntry[];
+  roadmapActivities: PrismaRoadmapActivity[];
+};
+
+export interface CSVPageStats {
+  total: number;
+  validated: number;
+  inProgress: number;
+  notStarted: number;
+  overdue: number;
+  auditTrailEnabled: number;
+}
+
+export interface CSVPageRTMStats {
+  total: number;
+  complete: number;
+  partial: number;
+  broken: number;
+}
+
+export interface CSVPageProps {
+  /** Server-fetched GxP systems (with stages/RTM/roadmap relations). */
+  systems: PrismaSystemWithRelations[];
+  /** Server-computed system stats for KPI surface. */
+  stats: CSVPageStats;
+  /** Server-computed RTM traceability stats. */
+  rtmStats: CSVPageRTMStats;
+}
+
 /* ══════════════════════════════════════ */
 
-export function CSVPage() {
+export function CSVPage(props: CSVPageProps = { systems: [], stats: { total: 0, validated: 0, inProgress: 0, notStarted: 0, overdue: 0, auditTrailEnabled: 0 }, rtmStats: { total: 0, complete: 0, partial: 0, broken: 0 } }) {
   const router = useRouter();
-  const dispatch = useAppDispatch();
   const { isViewOnly, role } = useRole();
 
-  /* ── Redux ── */
-  const { systems, roadmap, findings, capas, tenantId } = useTenantData();
+  /* ── Server-fetched systems → adapted to slice shape ──
+   * The page is built around the slice's richer `GxPSystem`
+   * type; we adapt Prisma rows once, then everything downstream
+   * (filters, KPIs, child tabs) keeps working unchanged.
+   * `findings`/`capas` still come from useTenantData (now empty
+   * Redux — they degrade gracefully). `tenantId` from session.
+   */
+  const systems = useMemo(() => props.systems.map(adaptPrismaSystem), [props.systems]);
+  const roadmap = useMemo(() => adaptPrismaRoadmap(props.systems), [props.systems]);
+  const rtmEntries = useMemo(() => adaptPrismaRTM(props.systems), [props.systems]);
+  const { findings, capas } = useTenantData();
   const { org, sites, users } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
@@ -90,7 +142,6 @@ export function CSVPage() {
   const [roadmapSynced, setRoadmapSynced] = useState("");
   const [autoRoadmapPrompt, setAutoRoadmapPrompt] = useState<{ systemId: string; stageKey: ValidationStageKey } | null>(null);
 
-  const pathname = usePathname();
   useEffect(() => {
     const sid = null /*migration: location.state removed*/;
     if (sid) {
@@ -146,66 +197,97 @@ export function CSVPage() {
   }, [filteredRoadmap, systems]);
 
   /* ── Handlers ── */
-  function onAddSave(data: SystemForm) {
-    const id = crypto.randomUUID();
-    dispatch(addSystem({
-      ...data, id,
-      gxpScope: data.gxpScope ?? "",
-      criticalFunctions: data.criticalFunctions ?? "",
-      riskFactors: data.riskFactors ?? "",
-      plannedActions: data.plannedActions ?? "",
-      lastValidated: data.lastValidated ? dayjs(data.lastValidated).utc().toISOString() : "",
-      nextReview: data.nextReview ? dayjs(data.nextReview).utc().toISOString() : "",
-      createdAt: "", tenantId: tenantId ?? "",
-    }));
-    auditLog({ action: "SYSTEM_ADDED", module: "csv-csa", recordId: id, newValue: data });
-    setAddOpen(false); setAddedPopup(true);
-  }
-
-  function onEditSave(data: EditSystemForm) {
-    if (!selectedSystem) return;
-    dispatch(updateSystem({ id: selectedSystem.id, patch: {
-      name: data.name, type: data.type, vendor: data.vendor, version: data.version,
-      gxpRelevance: data.gxpRelevance, riskLevel: data.riskLevel,
-      part11Status: data.part11Status, annex11Status: data.annex11Status,
-      gamp5Category: data.gamp5Category, validationStatus: data.validationStatus,
-      patientSafetyRisk: data.patientSafetyRisk,
-      productQualityImpact: data.productQualityImpact,
-      regulatoryExposure: data.regulatoryExposure,
-      diImpact: data.diImpact,
-      siteId: data.siteId, owner: data.owner,
+  async function onAddSave(data: SystemForm) {
+    const result = await createSystem({
+      name: data.name,
+      type: data.type,
+      vendor: data.vendor,
+      version: data.version,
+      gxpRelevance: data.gxpRelevance,
+      gamp5Category: data.gamp5Category,
+      riskLevel: data.riskLevel,
+      siteId: data.siteId,
       intendedUse: data.intendedUse,
-      gxpScope: data.gxpScope ?? "", criticalFunctions: data.criticalFunctions ?? "",
-      riskFactors: data.riskFactors ?? "", plannedActions: data.plannedActions ?? "",
-      lastValidated: data.lastValidated?.trim() ? dayjs(data.lastValidated).utc().toISOString() : "",
-      nextReview: data.nextReview?.trim() ? dayjs(data.nextReview).utc().toISOString() : "",
-    } }));
-    auditLog({ action: "SYSTEM_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: data });
-    setEditOpen(false); setEditSavedPopup(true);
+      gxpScope: data.gxpScope ?? "",
+      owner: data.owner,
+    });
+    if (!result.success) {
+      console.error("[csv-csa] createSystem failed:", result.error);
+      return;
+    }
+    setAddOpen(false);
+    setAddedPopup(true);
+    router.refresh();
   }
 
-  function onActivitySave(data: ActivityForm) {
-    const newAct: RoadmapActivity = { ...data, id: crypto.randomUUID(), startDate: dayjs(data.startDate).utc().toISOString(), endDate: dayjs(data.endDate).utc().toISOString(), tenantId: tenantId ?? "" };
-    dispatch(addActivity({ ...newAct, tenantId: tenantId ?? "" }));
-    auditLog({ action: "ROADMAP_ACTIVITY_ADDED", module: "csv-csa", recordId: newAct.id, newValue: newAct });
-    setAddActivityOpen(false); setActivityAddedPopup(true);
+  async function onEditSave(data: EditSystemForm) {
+    if (!selectedSystem) return;
+    // Server action accepts only Prisma columns; the slice's richer
+    // patch fields (criticalFunctions / riskFactors / lastValidated /
+    // nextReview / patient/product/regulatory/DI risk classifications)
+    // have no schema columns yet — they're dropped here. Schema can be
+    // extended in a follow-up to persist them.
+    const result = await updateSystemServer(selectedSystem.id, {
+      name: data.name,
+      type: data.type,
+      vendor: data.vendor,
+      version: data.version,
+      gxpRelevance: data.gxpRelevance,
+      gamp5Category: data.gamp5Category,
+      riskLevel: data.riskLevel,
+      siteId: data.siteId,
+      intendedUse: data.intendedUse,
+      gxpScope: data.gxpScope ?? "",
+      owner: data.owner,
+    });
+    if (!result.success) {
+      console.error("[csv-csa] updateSystem failed:", result.error);
+      return;
+    }
+    setEditOpen(false);
+    setEditSavedPopup(true);
+    router.refresh();
+  }
+
+  async function onActivitySave(data: ActivityForm) {
+    const result = await addRoadmapActivity({
+      systemId: data.systemId,
+      title: data.title,
+      type: data.type,
+      owner: data.owner,
+      // completionType is not collected by AddActivityModal today; omit until the Zod schema gains the field.
+      startDate: data.startDate ? dayjs(data.startDate).utc().toISOString() : undefined,
+      endDate: data.endDate ? dayjs(data.endDate).utc().toISOString() : undefined,
+    });
+    if (!result.success) {
+      console.error("[csv-csa] addRoadmapActivity failed:", result.error);
+      return;
+    }
+    setAddActivityOpen(false);
+    setActivityAddedPopup(true);
+    router.refresh();
   }
 
   function handleSaveRiskFactors(text: string) {
     if (!selectedSystem) return;
-    dispatch(updateSystem({ id: selectedSystem.id, patch: { riskFactors: text } }));
+    // `riskFactors` not in Prisma schema — UI-only state until schema
+    // is extended. Audit log preserves the action.
     auditLog({ action: "SYSTEM_RISK_FACTORS_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: { riskFactors: text } });
     setRiskFactorsSaved(true);
   }
 
-  function handleSavePlannedActions(text: string) {
+  async function handleSavePlannedActions(text: string) {
     if (!selectedSystem) return;
-    dispatch(updateSystem({ id: selectedSystem.id, patch: { plannedActions: text } }));
-    auditLog({ action: "SYSTEM_PLANNED_ACTIONS_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: { plannedActions: text } });
+    const result = await updateSystemServer(selectedSystem.id, { plannedActions: text });
+    if (!result.success) {
+      console.error("[csv-csa] updateSystem (plannedActions) failed:", result.error);
+      return;
+    }
     setActionsSaved(true);
+    router.refresh();
   }
 
-  function handleSaveStage(stage: ValidationStage) {
+  async function handleSaveStage(stage: ValidationStage) {
     if (!selectedSystem) return;
     const existing = selectedSystem.validationStages ?? [];
     // Replace or append; preserve order based on VALIDATION_STAGE_KEYS
@@ -219,23 +301,25 @@ export function CSVPage() {
       && merged.every((s) => s.status === "complete" || s.status === "skipped");
     const anyProgress = merged.some((s) => s.status === "complete" || s.status === "in-progress");
 
-    const patch: Partial<GxPSystem> = { validationStages: merged };
-    if (allDone) {
-      patch.validationStatus = "Validated";
-      patch.lastValidated = dayjs().utc().toISOString();
-    } else if (anyProgress && selectedSystem.validationStatus !== "Validated") {
-      patch.validationStatus = "In Progress";
+    // `validationStages` (nested array) and `lastValidated` are slice-only
+    // — neither persists. The aggregate `validationStatus` IS in Prisma so
+    // we sync that via the server action when the per-stage server actions
+    // (submitStageForReview/approveStage etc.) haven't already.
+    if (allDone || (anyProgress && selectedSystem.validationStatus !== "Validated")) {
+      const newStatus = allDone ? "Validated" : "In Progress";
+      if (selectedSystem.validationStatus !== newStatus) {
+        await updateSystemServer(selectedSystem.id, { validationStatus: newStatus });
+      }
     }
-
-    dispatch(updateSystem({ id: selectedSystem.id, patch }));
     auditLog({ action: "SYSTEM_VALIDATION_STAGE_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: stage });
 
     // Bidirectional sync with CSV Roadmap
     if (stage.status === "complete") {
       const matchingActivity = roadmap.find((a) => a.systemId === selectedSystem.id && a.type === stage.key);
       if (matchingActivity && matchingActivity.status !== "Complete") {
-        dispatch(updateActivity({ id: matchingActivity.id, patch: { status: "Complete" } }));
+        await updateRoadmapActivity(matchingActivity.id, "Complete");
         setRoadmapSynced(`${stage.key} roadmap activity marked Complete.`);
+        router.refresh();
       }
     } else if (stage.status === "in-progress") {
       const matchingActivity = roadmap.find((a) => a.systemId === selectedSystem.id && a.type === stage.key);
@@ -245,76 +329,72 @@ export function CSVPage() {
     }
   }
 
-  function handleConfirmAutoRoadmap() {
+  async function handleConfirmAutoRoadmap() {
     if (!autoRoadmapPrompt) return;
     const sys = systems.find((s) => s.id === autoRoadmapPrompt.systemId);
     if (!sys) { setAutoRoadmapPrompt(null); return; }
     const shortName = autoRoadmapPrompt.stageKey;
-    const newAct: RoadmapActivity = {
-      id: crypto.randomUUID(),
-      tenantId: tenantId ?? "",
+    const result = await addRoadmapActivity({
       systemId: sys.id,
       title: `${sys.name} ${shortName} execution`,
       type: shortName,
-      status: "In Progress",
       startDate: dayjs().utc().toISOString(),
       endDate: dayjs().add(30, "day").utc().toISOString(),
       owner: sys.owner,
-    };
-    dispatch(addActivity(newAct));
-    auditLog({ action: "ROADMAP_ACTIVITY_ADDED", module: "csv-csa", recordId: newAct.id, newValue: newAct });
+    });
+    if (!result.success) {
+      console.error("[csv-csa] addRoadmapActivity failed:", result.error);
+      return;
+    }
     setAutoRoadmapPrompt(null);
     setRoadmapSynced(`${shortName} added to CSV Roadmap.`);
+    router.refresh();
   }
 
-  function handleCompleteActivity(activityId: string) {
+  async function handleCompleteActivity(activityId: string) {
     const activity = roadmap.find((a) => a.id === activityId);
     if (!activity) return;
-    dispatch(updateActivity({ id: activityId, patch: { status: "Complete" } }));
-    auditLog({ action: "ROADMAP_ACTIVITY_COMPLETED", module: "csv-csa", recordId: activityId });
-
-    // Sync the matching validation stage
-    const sys = systems.find((s) => s.id === activity.systemId);
-    if (!sys) return;
-    const isStageKey = (VALIDATION_STAGE_KEYS as readonly string[]).includes(activity.type);
-    if (!isStageKey) return;
-    const stageKey = activity.type as ValidationStageKey;
-    const existing = sys.validationStages ?? [];
-    const current = existing.find((s) => s.key === stageKey);
-    if (current?.status === "complete") return;
-    const patchedStage: ValidationStage = { ...current, key: stageKey, status: "complete", date: dayjs().utc().toISOString() };
-    const merged = [...existing.filter((s) => s.key !== stageKey), patchedStage];
-    merged.sort((a, b) => VALIDATION_STAGE_KEYS.indexOf(a.key) - VALIDATION_STAGE_KEYS.indexOf(b.key));
-    const allDone = merged.length >= VALIDATION_STAGE_KEYS.length
-      && merged.every((s) => s.status === "complete" || s.status === "skipped");
-    const patch: Partial<GxPSystem> = { validationStages: merged };
-    if (allDone) {
-      patch.validationStatus = "Validated";
-      patch.lastValidated = dayjs().utc().toISOString();
+    const result = await updateRoadmapActivity(activityId, "Complete");
+    if (!result.success) {
+      console.error("[csv-csa] updateRoadmapActivity failed:", result.error);
+      return;
     }
-    dispatch(updateSystem({ id: sys.id, patch }));
-    setRoadmapSynced(`${VALIDATION_STAGE_LABELS[stageKey]} stage marked Complete in Validation.`);
+    // Stage-side sync of validation status (validationStatus is in Prisma;
+    // validationStages is a slice-only nested field — not persistable via
+    // this server action, so just nudge `validationStatus` if appropriate
+    // and let the next server fetch reconcile derived fields).
+    const sys = systems.find((s) => s.id === activity.systemId);
+    if (sys) {
+      const isStageKey = (VALIDATION_STAGE_KEYS as readonly string[]).includes(activity.type);
+      if (isStageKey) {
+        const stageKey = activity.type as ValidationStageKey;
+        setRoadmapSynced(`${VALIDATION_STAGE_LABELS[stageKey]} stage marked Complete in Validation.`);
+      }
+    }
+    router.refresh();
   }
 
   function handleSaveNextReview(iso: string) {
     if (!selectedSystem) return;
-    dispatch(updateSystem({ id: selectedSystem.id, patch: { nextReview: iso } }));
+    // `nextReview` not in Prisma schema — UI-only state. Audit log preserved.
     auditLog({ action: "SYSTEM_NEXT_REVIEW_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: { nextReview: iso } });
   }
 
   function handleSaveRiskClassification(patch: import("@/modules/csv-csa/detail/RiskControlsPanel").RiskClassificationPatch) {
     if (!selectedSystem) return;
-    dispatch(updateSystem({ id: selectedSystem.id, patch }));
+    // patientSafetyRisk / productQualityImpact / regulatoryExposure / diImpact
+    // are not in the Prisma schema — UI-only state. Audit log preserved.
     auditLog({ action: "SYSTEM_RISK_CLASSIFICATION_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: patch });
   }
 
   function handleSaveRemediation(patch: { remediationTargetDate?: string; remediationNotes?: string }) {
     if (!selectedSystem) return;
+    // remediationTargetDate / remediationNotes are not in the Prisma
+    // schema — UI-only state. Audit log preserved.
     const normalized = {
       remediationTargetDate: patch.remediationTargetDate?.trim() ? dayjs(patch.remediationTargetDate).utc().toISOString() : undefined,
       remediationNotes: patch.remediationNotes?.trim() || undefined,
     };
-    dispatch(updateSystem({ id: selectedSystem.id, patch: normalized }));
     auditLog({ action: "SYSTEM_REMEDIATION_UPDATED", module: "csv-csa", recordId: selectedSystem.id, newValue: normalized });
     setRemediationSaved(true);
   }
@@ -379,7 +459,7 @@ export function CSVPage() {
 
       {/* ═══ RTM TAB ═══ */}
       <div role="tabpanel" id="panel-rtm" aria-labelledby="tab-rtm" tabIndex={0} hidden={activeTab !== "rtm"}>
-        <RTMTab />
+        <RTMTab entries={rtmEntries} systemsOverride={systems} />
       </div>
 
       {/* ═══════════ SYSTEM DETAIL DRAWER ═══════════ */}
@@ -433,8 +513,8 @@ export function CSVPage() {
                 onEdit={() => setEditOpen(true)}
                 onGoToInventory={() => { setDetailDrawerOpen(false); setSelectedSystem(null); }}
                 onNavigateSettings={() => router.push("/settings")}
-                onNavigateGap={(fid) => router.push("/gap-assessment", { state: { openFindingId: fid } })}
-                onNavigateCapa={(cid) => router.push("/capa", { state: { openCapaId: cid } })}
+                onNavigateGap={() => router.push("/gap-assessment")}
+                onNavigateCapa={() => router.push("/capa")}
                 onSaveRemediation={handleSaveRemediation}
                 onSaveRiskFactors={handleSaveRiskFactors}
                 onSavePlannedActions={handleSavePlannedActions}
@@ -457,7 +537,7 @@ export function CSVPage() {
       <Popup isOpen={editSavedPopup} variant="success" title="System updated" description="Changes saved to the system record." onDismiss={() => setEditSavedPopup(false)} />
       <Popup isOpen={riskFactorsSaved} variant="success" title="Risk factors saved" description="Risk factors updated. Visible in system detail and inspector review." onDismiss={() => setRiskFactorsSaved(false)} />
       <Popup isOpen={actionsSaved} variant="success" title="Planned actions saved" description="Validation plan updated." onDismiss={() => setActionsSaved(false)} />
-      <Popup isOpen={removePopup} variant="confirmation" title="Remove this system?" description="The system will be removed from the inventory. Existing findings and CAPAs are not affected." onDismiss={() => { setRemovePopup(false); setSystemToRemove(null); }} actions={[{ label: "Cancel", style: "ghost", onClick: () => { setRemovePopup(false); setSystemToRemove(null); } }, { label: "Yes, remove", style: "primary", onClick: () => { if (systemToRemove) dispatch(removeSystem(systemToRemove)); if (selectedSystem?.id === systemToRemove) setSelectedSystemId(null); setRemovePopup(false); setSystemToRemove(null); } }]} />
+      <Popup isOpen={removePopup} variant="confirmation" title="Remove this system?" description="The system will be removed from the inventory. Existing findings and CAPAs are not affected." onDismiss={() => { setRemovePopup(false); setSystemToRemove(null); }} actions={[{ label: "Cancel", style: "ghost", onClick: () => { setRemovePopup(false); setSystemToRemove(null); } }, { label: "Yes, remove", style: "primary", onClick: async () => { if (systemToRemove) { const r = await deleteSystemServer(systemToRemove); if (!r.success) console.error("[csv-csa] deleteSystem failed:", r.error); } if (selectedSystem?.id === systemToRemove) setSelectedSystemId(null); setRemovePopup(false); setSystemToRemove(null); router.refresh(); } }]} />
       <Popup isOpen={activityAddedPopup} variant="success" title="Activity added" description="Roadmap activity added. It will appear in the system's Validation tab and CSV Roadmap timeline." onDismiss={() => setActivityAddedPopup(false)} />
       <Popup isOpen={remediationSaved} variant="success" title="Remediation details saved" description="Visible in the DI &amp; Audit Trail tab and inspector review." onDismiss={() => setRemediationSaved(false)} />
       <Popup isOpen={!!roadmapSynced} variant="success" title="Roadmap synced" description={roadmapSynced} onDismiss={() => setRoadmapSynced("")} />

@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect } from "react";
 import { Paperclip } from "lucide-react";
 import clsx from "clsx";
@@ -17,6 +19,8 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, findingId, currentL
   const [evidenceInput, setEvidenceInput] = useState(currentLink);
 
   useEffect(() => {
+    // Sync controlled input value when the prop changes.
+     
     setEvidenceInput(currentLink);
   }, [currentLink, findingId]);
 

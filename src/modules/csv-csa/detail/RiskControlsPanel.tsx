@@ -1,13 +1,13 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { ShieldAlert, AlertTriangle, CheckCircle2, Info, Pencil, X, Save } from "lucide-react";
-import type { GxPSystem, RiskLevel } from "@/store/systems.slice";
+import type { GxPSystem, RiskLevel } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 
 /* ── Helpers ── */
 
-import type { ComplianceStatus, GAMP5Category } from "@/store/systems.slice";
+import type { ComplianceStatus, GAMP5Category } from "@/types/csv-csa";
 
 function complianceBadge(s: ComplianceStatus) {
   const m: Record<ComplianceStatus, "green" | "red" | "amber" | "gray"> = { Compliant: "green", "Non-Compliant": "red", "In Progress": "amber", "N/A": "gray" };

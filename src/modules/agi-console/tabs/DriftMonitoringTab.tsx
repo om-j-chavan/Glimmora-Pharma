@@ -2,7 +2,7 @@ import { Activity, AlertCircle, Plus } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import dayjs from "@/lib/dayjs";
 import { chartDefaults } from "@/lib/chartColors";
-import type { DriftAlert, DriftSeverity, DriftStatus } from "@/store/agiDrift.slice";
+import type { DriftAlert, DriftSeverity, DriftStatus } from "@/types/agi";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 

@@ -11,8 +11,8 @@ import {
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { logout } from "@/store/auth.slice";
-import { logout as nextAuthLogout } from "@/lib/authClient";
+import { logout, setCredentials, type UserRole } from "@/store/auth.slice";
+import { logout as nextAuthLogout, fetchCurrentUser } from "@/lib/authClient";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 const NAV_ITEMS = [
@@ -28,8 +28,38 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // SSR-safe mount flag — intentionally syncs on mount only.
+
     setMounted(true);
   }, []);
+
+  // Hydrate Redux auth.user from the NextAuth session cookie when it's missing.
+  // The session cookie can outlive the localStorage-persisted Redux state
+  // (version bump, incognito, new tab, debounced write missed by a fast
+  // reload). Without this, role-gated UI like the MFA toggle silently hides
+  // even though the user is fully authenticated server-side.
+  useEffect(() => {
+    if (user) return;
+    let cancelled = false;
+    fetchCurrentUser().then((u) => {
+      if (cancelled || !u) return;
+      dispatch(
+        setCredentials({
+          token: "nextauth-session",
+          user: {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role as UserRole,
+            gxpSignatory: u.gxpSignatory,
+            orgId: u.orgId,
+            tenantId: u.tenantId,
+          },
+        }),
+      );
+    });
+    return () => { cancelled = true; };
+  }, [user, dispatch]);
 
   const initials = mounted && user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)

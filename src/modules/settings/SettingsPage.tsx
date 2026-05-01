@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { Building2, MapPin, Users, BookOpen, Bot, Shield, Info } from "lucide-react";
 import { OrgTab } from "./tabs/OrgTab";

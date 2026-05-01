@@ -1,15 +1,25 @@
-import { useState, useEffect, type ReactNode } from "react";
+"use client";
+
+import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
 import {
   Map, Shield, BookOpen, GraduationCap, Users, GitBranch, Database, Monitor,
-  FileText, ClipboardList, CheckCircle2, Clock, AlertTriangle, Plus, ArrowLeft,
-  FolderOpen, ChevronRight, ChevronUp, UserCheck, X, Play, ChevronDown, Calendar,
-  Lock, Info, Link2 as LinkIcon,
+  FileText, ClipboardList, CheckCircle2, Clock, AlertTriangle, Plus,
+  ChevronRight, ChevronUp, UserCheck, X, ChevronDown, Calendar,
+  Link2 as LinkIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import type {
+  Inspection as PrismaInspection,
+  ReadinessAction as PrismaReadinessAction,
+  Simulation as PrismaSimulation,
+  TrainingRecord as PrismaTrainingRecord,
+  Playbook as PrismaPlaybook,
+} from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -19,11 +29,12 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
-  addCard, updateCard, addSimulation, updateSimulation, addTraining, removeTraining,
-  addInspection, setActiveInspection,
-  type Playbook, type Simulation, type ReadinessLane, type ReadinessBucket,
-  type PlaybookType, type InspectionAgency, type InspectionType,
+  addCard, updateCard, addSimulation, updateSimulation, addTraining,
+  setActiveInspection,
+  type Inspection, type Playbook, type Simulation, type ReadinessLane, type ReadinessBucket,
+  type InspectionAgency, type InspectionType, type InspectionStatus,
 } from "@/store/readiness.slice";
+import { createInspection as createInspectionAction, completeInspection as completeInspectionAction } from "@/actions/inspections";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -31,6 +42,9 @@ import { Badge } from "@/components/ui/Badge";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 import { PageHeader, TabBar, StatCard, CardSection } from "@/components/shared";
+import { RoadmapPrismaTab } from "./RoadmapPrismaTab";
+import { TrainingPrismaTab } from "./tabs/TrainingPrismaTab";
+import { PlaybooksPrismaTab } from "./tabs/PlaybooksPrismaTab";
 
 /* ── Constants ── */
 
@@ -38,8 +52,6 @@ const LANES: ReadinessLane[] = ["People", "Process", "Data", "Systems", "Documen
 const BUCKETS: ReadinessBucket[] = ["Immediate", "31-60 days", "61-90 days"];
 const BUCKET_COLORS: Record<string, string> = { Immediate: "#ef4444", "31-60 days": "#f59e0b", "61-90 days": "#10b981" };
 const LANE_ICONS: Record<ReadinessLane, LucideIcon> = { People: Users, Process: GitBranch, Data: Database, Systems: Monitor, Documentation: FileText };
-const PB_CFG: Record<PlaybookType, { color: string; icon: LucideIcon }> = { "Front Room": { color: "#0ea5e9", icon: Users }, "Back Room": { color: "#6366f1", icon: Shield }, SME: { color: "#10b981", icon: GraduationCap }, "DIL Handling": { color: "#f59e0b", icon: FolderOpen } };
-
 const TABS = [
   { id: "training", label: "Training & Simulations", Icon: GraduationCap },
   { id: "playbooks", label: "Playbooks", Icon: BookOpen },
@@ -80,26 +92,93 @@ const cardSchema = z.object({
 });
 type CardForm = z.infer<typeof cardSchema>;
 
+/* ── Server Component props ── */
+
+type PrismaInspectionWithRelations = PrismaInspection & {
+  actions: PrismaReadinessAction[];
+  simulations: PrismaSimulation[];
+  trainingRecords: PrismaTrainingRecord[];
+};
+
+export interface ReadinessPageStats {
+  totalInspections: number;
+  activeInspections: number;
+  completedInspections: number;
+  lowestReadiness: number;
+}
+
+export interface ReadinessPageProps {
+  inspections: PrismaInspectionWithRelations[];
+  stats: ReadinessPageStats;
+  playbooks: PrismaPlaybook[];
+}
+
+/**
+ * Adapt a Prisma Inspection (+ actions for live readiness %) into the
+ * richer Redux `Inspection` shape the existing UI is built around. Fields
+ * the schema doesn't store (siteId, frontRoom, backRoom, linkedFindings,
+ * completionOutcome) get safe defaults — the UI degrades gracefully.
+ */
+function adaptInspection(p: PrismaInspectionWithRelations): Inspection {
+  const total = p.actions.length;
+  const completed = p.actions.filter((a) => a.status === "Complete").length;
+  const score = total > 0 ? Math.round((completed / total) * 100) : 0;
+  return {
+    id: p.id,
+    tenantId: p.tenantId,
+    title: p.title,
+    siteId: "",
+    siteName: p.siteName,
+    agency: (p.agency as InspectionAgency) ?? "FDA",
+    type: (p.type as InspectionType) ?? "announced",
+    status: (p.status as InspectionStatus) ?? "preparation",
+    expectedDate: p.expectedDate ? p.expectedDate.toISOString() : undefined,
+    startDate: p.startDate ? p.startDate.toISOString() : undefined,
+    endDate: p.endDate ? p.endDate.toISOString() : undefined,
+    readinessScore: score,
+    totalActions: total,
+    completedActions: completed,
+    inspectionLead: p.inspectionLead ?? "",
+    createdBy: p.createdBy,
+    createdAt: p.createdAt.toISOString(),
+    updatedAt: p.updatedAt.toISOString(),
+    notes: p.notes ?? undefined,
+    linkedFDA483Id: p.linkedFDA483Id ?? undefined,
+  };
+}
+
 /* ══════════════════════════════════════ */
 
-export function ReadinessPage() {
+export function ReadinessPage({ inspections: prismaInspections, playbooks }: ReadinessPageProps) {
+  const router = useRouter();
   const dispatch = useAppDispatch();
-  const { cards, playbooks, simulations, training, score: readinessScore, complete: completeCount, total: totalCards, inspections, activeInspectionId } = useAppSelector((s) => s.readiness);
+  // Inspections come from Prisma (server-fetched). Cards/playbooks/simulations/
+  // training still live in Redux — they have no Prisma model yet, so this is
+  // a partial migration. After the prisma side is added, those Redux reads
+  // should be replaced with props the same way `inspections` was.
+  const { cards, training, score: readinessScore, complete: completeCount, total: totalCards, activeInspectionId } = useAppSelector((s) => s.readiness);
+  const inspections = useMemo(() => prismaInspections.map(adaptInspection), [prismaInspections]);
   const { users, tenantId, allSites } = useTenantConfig();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const authUser = useAppSelector((s) => s.auth.user);
-  const currentUserId = authUser?.id ?? "";
   const { role } = useRole();
-  const { canScheduleSimulation, canUpdateTraining, canCompleteSimulation } = usePermissions();
+  const { canScheduleSimulation } = usePermissions();
 
   const tenantCards = cards.filter((c) => c.tenantId === tenantId);
-  const tenantPlaybooks = playbooks.filter((p) => p.tenantId === tenantId);
-  const tenantSims = simulations.filter((s) => s.tenantId === tenantId);
 
   const tenantInspections = inspections.filter((i) => i.tenantId === tenantId);
   const activeInspection = tenantInspections.find((i) => i.id === activeInspectionId) ?? null;
   const activeInspections = tenantInspections.filter((i) => i.status !== "completed" && i.status !== "cancelled");
   const completedInspections = tenantInspections.filter((i) => i.status === "completed");
+
+  // Selected Prisma inspection (with relations) for the Roadmap tab and
+  // the Complete modal — the adapted Inspection above loses the `actions`
+  // array, so we look up the original Prisma row by ID.
+  const selectedPrismaInspection = useMemo(
+    () => prismaInspections.find((i) => i.id === activeInspectionId) ?? null,
+    [prismaInspections, activeInspectionId],
+  );
+  const isAdmin = role === "qa_head" || role === "super_admin" || role === "customer_admin";
 
   const inProgressCount = tenantCards.filter((c) => c.status === "In Progress").length;
   const overdueCount = tenantCards.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length;
@@ -119,11 +198,10 @@ export function ReadinessPage() {
   };
   const roleLabel = (r: string) => ROLE_LABELS[r] ?? r;
   const simEligibleUsers = users.filter((u) => !["super_admin", "customer_admin", "viewer"].includes(u.role));
-  const canEditTrainingFor = (userId: string) => canUpdateTraining || userId === currentUserId;
-  const canManageSims = canScheduleSimulation;
 
   const [activeTab, setActiveTab] = useState<TabId>("training");
-  const [selectedPlaybook, setSelectedPlaybook] = useState<Playbook | null>(null);
+  // selectedPlaybook value is unused — only the setter resets it on tab change.
+  const [, setSelectedPlaybook] = useState<Playbook | null>(null);
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [addSimOpen, setAddSimOpen] = useState(false);
   const [cardSavedPopup, setCardSavedPopup] = useState(false);
@@ -143,35 +221,72 @@ export function ReadinessPage() {
   const [inspNotes, setInspNotes] = useState("");
   const [inspCreatedPopup, setInspCreatedPopup] = useState(false);
 
-  function handleCreateInspection() {
-    if (!inspTitle.trim() || !inspSite || !inspLead) return;
-    const id = `INSP-${dayjs().format("YYYY")}-${String(tenantInspections.length + 1).padStart(3, "0")}`;
-    const site = allSites.find((s) => s.id === inspSite);
-    const now = new Date().toISOString();
-    dispatch(addInspection({
-      id, tenantId: tenantId ?? "", title: inspTitle.trim(),
-      siteId: inspSite, siteName: site?.name ?? inspSite,
-      agency: inspAgency, type: inspType, status: "preparation",
-      expectedDate: inspDate ? dayjs(inspDate).utc().toISOString() : undefined,
-      readinessScore: 0, totalActions: 16, completedActions: 0,
-      inspectionLead: inspLead,
-      createdBy: currentUserId, createdAt: now, updatedAt: now,
-      notes: inspNotes.trim() || undefined,
-    }));
-    dispatch(setActiveInspection(id));
-    auditLog({ action: "INSPECTION_CREATED", module: "Inspection Readiness", recordId: id, recordTitle: inspTitle.trim() });
-    setCreateInspOpen(false);
-    setInspTitle(""); setInspDate(""); setInspNotes("");
-    setInspCreatedPopup(true);
+  // Complete Inspection modal
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [completionOutcome, setCompletionOutcome] = useState("");
+  const [linkedFDA483, setLinkedFDA483] = useState("");
+  const [completeLoading, setCompleteLoading] = useState(false);
+  const [completedPopup, setCompletedPopup] = useState(false);
+
+  function resetCompleteForm() {
+    setCompleteOpen(false);
+    setCompletionOutcome("");
+    setLinkedFDA483("");
   }
 
-  // Training tab info banner (dismissible + persisted)
-  const [showTrainingInfo, setShowTrainingInfo] = useState(() => {
-    try { return localStorage.getItem("glimmora-training-info-dismissed") !== "1"; } catch { return true; }
-  });
-  function dismissTrainingInfo() {
-    setShowTrainingInfo(false);
-    try { localStorage.setItem("glimmora-training-info-dismissed", "1"); } catch { /* ignore */ }
+  async function handleCompleteInspection() {
+    if (!selectedPrismaInspection || !completionOutcome) return;
+    setCompleteLoading(true);
+    const result = await completeInspectionAction(
+      selectedPrismaInspection.id,
+      completionOutcome,
+      linkedFDA483.trim() || undefined,
+    );
+    setCompleteLoading(false);
+    if (!result.success) {
+      console.error("[readiness] completeInspection failed:", result.error);
+      return;
+    }
+    // Move active selection to the next still-open inspection.
+    const remaining = prismaInspections.filter(
+      (i) => i.id !== selectedPrismaInspection.id && i.status !== "completed",
+    );
+    if (remaining[0]) dispatch(setActiveInspection(remaining[0].id));
+    resetCompleteForm();
+    setCompletedPopup(true);
+    router.refresh();
+  }
+
+  async function handleCreateInspection() {
+    if (!inspTitle.trim() || !inspSite || !inspLead) return;
+    const site = allSites.find((s) => s.id === inspSite);
+
+    const result = await createInspectionAction({
+      title: inspTitle.trim(),
+      siteName: site?.name ?? inspSite,
+      agency: inspAgency,
+      type: inspType,
+      expectedDate: inspDate ? dayjs(inspDate).utc().toISOString() : undefined,
+      inspectionLead: inspLead,
+      notes: inspNotes.trim() || undefined,
+    });
+
+    if (!result.success) {
+      console.error("[readiness] createInspection failed:", result.error);
+      return;
+    }
+
+    // Server action created the inspection + 16 standard ReadinessActions and
+    // wrote an audit log entry. Set it active so the UI focuses it as soon as
+    // the refresh below brings it into the props.
+    const created = result.data as { id: string } | null;
+    if (created?.id) dispatch(setActiveInspection(created.id));
+    setCreateInspOpen(false);
+    setInspTitle("");
+    setInspDate("");
+    setInspNotes("");
+    setInspCreatedPopup(true);
+    router.refresh();
   }
 
   // Simulation Start / Complete modal state
@@ -185,18 +300,6 @@ export function ReadinessPage() {
 
   function toggleCompleteModule(m: string) {
     setCompleteModules((s) => { const n = new Set(s); if (n.has(m)) n.delete(m); else n.add(m); return n; });
-  }
-
-  function openStartSimulation(sim: Simulation) {
-    if (sim.status === "Scheduled") {
-      dispatch(updateSimulation({ id: sim.id, patch: { status: "In Progress" } }));
-      auditLog({ action: "SIMULATION_STARTED", module: "readiness", recordId: sim.id, newValue: { status: "In Progress" } });
-    }
-    setActiveSim(sim);
-    setSimScore(sim.score != null ? String(sim.score) : "");
-    setSimFeedback(sim.notes ?? "");
-    setSimScoreError("");
-    setCompleteModules(new Set());
   }
 
   function completeActiveSimulation() {
@@ -323,9 +426,11 @@ export function ReadinessPage() {
   }
 
   const simSchema = z.object({ title: z.string().min(3, "Title required"), type: z.enum(["Mock Inspection", "DIL Drill", "SME Q&A", "Leadership Briefing"]), scheduledAt: z.string().min(1, "Date required"), duration: z.coerce.number().min(15, "Min 15 min"), participants: z.array(z.string()).min(1, "Select at least one") });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { control: simCtl, handleSubmit: simSubmit, reset: simReset, watch: simWatch, setValue: simSetValue, formState: { errors: simErrors } } = useForm({ resolver: zodResolver(simSchema) as any, defaultValues: { title: "", type: "Mock Inspection" as const, scheduledAt: "", duration: 90, participants: [] as string[] } });
   const watchParticipants = simWatch("participants") ?? [];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function onSimSave(data: any) {
     const id = crypto.randomUUID();
     dispatch(addSimulation({ ...data, id, status: "Scheduled", tenantId: tenantId ?? "", scheduledAt: dayjs(data.scheduledAt).utc().toISOString() }));
@@ -385,8 +490,19 @@ export function ReadinessPage() {
             {activeInspection.expectedDate && <span>· Expected {dayjs.utc(activeInspection.expectedDate).tz(timezone).format("DD MMM YYYY")}</span>}
           </div>
         )}
+        {activeInspection && isAdmin && activeInspection.status !== "completed" && (
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={CheckCircle2}
+            onClick={() => setCompleteOpen(true)}
+            className="ml-auto"
+          >
+            Complete Inspection
+          </Button>
+        )}
         {(canScheduleSimulation) && (
-          <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateInspOpen(true)} className="ml-auto">New Inspection</Button>
+          <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateInspOpen(true)} className={activeInspection && isAdmin ? "" : "ml-auto"}>New Inspection</Button>
         )}
       </div>
 
@@ -396,6 +512,32 @@ export function ReadinessPage() {
       {/* ═══ TAB 1 — ROADMAP ═══ */}
       {activeTab === "roadmap" && (
         <section aria-label="Readiness roadmap">
+          {selectedPrismaInspection ? (
+            <RoadmapPrismaTab inspection={selectedPrismaInspection} isAdmin={isAdmin} />
+          ) : (
+            <div
+              className="text-center py-16 rounded-xl border"
+              style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
+            >
+              <Map className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              <p className="text-[14px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
+                No inspection selected
+              </p>
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                Select or create an inspection to see its readiness roadmap.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Legacy Redux-driven roadmap (cards/suggestions) — superseded by
+          RoadmapPrismaTab above. Block kept disabled until a follow-up
+          turn migrates cards-as-Prisma-objects (ReadinessCard model now
+          exists; needs server actions + UI wiring). */}
+      {/* eslint-disable-next-line no-constant-binary-expression */}
+      {false && (
+        <section aria-label="Readiness roadmap (legacy)">
           {/* Stats */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <StatCard icon={ClipboardList} color="#0ea5e9" label="Total actions" value={String(tenantCards.length)} sub="Across all lanes" />
@@ -669,385 +811,29 @@ export function ReadinessPage() {
 
       {/* ═══ TAB 3 — PLAYBOOKS ═══ */}
       {activeTab === "playbooks" && (
-        <section aria-label="Inspection playbooks">
-          {!selectedPlaybook ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {tenantPlaybooks.map((pb) => {
-                const cfg = PB_CFG[pb.type];
-                const PbIcon = cfg.icon;
-                return (
-                  <button key={pb.id} type="button" onClick={() => setSelectedPlaybook(pb)} className={clsx("card text-left cursor-pointer transition-colors hover:border-[#0ea5e9]", "border-(--bg-border)")} aria-label={`Open ${pb.title}`}>
-                    <div className="card-body">
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: cfg.color + "18" }}><PbIcon className="w-5 h-5" style={{ color: cfg.color }} aria-hidden="true" /></div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{pb.title}</p>
-                          <Badge variant="gray">{pb.type}</Badge>
-                        </div>
-                      </div>
-                      <p className="text-[12px] mb-3" style={{ color: "var(--text-secondary)" }}>{pb.description}</p>
-                      <div className="flex gap-4 text-[11px]" style={{ color: "var(--text-muted)" }}>
-                        <span>{pb.steps.length} steps</span><span>{pb.templates.length} templates</span>
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div>
-              <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => setSelectedPlaybook(null)} className="mb-4">All playbooks</Button>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: PB_CFG[selectedPlaybook.type].color + "18" }}>
-                  {(() => { const I = PB_CFG[selectedPlaybook.type].icon; return <I className="w-5 h-5" style={{ color: PB_CFG[selectedPlaybook.type].color }} aria-hidden="true" />; })()}
-                </div>
-                <div><p className="text-[16px] font-bold" style={{ color: "var(--text-primary)" }}>{selectedPlaybook.title}</p><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{selectedPlaybook.description}</p></div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Steps */}
-                <div className="lg:col-span-2 space-y-4">
-                  {selectedPlaybook.steps.map((step) => (
-                    <div key={step.id} className="card">
-                      <div className="card-body">
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="w-6 h-6 rounded-full bg-[#0ea5e9] flex items-center justify-center shrink-0"><span className="text-white text-[11px] font-bold">{step.order}</span></div>
-                          <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{step.action}</p>
-                        </div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 text-[#10b981]">Do</p>
-                        <ul className="space-y-1 mb-3 list-none p-0 m-0">
-                          {step.do.map((d) => <li key={d} className="flex items-start gap-2 py-0.5"><CheckCircle2 className="w-3.5 h-3.5 text-[#10b981] shrink-0 mt-0.5" aria-hidden="true" /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{d}</span></li>)}
-                        </ul>
-                        <p className="text-[11px] font-semibold uppercase tracking-wider mb-2 text-[#ef4444]">Don't</p>
-                        <ul className="space-y-1 list-none p-0 m-0">
-                          {step.dont.map((d) => <li key={d} className="flex items-start gap-2 py-0.5"><X className="w-3.5 h-3.5 text-[#ef4444] shrink-0 mt-0.5" aria-hidden="true" /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{d}</span></li>)}
-                        </ul>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {/* Templates */}
-                <div>
-                  <CardSection icon={FileText} iconColor="#6366f1" title="Document templates">
-                    {selectedPlaybook.templates.map((t) => (
-                      <div key={t} className="flex items-center gap-2 py-2.5 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
-                        <FileText className="w-3.5 h-3.5 text-[#0ea5e9] shrink-0" aria-hidden="true" />
-                        <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>{t}</span>
-                      </div>
-                    ))}
-                    <p className="text-[11px] italic mt-3" style={{ color: "var(--text-muted)" }}>Template downloads available when document storage is connected.</p>
-                  </CardSection>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
+        <PlaybooksPrismaTab playbooks={playbooks} isAdmin={isAdmin} />
       )}
 
       {/* ═══ TAB 4 — TRAINING ═══ */}
       {activeTab === "training" && (
-        <section aria-label="Training and simulations" className="space-y-6">
-          {/* Header */}
-          <div className="flex items-start justify-between">
-            <div><p className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>Training Records &amp; Simulations</p><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Track team training completion and mock inspection scores</p></div>
-            {canManageSims ? (
-              <Button variant="primary" size="sm" icon={Plus} onClick={() => setAddSimOpen(true)}>Schedule simulation</Button>
-            ) : (
-              <p className="text-[11px] italic shrink-0 max-w-[200px] text-right" style={{ color: "var(--text-muted)" }}>Contact QA Head to schedule simulations</p>
-            )}
-          </div>
-
-          {/* About this tab — dismissible info banner */}
-          {showTrainingInfo && (
-            <div
-              role="region"
-              aria-labelledby="training-info-title"
-              className="flex items-start gap-3 p-4 rounded-xl border"
-              style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}
-            >
-              <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-              <div className="flex-1 space-y-2">
-                <p id="training-info-title" className="text-[12px] font-semibold" style={{ color: "var(--brand)" }}>About this tab</p>
-                <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>This tab tracks training completion and mock inspection scores.</p>
-                <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Actual training is conducted offline by your QA Head or Glimmora consultant.</p>
-                <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>QA Head marks training complete after each session.</p>
-              </div>
-              <button
-                type="button"
-                onClick={dismissTrainingInfo}
-                aria-label="Dismiss info banner"
-                className="p-1 rounded-md cursor-pointer border-none bg-transparent hover:bg-(--brand-muted)"
-                style={{ color: "var(--brand)" }}
-              >
-                <X className="w-4 h-4" aria-hidden="true" />
-              </button>
-            </div>
-          )}
-
-          {/* Sim stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <StatCard icon={Clock} color="#0ea5e9" label="Scheduled" value={String(tenantSims.filter((s) => s.status === "Scheduled").length)} sub="Upcoming" />
-            <StatCard icon={AlertTriangle} color="#f59e0b" label="In progress" value={String(tenantSims.filter((s) => s.status === "In Progress").length)} sub="Active now" />
-            <StatCard icon={CheckCircle2} color="#10b981" label="Completed" value={String(tenantSims.filter((s) => s.status === "Completed").length)} sub="Done" />
-            {(() => { const scores = tenantSims.filter((s) => s.score != null).map((s) => s.score!); const avg = scores.length === 0 ? null : Math.round(scores.reduce((a, b) => a + b, 0) / scores.length); return <StatCard icon={GraduationCap} color="#6366f1" label="Avg score" value={avg === null ? "\u2014" : `${avg}%`} sub={scores.length === 0 ? "No scores yet" : `From ${scores.length} simulation${scores.length !== 1 ? "s" : ""}`} />; })()}
-          </div>
-
-          {/* Sim 3-column grid */}
-          {(() => {
-            const todayStart = dayjs().tz(timezone).startOf("day");
-            const isOverdueSim = (s: Simulation) => s.status === "Scheduled" && dayjs.utc(s.scheduledAt).tz(timezone).startOf("day").isBefore(todayStart);
-            const byDate = (a: Simulation, b: Simulation) => dayjs(a.scheduledAt).diff(dayjs(b.scheduledAt));
-            const overdueSims = tenantSims.filter(isOverdueSim).sort(byDate);
-            const upcomingSims = tenantSims.filter((s) => (s.status === "Scheduled" && !isOverdueSim(s)) || s.status === "In Progress").sort(byDate);
-            const completedSims = tenantSims.filter((s) => s.status === "Completed").sort((a, b) => dayjs(b.scheduledAt).diff(dayjs(a.scheduledAt)));
-
-            const simTypeIcon = (type: Simulation["type"]): { Icon: LucideIcon; color: string } => {
-              if (type === "Mock Inspection") return { Icon: Shield, color: "#ef4444" };
-              if (type === "DIL Drill") return { Icon: FolderOpen, color: "#f59e0b" };
-              if (type === "SME Q&A") return { Icon: GraduationCap, color: "#6366f1" };
-              return { Icon: GraduationCap, color: "#6366f1" };
-            };
-
-            const scoreColor = (s: number) => s >= 90 ? "#10b981" : s >= 80 ? "#0ea5e9" : s >= 70 ? "#f59e0b" : "#ef4444";
-
-            const SimCardHeader = ({ sim }: { sim: Simulation }) => {
-              const { Icon, color } = simTypeIcon(sim.type);
-              return (
-                <div className="flex items-start gap-2.5 mb-3">
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: color + "18" }}>
-                    <Icon className="w-4 h-4" style={{ color }} aria-hidden="true" />
-                  </div>
-                  <p className="text-[12.5px] font-semibold leading-tight" style={{ color: "var(--text-primary)" }}>{sim.title}</p>
-                </div>
-              );
-            };
-
-            const SimCardMeta = ({ sim, showTime = true }: { sim: Simulation; showTime?: boolean }) => (
-              <div className="space-y-1 mb-3">
-                <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                  <Calendar className="w-3 h-3 shrink-0" aria-hidden="true" />
-                  <span>{dayjs.utc(sim.scheduledAt).tz(timezone).format(showTime ? "DD MMM YYYY HH:mm" : "DD MMM YYYY")}</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                  <Clock className="w-3 h-3 shrink-0" aria-hidden="true" />
-                  <span>{sim.duration} min</span>
-                </div>
-                <div className="flex items-start gap-1.5 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                  <Users className="w-3 h-3 shrink-0 mt-0.5" aria-hidden="true" />
-                  <span className="line-clamp-2">{sim.participants.map((id) => ownerName(id)).join(", ")}</span>
-                </div>
-              </div>
-            );
-
-            const cardShell = (borderColor: string) => ({
-              borderLeft: `3px solid ${borderColor}`,
-            });
-
-            return (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* ─── COLUMN 1: OVERDUE ─── */}
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--danger-bg)", border: `1px solid ${"var(--danger-bg)"}` }}>
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 shrink-0" style={{ color: "#A32D2D" }} aria-hidden="true" />
-                      <p className="text-[12.5px] font-semibold" style={{ color: isDark ? "#ef4444" : "#A32D2D" }}>Overdue</p>
-                    </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--danger-bg)", color: isDark ? "#ef4444" : "#A32D2D" }}>
-                      {overdueSims.length} simulation{overdueSims.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  {overdueSims.length === 0 ? (
-                    <div className="card p-4 text-center">
-                      <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-[#10b981]" aria-hidden="true" />
-                      <p className="text-[12px] font-medium" style={{ color: "#10b981" }}>No overdue simulations</p>
-                    </div>
-                  ) : overdueSims.map((sim) => (
-                    <div key={sim.id} className="card p-4" style={cardShell("#ef4444")}>
-                      <SimCardHeader sim={sim} />
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--danger-bg)", color: "#ef4444" }}>Overdue</span>
-                        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{dayjs.utc(sim.scheduledAt).tz(timezone).format("DD MMM YYYY")}</span>
-                      </div>
-                      <SimCardMeta sim={sim} />
-                      {canCompleteSimulation && (
-                        <Button variant="primary" size="sm" icon={CheckCircle2} fullWidth onClick={() => openStartSimulation(sim)}>Mark complete</Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {/* ─── COLUMN 2: UPCOMING ─── */}
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--warning-bg)", border: `1px solid ${"var(--warning-bg)"}` }}>
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 shrink-0" style={{ color: "#7A6200" }} aria-hidden="true" />
-                      <p className="text-[12.5px] font-semibold" style={{ color: isDark ? "#f59e0b" : "#7A6200" }}>Upcoming</p>
-                    </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--warning-bg)", color: isDark ? "#f59e0b" : "#7A6200" }}>
-                      {upcomingSims.length} simulation{upcomingSims.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  {upcomingSims.length === 0 ? (
-                    <div className="card p-4 text-center">
-                      <p className="text-[12px] font-medium mb-0.5" style={{ color: "var(--text-secondary)" }}>No upcoming simulations</p>
-                      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Schedule one above</p>
-                    </div>
-                  ) : upcomingSims.map((sim) => {
-                    const simDate = dayjs.utc(sim.scheduledAt).tz(timezone).startOf("day");
-                    const dl = simDate.diff(todayStart, "day");
-                    const isToday = dl === 0;
-                    const isRunning = sim.status === "In Progress";
-                    const borderColor = isRunning ? "#0ea5e9" : "#f59e0b";
-                    return (
-                      <div key={sim.id} className="card p-4" style={cardShell(borderColor)}>
-                        <SimCardHeader sim={sim} />
-                        <div className="flex items-center gap-2 mb-3 flex-wrap">
-                          {isToday ? (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--success-bg)", color: "#10b981" }}>Today</span>
-                          ) : dl === 1 ? (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}>Tomorrow</span>
-                          ) : (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}>{dl} days away</span>
-                          )}
-                          {isRunning && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--brand-muted)", color: "#0ea5e9" }}>In Progress</span>
-                          )}
-                        </div>
-                        <SimCardMeta sim={sim} />
-                        {isToday && sim.status === "Scheduled" && canManageSims && (
-                          <Button variant="primary" size="sm" icon={Play} fullWidth onClick={() => openStartSimulation(sim)}>Start simulation</Button>
-                        )}
-                        {isRunning && canCompleteSimulation && (
-                          <Button variant="primary" size="sm" icon={CheckCircle2} fullWidth onClick={() => openStartSimulation(sim)}>Complete &amp; score</Button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* ─── COLUMN 3: COMPLETED ─── */}
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: "var(--success-bg)", border: `1px solid ${"var(--success-bg)"}` }}>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: "#0F6E56" }} aria-hidden="true" />
-                      <p className="text-[12.5px] font-semibold" style={{ color: isDark ? "#10b981" : "#0F6E56" }}>Completed</p>
-                    </div>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--success-bg)", color: isDark ? "#10b981" : "#0F6E56" }}>
-                      {completedSims.length} simulation{completedSims.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  {completedSims.length === 0 ? (
-                    <div className="card p-4 text-center">
-                      <p className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>No completed simulations yet</p>
-                    </div>
-                  ) : completedSims.map((sim) => (
-                    <div key={sim.id} className="card p-4" style={cardShell("#10b981")}>
-                      <SimCardHeader sim={sim} />
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{dayjs.utc(sim.scheduledAt).tz(timezone).format("DD MMM YYYY")}</span>
-                        {sim.score != null && (
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: scoreColor(sim.score) + "18", color: scoreColor(sim.score) }}>{sim.score}%</span>
-                        )}
-                      </div>
-                      <div className="flex items-start gap-1.5 text-[11px] mb-2" style={{ color: "var(--text-secondary)" }}>
-                        <Users className="w-3 h-3 shrink-0 mt-0.5" aria-hidden="true" />
-                        <span className="line-clamp-2">{sim.participants.map((id) => ownerName(id)).join(", ")}</span>
-                      </div>
-                      {sim.notes && (
-                        <p className="text-[11px] italic pt-2 border-t" style={{ color: "var(--text-muted)", borderColor: "var(--bg-border)" }}>{sim.notes}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Training matrix */}
-          <p className="text-[13px] font-semibold mt-4" style={{ color: "var(--text-primary)" }}>Team training checklist</p>
-          <div role="status" className="flex items-start gap-2 p-3 rounded-xl border" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
-            <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
+        selectedPrismaInspection ? (
+          <TrainingPrismaTab inspection={selectedPrismaInspection} isAdmin={isAdmin} />
+        ) : (
+          <div
+            className="text-center py-16 rounded-xl border"
+            style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
+          >
+            <GraduationCap className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+            <p className="text-[14px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
+              No inspection selected
+            </p>
             <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              Mark your own training as complete on your row, or — as <strong style={{ color: "var(--brand)" }}>QA Head</strong> — update any user's training.
+              Select or create an inspection to view its training program.
             </p>
           </div>
-          <div className="card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="data-table" style={{ minWidth: 700 }} aria-label="Training completion matrix">
-                <thead>
-                  <tr>
-                    <th scope="col">User</th>
-                    {TRAINING_MODULES.map((m) => <th key={m} scope="col" className="text-[9px]" style={{ minWidth: 70 }}>{m}</th>)}
-                    <th scope="col">Progress</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.filter((u) => !["super_admin", "customer_admin"].includes(u.role)).map((u) => {
-                    const ut = training.filter((t) => t.userId === u.id && t.tenantId === tenantId);
-                    const done = TRAINING_MODULES.filter((m) => ut.some((t) => t.module === m));
-                    const pct = Math.round((done.length / TRAINING_MODULES.length) * 100);
-                    return (
-                      <tr key={u.id}>
-                        <th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{u.name}</th>
-                        {TRAINING_MODULES.map((m) => {
-                          const isDone = done.includes(m);
-                          const canEdit = canEditTrainingFor(u.id);
-                          if (canEdit) {
-                            return (
-                              <td key={m} className="text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (isDone) {
-                                      dispatch(removeTraining({ userId: u.id, module: m, tenantId: tenantId ?? "" }));
-                                      auditLog({ action: "TRAINING_REMOVED", module: "readiness", recordId: `${u.id}:${m}`, newValue: { userId: u.id, module: m } });
-                                    } else {
-                                      dispatch(addTraining({ id: crypto.randomUUID(), userId: u.id, module: m, completedAt: dayjs().toISOString(), tenantId: tenantId ?? "" }));
-                                      auditLog({ action: "TRAINING_COMPLETED", module: "readiness", recordId: `${u.id}:${m}`, newValue: { userId: u.id, module: m } });
-                                    }
-                                  }}
-                                  aria-label={`${isDone ? "Untick" : "Mark"} ${m} for ${u.name}`}
-                                  aria-pressed={isDone}
-                                  className="w-4 h-4 rounded border mx-auto cursor-pointer transition-colors flex items-center justify-center p-0"
-                                  style={{ background: isDone ? "#10b981" : "transparent", borderColor: isDone ? "#10b981" : "var(--bg-border)" }}
-                                >
-                                  {isDone && <CheckCircle2 className="w-3 h-3 text-white" aria-hidden="true" />}
-                                </button>
-                              </td>
-                            );
-                          }
-                          return (
-                            <td key={m} className="text-center">
-                              <div
-                                className="relative w-4 h-4 rounded border mx-auto flex items-center justify-center group"
-                                style={{ background: isDone ? "var(--success-bg)" : "transparent", borderColor: isDone ? "#10b981" : "var(--bg-border)" }}
-                                title="Only QA Head or the user themselves can update this training record"
-                                aria-label={isDone ? `${m} complete for ${u.name} (read-only)` : `${m} not complete for ${u.name} (read-only)`}
-                              >
-                                {isDone ? (
-                                  <CheckCircle2 className="w-3 h-3 text-[#10b981]" aria-hidden="true" />
-                                ) : (
-                                  <Lock className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                                )}
-                              </div>
-                            </td>
-                          );
-                        })}
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <div className={clsx("h-1.5 rounded-full flex-1", "bg-(--bg-border)")}><div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct === 100 ? "#10b981" : pct >= 50 ? "#f59e0b" : "#ef4444" }} /></div>
-                            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{pct}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
+        )
       )}
+
 
       {/* ═══ ADD CARD MODAL ═══ */}
       <Modal open={addCardOpen} onClose={() => { setAddCardOpen(false); reset(); }} title="Add readiness action">
@@ -1262,6 +1048,86 @@ export function ReadinessPage() {
         </div>
       </Modal>
       <Popup isOpen={inspCreatedPopup} variant="success" title="Inspection created" description={`${inspTitle || "Inspection"} created. Readiness: 0%`} onDismiss={() => setInspCreatedPopup(false)} />
+
+      {/* ═══ COMPLETE INSPECTION MODAL ═══ */}
+      <Modal open={completeOpen} onClose={resetCompleteForm} title="Complete Inspection">
+        {selectedPrismaInspection && (() => {
+          const total = selectedPrismaInspection.actions.length;
+          const completed = selectedPrismaInspection.actions.filter((a) => a.status === "Complete").length;
+          const score = total > 0 ? Math.round((completed / total) * 100) : 0;
+          const scoreColor = score < 50 ? "var(--danger)" : score < 80 ? "var(--warning)" : "var(--success)";
+          return (
+            <div className="space-y-4">
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                <strong style={{ color: "var(--text-primary)" }}>{selectedPrismaInspection.title}</strong> · {selectedPrismaInspection.siteName}
+              </p>
+
+              <div>
+                <label htmlFor="complete-outcome" className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
+                  Inspection outcome *
+                </label>
+                <Dropdown
+                  value={completionOutcome}
+                  onChange={setCompletionOutcome}
+                  width="w-full"
+                  placeholder="Select outcome..."
+                  options={[
+                    { value: "No observations issued", label: "No observations issued" },
+                    { value: "FDA 483 issued", label: "FDA 483 issued" },
+                    { value: "Warning Letter issued", label: "Warning Letter issued" },
+                    { value: "EIR only", label: "EIR only (no further action)" },
+                  ]}
+                />
+              </div>
+
+              {completionOutcome === "FDA 483 issued" && (
+                <div>
+                  <label htmlFor="complete-fda483" className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
+                    Linked FDA 483 reference (optional)
+                  </label>
+                  <input
+                    id="complete-fda483"
+                    type="text"
+                    className="input w-full"
+                    value={linkedFDA483}
+                    onChange={(e) => setLinkedFDA483(e.target.value)}
+                    placeholder="FDA 483 ID or reference"
+                  />
+                </div>
+              )}
+
+              <div className="rounded-lg p-3 border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
+                <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Final readiness score</p>
+                <p className="text-2xl font-bold" style={{ color: scoreColor }}>{score}%</p>
+                <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                  {completed} of {total} actions completed
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: "var(--bg-border)" }}>
+                <Button variant="secondary" onClick={resetCompleteForm}>Cancel</Button>
+                <Button
+                  variant="primary"
+                  icon={CheckCircle2}
+                  loading={completeLoading}
+                  disabled={!completionOutcome || completeLoading}
+                  onClick={handleCompleteInspection}
+                >
+                  Complete &amp; Archive
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      <Popup
+        isOpen={completedPopup}
+        variant="success"
+        title="Inspection completed"
+        description="The inspection has been archived. Audit trail updated."
+        onDismiss={() => setCompletedPopup(false)}
+      />
     </main>
   );
 }

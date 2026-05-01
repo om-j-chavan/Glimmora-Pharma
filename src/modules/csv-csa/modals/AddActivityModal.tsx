@@ -3,7 +3,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Save } from "lucide-react";
-import type { GxPSystem } from "@/store/systems.slice";
+import type { GxPSystem } from "@/types/csv-csa";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";

@@ -1,20 +1,21 @@
+"use client";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
+import type { AuditLog } from "@prisma/client";
 import {
   Bot, BookOpen, Shield, Activity, Settings, AlertTriangle,
   ClipboardCheck, Search, Database, FileWarning, FolderOpen, TrendingUp,
 } from "lucide-react";
-import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addAlert, resolveAlert, type DriftAlert, type DriftSeverity, type DriftType } from "@/store/agiDrift.slice";
+import type { DriftAlert, DriftSeverity, DriftType } from "@/types/agi";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -50,13 +51,20 @@ const alertSchema = z.object({
 });
 type AlertForm = z.infer<typeof alertSchema>;
 
+export interface AGIPageProps {
+  /** Server-fetched AGI activity entries from the AuditLog table. */
+  activityLogs?: AuditLog[];
+}
+
 /* ══════════════════════════════════════ */
 
-export function AGIPage() {
+export function AGIPage({ activityLogs: _activityLogs = [] }: AGIPageProps = {}) {
+  // Server-fetched activity log accepted; the existing UI still derives
+  // its activity feed from useTenantData() (now empty Redux). Wiring the
+  // prop into the existing AGI Activity tab is the next focused step.
   const router = useRouter();
-  const dispatch = useAppDispatch();
   const agiSettings = useAppSelector((s) => s.settings.agi);
-  const { driftAlerts, driftMetrics, capas, findings, systems, fda483Events, tenantId } = useTenantData();
+  const { driftAlerts, driftMetrics, capas, findings, systems, fda483Events } = useTenantData();
   const { org, users } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;  const { role } = useRole();
@@ -90,15 +98,17 @@ export function AGIPage() {
   const alertForm = useForm<AlertForm>({ resolver: zodResolver(alertSchema), defaultValues: { severity: "Major", type: "Configuration Change" } });
 
   function onAlertSave(data: AlertForm) {
+    // Drift alert persistence removed — no Prisma `DriftAlert` model.
+    // The audit log captures the event so it remains in the trail.
     const id = crypto.randomUUID();
-    dispatch(addAlert({ ...data, id, tenantId: tenantId ?? "", detectedAt: dayjs().toISOString(), status: "Open" }));
     auditLog({ action: "AGI_DRIFT_ALERT_ADDED", module: "agi-console", recordId: id, newValue: data });
     setAddAlertOpen(false); setAlertAddedPopup(true); alertForm.reset();
   }
 
   function handleResolve() {
     if (!selectedAlert || !resolveAction.trim()) return;
-    dispatch(resolveAlert({ id: selectedAlert.id, action: resolveAction.trim(), resolvedAt: dayjs().toISOString() }));
+    // Resolution persistence removed — no Prisma `DriftAlert` model.
+    // The audit log preserves the resolution event for the trail.
     auditLog({ action: "AGI_DRIFT_ALERT_RESOLVED", module: "agi-console", recordId: selectedAlert.id, newValue: { action: resolveAction } });
     setResolveOpen(false); setSelectedAlert(null); setResolveAction(""); setResolvedPopup(true);
   }

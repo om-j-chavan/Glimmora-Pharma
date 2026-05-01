@@ -2,7 +2,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import { ShieldAlert, AlertCircle, CheckCircle2, Search, ClipboardCheck, Wrench, Pencil, X, Save } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import type { GxPSystem } from "@/store/systems.slice";
+import type { GxPSystem } from "@/types/csv-csa";
 import type { Finding } from "@/store/findings.slice";
 import type { CAPA } from "@/store/capa.slice";
 import { Badge } from "@/components/ui/Badge";

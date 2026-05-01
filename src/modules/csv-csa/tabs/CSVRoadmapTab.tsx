@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { GitBranch, Plus, Check } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import type { GxPSystem, RiskLevel, RoadmapActivity } from "@/store/systems.slice";
+import type { GxPSystem, RiskLevel, RoadmapActivity } from "@/types/csv-csa";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";

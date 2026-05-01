@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { Server, Pencil, X } from "lucide-react";
-import type { GxPSystem, RiskLevel, ValidationStatus, GAMP5Category, SystemType, RoadmapActivity } from "@/store/systems.slice";
+import type { GxPSystem, RiskLevel, ValidationStatus, GAMP5Category, SystemType, RoadmapActivity } from "@/types/csv-csa";
 import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import type { Finding } from "@/store/findings.slice";
 import type { CAPA } from "@/store/capa.slice";
@@ -85,7 +85,7 @@ export interface SystemDetailTabProps {
   onSaveRemediation: (patch: { remediationTargetDate?: string; remediationNotes?: string }) => void;
   onSaveRiskFactors: (text: string) => void;
   onSavePlannedActions: (text: string) => void;
-  onSaveStage: (stage: import("@/store/systems.slice").ValidationStage) => void;
+  onSaveStage: (stage: import("@/types/csv-csa").ValidationStage) => void;
   onSaveNextReview: (iso: string) => void;
   onSaveRiskClassification: (patch: import("@/modules/csv-csa/detail/RiskControlsPanel").RiskClassificationPatch) => void;
 }

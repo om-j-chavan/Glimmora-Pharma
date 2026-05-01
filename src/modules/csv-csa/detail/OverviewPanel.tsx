@@ -1,5 +1,5 @@
 import { Target, Shield, Zap, Server } from "lucide-react";
-import type { GxPSystem } from "@/store/systems.slice";
+import type { GxPSystem } from "@/types/csv-csa";
 import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 
 /* ── Props ── */

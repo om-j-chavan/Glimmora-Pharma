@@ -8,11 +8,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import type {
-  FDA483Event,
-  EventType,
-  EventStatus,
-} from "@/store/fda483.slice";
+import type { FDA483Event, EventType, EventStatus } from "@/types/fda483";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
