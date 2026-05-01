@@ -153,10 +153,11 @@ model CAPA {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site      Site?         @relation(fields: [siteId], references: [id])
-  finding   Finding?      @relation(fields: [findingId], references: [id])
-  documents CAPADocument[]
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site           Site?          @relation(fields: [siteId], references: [id])
+  finding        Finding?       @relation(fields: [findingId], references: [id])
+  documents      CAPADocument[]
+  evidenceItems  EvidenceItem[]
 }
 
 model CAPADocument {
@@ -557,6 +558,91 @@ model TrainingRecord {
 
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   inspection Inspection? @relation(fields: [inspectionId], references: [id])
+}
+
+// ── EVIDENCE COLLECTION (CAPA substage 3.2) ──
+// Structured evidence collection during CAPA investigation per the GxP
+// reference: 21 CFR 820.100(a)(2), 21 CFR 211.192, ICH Q10 §3.2.2,
+// EU GMP Ch.1 §1.4(xiv), 21 CFR Part 11. Designed to satisfy ALCOA+.
+
+// EvidenceItem.category — allowed values:
+//   BATCH_RECORDS, TRAINING_RECORDS, EQUIPMENT_LOGS, ENVIRONMENTAL_DATA,
+//   DEVIATION_HISTORY, WITNESS_INTERVIEWS, SUPPLIER_DATA
+// EvidenceItem.status — allowed values:
+//   PENDING, IN_PROGRESS, COMPLETE, NOT_APPLICABLE
+// (No native enums: SQLite + Prisma uses string fields with Zod runtime
+// validation — same pattern as CAPA.risk, Finding.severity, etc.)
+model EvidenceItem {
+  id                String   @id @default(cuid())
+  capaId            String
+  category          String
+  status            String   @default("PENDING")
+  notes             String?
+
+  // Wave 3 e-sig lock placeholder (unused in v1; schema-stable for future).
+  // When set, all mutations on this EvidenceItem and its files are rejected.
+  lockedAt          DateTime?
+  lockedBy          String?
+  lockedSignatureId String?
+
+  createdBy         String
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  capa              CAPA                  @relation(fields: [capaId], references: [id], onDelete: Cascade)
+  files             EvidenceFile[]
+  noteVersions      EvidenceNoteVersion[]
+
+  @@unique([capaId, category])
+  @@index([capaId])
+}
+
+// EvidenceNoteVersion — immutable historical snapshots of EvidenceItem.notes.
+// Inserted (never updated) on every notes change so the prior value is
+// preserved per ALCOA+ Original. statusAtTime captures the EvidenceItem.status
+// at the moment the snapshot was taken.
+model EvidenceNoteVersion {
+  id              String   @id @default(cuid())
+  evidenceItemId  String
+  notes           String
+  statusAtTime    String
+  createdBy       String
+  createdAt       DateTime @default(now())
+
+  evidenceItem    EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceItemId])
+}
+
+// EvidenceFile — soft-delete only per Part 11 immutability. The actual file
+// on disk is preserved per ALCOA+ Enduring; deletion is metadata-only via
+// (deletedAt, deletedBy, deletionReason). retainUntil is enforced server-side
+// — uploads default to +7 years (conservative baseline for "≥5 years post
+// product expiry" per the PDF substage 8.4 spec).
+model EvidenceFile {
+  id                String   @id @default(cuid())
+  evidenceItemId    String
+  fileName          String
+  originalFileName  String
+  fileSize          Int
+  fileType          String
+  fileExtension     String
+  fileUrl           String
+  contentHashSha256 String
+  retainUntil       DateTime
+
+  // Soft delete metadata
+  deletedAt         DateTime?
+  deletedBy         String?
+  deletionReason    String?
+
+  uploadedBy        String
+  createdAt         DateTime @default(now())
+
+  evidenceItem      EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceItemId])
+  @@index([deletedAt])
 }
 
 // ── EMAIL OTP (MFA) ──
