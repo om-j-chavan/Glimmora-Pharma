@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 import { Mail } from "lucide-react";
 import clsx from "clsx";
@@ -9,18 +9,25 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useNotificationEngine } from "@/hooks/useNotificationEngine";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
-import { logout } from "@/store/auth.slice";
+import { logout, setTenants, type Tenant } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { Button } from "@/components/ui/Button";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { SiteFilterBanner } from "./SiteFilterBanner";
 
-export function AppShell({ children }: { children?: React.ReactNode }) {
+interface AppShellProps {
+  children?: React.ReactNode;
+  initialTenant?: Tenant | null;
+}
+
+export function AppShell({ children, initialTenant }: AppShellProps) {
   // 🔒 Prevent hydration mismatch
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // SSR-safe mount flag — intentionally syncs on mount only.
+
     setMounted(true);
   }, []);
 
@@ -28,6 +35,20 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const dispatch = useAppDispatch();
+
+  // Hydrate Redux with the current user's own tenant so useTenantConfig()
+  // can resolve subscription/site/user state. Without this, customer_admin
+  // and site users would have an empty tenants array (only /admin's
+  // CustomerAccountsPage dispatches setTenants), the subscription gate
+  // would fire as "expired", and the entire app would be blocked.
+  const initialSeeded = useRef(false);
+  useEffect(() => {
+    if (initialTenant && !initialSeeded.current) {
+      dispatch(setTenants([initialTenant]));
+      initialSeeded.current = true;
+    }
+  }, [dispatch, initialTenant]);
+
   const { activePlan, tenantName, isExpired, isNearExpiry, daysRemaining } =
     useTenantConfig();
   const { isSuperAdmin } = useRole();
@@ -131,7 +152,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onClick={async () => {
                 try {
                   await nextAuthLogout();
-                } catch {}
+                } catch { /* ignore — fall through to local logout */ }
                 dispatch(logout());
                 window.location.href = "/login";
               }}
