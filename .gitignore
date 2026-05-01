@@ -31,6 +31,19 @@ dist-ssr
 # Next.js
 .next/
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# tsc scratch output
+tsc-errors.txt
+
+# Local SQLite database
+prisma/dev.db
+prisma/dev.db-journal
+prisma/dev.db.backup-*
+*.db
+*.db-journal
+
 # Playwright
 test-results/
 playwright-report/
