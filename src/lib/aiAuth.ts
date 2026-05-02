@@ -72,7 +72,16 @@ function formatDetail(parsed: unknown, status: number): string {
   return `Request failed (${status})`;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+/**
+ * Posts a JSON body to the AI backend.
+ *
+ * `silent` demotes the failure log from error → warn for callers where
+ * a 4xx is expected/normal (e.g. the best-effort AI login that fires on
+ * every app sign-in). The error is still thrown so the caller can react;
+ * we just don't pollute the dev console with red lines for non-actionable
+ * cases.
+ */
+async function postJson<T>(path: string, body: unknown, silent = false): Promise<T> {
   const tag = `[aiAuth] POST ${path}`;
   const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
   console.info(`${tag} → sending`, safeBody(body));
@@ -84,7 +93,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
       body: JSON.stringify(body),
     });
   } catch (err) {
-    console.error(`${tag} ✗ network error`, err);
+    (silent ? console.warn : console.error)(`${tag} ✗ network error`, err);
     throw err;
   }
   const text = await res.text();
@@ -97,7 +106,10 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   const ms = typeof performance !== "undefined" ? Math.round(performance.now() - startedAt) : 0;
   if (!res.ok) {
     const detail = formatDetail(parsed, res.status);
-    console.error(`${tag} ✗ ${res.status} (${ms}ms) — ${detail}`, { body: safeBody(body), response: parsed });
+    (silent ? console.warn : console.error)(
+      `${tag} ✗ ${res.status} (${ms}ms) — ${detail}`,
+      { body: safeBody(body), response: parsed },
+    );
     throw new AiAuthError(res.status, detail, parsed);
   }
   console.info(`${tag} ✓ ${res.status} (${ms}ms)`, parsed);
@@ -107,8 +119,13 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 export const aiSignup = (body: AiSignupRequest) =>
   postJson<AiAuthResponse>("/api/v1/auth/signup", body);
 
-export const aiLogin = (username: string, password: string) =>
-  postJson<AiAuthResponse>("/api/v1/auth/login", { username, password });
+/**
+ * @param silent when true, a 401 from the backend is logged at warn
+ *               level instead of error. Use for best-effort auto-login
+ *               attempts (the app login flow's AI token refresh).
+ */
+export const aiLogin = (username: string, password: string, silent = false) =>
+  postJson<AiAuthResponse>("/api/v1/auth/login", { username, password }, silent);
 
 /* ── Helpers for ID generation ─────────────────────────────────── */
 

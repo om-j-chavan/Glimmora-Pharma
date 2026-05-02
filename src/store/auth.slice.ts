@@ -10,6 +10,14 @@ export interface AuthUser {
   gxpSignatory: boolean;
   orgId: string;
   tenantId: string;
+  /** AI backend access token, refreshed on each app login. Stored on the
+   *  user record so it's available even for users that don't live in a
+   *  tenant's config.users list (e.g. the platform super admin). */
+  aiAccessToken?: string;
+  /** customer_id used by the AI backend for this user. Defaults to the
+   *  customer admin's aiUserId; set to the user's own AI user_id for the
+   *  platform super admin / customer admin. */
+  aiCustomerId?: string;
 }
 
 export interface TenantOrgConfig {
@@ -163,6 +171,15 @@ const authSlice = createSlice({
       state.user = payload.user;
       state.currentTenant = payload.user.tenantId;
     },
+    /** Updates the AI backend token + customer_id on the currently logged-in
+     *  user record. Used by LoginPage's refreshAiToken so even users that
+     *  don't live in any tenant.config.users list (platform super admin)
+     *  still have a token to send with chat / capa-create / etc. */
+    setAiCredentials(state, { payload }: PayloadAction<{ accessToken: string; customerId?: string }>) {
+      if (!state.user) return;
+      state.user.aiAccessToken = payload.accessToken;
+      if (payload.customerId) state.user.aiCustomerId = payload.customerId;
+    },
     setActiveSite(state, { payload }: PayloadAction<string>) { state.activeSiteId = payload; },
     setSelectedSite(state, { payload }: PayloadAction<string | null>) { state.selectedSiteId = payload; },
     setCurrentTenant(state, { payload }: PayloadAction<string>) { state.currentTenant = payload; },
@@ -238,7 +255,7 @@ const authSlice = createSlice({
 });
 
 export const {
-  setCredentials, setActiveSite, setSelectedSite, setCurrentTenant,
+  setCredentials, setAiCredentials, setActiveSite, setSelectedSite, setCurrentTenant,
   addTenant, updateTenant, removeTenant, setTenants,
   updateTenantOrg, addTenantSite, updateTenantSite, removeTenantSite,
   addTenantUser, updateTenantUser,

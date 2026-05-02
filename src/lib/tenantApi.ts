@@ -4,7 +4,12 @@ import { getSession } from "next-auth/react";
 const BASE = "/api";
 
 /** Logs the success/failure outcome of an API call with timing. */
-async function logCall<T>(method: string, path: string, fn: () => Promise<T>): Promise<T> {
+async function logCall<T>(
+  method: string,
+  path: string,
+  fn: () => Promise<T>,
+  opts: { silent?: boolean } = {},
+): Promise<T> {
   const tag = `[tenantApi] ${method} ${path}`;
   const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
   console.info(`${tag} → sending`);
@@ -15,7 +20,7 @@ async function logCall<T>(method: string, path: string, fn: () => Promise<T>): P
     return result;
   } catch (err) {
     const ms = typeof performance !== "undefined" ? Math.round(performance.now() - startedAt) : 0;
-    console.error(`${tag} ✗ failed (${ms}ms)`, err);
+    (opts.silent ? console.warn : console.error)(`${tag} ✗ failed (${ms}ms)`, err);
     throw err;
   }
 }
@@ -106,9 +111,15 @@ export interface LoginResult {
   tenant: Tenant;
 }
 
+/**
+ * @param silent demote failure logs to warn level (used by the LoginPage's
+ *               best-effort Neon login that may 500 when the API isn't
+ *               wired up — the flow falls back to mock accounts).
+ */
 export async function loginApi(
   username: string,
   password: string,
+  silent = false,
 ): Promise<LoginResult | null> {
   return logCall("POST", "/auth/login", async () => {
     const res = await fetch(`${BASE}/auth/login`, {
@@ -126,5 +137,5 @@ export async function loginApi(
     }
     if (!res.ok) throw new Error(`Login failed: ${res.status}`);
     return (await res.json()) as LoginResult;
-  });
+  }, { silent });
 }

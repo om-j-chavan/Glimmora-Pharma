@@ -15,12 +15,20 @@ export interface LoginResult {
   error?: string;
 }
 
+/**
+ * @param silent when true, expected failures (no result, error result) are
+ *               logged at warn instead of error. Use for the LoginPage's
+ *               best-effort next-auth attempt that frequently 401s for
+ *               mock accounts.
+ */
 export async function login(
   username: string,
   password: string,
+  silent = false,
 ): Promise<LoginResult> {
   const tag = `[authClient] signIn(credentials)`;
   const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
+  const log = silent ? console.warn : console.error;
   console.info(`${tag} → sending`);
   let result;
   try {
@@ -31,17 +39,17 @@ export async function login(
     });
   } catch (err) {
     const ms = typeof performance !== "undefined" ? Math.round(performance.now() - startedAt) : 0;
-    console.error(`${tag} ✗ network error (${ms}ms)`, err);
+    log(`${tag} ✗ network error (${ms}ms)`, err);
     throw err;
   }
   const ms = typeof performance !== "undefined" ? Math.round(performance.now() - startedAt) : 0;
 
   if (!result) {
-    console.error(`${tag} ✗ no response (${ms}ms)`);
+    log(`${tag} ✗ no response (${ms}ms)`);
     return { ok: false, error: "No response from auth server" };
   }
   if (result.error) {
-    console.error(`${tag} ✗ ${result.error} (${ms}ms)`);
+    log(`${tag} ✗ ${result.error} (${ms}ms)`);
     return { ok: false, error: result.error };
   }
   console.info(`${tag} ✓ ok (${ms}ms)`);

@@ -14,11 +14,11 @@ import {
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { setCredentials, setActiveSite, setSelectedSite, setTenants, updateTenantUser, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
+import { setCredentials, setAiCredentials, setActiveSite, setSelectedSite, setTenants, updateTenantUser, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
 import { loginApi } from "@/lib/tenantApi";
 import { login as nextAuthLogin } from "@/lib/authClient";
-import { aiLogin } from "@/lib/aiAuth";
-import { Input } from "@/components/ui/Input";
+import { aiLogin, aiSignup, AiAuthError } from "@/lib/aiAuth";
+import { flushPersist } from "@/store/persistence";
 import { Button } from "@/components/ui/Button";
 
 const schema = z.object({
@@ -201,24 +201,78 @@ export function LoginPage() {
    * Best-effort: if the AI backend is unreachable or rejects, the app login
    * still succeeds — modules that need the token will prompt for re-auth.
    */
+  const persistAiToken = (
+    user: AuthUser,
+    tenant: Tenant | undefined,
+    accessToken: string,
+    customerId: string | undefined,
+  ) => {
+    dispatch(setAiCredentials({ accessToken, customerId }));
+    if (tenant) {
+      dispatch(
+        updateTenantUser({
+          tenantId: tenant.id,
+          userId: user.id,
+          patch: { aiAccessToken: accessToken },
+        }),
+      );
+    }
+  };
+
   const refreshAiToken = async (
     user: AuthUser,
     tenant: Tenant | undefined,
     rawUsername: string,
     rawPassword: string,
   ) => {
-    if (!tenant) return;
+    // The AI backend's `username` may be the raw input or the email's
+    // local part — try both silently.
+    const candidates = [rawUsername.trim()];
+    const local = rawUsername.includes("@") ? rawUsername.split("@")[0].trim() : "";
+    if (local && !candidates.includes(local)) candidates.push(local);
+
+    // ── 1) Try logging in with each candidate. ─────────────────
+    for (const candidate of candidates) {
+      try {
+        const res = await aiLogin(candidate, rawPassword, /* silent */ true);
+        persistAiToken(user, tenant, res.access_token, res.customer_id);
+        return;
+      } catch {
+        // Try next candidate; postJson already logged at warn.
+      }
+    }
+
+    // ── 2) Self-heal: auto-signup with the credentials just typed.
+    //      Seed accounts (qa@, custadmin@, …) and any user not yet on the
+    //      AI backend get registered transparently the first time they
+    //      sign in. customer_id reuses the tenant's customer admin id when
+    //      one exists, otherwise falls back to the tenant id (or, for
+    //      customer_admin / super_admin, to the user's own id).
+    const tenantUsers = tenant?.config?.users ?? [];
+    const adminAiId = tenantUsers.find((u) => u.role === "customer_admin" && u.aiUserId)?.aiUserId;
+    const isAdmin = user.role === "super_admin" || user.role === "customer_admin";
+    const customerId = adminAiId ?? (isAdmin ? user.id : tenant?.id ?? user.id);
+    const username = candidates[0] || user.email || user.id;
+    const email = user.email && user.email.includes("@") ? user.email : `${username}@local.invalid`;
+
     try {
-      const res = await aiLogin(rawUsername, rawPassword);
-      dispatch(
-        updateTenantUser({
-          tenantId: tenant.id,
-          userId: user.id,
-          patch: { aiAccessToken: res.access_token },
-        }),
-      );
+      const res = await aiSignup({
+        user_id: user.id,
+        username,
+        email,
+        password: rawPassword,
+        customer_id: customerId,
+        role: user.role,
+      });
+      persistAiToken(user, tenant, res.access_token, res.customer_id);
+      console.info(`[login] AI backend auto-signed-up '${username}' for tenant ${customerId}`);
+      return;
     } catch (err) {
-      console.warn("[login] AI backend login failed (non-fatal):", err);
+      const reason = err instanceof AiAuthError ? err.message : "unknown";
+      console.warn(
+        `[login] AI backend login + auto-signup both failed: ${reason}.` +
+          " Chatbot / AI CAPA features will be unavailable until this account is registered.",
+      );
     }
   };
 
@@ -230,7 +284,7 @@ export function LoginPage() {
     //    place by the time API calls go out. If next-auth rejects, fall back
     //    to the legacy paths so dev/demo flows keep working.
     try {
-      const result = await nextAuthLogin(data.email.trim(), data.password);
+      const result = await nextAuthLogin(data.email.trim(), data.password, /* silent */ true);
       if (!result.ok) {
         // Surface specific auth errors back to the form (subscription, etc.)
         if (result.error && result.error.includes("SUBSCRIPTION_INACTIVE")) {
@@ -276,7 +330,7 @@ export function LoginPage() {
         setLoadingTenant(true);
           // Full page navigation — guarantees URL is exactly /admin with no
         // leftover query params, and rehydrates the SPA shell cleanly.
-        window.location.assign("/admin");
+        flushPersist(); window.location.assign("/admin");
         return;
       }
 
@@ -286,7 +340,7 @@ export function LoginPage() {
         dispatch(setSelectedSite(null));
         setLoadingName(userTenant?.name ?? "workspace");
         setLoadingTenant(true);
-          window.location.assign("/");
+          flushPersist(); window.location.assign("/");
         return;
       }
 
@@ -296,7 +350,7 @@ export function LoginPage() {
 
     // 2. Try the backend API (Neon) — handles cross-browser sync
     try {
-      const apiResult = await loginApi(data.email.trim(), data.password);
+      const apiResult = await loginApi(data.email.trim(), data.password, /* silent */ true);
       if (apiResult) {
         const user = apiResult.user as AuthUser;
         // Refresh local tenant cache with the authoritative one from the server
@@ -307,7 +361,7 @@ export function LoginPage() {
         if (user.role === "super_admin") {
           setLoadingName("Platform Admin");
           setLoadingTenant(true);
-              window.location.assign("/admin");
+              flushPersist(); window.location.assign("/admin");
           return;
         }
 
@@ -364,7 +418,7 @@ export function LoginPage() {
         if (user.role === "super_admin") {
           setLoadingName("Platform Admin");
           setLoadingTenant(true);
-              window.location.assign("/admin");
+              flushPersist(); window.location.assign("/admin");
           return;
         }
 
@@ -374,7 +428,7 @@ export function LoginPage() {
           dispatch(setSelectedSite(null));
           setLoadingName(tenant.name);
           setLoadingTenant(true);
-              window.location.assign("/");
+              flushPersist(); window.location.assign("/");
           return;
         }
 
@@ -438,17 +492,32 @@ export function LoginPage() {
             </div>
           )}
 
-          <Input
-            id="email"
-            label="Work email"
-            type="email"
-            required
-            icon={Mail}
-            autoComplete="email"
-            placeholder="admin@pharmaglimmora.com"
-            error={errors.email?.message}
-            {...register("email")}
-          />
+          {/* Username / email — matches the passcode field below to stay
+              light-themed regardless of the user's stored theme preference. */}
+          <div>
+            <label htmlFor="email" className="text-[11px] font-medium text-[#302d29] block mb-1.5">
+              Work email <span className="text-[#dc2626]" aria-hidden="true">*</span>
+              <span className="sr-only">(required)</span>
+            </label>
+            <div className="relative">
+              <Mail className="w-3.5 h-3.5 text-[#a39e96] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
+              <input
+                id="email"
+                type="text"
+                autoComplete="email"
+                placeholder="admin@pharmaglimmora.com"
+                required
+                aria-required="true"
+                aria-invalid={errors.email ? true : undefined}
+                aria-describedby={errors.email ? "email-error" : undefined}
+                {...register("email")}
+                className="w-full bg-white border border-[#e8e4dd] rounded-lg pl-9.5 pr-3 py-2.5 text-[13px] text-[#302d29] placeholder:text-[#a39e96] outline-none focus:border-[#8b6914] focus:ring-[3px] focus:ring-[rgba(139,105,20,0.12)] transition-all duration-150"
+              />
+            </div>
+            {errors.email && (
+              <p id="email-error" role="alert" className="text-[11px] text-[#dc2626] mt-1">{errors.email.message}</p>
+            )}
+          </div>
 
           {/* Password */}
           <div>
@@ -489,9 +558,15 @@ export function LoginPage() {
             <div className="flex-1 h-px bg-[#e8e4dd]" />
           </div>
 
-          <Button variant="secondary" icon={Building2} fullWidth>
+          {/* SSO — light cream tint so it reads as a secondary action
+              while staying distinct from the white email/passcode fields. */}
+          <button
+            type="button"
+            className="w-full inline-flex items-center justify-center gap-2 bg-[#f7efe2] border border-[#e8d9b8] rounded-lg py-2.5 text-[13px] font-semibold text-[#302d29] cursor-pointer outline-none transition-all duration-150 hover:bg-[#f0e3c8] hover:border-[#8b6914] focus:border-[#8b6914] focus:ring-[3px] focus:ring-[rgba(139,105,20,0.12)]"
+          >
+            <Building2 className="w-4 h-4 text-[#8b6914]" aria-hidden="true" />
             Single Sign-On (SSO)
-          </Button>
+          </button>
         </form>
 
         {/* Footer */}

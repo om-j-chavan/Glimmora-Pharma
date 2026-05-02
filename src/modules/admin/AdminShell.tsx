@@ -14,6 +14,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { logout } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { AIChatbot } from "@/components/chatbot/AIChatbot";
 
 const NAV_ITEMS = [
   { path: "/admin", label: "Customer Accounts", icon: Users, end: true },
@@ -227,6 +228,9 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
           </main>
         </div>
       </div>
+
+      {/* Floating AI assistant on the platform admin shell too. */}
+      <AIChatbot />
     </>
   );
 }

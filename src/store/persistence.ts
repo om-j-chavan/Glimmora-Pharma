@@ -58,22 +58,44 @@ export function readPersistedStateFromStorage(): Record<string, any> | undefined
 
 /** Debounced save — avoids thrashing localStorage on rapid dispatch bursts. */
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let lastStore: { getState: () => any } | null = null;
+
+function persistNow() {
+  if (!lastStore) return;
+  try {
+    const state = lastStore.getState();
+    const toPersist: Record<string, unknown> = {};
+    for (const key of PERSIST_SLICES) {
+      toPersist[key] = state[key];
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
+  } catch {
+    // quota exceeded or private browsing — ignore
+  }
+}
+
+/**
+ * Forces an immediate persist of the current Redux state to localStorage.
+ * Use before a full-page navigation that would otherwise cause the in-flight
+ * debounced save to be dropped (e.g. window.location.assign right after a
+ * dispatch).
+ */
+export function flushPersist() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  persistNow();
+}
 
 export const persistMiddleware: Middleware = (store) => (next) => (action) => {
   const result = next(action);
+  lastStore = store;
 
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try {
-      const state = store.getState();
-      const toPersist: Record<string, unknown> = {};
-      for (const key of PERSIST_SLICES) {
-        toPersist[key] = state[key];
-      }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
-    } catch {
-      // quota exceeded or private browsing — ignore
-    }
+    persistNow();
   }, 500);
 
   return result;

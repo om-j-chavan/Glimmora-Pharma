@@ -363,6 +363,7 @@ import type { RootState } from "@/store";
 export function selectAiToken(state: RootState): string | null {
   const u = state.auth.user;
   if (!u) return null;
+  if (u.aiAccessToken) return u.aiAccessToken;
   const tenant = state.auth.tenants.find((t) => t.id === u.tenantId);
   return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? null;
 }
@@ -376,6 +377,7 @@ export function selectAiToken(state: RootState): string | null {
 export function selectAiCustomerId(state: RootState): string | null {
   const u = state.auth.user;
   if (!u) return null;
+  if (u.aiCustomerId) return u.aiCustomerId;
   const tenant = state.auth.tenants.find((t) => t.id === u.tenantId);
   const admin = tenant?.config?.users?.find((x) => x.role === "customer_admin" && x.aiUserId);
   return admin?.aiUserId ?? u.tenantId ?? null;

@@ -102,14 +102,38 @@ export async function aiChatSend(
 
 /**
  * One-shot voice round-trip. The backend transcribes, generates a reply,
- * and returns audio bytes. The decoded transcript + reply text aren't in
- * the audio response — for those, use transcribe + chat separately.
+ * and returns audio bytes. The transcript + reply text are returned via
+ * CORS-exposed response headers (X-User-Text, X-AI-Reply, X-Intent), so
+ * the UI can show them in the chat alongside the played audio.
  */
-export async function aiVoiceChat(audio: Blob, token: string | null): Promise<Blob> {
+export interface VoiceChatResult {
+  audio: Blob;
+  userText: string | null;
+  aiReply: string | null;
+  intent: string | null;
+}
+
+export async function aiVoiceChat(
+  audio: Blob,
+  token: string | null,
+  history: ChatMessage[] = [],
+): Promise<VoiceChatResult> {
   const fd = new FormData();
   fd.append("audio", audio, audio instanceof File ? audio.name : "speech.webm");
+  if (history.length > 0) fd.append("chat_history", JSON.stringify(history));
   const res = await authedFetch("/api/ai/voice/chat", { method: "POST", body: fd }, token);
-  return await res.blob();
+  // Some browsers / proxies decode header values; the backend escapes them
+  // server-side. Try both raw and URI-decoded.
+  const decode = (v: string | null) => {
+    if (!v) return v;
+    try { return decodeURIComponent(v); } catch { return v; }
+  };
+  return {
+    audio: await res.blob(),
+    userText: decode(res.headers.get("x-user-text")),
+    aiReply: decode(res.headers.get("x-ai-reply")),
+    intent: decode(res.headers.get("x-intent")),
+  };
 }
 
 export async function aiVoiceTranscribe(audio: Blob, token: string | null): Promise<{ text: string }> {
