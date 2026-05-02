@@ -55,6 +55,29 @@ type ActionResult<T = unknown> =
 
 // ── Actions ──
 
+// Build a per-tenant per-year reference like "CAPA-2026-014" by counting
+// existing rows in (tenantId, year) and incrementing. Caller MUST run this
+// inside the same transaction that inserts the new row, otherwise two
+// concurrent creators can read the same count and collide on the unique
+// index. The caller-side retry below handles the residual race where the
+// transaction itself loses to a concurrent commit.
+async function nextCapaReference(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  tenantId: string,
+  now: Date,
+): Promise<string> {
+  const year = now.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const yearEnd = new Date(Date.UTC(year + 1, 0, 1));
+  const count = await tx.cAPA.count({
+    where: {
+      tenantId,
+      createdAt: { gte: yearStart, lt: yearEnd },
+    },
+  });
+  return `CAPA-${year}-${String(count + 1).padStart(3, "0")}`;
+}
+
 export async function createCAPA(
   input: z.input<typeof CreateCAPASchema>,
 ): Promise<ActionResult> {
@@ -77,18 +100,45 @@ export async function createCAPA(
       ...rest
     } = parsed.data;
 
-    const capa = await prisma.cAPA.create({
-      data: {
-        ...rest,
-        tenantId: session.user.tenantId,
-        status: "Open",
-        createdBy: session.user.name,
-        dueDate: new Date(dueDate),
-        findingId: linkedFindingId ?? null,
-        diGate: diGateRequired ?? false,
-        diGateStatus: diGateRequired ? "pending" : null,
-      },
-    });
+    // Race-safe sequence allocation. Two server actions creating CAPAs at
+    // the same instant can both read count=N inside their respective
+    // transactions, both compute reference=N+1, and the second commit
+    // hits CAPA_reference_key uniqueness. Retry on that specific
+    // collision; bubble any other error.
+    const MAX_RETRIES = 5;
+    let capa: Awaited<ReturnType<typeof prisma.cAPA.create>> | null = null;
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        capa = await prisma.$transaction(async (tx) => {
+          const reference = await nextCapaReference(tx, session.user.tenantId, new Date());
+          return tx.cAPA.create({
+            data: {
+              ...rest,
+              reference,
+              tenantId: session.user.tenantId,
+              status: "Open",
+              createdBy: session.user.name,
+              dueDate: new Date(dueDate),
+              findingId: linkedFindingId ?? null,
+              diGate: diGateRequired ?? false,
+              diGateStatus: diGateRequired ? "pending" : null,
+            },
+          });
+        });
+        break;
+      } catch (err) {
+        lastErr = err;
+        // P2002 = Prisma unique-constraint violation. Anything else is a
+        // real failure — surface immediately rather than silently retry.
+        const code = (err as { code?: string } | null)?.code;
+        if (code !== "P2002") throw err;
+      }
+    }
+    if (!capa) {
+      console.error("[action] createCAPA exhausted reference retries:", lastErr);
+      return { success: false, error: "Failed to allocate CAPA reference" };
+    }
 
     if (linkedFindingId) {
       await prisma.finding.update({
@@ -112,7 +162,9 @@ export async function createCAPA(
         module: "CAPA",
         action: "CAPA_CREATED",
         recordId: capa.id,
-        recordTitle: parsed.data.description.slice(0, 80),
+        recordTitle: capa.reference
+          ? `${capa.reference} — ${parsed.data.description.slice(0, 60)}`
+          : parsed.data.description.slice(0, 80),
         newValue: parsed.data.risk,
       },
     });

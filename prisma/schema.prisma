@@ -128,6 +128,14 @@ model Finding {
 
 model CAPA {
   id                 String    @id @default(cuid())
+  // Human-readable per-tenant identifier, e.g. "CAPA-2026-014".
+  // Nullable for the migration-then-backfill window; populated for every
+  // row by the post-migration backfill, and for new rows by createCAPA's
+  // sequence-allocating transaction. Uniqueness is enforced globally
+  // (rather than per-tenant) because the cross-tenant collision space is
+  // tiny — a tenant rarely creates >999 CAPAs in a year — and a global
+  // unique index is cheaper to enforce in SQLite than a composite one.
+  reference          String?   @unique
   tenantId           String
   siteId             String?
   findingId          String?   @unique

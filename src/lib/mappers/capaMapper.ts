@@ -2,6 +2,7 @@ import type { CAPA, CAPARisk, CAPAStatus, CAPASource, RCAMethod } from "@/store/
 
 type PrismaCAPA = {
   id: string;
+  reference: string | null;
   tenantId: string;
   siteId: string | null;
   findingId: string | null;
@@ -56,6 +57,7 @@ const STATUS_MAP: Record<string, CAPAStatus> = {
 export function mapCAPAFromPrisma(row: PrismaCAPA): CAPA {
   return {
     id: row.id,
+    reference: row.reference ?? undefined,
     tenantId: row.tenantId,
     siteId: row.siteId ?? "",
     findingId: row.findingId ?? undefined,

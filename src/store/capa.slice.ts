@@ -8,6 +8,11 @@ export type CAPASource = "483" | "Internal Audit" | "Deviation" | "Complaint" | 
 
 export interface CAPA {
   id: string;
+  /** Human-readable per-tenant identifier, e.g. "CAPA-2026-014".
+   *  Optional in the slice type because legacy in-memory CAPAs created
+   *  before the migration may exist transiently; every persisted row
+   *  has a non-null reference after the 20260502000000 migration. */
+  reference?: string;
   tenantId: string;
   siteId: string;
   findingId?: string;
