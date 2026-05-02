@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { SiteFilterBanner } from "./SiteFilterBanner";
+import { AIChatbot } from "@/components/chatbot/AIChatbot";
 
 export function AppShell({ children }: { children?: React.ReactNode }) {
   // 🔒 Prevent hydration mismatch
@@ -30,7 +31,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const dispatch = useAppDispatch();
   const { activePlan, tenantName, isExpired, isNearExpiry, daysRemaining } =
     useTenantConfig();
-  const { isSuperAdmin } = useRole();
+  const { isSuperAdmin, isViewOnly } = useRole();
 
   // ⛔ Wait until client is ready
   if (!mounted) return null;
@@ -261,6 +262,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           </main>
         </div>
       </div>
+
+      {/* Floating AI assistant — available on every authed page except for
+          read-only viewers. Right-click + drag the bubble to move it. */}
+      {!isViewOnly && <AIChatbot />}
     </>
   );
 }
