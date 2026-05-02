@@ -26,6 +26,11 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
   const user = useAppSelector((s) => s.auth.user);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [credentialsLoadError, setCredentialsLoadError] = useState<string | null>(null);
+  // Bumped by [Retry] on the failure banner to refire the fetchCurrentUser
+  // effect — lets the user recover from a transient /api/auth/me failure
+  // without a full page reload.
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     // SSR-safe mount flag — intentionally syncs on mount only.
@@ -38,28 +43,43 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
   // (version bump, incognito, new tab, debounced write missed by a fast
   // reload). Without this, role-gated UI like the MFA toggle silently hides
   // even though the user is fully authenticated server-side.
+  //
+  // On rejection (network failure, /api/auth/me 5xx, etc.) we surface a
+  // visible banner instead of failing silently — silent failure plus
+  // invisible role-gated buttons is exactly the bug this effect was added
+  // to prevent in the first place. The banner offers a [Retry] that
+  // re-runs this effect via retryNonce.
   useEffect(() => {
     if (user) return;
     let cancelled = false;
-    fetchCurrentUser().then((u) => {
-      if (cancelled || !u) return;
-      dispatch(
-        setCredentials({
-          token: "nextauth-session",
-          user: {
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            role: u.role as UserRole,
-            gxpSignatory: u.gxpSignatory,
-            orgId: u.orgId,
-            tenantId: u.tenantId,
-          },
-        }),
-      );
-    });
+    setCredentialsLoadError(null);
+    fetchCurrentUser()
+      .then((u) => {
+        if (cancelled || !u) return;
+        dispatch(
+          setCredentials({
+            token: "nextauth-session",
+            user: {
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              role: u.role as UserRole,
+              gxpSignatory: u.gxpSignatory,
+              orgId: u.orgId,
+              tenantId: u.tenantId,
+            },
+          }),
+        );
+      })
+      .catch((reason) => {
+        if (cancelled) return;
+        console.error("[AdminShell] fetchCurrentUser failed:", reason);
+        setCredentialsLoadError(
+          "Couldn't load your full profile — some controls may be hidden.",
+        );
+      });
     return () => { cancelled = true; };
-  }, [user, dispatch]);
+  }, [user, dispatch, retryNonce]); // retryNonce: bumped by [Retry] to refire
 
   const initials = mounted && user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2)
@@ -253,6 +273,22 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
             className="flex-1 overflow-y-auto p-4 sm:p-6"
             style={{ background: "var(--bg-base)" }}
           >
+            {credentialsLoadError && (
+              <div
+                role="alert"
+                className="alert alert-warning mb-4 flex items-center justify-between gap-3 text-[12px]"
+              >
+                <span>{credentialsLoadError}</span>
+                <button
+                  type="button"
+                  onClick={() => setRetryNonce((n) => n + 1)}
+                  className="font-medium border-none bg-transparent cursor-pointer underline shrink-0"
+                  style={{ color: "var(--warning)" }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
             {children}
           </main>
         </div>

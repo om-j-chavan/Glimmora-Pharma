@@ -586,14 +586,29 @@ function NoteHistoryModal({ evidenceItemId, categoryLabel, onClose }: HistoryPro
 
   useEffect(() => {
     let cancelled = false;
-    loadEvidenceNoteHistory(evidenceItemId).then((result) => {
-      if (cancelled) return;
-      if (!result.success) {
-        setErr(result.error);
-      } else {
-        setData(result.data as Loaded);
-      }
-    });
+    loadEvidenceNoteHistory(evidenceItemId)
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.success) {
+          setErr(result.error);
+        } else {
+          setData(result.data as Loaded);
+        }
+      })
+      .catch((reason) => {
+        // Without this catch, a network/server crash leaves both `data`
+        // and `err` null forever — the modal renders a permanent
+        // "Loading…" state with no recovery. Routing rejection through
+        // the same setErr the modal already renders means the user sees
+        // the existing role="alert" red message and can close + reopen
+        // to retry.
+        if (cancelled) return;
+        console.error(
+          "[EvidenceCollectionPanel] loadEvidenceNoteHistory failed:",
+          reason,
+        );
+        setErr("Couldn't load notes history. Try again.");
+      });
     return () => {
       cancelled = true;
     };
