@@ -101,11 +101,14 @@ const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
 export function LoginPage() {
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
+  const themeMode = useAppSelector((s) => s.theme.mode);
   const tenants = useAppSelector((s) => s.auth.tenants);
   const [showCreds, setShowCreds] = useState(false);
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [loadingName, setLoadingName] = useState("");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const isDark = mounted && themeMode === "dark";
 
 
   // Bootstrap: ensure platform super_admin account exists

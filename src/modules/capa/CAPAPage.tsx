@@ -5,6 +5,7 @@ import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
   AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -39,6 +40,7 @@ import { CAPAMetricsTab } from "./tabs/CAPAMetricsTab";
 import { AddCAPAModal, type CAPAForm } from "./modals/AddCAPAModal";
 import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
 import { SignCloseModal } from "./modals/SignCloseModal";
+import { AIGenerateCAPAModal, type AICapaResponse } from "./modals/AIGenerateCAPAModal";
 
 /* ── Constants ── */
 
@@ -84,6 +86,8 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
   const selectedCAPA = selectedCAPAId ? capas.find((c) => c.id === selectedCAPAId) ?? null : null;
   const setSelectedCAPA = (c: CAPA | null) => setSelectedCAPAId(c?.id ?? null);
   const [addOpen, setAddOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiSavedPopup, setAiSavedPopup] = useState<string | null>(null);
   const [addedPopup, setAddedPopup] = useState(false);
   const [signOpen, setSignOpen] = useState(false);
   const [signedPopup, setSignedPopup] = useState(false);
@@ -280,7 +284,10 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
           <p className="page-subtitle mt-1">{capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}</p>
           <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
         </div>
-        {canCreateCAPAs && <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>New CAPA</Button>}
+        <div className="flex items-center gap-2">
+          {canCreateCAPAs && <Button variant="secondary" icon={Sparkles} onClick={() => setAiOpen(true)}>AI CAPA</Button>}
+          {canCreateCAPAs && <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>New CAPA</Button>}
+        </div>
         {isCustomerAdmin && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>CAPA actions require QA Head authorization</p>}
       </header>
 
@@ -333,12 +340,22 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
       <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} lockedSiteId={selectedSiteId} />
       <EditCAPAModal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} onSave={handleEditSave} capa={selectedCAPA} users={complianceUsers} />
       <SignCloseModal isOpen={signOpen} onClose={() => setSignOpen(false)} onSign={handleSignClose} capa={selectedCAPA} />
+      <AIGenerateCAPAModal
+        isOpen={aiOpen}
+        onClose={() => setAiOpen(false)}
+        defaultCustomerId={tenantId ?? ""}
+        onAccepted={(res: AICapaResponse) => {
+          auditLog({ action: "CAPA_AI_GENERATED", module: "capa", recordId: res.capa_id, newValue: { riskScore: res.risk_score, isRecurring: res.is_recurring } });
+          setAiSavedPopup(`AI CAPA ${res.capa_id} created`);
+        }}
+      />
 
       {/* Popups */}
       <Popup isOpen={editSavedPopup} variant="success" title="CAPA updated" description="Changes saved. Submit for QA review when RCA and corrective actions are complete." onDismiss={() => setEditSavedPopup(false)} />
       <Popup isOpen={addedPopup} variant="success" title="CAPA created" description="Added to the tracker. Document RCA and corrective actions next." onDismiss={() => setAddedPopup(false)} />
       <Popup isOpen={submittedPopup} variant="success" title="Submitted for QA review" description="QA Head will review and sign to close." onDismiss={() => setSubmittedPopup(false)} />
       <Popup isOpen={signedPopup} variant="success" title="CAPA closed" description="Signed and closed. Audit trail entry recorded." onDismiss={() => setSignedPopup(false)} />
+      <Popup isOpen={!!aiSavedPopup} variant="success" title="AI CAPA generated" description={aiSavedPopup ?? ""} onDismiss={() => setAiSavedPopup(null)} />
       <Popup isOpen={diGateBlockPopup} variant="confirmation" title="DI gate must be cleared" description="Data integrity review has not been completed. Open Edit mode and clear the DI gate before closing this CAPA." onDismiss={() => setDiGateBlockPopup(false)} actions={[{ label: "OK", style: "primary", onClick: () => setDiGateBlockPopup(false) }]} />
     </main>
   );

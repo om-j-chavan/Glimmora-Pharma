@@ -4,6 +4,28 @@ import { authOptions } from "./auth/[...nextauth]";
 import { prisma } from "@/lib/prisma";
 import { mapTenantFromPrisma } from "@/lib/mappers/tenantMapper";
 
+interface SubscriptionPlanInput {
+  id?: string;
+  startDate?: string;
+  endDate?: string;
+  expiryDate?: string;
+  maxAccounts?: number;
+  status?: string;
+}
+
+function parseDate(value: string | undefined): Date {
+  if (!value) return new Date();
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
+function pickActivePlan(
+  plans: SubscriptionPlanInput[] | undefined,
+): SubscriptionPlanInput | null {
+  if (!plans || plans.length === 0) return null;
+  return plans.find((p) => (p.status ?? "Active") === "Active") ?? plans[0];
+}
+
 /**
  * Tenants API — session-protected via next-auth.
  *   GET     — any authenticated user (returns mapped legacy Tenant shape)
@@ -42,6 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         username?: string;
         passwordHash?: string;
         active?: boolean;
+        subscriptionPlans?: SubscriptionPlanInput[];
       };
       if (!body?.id || !body?.name || !body?.adminEmail) {
         return res.status(400).json({ error: "id, name and adminEmail are required" });
@@ -58,6 +81,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           isActive: body.active ?? true,
         },
       });
+      const plan = pickActivePlan(body.subscriptionPlans);
+      if (plan) {
+        await prisma.subscription.create({
+          data: {
+            tenantId: body.id,
+            maxAccounts: plan.maxAccounts ?? 5,
+            startDate: parseDate(plan.startDate),
+            expiryDate: parseDate(plan.endDate ?? plan.expiryDate),
+            status: plan.status ?? "Active",
+          },
+        });
+      }
       return res.status(201).json({ ok: true });
     }
 
@@ -67,6 +102,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         name?: string;
         adminEmail?: string;
         active?: boolean;
+        subscriptionPlans?: SubscriptionPlanInput[];
       };
       if (!body?.id) return res.status(400).json({ error: "id is required" });
       const existing = await prisma.tenant.findUnique({ where: { id: body.id } });
@@ -79,6 +115,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           ...(body.active !== undefined ? { isActive: body.active } : {}),
         },
       });
+      if (body.subscriptionPlans !== undefined) {
+        const plan = pickActivePlan(body.subscriptionPlans);
+        if (plan) {
+          await prisma.subscription.upsert({
+            where: { tenantId: body.id },
+            update: {
+              maxAccounts: plan.maxAccounts ?? 5,
+              startDate: parseDate(plan.startDate),
+              expiryDate: parseDate(plan.endDate ?? plan.expiryDate),
+              status: plan.status ?? "Active",
+            },
+            create: {
+              tenantId: body.id,
+              maxAccounts: plan.maxAccounts ?? 5,
+              startDate: parseDate(plan.startDate),
+              expiryDate: parseDate(plan.endDate ?? plan.expiryDate),
+              status: plan.status ?? "Active",
+            },
+          });
+        } else {
+          // Empty array → caller cleared the plan
+          await prisma.subscription.deleteMany({ where: { tenantId: body.id } });
+        }
+      }
       return res.status(200).json({ ok: true });
     }
 
