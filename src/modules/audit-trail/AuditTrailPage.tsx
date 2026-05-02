@@ -101,6 +101,18 @@ function formatAction(action: string): string {
 
 interface AuditTrailPageProps {
   logs: AuditLog[];
+  /** Total audit-log rows in the tenant — may exceed `logs.length` when
+   *  the loaded slice is capped. Used for the truncation notice and the
+   *  summary row so the user always sees the true population size. */
+  totalCount: number;
+  /** True when totalCount > limit and the visible slice is the most-recent
+   *  `limit` rows. Drives the standalone notice rendered above the
+   *  filters. Filters and CSV export still operate on the loaded slice
+   *  only — server-side date-range filtering is a separate change. */
+  truncated: boolean;
+  /** The cap applied by `getAuditLogs`. Surfaced for the notice so the
+   *  message stays correct if the cap is ever changed in one place. */
+  limit: number;
 }
 
 interface LocalFilters {
@@ -121,7 +133,7 @@ const EMPTY_FILTERS: LocalFilters = {
   dateTo: "",
 };
 
-export function AuditTrailPage({ logs }: AuditTrailPageProps) {
+export function AuditTrailPage({ logs, totalCount, truncated, limit }: AuditTrailPageProps) {
   const { users, org } = useTenantConfig();
   const timezone = org.timezone;
   const [filters, setFilters] = useState<LocalFilters>(EMPTY_FILTERS);
@@ -197,8 +209,10 @@ export function AuditTrailPage({ logs }: AuditTrailPageProps) {
         title="Audit Trail"
         subtitle={
           filtered.length === logs.length
-            ? `${logs.length} entries · Complete compliance log`
-            : `${filtered.length} entries (filtered from ${logs.length})`
+            ? truncated
+              ? `${totalCount} entries in audit log`
+              : `${totalCount} entries · Complete compliance log`
+            : `${filtered.length} entries (filtered from ${logs.length} loaded)`
         }
         actions={
           <Button variant="secondary" size="sm" icon={Download} onClick={exportCSV} disabled={filtered.length === 0}>
@@ -206,6 +220,17 @@ export function AuditTrailPage({ logs }: AuditTrailPageProps) {
           </Button>
         }
       />
+
+      {/* Truncation notice — only rendered when the total population in the
+       *  DB exceeds the display limit. Wording is the literal product spec;
+       *  `limit` and the older-entry count interpolate so the math stays
+       *  correct if AUDIT_LOG_DISPLAY_LIMIT in src/lib/queries/governance.ts
+       *  changes in one place. */}
+      {truncated && (
+        <div role="status" className="alert alert-warning text-[12px]">
+          Showing the {limit} most recent entries. {totalCount - limit} older entries are not displayed.
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-end gap-3 flex-wrap">
@@ -286,7 +311,10 @@ export function AuditTrailPage({ logs }: AuditTrailPageProps) {
       {/* Summary row */}
       <div className="flex items-center gap-3 text-[12px]" style={{ color: "var(--text-secondary)" }}>
         <Filter className="w-3.5 h-3.5" aria-hidden="true" />
-        <span>{filtered.length} of {logs.length} entries</span>
+        <span>
+          {filtered.length} of {logs.length}
+          {truncated && ` loaded · ${totalCount} total`} entries
+        </span>
         <span className="mx-1">·</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#ef4444]" /> Critical</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#f59e0b]" /> Status changes</span>

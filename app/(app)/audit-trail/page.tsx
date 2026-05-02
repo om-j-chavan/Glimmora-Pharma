@@ -16,11 +16,11 @@ export default async function Page() {
     redirect("/");
   }
 
-  const logs = await getAuditLogs(session.user.tenantId);
+  const result = await getAuditLogs(session.user.tenantId);
 
   return (
     <ErrorBoundary moduleName="Audit Trail">
-      <AuditTrailPage logs={logs} />
+      <AuditTrailPage {...result} />
     </ErrorBoundary>
   );
 }
