@@ -28,6 +28,7 @@ import {
   updateTenantUser,
   type TenantUserConfig,
 } from "@/store/auth.slice";
+import { aiSignup, generateUserId, AiAuthError } from "@/lib/aiAuth";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -402,7 +403,40 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const getRoleLabel = (value: string) =>
     ROLES.find((r) => r.value === value)?.label ?? value;
 
-  const handleAdd = (data: UserFormValues) => {
+  const handleAdd = async (data: UserFormValues) => {
+    const userId = generateUserId();
+    // For non-(super|customer)-admin users, customer_id is inherited from the
+    // tenant's customer admin (their aiUserId). If no admin has signed up yet
+    // we fall back to the tenant id, but the backend will reject this — flag
+    // that case so the operator knows to provision the customer admin first.
+    const customerAdmin = users.find(
+      (u) => u.role === "customer_admin" && u.aiUserId,
+    );
+    const customerId = customerAdmin?.aiUserId ?? tenantId;
+    // AI backend requires username ≥ 3 chars. The email's local part can
+    // be shorter (e.g. "qa@..." → "qa"), so pad with the user_id suffix.
+    const localPart = data.email.split("@")[0] ?? "";
+    const username =
+      localPart.length >= 3 ? localPart : `${localPart}_${userId.slice(-4)}`;
+
+    let aiUserId: string | undefined;
+    let aiAccessToken: string | undefined;
+    try {
+      const res = await aiSignup({
+        user_id: userId,
+        username,
+        email: data.email,
+        password: data.password ?? "",
+        customer_id: customerId,
+        role: data.role,
+      });
+      aiUserId = userId;
+      aiAccessToken = res.access_token;
+    } catch (err) {
+      const reason = err instanceof AiAuthError ? err.message : "unknown";
+      console.error("[UsersTab] AI signup failed — saving locally only:", reason);
+    }
+
     dispatch(
       addTenantUser({
         tenantId,
@@ -413,9 +447,12 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           gxpSignatory: data.gxpSignatory,
           status: data.status,
           allSites: data.allSites,
-          id: crypto.randomUUID(),
+          id: userId,
           assignedSites: data.allSites ? [] : data.assignedSites,
           password: data.password,
+          username,
+          aiUserId,
+          aiAccessToken,
         },
       }),
     );
@@ -428,7 +465,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
     setEditModal(true);
   };
 
-  const handleEdit = (data: UserFormValues) => {
+  const handleEdit = async (data: UserFormValues) => {
     if (editingUser) {
       const patch: Partial<TenantUserConfig> = {
         name: data.name,
@@ -440,6 +477,38 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         assignedSites: data.allSites ? [] : data.assignedSites,
       };
       if (data.password) patch.password = data.password;
+
+      // Retry AI signup only if it never succeeded for this user (missing
+      // aiUserId sentinel). Once aiUserId is set we never re-sign-up — edits
+      // become local + Neon-only.
+      if (!editingUser.aiUserId) {
+        const customerAdmin = users.find(
+          (u) => u.role === "customer_admin" && u.aiUserId,
+        );
+        const customerId = customerAdmin?.aiUserId ?? tenantId;
+        // AI backend requires username ≥ 3 chars. The email's local part can
+        // be shorter (e.g. "qa@..." → "qa"), so pad with the user id suffix.
+        const localPart = data.email.split("@")[0] ?? "";
+        const username =
+          localPart.length >= 3 ? localPart : `${localPart}_${editingUser.id.slice(-4)}`;
+        try {
+          const res = await aiSignup({
+            user_id: editingUser.id,
+            username,
+            email: data.email,
+            password: data.password ?? editingUser.password ?? "",
+            customer_id: customerId,
+            role: data.role,
+          });
+          patch.aiUserId = editingUser.id;
+          patch.aiAccessToken = res.access_token;
+          patch.username = username;
+        } catch (err) {
+          const reason = err instanceof AiAuthError ? err.message : "unknown";
+          console.error("[UsersTab] AI signup retry on edit failed:", reason);
+        }
+      }
+
       dispatch(updateTenantUser({ tenantId, userId: editingUser.id, patch }));
     }
     setEditModal(false);

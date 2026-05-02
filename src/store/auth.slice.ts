@@ -39,6 +39,13 @@ export interface TenantUserConfig {
   allSites: boolean;
   password?: string;
   username?: string;
+  /** user_id sent to the AI backend's signup. Set once after successful
+   *  signup and never re-sent on subsequent edits. Use as the "already
+   *  signed up" sentinel — if present, skip /auth/signup. */
+  aiUserId?: string;
+  /** Latest access_token from /api/v1/auth/login (or signup). Updated on
+   *  every login. Sent as the `auth` header for all protected endpoints. */
+  aiAccessToken?: string;
 }
 
 export interface TenantConfig {

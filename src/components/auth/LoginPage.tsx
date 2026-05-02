@@ -14,9 +14,10 @@ import {
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { setCredentials, setActiveSite, setSelectedSite, setTenants, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
+import { setCredentials, setActiveSite, setSelectedSite, setTenants, updateTenantUser, type AuthUser, type Tenant, type TenantSiteConfig } from "@/store/auth.slice";
 import { loginApi } from "@/lib/tenantApi";
 import { login as nextAuthLogin } from "@/lib/authClient";
+import { aiLogin } from "@/lib/aiAuth";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 
@@ -192,6 +193,35 @@ export function LoginPage() {
     router.push("/");
   };
 
+  /**
+   * Refreshes the user's AI backend access_token after a successful app login.
+   * The token rotates on every login (per backend spec) so we always re-fetch
+   * and write it back into the matching tenant user record.
+   *
+   * Best-effort: if the AI backend is unreachable or rejects, the app login
+   * still succeeds — modules that need the token will prompt for re-auth.
+   */
+  const refreshAiToken = async (
+    user: AuthUser,
+    tenant: Tenant | undefined,
+    rawUsername: string,
+    rawPassword: string,
+  ) => {
+    if (!tenant) return;
+    try {
+      const res = await aiLogin(rawUsername, rawPassword);
+      dispatch(
+        updateTenantUser({
+          tenantId: tenant.id,
+          userId: user.id,
+          patch: { aiAccessToken: res.access_token },
+        }),
+      );
+    } catch (err) {
+      console.warn("[login] AI backend login failed (non-fatal):", err);
+    }
+  };
+
   const onSubmit = async (data: FormValues) => {
     const key = data.email.toLowerCase().trim();
 
@@ -238,6 +268,8 @@ export function LoginPage() {
     const mockAccount = MOCK_ACCOUNTS[key];
     if (mockAccount && mockAccount.password === data.password) {
       dispatch(setCredentials({ token: "mock-token-" + Date.now(), user: mockAccount.user }));
+      const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
+      await refreshAiToken(mockAccount.user, userTenant, data.email.trim(), data.password);
 
       if (mockAccount.user.role === "super_admin") {
         setLoadingName("Platform Admin");
@@ -249,7 +281,6 @@ export function LoginPage() {
       }
 
       if (mockAccount.user.role === "customer_admin") {
-        const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
         const firstSite = userTenant?.config?.sites?.[0];
         if (firstSite) dispatch(setActiveSite(firstSite.id));
         dispatch(setSelectedSite(null));
@@ -259,7 +290,6 @@ export function LoginPage() {
         return;
       }
 
-      const userTenant = tenants.find((t) => t.id === mockAccount.user.tenantId);
       await finishLogin(mockAccount.user, userTenant, userTenant?.name ?? "workspace");
       return;
     }
@@ -272,6 +302,7 @@ export function LoginPage() {
         // Refresh local tenant cache with the authoritative one from the server
         dispatch(setTenants([apiResult.tenant]));
         dispatch(setCredentials({ token: "api-token-" + Date.now(), user }));
+        await refreshAiToken(user, apiResult.tenant, data.email.trim(), data.password);
 
         if (user.role === "super_admin") {
           setLoadingName("Platform Admin");
@@ -328,6 +359,7 @@ export function LoginPage() {
           tenantId: tenant.id,
         };
         dispatch(setCredentials({ token: "mock-token-" + Date.now(), user }));
+        await refreshAiToken(user, tenant, data.email.trim(), data.password);
 
         if (user.role === "super_admin") {
           setLoadingName("Platform Admin");

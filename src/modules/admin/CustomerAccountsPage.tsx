@@ -25,6 +25,7 @@ import {
   type Tenant,
 } from "@/store/auth.slice";
 import { fetchTenants, createTenantApi, updateTenantApi, deleteTenantApi } from "@/lib/tenantApi";
+import { aiSignup, generateCustomerId, AiAuthError } from "@/lib/aiAuth";
 import { isTenantEffectivelyActive, getInactiveReason } from "@/lib/tenantStatus";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -627,6 +628,36 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
 
   const handleSave = async (data: AccountFormData) => {
     if (editingTenant) {
+      // If the original create's AI signup failed, the customer admin won't
+      // have aiUserId / aiAccessToken set. Retry signup here so the edit
+      // recovers the missing token. Skip the retry once aiUserId is present
+      // — that's our "already signed up" sentinel and we never re-sign-up.
+      const existingAdmin = editingTenant.config.users.find(
+        (u) => u.role === "customer_admin" || u.role === "super_admin",
+      );
+      let retriedAiUserId: string | undefined;
+      let retriedAiAccessToken: string | undefined;
+      if (existingAdmin && !existingAdmin.aiUserId) {
+        // Reuse the admin's existing id as both customer_id and user_id —
+        // that id was already generated as a CUST_xxx during the failed create.
+        const customerId = existingAdmin.id;
+        try {
+          const res = await aiSignup({
+            user_id: customerId,
+            username: data.username,
+            email: data.email,
+            password: data.newPassword || existingAdmin.password || "",
+            customer_id: customerId,
+            role: "customer_admin",
+          });
+          retriedAiUserId = customerId;
+          retriedAiAccessToken = res.access_token;
+        } catch (err) {
+          const reason = err instanceof AiAuthError ? err.message : "unknown";
+          console.error("[admin] AI signup retry on edit failed:", reason);
+        }
+      }
+
       // Update existing admin user in the tenant's user list
       const updatedUsers = editingTenant.config.users.map((u) =>
         u.role === "customer_admin" || u.role === "super_admin"
@@ -638,6 +669,8 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
               // Only overwrite password if a new one was entered
               ...(data.newPassword ? { password: data.newPassword } : {}),
               status: data.active ? "Active" as const : "Inactive" as const,
+              ...(retriedAiUserId ? { aiUserId: retriedAiUserId } : {}),
+              ...(retriedAiAccessToken ? { aiAccessToken: retriedAiAccessToken } : {}),
             }
           : u,
       );
@@ -673,7 +706,35 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
       }
     } else {
       const tenantId = `tenant-${Date.now()}`;
-      const adminUserId = `u-ca-${Date.now()}`;
+      // Customer admin: customer_id is auto-generated AND used as the user_id
+      // for that admin (per spec). Both fields share the same CUST_xxx value.
+      const customerId = generateCustomerId();
+      const adminUserId = customerId;
+
+      // Sign up the customer admin against the AI backend so they get an
+      // access token and can call protected endpoints. Stash the token + id
+      // on the user record. If signup fails (network, duplicate, etc.) we
+      // still create the local account but log the reason — the admin can
+      // re-trigger by editing later (we'll need to expose that).
+      let aiUserId: string | undefined;
+      let aiAccessToken: string | undefined;
+      try {
+        const res = await aiSignup({
+          user_id: adminUserId,
+          username: data.username,
+          email: data.email,
+          password: data.newPassword,
+          customer_id: customerId,
+          role: "customer_admin",
+        });
+        aiUserId = adminUserId;
+        aiAccessToken = res.access_token;
+      } catch (err) {
+        const reason = err instanceof AiAuthError ? err.message : "unknown";
+        console.error("[admin] AI signup failed for customer admin — saving locally only:", reason);
+        setSyncError(`Customer saved locally, but AI signup failed: ${reason}. Edit the customer to retry.`);
+      }
+
       const newTenant: Tenant = {
         id: tenantId,
         name: data.customerName,
@@ -709,6 +770,8 @@ export function CustomerAccountsPage({ initialTenants }: CustomerAccountsPagePro
               status: "Active",
               assignedSites: [],
               allSites: true,
+              aiUserId,
+              aiAccessToken,
             },
           ],
         },

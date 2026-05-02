@@ -24,6 +24,23 @@ const PERSIST_SLICES = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function loadPersistedState(): Record<string, any> | undefined {
+  // Never preload at store-creation time. The store module is imported on
+  // both the server and the client, and reading localStorage here would
+  // give the server (no localStorage → defaults) and client (localStorage
+  // → previous session) different first-render output, causing a hydration
+  // mismatch. Use readPersistedStateFromStorage() inside a post-mount
+  // useEffect to rehydrate after React has hydrated the tree.
+  return undefined;
+}
+
+/**
+ * Read the persisted Redux state from localStorage. Safe to call only on the
+ * client. Returns undefined on the server, when nothing is stored, when the
+ * stored version is stale, or when JSON parsing fails.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function readPersistedStateFromStorage(): Record<string, any> | undefined {
+  if (typeof window === "undefined") return undefined;
   try {
     const ver = localStorage.getItem(VERSION_KEY);
     if (ver !== CURRENT_VERSION) {

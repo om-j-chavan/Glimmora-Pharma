@@ -3,7 +3,7 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   ClipboardCheck, Plus, Search, ChevronRight, Link2, Pencil,
   AlertCircle, AlertTriangle, CheckCircle2, TrendingUp,
-  ShieldCheck, Send,
+  ShieldCheck, Send, Sparkles,
 } from "lucide-react";
 import { DocumentUpload, type LinkedDocument } from "@/components/shared";
 import clsx from "clsx";
@@ -47,6 +47,7 @@ interface CAPATrackerTabProps {
   canSign: boolean;
   canCloseCapa: boolean;
   onAddOpen: () => void;
+  onAiOpen?: () => void;
   onEditOpen: () => void;
   onSignOpen: () => void;
   onSubmitForReview: (id: string) => void;
@@ -61,7 +62,7 @@ export function CAPATrackerTab({
   capas, filteredCAPAs, selectedCAPA, onSelectCAPA,
   isDark, isViewOnly, users, user, sites, timezone, dateFormat,
   canSign, canCloseCapa,
-  onAddOpen, onEditOpen, onSignOpen, onSubmitForReview,
+  onAddOpen, onAiOpen, onEditOpen, onSignOpen, onSubmitForReview,
   onNavigateGap, onNavigateCapa,
   onDocUpload, onDocDelete, onDocApprove,
 }: CAPATrackerTabProps) {
@@ -99,6 +100,7 @@ export function CAPATrackerTab({
         <Dropdown placeholder="All risks" value={riskFilter} onChange={setRiskFilter} width="w-32" options={[{ value: "", label: "All risks" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Low", label: "Low" }]} />
         <Dropdown placeholder="All sources" value={sourceFilter} onChange={setSourceFilter} width="w-40" options={[{ value: "", label: "All sources" }, { value: "483", label: "483" }, { value: "Internal Audit", label: "Internal Audit" }, { value: "Deviation", label: "Deviation" }, { value: "Complaint", label: "Complaint" }, { value: "OOS", label: "OOS" }, { value: "Change Control", label: "Change Control" }, { value: "Gap Assessment", label: "Gap Assessment" }]} />
         {anyFilterActive && <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>}
+        {!isViewOnly && onAiOpen && <Button variant="secondary" size="sm" icon={Sparkles} onClick={onAiOpen}>AI CAPA</Button>}
         {!isViewOnly && <Button variant="primary" size="sm" icon={Plus} onClick={onAddOpen}>New CAPA</Button>}
       </div>
 
@@ -112,7 +114,6 @@ export function CAPATrackerTab({
                 <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>No CAPAs raised yet</p>
                 <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>CAPAs are raised from Gap Assessment findings, or you can create one manually.</p>
                 <div className="flex gap-3 justify-center mt-3">
-                  {!isViewOnly && <Button variant="primary" icon={Plus} onClick={onAddOpen}>Create CAPA</Button>}
                   <Button variant="ghost" onClick={onNavigateCapa}>Go to Gap Assessment</Button>
                 </div>
               </>

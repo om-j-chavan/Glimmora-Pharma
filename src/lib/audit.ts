@@ -33,14 +33,21 @@ export async function auditLog(entry: AuditEntry): Promise<void> {
   };
   store.dispatch(logAction(full));
 
-  // Also POST to server (no-op in mock mode)
+  // Also POST to server (no-op in mock mode). Marked `optional: true` so the
+  // shared axios interceptor logs failures at warn level — the local audit
+  // trail in Redux is the source of truth; this server sync is a bonus.
   try {
-    await api.post("/audit", {
-      ...entry,
-      userId: user.id,
-      userEmail: user.email,
-    });
+    await api.post(
+      "/audit",
+      {
+        ...entry,
+        userId: user.id,
+        userEmail: user.email,
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { metadata: { optional: true } } as any,
+    );
   } catch {
-    // API may not be connected — local audit trail is the fallback
+    // Swallowed — interceptor already logged at warn level.
   }
 }

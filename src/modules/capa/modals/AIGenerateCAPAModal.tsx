@@ -5,6 +5,9 @@ import { z } from "zod";
 import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, XCircle, UploadCloud, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { updateTenantUser } from "@/store/auth.slice";
 
 const aiCapaSchema = z.object({
   customer_id: z.string().min(1, "Customer ID is required"),
@@ -14,7 +17,7 @@ const aiCapaSchema = z.object({
   equipment_product: z.string().min(1, "Equipment / product is required"),
   initial_severity: z.enum(["Low", "Medium", "High", "Critical"]),
 });
-type AICapaForm = z.infer<typeof aiCapaSchema>;
+export type AICapaForm = z.infer<typeof aiCapaSchema>;
 
 export interface SimilarCAPA {
   capa_id: string;
@@ -69,31 +72,28 @@ function setStoredToken(t: string | null) {
   }
 }
 
-async function aiLogin(username: string, password: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
-  const text = await res.text();
-  let body: { access_token?: string; detail?: string } = {};
-  try {
-    body = JSON.parse(text);
-  } catch {
-    /* ignore */
-  }
-  if (!res.ok || !body.access_token) {
-    throw new Error(body.detail ?? `Login failed (${res.status})`);
-  }
-  return body.access_token;
-}
-
 export function AIGenerateCAPAModal({
   isOpen,
   onClose,
   defaultCustomerId,
   onAccepted,
 }: AIGenerateCAPAModalProps) {
+  const dispatch = useAppDispatch();
+  // Pull the AI backend access token straight off the logged-in user's
+  // tenant-user record (set by the login flow). Avoids prompting for
+  // a second username/password — re-login refreshes the token.
+  const { authUserId, tenantId, storedAiToken } = useAppSelector((s) => {
+    const u = s.auth.user;
+    if (!u) return { authUserId: null, tenantId: null, storedAiToken: null };
+    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
+    const tu = tenant?.config?.users?.find((x) => x.id === u.id);
+    return {
+      authUserId: u.id,
+      tenantId: u.tenantId,
+      storedAiToken: tu?.aiAccessToken ?? null,
+    };
+  });
+
   const {
     register,
     handleSubmit,
@@ -116,11 +116,6 @@ export function AIGenerateCAPAModal({
   const [result, setResult] = useState<AICapaResponse | null>(null);
   const [lastForm, setLastForm] = useState<AICapaForm | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [needsAuth, setNeedsAuth] = useState(false);
-  const [authUser, setAuthUser] = useState("");
-  const [authPass, setAuthPass] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
-  const [pendingPayload, setPendingPayload] = useState<AICapaForm | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -136,9 +131,6 @@ export function AIGenerateCAPAModal({
       setResult(null);
       setLastForm(null);
       setError(null);
-      setNeedsAuth(false);
-      setPendingPayload(null);
-      setAuthPass("");
     }
   }, [isOpen, defaultCustomerId, reset]);
 
@@ -161,18 +153,26 @@ export function AIGenerateCAPAModal({
   async function onSubmit(data: AICapaForm) {
     setError(null);
     setResult(null);
-    const token = getStoredToken();
+    // Prefer the token attached to the logged-in user record (refreshed on
+    // every login). Fall back to a session-scoped token from the legacy
+    // login prompt if it's set. If neither exists, surface a clear error
+    // and ask the user to log out and log back in — that path automatically
+    // calls /api/v1/auth/login and stores the token.
+    const token = storedAiToken ?? getStoredToken();
     if (!token) {
-      setPendingPayload(data);
-      setNeedsAuth(true);
+      setError("AI backend session is missing. Please sign out and sign in again to refresh your access token.");
       return;
     }
     try {
       const res = await callCreate(data, token);
       if (res.status === 401) {
+        // Token expired/invalid — clear from both stores and tell the user
+        // to re-login (which refreshes via /api/v1/auth/login).
         setStoredToken(null);
-        setPendingPayload(data);
-        setNeedsAuth(true);
+        if (authUserId && tenantId) {
+          dispatch(updateTenantUser({ tenantId, userId: authUserId, patch: { aiAccessToken: undefined } }));
+        }
+        setError("AI backend rejected the cached token (401). Please sign out and sign in again to refresh it.");
         return;
       }
       if (!res.ok) {
@@ -187,33 +187,6 @@ export function AIGenerateCAPAModal({
     }
   }
 
-  async function handleAuthSubmit() {
-    setError(null);
-    setAuthBusy(true);
-    try {
-      const token = await aiLogin(authUser.trim(), authPass);
-      setStoredToken(token);
-      setNeedsAuth(false);
-      setAuthPass("");
-      if (pendingPayload) {
-        const data = pendingPayload;
-        setPendingPayload(null);
-        const res = await callCreate(data, token);
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `Request failed (${res.status})`);
-        }
-        const json = (await res.json()) as AICapaResponse;
-        setResult(json);
-        setLastForm(data);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
-    } finally {
-      setAuthBusy(false);
-    }
-  }
-
   function handleAccept() {
     if (result && lastForm) onAccepted?.(result, lastForm);
     onClose();
@@ -225,56 +198,7 @@ export function AIGenerateCAPAModal({
 
   return (
     <Modal open={isOpen} onClose={handleClose} title="AI-Generated CAPA">
-      {needsAuth && (
-        <div className="space-y-3">
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-            The AI backend requires sign-in. Enter your AI service credentials —
-            the token is cached for this session.
-          </p>
-          <div>
-            <label htmlFor="ai-auth-user" className="text-[11px] font-medium block mb-1.5" style={{ color: "var(--text-secondary)" }}>
-              Username
-            </label>
-            <input
-              id="ai-auth-user"
-              type="text"
-              autoComplete="username"
-              className="input text-[12px]"
-              value={authUser}
-              onChange={(e) => setAuthUser(e.target.value)}
-            />
-          </div>
-          <div>
-            <label htmlFor="ai-auth-pass" className="text-[11px] font-medium block mb-1.5" style={{ color: "var(--text-secondary)" }}>
-              Password
-            </label>
-            <input
-              id="ai-auth-pass"
-              type="password"
-              autoComplete="current-password"
-              className="input text-[12px]"
-              value={authPass}
-              onChange={(e) => setAuthPass(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void handleAuthSubmit(); }}
-            />
-          </div>
-          {error && (
-            <div role="alert" className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger)" }}>
-              {error}
-            </div>
-          )}
-          <div className="flex justify-end gap-3 pt-1">
-            <Button variant="ghost" type="button" onClick={() => { setNeedsAuth(false); setPendingPayload(null); }}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="button" loading={authBusy} onClick={handleAuthSubmit}>
-              Sign in &amp; continue
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {!needsAuth && !result && (
+      {!result && (
         <form
           onSubmit={handleSubmit(onSubmit)}
           aria-label="Generate AI CAPA"
@@ -285,29 +209,12 @@ export function AIGenerateCAPAModal({
             recurrence patterns, and propose a recommendation.
           </p>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label
-                htmlFor="ai-customer-id"
-                className="text-[11px] font-medium block mb-1.5"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                Customer ID <span style={{ color: "var(--danger)" }}>*</span>
-              </label>
-              <input
-                id="ai-customer-id"
-                type="text"
-                className="input text-[12px]"
-                placeholder="CUST_001"
-                {...register("customer_id")}
-              />
-              {errors.customer_id && (
-                <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>
-                  {errors.customer_id.message}
-                </p>
-              )}
-            </div>
+          {/* customer_id is auto-populated from the logged-in user's tenant
+              (the customer admin's aiUserId). Kept as a hidden field so it
+              still flows through react-hook-form into the request payload. */}
+          <input type="hidden" {...register("customer_id")} />
 
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label
                 htmlFor="ai-severity"
@@ -527,7 +434,7 @@ export function AIGenerateCAPAModal({
         </form>
       )}
 
-      {!needsAuth && result && <AIResultPanel result={result} onBack={() => setResult(null)} onAccept={handleAccept} />}
+      {result && <AIResultPanel result={result} onBack={() => setResult(null)} onAccept={handleAccept} />}
     </Modal>
   );
 }

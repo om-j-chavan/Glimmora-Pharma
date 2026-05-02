@@ -5,7 +5,6 @@ import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
   AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare,
-  Sparkles,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -29,7 +28,6 @@ import {
   submitForReview as submitForReviewServer,
   signAndCloseCAPA as signAndCloseCAPAServer,
 } from "@/actions/capas";
-import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
 import { StatusGuide } from "@/components/shared";
 import { CAPA_STATUSES } from "@/constants/statusTaxonomy";
@@ -40,7 +38,7 @@ import { CAPAMetricsTab } from "./tabs/CAPAMetricsTab";
 import { AddCAPAModal, type CAPAForm } from "./modals/AddCAPAModal";
 import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
 import { SignCloseModal } from "./modals/SignCloseModal";
-import { AIGenerateCAPAModal, type AICapaResponse } from "./modals/AIGenerateCAPAModal";
+import { AIGenerateCAPAModal, type AICapaResponse, type AICapaForm } from "./modals/AIGenerateCAPAModal";
 
 /* ── Constants ── */
 
@@ -68,10 +66,21 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
   const dispatch = useAppDispatch();
   const [, startTransition] = useTransition();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
-  const { isCustomerAdmin, canCreateCAPAs } = usePermissions();
+  const { isCustomerAdmin, isViewer } = usePermissions();
+  // AI CAPA is available to anyone except read-only viewers — including
+  // customer admins, so they can trigger AI analysis even though the manual
+  // "New CAPA" creation flow is reserved for QA-side roles.
+  const canUseAiCapa = !isViewer;
 
   const { capas, fda483Events, tenantId } = useTenantData();
   const { org, users, allSites } = useTenantConfig();
+  // For the AI backend, customer_id is the customer admin's aiUserId (the
+  // CUST_xxx that was registered at signup). Fall back to the local tenantId
+  // only if no admin has been signed up yet — the backend will then 422.
+  const aiCustomerId =
+    users.find((u) => u.role === "customer_admin" && u.aiUserId)?.aiUserId ??
+    tenantId ??
+    "";
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -284,10 +293,6 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
           <p className="page-subtitle mt-1">{capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}</p>
           <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
         </div>
-        <div className="flex items-center gap-2">
-          {canCreateCAPAs && <Button variant="secondary" icon={Sparkles} onClick={() => setAiOpen(true)}>AI CAPA</Button>}
-          {canCreateCAPAs && <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>New CAPA</Button>}
-        </div>
         {isCustomerAdmin && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>CAPA actions require QA Head authorization</p>}
       </header>
 
@@ -316,7 +321,9 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
           capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
           isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
           timezone={timezone} dateFormat={dateFormat} canSign={canSign} canCloseCapa={canCloseCapa}
-          onAddOpen={() => setAddOpen(true)} onEditOpen={() => setEditModalOpen(true)}
+          onAddOpen={() => setAddOpen(true)}
+          onAiOpen={canUseAiCapa ? () => setAiOpen(true) : undefined}
+          onEditOpen={() => setEditModalOpen(true)}
           onSignOpen={() => setSignOpen(true)} onSubmitForReview={handleSubmitForReview}
           onNavigateGap={(fid) => router.push(`/gap-assessment?openFindingId=${encodeURIComponent(fid)}`)}
           onNavigateCapa={() => router.push("/gap-assessment")}
@@ -343,10 +350,47 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
       <AIGenerateCAPAModal
         isOpen={aiOpen}
         onClose={() => setAiOpen(false)}
-        defaultCustomerId={tenantId ?? ""}
-        onAccepted={(res: AICapaResponse) => {
+        defaultCustomerId={aiCustomerId}
+        onAccepted={(res: AICapaResponse, form: AICapaForm) => {
+          // Map AI form severity → CAPA risk taxonomy ("Medium" → "High" so it
+          // still escalates; backend severity is informational anyway).
+          const risk: "Critical" | "High" | "Low" =
+            form.initial_severity === "Critical" ? "Critical" :
+            form.initial_severity === "Low" ? "Low" : "High";
+
+          // Map free-text source → known CAPASource, fall back to Deviation.
+          const knownSources = ["483", "Internal Audit", "Deviation", "Complaint", "OOS", "Change Control", "Gap Assessment"] as const;
+          const source = (knownSources as readonly string[]).includes(form.source)
+            ? form.source as typeof knownSources[number]
+            : "Deviation";
+
+          // Default due date: 30 days for Critical, 60 for High, 90 for Low.
+          const days = risk === "Critical" ? 30 : risk === "High" ? 60 : 90;
+
+          dispatch(addCAPA({
+            id: res.capa_id,
+            tenantId: tenantId ?? "",
+            siteId: selectedSiteId ?? allSites[0]?.id ?? "",
+            source,
+            risk,
+            owner: user?.id ?? "",
+            dueDate: dayjs(res.created_at).add(days, "day").toISOString(),
+            status: "Open",
+            description: [
+              form.problem_statement,
+              form.area_affected ? `Area: ${form.area_affected}` : "",
+              form.equipment_product ? `Equipment/Product: ${form.equipment_product}` : "",
+              res.ai_recommendation ? `\nAI recommendation: ${res.ai_recommendation}` : "",
+              res.pattern_detected ? `Pattern: ${res.pattern_detected}` : "",
+              res.recurrence_alert ? `Recurrence: ${res.recurrence_alert}` : "",
+            ].filter(Boolean).join("\n"),
+            effectivenessCheck: true,
+            evidenceLinks: [],
+            diGate: false,
+            createdAt: res.created_at,
+          }));
           auditLog({ action: "CAPA_AI_GENERATED", module: "capa", recordId: res.capa_id, newValue: { riskScore: res.risk_score, isRecurring: res.is_recurring } });
-          setAiSavedPopup(`AI CAPA ${res.capa_id} created`);
+          setAiSavedPopup(`AI CAPA ${res.capa_id} created and added to the tracker.`);
         }}
       />
 

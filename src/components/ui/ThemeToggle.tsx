@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Sun, Moon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -8,7 +9,13 @@ import { toggleTheme } from "@/store/theme.slice";
 export function ThemeToggle() {
   const dispatch = useAppDispatch();
   const mode = useAppSelector((s) => s.theme?.mode ?? "light");
-  const isDark = mode === "dark";
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  // Render the same output the server produced ("light") on the first
+  // client render, then swap to the real value after mount. Without this
+  // the button hydrates with mismatched aria-label / icon when the user's
+  // saved theme differs from the server default.
+  const isDark = mounted && mode === "dark";
 
   return (
     <button
