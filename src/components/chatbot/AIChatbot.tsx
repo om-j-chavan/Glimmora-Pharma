@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Bot, Send, Mic, Square, X, Volume2, RefreshCw, Trash2, Settings } from "lucide-react";
+import { Bot, Send, Mic, Square, X, Volume2, RefreshCw, Trash2, Settings, Edit3 } from "lucide-react";
 // Type-only import — the actual classes extend AudioWorkletNode (a
 // browser-only global) and crash at module-evaluation time on the SSR
 // server. We dynamically import() the runtime inside startRecording so
@@ -11,6 +11,8 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   aiChatSend,
   aiVoiceChat,
+  aiVoiceTranscribe,
+  aiVoiceSpeak,
   AiChatError,
   type ChatMessage,
 } from "@/lib/aiChat";
@@ -98,6 +100,12 @@ export function AIChatbot() {
   const [error, setError] = useState<string | null>(null);
   // Voice state machine: idle → recording → preview → idle.
   const [voiceState, setVoiceState] = useState<"idle" | "recording" | "preview">("idle");
+  // round-trip = STT + chat + TTS (audio reply); dictate = STT only, drops
+  // text into the input box for the user to review and send manually.
+  const [voiceMode, setVoiceMode] = useState<"round-trip" | "dictate">("round-trip");
+  // Per-message TTS state — the message index whose audio is currently
+  // being fetched / playing, so we can show a spinner / disabled state.
+  const [ttsIdx, setTtsIdx] = useState<number | null>(null);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -515,24 +523,44 @@ export function AIChatbot() {
   async function sendRecorded() {
     if (!aiToken || !recordedBlob) return;
     const blob = recordedBlob;
-    setBusy(true);
     setError(null);
-    // Append a placeholder for the user turn that we'll patch with the
-    // real transcript once it comes back in the response headers.
+
+    // Dictate mode — STT only. Transcribe and drop into the input box for
+    // the user to edit and send manually. No assistant turn is added.
+    if (voiceMode === "dictate") {
+      setBusy(true);
+      // Reset preview state immediately so the panel returns to its idle UI.
+      if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+      setRecordedBlob(null);
+      setRecordedUrl(null);
+      setRecordSeconds(0);
+      setVoiceState("idle");
+      try {
+        const r = await aiVoiceTranscribe(blob, aiToken);
+        const transcribed = (r as { text?: string }).text ?? "";
+        setInput((prev) => (prev ? `${prev} ${transcribed}` : transcribed));
+      } catch (e) {
+        const msg = e instanceof AiChatError ? e.message : e instanceof Error ? e.message : "Transcription failed";
+        setError(msg);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Round-trip mode — STT + chat + TTS. Plays audio reply.
+    setBusy(true);
     let userIdx = -1;
     setMessages((m) => {
       userIdx = m.length;
       return [...m, { role: "user", content: "🎤 (transcribing…)" }];
     });
-    // Reset preview state immediately so the panel returns to its idle UI.
     if (recordedUrl) URL.revokeObjectURL(recordedUrl);
     setRecordedBlob(null);
     setRecordedUrl(null);
     setRecordSeconds(0);
     setVoiceState("idle");
     try {
-      // Pass the existing conversation so vague utterances get answered in
-      // context instead of triggering the backend's generic intro reply.
       const result = await aiVoiceChat(blob, aiToken, messages);
       const url = URL.createObjectURL(result.audio);
       if (audioRef.current) {
@@ -541,7 +569,6 @@ export function AIChatbot() {
       }
       setMessages((m) => {
         const next = m.slice();
-        // Patch the user turn with the actual transcript.
         if (userIdx >= 0 && userIdx < next.length && next[userIdx].role === "user") {
           next[userIdx] = {
             role: "user",
@@ -550,7 +577,6 @@ export function AIChatbot() {
               : "🎤 (voice message — transcript unavailable)",
           };
         }
-        // Append the assistant's textual reply (audio is already playing).
         next.push({
           role: "assistant",
           content: result.aiReply ?? "🔊 (voice reply — playing)",
@@ -562,6 +588,26 @@ export function AIChatbot() {
       setError(msg);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // TTS — speak a stored assistant reply on demand.
+  async function speakMessage(idx: number, text: string) {
+    if (!aiToken || !text || !text.trim()) return;
+    setTtsIdx(idx);
+    setError(null);
+    try {
+      const audio = await aiVoiceSpeak(text, "nova", aiToken);
+      const url = URL.createObjectURL(audio);
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        await audioRef.current.play().catch(() => undefined);
+      }
+    } catch (e) {
+      const msg = e instanceof AiChatError ? e.message : e instanceof Error ? e.message : "Speech failed";
+      setError(msg);
+    } finally {
+      setTtsIdx(null);
     }
   }
 
@@ -746,23 +792,53 @@ export function AIChatbot() {
                 Hold the mic to record, release to send.
               </p>
             )}
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className="rounded-lg px-2.5 py-2 text-[12px] max-w-[85%]"
-                style={{
-                  alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                  marginLeft: m.role === "user" ? "auto" : 0,
-                  marginRight: m.role === "user" ? 0 : "auto",
-                  background: m.role === "user" ? "var(--brand-muted)" : "var(--bg-elevated)",
-                  color: m.role === "user" ? "var(--brand)" : "var(--text-primary)",
-                  border: m.role === "user" ? "1px solid var(--brand-border)" : "1px solid var(--bg-border)",
-                  whiteSpace: "pre-wrap",
-                }}
-              >
-                {m.content}
-              </div>
-            ))}
+            {messages.map((m, i) => {
+              // Show a "speak this reply" button on assistant turns whose
+              // content is plain text (skip the placeholder voice-reply tag
+              // since that audio is already playing from the round-trip).
+              const isAssistant = m.role !== "user";
+              const isVoicePlayingTag = isAssistant && m.content.startsWith("🔊");
+              const canSpeak = isAssistant && !isVoicePlayingTag && !!m.content.trim();
+              const speaking = ttsIdx === i;
+              return (
+                <div
+                  key={i}
+                  className="rounded-lg px-2.5 py-2 text-[12px] max-w-[85%] relative group"
+                  style={{
+                    alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                    marginLeft: m.role === "user" ? "auto" : 0,
+                    marginRight: m.role === "user" ? 0 : "auto",
+                    background: m.role === "user" ? "var(--brand-muted)" : "var(--bg-elevated)",
+                    color: m.role === "user" ? "var(--brand)" : "var(--text-primary)",
+                    border: m.role === "user" ? "1px solid var(--brand-border)" : "1px solid var(--bg-border)",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {m.content}
+                  {canSpeak && (
+                    <button
+                      type="button"
+                      aria-label={speaking ? "Generating audio…" : "Read aloud"}
+                      title={speaking ? "Generating audio…" : "Read aloud"}
+                      onClick={() => speakMessage(i, m.content)}
+                      disabled={speaking || ttsIdx !== null}
+                      className="ml-2 inline-flex items-center justify-center rounded-md cursor-pointer border-0 align-middle disabled:opacity-50 disabled:cursor-wait"
+                      style={{
+                        width: 22,
+                        height: 22,
+                        background: "transparent",
+                        color: speaking ? "var(--brand)" : "var(--text-muted)",
+                      }}
+                    >
+                      <Volume2
+                        className={"w-3.5 h-3.5 " + (speaking ? "animate-pulse" : "")}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
             {busy && (
               <div
                 className="rounded-lg px-2.5 py-2 text-[12px] inline-flex items-center gap-2"
@@ -795,15 +871,29 @@ export function AIChatbot() {
           >
             {voiceState === "idle" && (
               <>
+                {/* Record voice (round-trip — STT + chat + TTS reply) */}
                 <button
                   type="button"
-                  aria-label="Record voice message"
-                  onClick={startRecording}
+                  aria-label="Record voice message (assistant replies aloud)"
+                  title="Record voice message — assistant replies aloud"
+                  onClick={() => { setVoiceMode("round-trip"); void startRecording(); }}
                   disabled={busy}
                   className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}
                 >
                   <Mic className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+                {/* Dictate (STT-only — text drops into the input box) */}
+                <button
+                  type="button"
+                  aria-label="Dictate to text input"
+                  title="Dictate — transcribe to the text input, then edit before sending"
+                  onClick={() => { setVoiceMode("dictate"); void startRecording(); }}
+                  disabled={busy}
+                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}
+                >
+                  <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
                 <input
                   type="text"
