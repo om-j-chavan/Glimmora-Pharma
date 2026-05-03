@@ -173,4 +173,8 @@ export const authOptions: NextAuthOptions = {
   },
 };
 
-export default NextAuth(authOptions);
+// App Router: NextAuth's handler is the GET + POST handler for this route.
+// v4.22+ supports the route.ts shape — Next.js 16 stopped discovering the
+// catch-all in pages/api/, so this is now the canonical location.
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };

@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "./[...nextauth]";
+import { authOptions } from "../../../app/api/auth/[...nextauth]/route";
 
 /**
  * AUTH-04: Current User API
