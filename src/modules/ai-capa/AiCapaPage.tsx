@@ -346,23 +346,50 @@ function getRiskScore(capa: unknown): number | null {
   return typeof v === "number" ? v : null;
 }
 
+// The backend wraps lookup responses in plural arrays (rcas[], action_plans[],
+// monitorings[], effectiveness_checks[], closures[]) when fetched via the
+// *ByCapa endpoints. These helpers reach into the first element of the
+// matching array, falling back to a top-level field if the response isn't
+// wrapped (e.g. status endpoints return the record directly).
+function firstFromArrayField<T = unknown>(obj: unknown, ...keys: string[]): T | null {
+  if (!obj || typeof obj !== "object") return null;
+  const o = obj as Record<string, unknown>;
+  for (const key of keys) {
+    const v = o[key];
+    if (Array.isArray(v) && v.length > 0) return v[0] as T;
+  }
+  return null;
+}
+
+function recordIdFrom(obj: unknown, idKey: string, ...arrayKeys: string[]): string | null {
+  // Prefer the id at the top level (status endpoints return the record
+  // directly). Fall back to the first element of the wrapper array.
+  const top = getField(obj, idKey);
+  if (typeof top === "string") return top;
+  const inner = firstFromArrayField<Record<string, unknown>>(obj, ...arrayKeys);
+  if (inner && typeof inner[idKey] === "string") return inner[idKey] as string;
+  return null;
+}
+
 function rcaId(rca: unknown): string | null {
-  const v = getField(rca, "rca_id");
-  return typeof v === "string" ? v : null;
+  return recordIdFrom(rca, "rca_id", "rcas", "rca");
 }
 
 function planId(plan: unknown): string | null {
-  const v = getField(plan, "action_plan_id");
-  return typeof v === "string" ? v : null;
+  return recordIdFrom(plan, "action_plan_id", "action_plans", "plans");
 }
 
 function effectivenessId(eff: unknown): string | null {
-  const v = getField(eff, "effectiveness_id");
-  return typeof v === "string" ? v : null;
+  return recordIdFrom(eff, "effectiveness_id", "effectiveness_checks", "effectiveness");
 }
 
 function planActions(plan: unknown): ActionItem[] {
-  const v = getField(plan, "actions");
+  // Look at top level first, then inside the wrapped record.
+  let v = getField(plan, "actions");
+  if (!Array.isArray(v)) {
+    const inner = firstFromArrayField<Record<string, unknown>>(plan, "action_plans", "plans");
+    v = inner ? inner.actions : undefined;
+  }
   if (!Array.isArray(v)) return [];
   return v
     .map((a) => {
