@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, XCircle, UploadCloud, FileText, X } from "lucide-react";
+import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, XCircle, UploadCloud, FileText, X, BellOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -512,9 +512,12 @@ function AIResultPanel({
         </Section>
       )}
       {result.recurrence_alert && (
-        <Section icon={<AlertTriangle className="w-3.5 h-3.5" />} label="Recurrence alert">
-          {result.recurrence_alert}
-        </Section>
+        <div>
+          <Section icon={<AlertTriangle className="w-3.5 h-3.5" />} label="Recurrence alert">
+            {result.recurrence_alert}
+          </Section>
+          <DismissAlertControl capaId={result.capa_id} alertType="recurrence_alert" />
+        </div>
       )}
       {result.ai_recommendation && (
         <Section icon={<Sparkles className="w-3.5 h-3.5" />} label="AI recommendation">
@@ -595,6 +598,98 @@ function Section({
       <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>
         {children}
       </p>
+    </div>
+  );
+}
+
+/* ── Dismiss-alert control ───────────────────────────────────── */
+
+import { capaDismissAlert, AiBackendError, selectAiToken } from "@/lib/aiBackend";
+
+function DismissAlertControl({ capaId, alertType }: { capaId: string; alertType: string }) {
+  const token = useAppSelector(selectAiToken);
+  const userName = useAppSelector((s) => s.auth.user?.name ?? "Operator");
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [signature, setSignature] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (done) {
+    return (
+      <p className="text-[11px] mt-1 inline-flex items-center gap-1" style={{ color: "var(--success)" }}>
+        <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Alert dismissed.
+      </p>
+    );
+  }
+
+  async function submit() {
+    if (reason.trim().length < 5 || signature.trim().length < 1) {
+      setError("Reason ≥ 5 chars and signature are required.");
+      return;
+    }
+    if (!token) {
+      setError("AI session is missing. Sign out and sign in again.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await capaDismissAlert({
+        capa_id: capaId,
+        alert_type: alertType,
+        dismissal_reason: reason,
+        electronic_signature: signature,
+        dismissed_by: userName,
+      }, token);
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof AiBackendError ? e.message : e instanceof Error ? e.message : "Dismiss failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-[11px] mt-1 inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer underline"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        <BellOff className="w-3 h-3" aria-hidden="true" /> Dismiss alert
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-lg p-3 space-y-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+        Logged in your audit trail. Reason becomes part of the immutable record.
+      </p>
+      <textarea
+        rows={2}
+        className="input text-[12px] resize-none"
+        placeholder="Why is this alert being dismissed? (e.g. investigated and confirmed different root cause)"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <input
+        type="text"
+        className="input text-[12px]"
+        placeholder="Electronic signature (e.g. QM-2026-001)"
+        value={signature}
+        onChange={(e) => setSignature(e.target.value)}
+      />
+      {error && (
+        <div role="alert" className="rounded-lg px-2 py-1 text-[11px]" style={{ background: "var(--danger-bg)", color: "var(--danger)" }}>{error}</div>
+      )}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" type="button" onClick={() => setOpen(false)}>Cancel</Button>
+        <Button variant="primary" type="button" loading={busy} onClick={submit}>Dismiss</Button>
+      </div>
     </div>
   );
 }

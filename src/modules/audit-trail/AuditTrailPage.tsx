@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import {
-  FileText, Download, Filter, X,
+  FileText, Download, Filter, X, RefreshCw,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -11,6 +11,17 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/shared";
+import { auditAll, AiBackendError, selectAiToken } from "@/lib/aiBackend";
+
+interface AiAuditEntry {
+  audit_id: string;
+  action_type: string;
+  feature_id: string;
+  record_id: string;
+  username: string;
+  status: string;
+  timestamp: string;
+}
 
 const MODULES = ["all", "Gap Assessment", "CAPA Tracker", "FDA 483", "CSV/CSA", "Evidence & Documents", "Governance", "Inspection Readiness", "Settings", "Auth"];
 const ACTION_GROUPS = ["all", "Created", "Updated", "Status Changed", "Signed", "Submitted", "Deleted"];
@@ -56,6 +67,35 @@ export function AuditTrailPage() {
   const filters = useAppSelector((s) => s.auditTrail.filters);
   const { users, org } = useTenantConfig();
   const timezone = org.timezone;
+
+  // Source toggle — local Redux audit log vs AI backend's /api/v1/audit/all.
+  const [source, setSource] = useState<"local" | "ai">("local");
+  const aiToken = useAppSelector(selectAiToken);
+  const [aiEntries, setAiEntries] = useState<AiAuditEntry[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const loadAi = useCallback(async () => {
+    if (!aiToken) {
+      setAiError("AI session is missing. Sign out and sign in again.");
+      return;
+    }
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const res = await auditAll(aiToken);
+      const list = (res && typeof res === "object" && "audit_logs" in res && Array.isArray((res as { audit_logs?: unknown }).audit_logs))
+        ? ((res as { audit_logs: AiAuditEntry[] }).audit_logs)
+        : [];
+      setAiEntries(list);
+    } catch (e) {
+      setAiError(e instanceof AiBackendError ? e.message : e instanceof Error ? e.message : "Audit fetch failed");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [aiToken]);
+
+  useEffect(() => { if (source === "ai") void loadAi(); }, [source, loadAi]);
 
   const anyFilter = filters.module !== "all" || filters.action !== "all" || filters.userId !== "all" || filters.dateFrom !== "" || filters.dateTo !== "";
 
@@ -104,11 +144,91 @@ export function AuditTrailPage() {
     <main id="main-content" aria-label="Audit trail" className="w-full space-y-5">
       <PageHeader
         title="Audit Trail"
-        subtitle={`Complete compliance log \u2014 ${entries.length} entries recorded`}
+        subtitle={
+          source === "local"
+            ? `Complete compliance log \u2014 ${entries.length} entries recorded`
+            : `AI backend audit log \u2014 ${aiEntries.length} entries`
+        }
         actions={
-          <Button variant="secondary" size="sm" icon={Download} onClick={exportCSV}>Export CSV</Button>
+          source === "local"
+            ? <Button variant="secondary" size="sm" icon={Download} onClick={exportCSV}>Export CSV</Button>
+            : <Button variant="secondary" size="sm" icon={RefreshCw} loading={aiLoading} onClick={loadAi}>Refresh</Button>
         }
       />
+
+      {/* Source toggle */}
+      <div role="tablist" aria-label="Audit source" className="flex gap-1 border-b border-(--bg-border)">
+        <button
+          type="button" role="tab" aria-selected={source === "local"}
+          onClick={() => setSource("local")}
+          className="inline-flex items-center gap-2 px-4 py-2.5 text-[12px] font-semibold border-b-2 -mb-px bg-transparent border-x-0 border-t-0 cursor-pointer outline-none"
+          style={{
+            borderBottomColor: source === "local" ? "var(--brand)" : "transparent",
+            color: source === "local" ? "var(--brand)" : "var(--text-muted)",
+          }}
+        >Local</button>
+        <button
+          type="button" role="tab" aria-selected={source === "ai"}
+          onClick={() => setSource("ai")}
+          className="inline-flex items-center gap-2 px-4 py-2.5 text-[12px] font-semibold border-b-2 -mb-px bg-transparent border-x-0 border-t-0 cursor-pointer outline-none"
+          style={{
+            borderBottomColor: source === "ai" ? "var(--brand)" : "transparent",
+            color: source === "ai" ? "var(--brand)" : "var(--text-muted)",
+          }}
+        >AI Backend</button>
+      </div>
+
+      {/* AI backend view \u2014 separate table, simpler shape from /api/v1/audit/all */}
+      {source === "ai" && (
+        <>
+          {aiError && (
+            <div role="alert" className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger)" }}>
+              {aiError}
+            </div>
+          )}
+          <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="data-table" style={{ minWidth: 800 }} aria-label="AI backend audit entries">
+                <thead>
+                  <tr>
+                    <th scope="col">Timestamp</th>
+                    <th scope="col">User</th>
+                    <th scope="col">Action</th>
+                    <th scope="col">Feature</th>
+                    <th scope="col">Record</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Audit ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aiLoading && aiEntries.length === 0 ? (
+                    <tr><td colSpan={7} className="text-center py-6 text-[12px]" style={{ color: "var(--text-muted)" }}>Loading\u2026</td></tr>
+                  ) : aiEntries.length === 0 ? (
+                    <tr><td colSpan={7} className="text-center py-8">
+                      <FileText className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                      <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>No AI backend audit entries yet</p>
+                    </td></tr>
+                  ) : aiEntries.map((e) => (
+                    <tr key={e.audit_id}>
+                      <td className="text-[11px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(e.timestamp).tz(timezone).format("DD/MM/YYYY HH:mm")}</td>
+                      <td className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{e.username}</td>
+                      <td className="text-[11px] font-mono" style={{ color: "var(--brand)" }}>{e.action_type}</td>
+                      <td><Badge variant="gray">{e.feature_id}</Badge></td>
+                      <td className="text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>{e.record_id}</td>
+                      <td>
+                        <Badge variant={e.status === "success" ? "green" : "red"}>{e.status}</Badge>
+                      </td>
+                      <td className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>{e.audit_id}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {source === "local" && <>
 
       {/* Filters */}
       <div className="flex items-end gap-3 flex-wrap">
@@ -222,6 +342,7 @@ export function AuditTrailPage() {
           </table>
         </div>
       </div>
+      </>}
     </main>
   );
 }

@@ -391,6 +391,9 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
           }));
           auditLog({ action: "CAPA_AI_GENERATED", module: "capa", recordId: res.capa_id, newValue: { riskScore: res.risk_score, isRecurring: res.is_recurring } });
           setAiSavedPopup(`AI CAPA ${res.capa_id} created and added to the tracker.`);
+          // Drop the user into the lifecycle dashboard so they can run RCA →
+          // Action plan → Monitoring → Effectiveness → Closure.
+          router.push(`/ai-capa/${encodeURIComponent(res.capa_id)}`);
         }}
       />
 
