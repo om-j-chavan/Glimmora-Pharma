@@ -19,11 +19,9 @@ import type {
   DeviationClusterInput,
   DeviationCluster,
   DeviationIntelligenceResult,
-  BatchRecord,
-  BatchReadinessAssessment,
-  BatchReadinessResult,
-  BatchReadinessLevel,
   DriftDetectionResult,
+  FindingTriageResult,
+  FindingTriageSeverity,
 } from "./index";
 import type { DriftAlert } from "@/types/agi";
 
@@ -1216,141 +1214,6 @@ export function mockDeviationIntelligence(
   };
 }
 
-/* ── Feature G — Batch Readiness Agent ───────────────────────────────
- * Deterministic demo batch records (real backend = MES) + a pure
- * completeness assessment. Entry statuses drive everything: "missing" →
- * not ready, "review" → needs review, all "complete" → ready. */
-
-/** Canonical record sections, in batch-record order. Drives the pre-release
- *  checklist (one gate per section the batch actually has). */
-const BATCH_SECTIONS = [
-  "Manufacturing",
-  "In-Process Controls",
-  "QC Testing",
-  "Packaging",
-  "Documentation",
-] as const;
-
-const BATCH_SECTION_GATE: Record<string, string> = {
-  Manufacturing: "Manufacturing steps recorded & signed",
-  "In-Process Controls": "In-process controls within limits",
-  "QC Testing": "QC results attached and reviewed",
-  Packaging: "Packaging & labelling reconciled",
-  Documentation: "Batch record reviewed, deviations reconciled",
-};
-
-const BATCH_RECORDS: BatchRecord[] = [
-  {
-    id: "STB-2026-041",
-    product: "Sterile Tablets 50 mg",
-    stage: "Released to QA",
-    site: "Chennai",
-    manufactureDate: "2026-05-20",
-    status: "under_review",
-    entries: [
-      { id: "41-mfg-1", section: "Manufacturing", label: "Dispensing weights recorded", status: "complete" },
-      { id: "41-mfg-2", section: "Manufacturing", label: "Granulation parameters logged", status: "complete" },
-      { id: "41-mfg-3", section: "Manufacturing", label: "Line clearance signature", status: "complete" },
-      { id: "41-ipc-1", section: "In-Process Controls", label: "Tablet hardness within range", status: "complete" },
-      { id: "41-ipc-2", section: "In-Process Controls", label: "Weight variation recorded", status: "complete" },
-      { id: "41-qc-1", section: "QC Testing", label: "Assay result attached", status: "complete" },
-      { id: "41-qc-2", section: "QC Testing", label: "Dissolution result attached", status: "complete" },
-      { id: "41-doc-1", section: "Documentation", label: "Batch record reviewed", status: "complete" },
-      { id: "41-doc-2", section: "Documentation", label: "Deviations reconciled", status: "complete" },
-    ],
-  },
-  {
-    id: "STB-2026-042",
-    product: "Sterile Tablets 50 mg",
-    stage: "Compression",
-    site: "Chennai",
-    manufactureDate: "2026-05-28",
-    status: "in_process",
-    entries: [
-      { id: "42-mfg-1", section: "Manufacturing", label: "Dispensing weights recorded", status: "complete" },
-      { id: "42-mfg-2", section: "Manufacturing", label: "Granulation parameters logged", status: "complete" },
-      { id: "42-mfg-3", section: "Manufacturing", label: "Line clearance signature", status: "complete" },
-      { id: "42-ipc-1", section: "In-Process Controls", label: "Tablet hardness within range", status: "review" },
-      { id: "42-ipc-2", section: "In-Process Controls", label: "Weight variation recorded", status: "complete" },
-      { id: "42-qc-1", section: "QC Testing", label: "Assay result attached", status: "complete" },
-      { id: "42-qc-2", section: "QC Testing", label: "Dissolution result attached", status: "review" },
-      { id: "42-doc-1", section: "Documentation", label: "Batch record reviewed", status: "complete" },
-      { id: "42-doc-2", section: "Documentation", label: "Deviations reconciled", status: "complete" },
-    ],
-  },
-  {
-    id: "STB-2026-043",
-    product: "Coated Tablets 100 mg",
-    stage: "Packaging",
-    site: "Bangalore",
-    manufactureDate: "2026-06-01",
-    status: "in_process",
-    entries: [
-      { id: "43-mfg-1", section: "Manufacturing", label: "Dispensing weights recorded", status: "complete" },
-      { id: "43-mfg-2", section: "Manufacturing", label: "Granulation parameters logged", status: "complete" },
-      { id: "43-mfg-3", section: "Manufacturing", label: "Line clearance signature", status: "missing" },
-      { id: "43-ipc-1", section: "In-Process Controls", label: "Tablet hardness within range", status: "complete" },
-      { id: "43-ipc-2", section: "In-Process Controls", label: "Weight variation recorded", status: "missing" },
-      { id: "43-qc-1", section: "QC Testing", label: "Assay result attached", status: "complete" },
-      { id: "43-qc-2", section: "QC Testing", label: "Dissolution result attached", status: "missing" },
-      { id: "43-pkg-1", section: "Packaging", label: "Label reconciliation", status: "missing" },
-      { id: "43-pkg-2", section: "Packaging", label: "Leak test recorded", status: "complete" },
-      { id: "43-doc-1", section: "Documentation", label: "Batch record reviewed", status: "missing" },
-    ],
-  },
-];
-
-export function listBatchRecords(): BatchRecord[] {
-  // Fresh deep-ish copy so callers can't mutate the source entries.
-  return BATCH_RECORDS.map((b) => ({ ...b, entries: b.entries.map((e) => ({ ...e })) }));
-}
-
-export function analyzeBatchReadiness(batch: BatchRecord): BatchReadinessAssessment {
-  const total = batch.entries.length;
-  const complete = batch.entries.filter((e) => e.status === "complete").length;
-  const missingEntries = batch.entries.filter((e) => e.status === "missing");
-  const reviewItems = batch.entries.filter((e) => e.status === "review");
-
-  const readiness: BatchReadinessLevel =
-    missingEntries.length > 0
-      ? "not_ready"
-      : reviewItems.length > 0
-        ? "needs_review"
-        : "ready";
-
-  // Pre-release checklist — one gate per section the batch actually has,
-  // in canonical order. A gate is "done" only when every entry in that
-  // section is complete (no missing AND no review).
-  const checklist = BATCH_SECTIONS.filter((sec) =>
-    batch.entries.some((e) => e.section === sec),
-  ).map((sec) => ({
-    id: sec,
-    label: BATCH_SECTION_GATE[sec] ?? sec,
-    done: batch.entries
-      .filter((e) => e.section === sec)
-      .every((e) => e.status === "complete"),
-  }));
-
-  return {
-    batchId: batch.id,
-    completenessPct: total === 0 ? 0 : Math.round((complete / total) * 100),
-    totalEntries: total,
-    completeEntries: complete,
-    missingEntries,
-    reviewItems,
-    checklist,
-    readiness,
-  };
-}
-
-export function mockBatchReadiness(batch: BatchRecord): BatchReadinessResult {
-  return {
-    ...analyzeBatchReadiness(batch),
-    scannedAt: new Date().toISOString(),
-    source: "mock",
-  };
-}
-
 /* ── Feature H — Drift Detection ─────────────────────────────────────
  * Deterministic drift alerts across validated systems (config changes,
  * access creep, audit-trail anomalies). A real backend would diff validated
@@ -1443,6 +1306,113 @@ export function mockDriftDetection(): DriftDetectionResult {
   return {
     alerts: buildDriftAlerts(),
     scannedAt: new Date().toISOString(),
+    source: "mock",
+  };
+}
+
+/* ── Feature I — Finding Triage ──────────────────────────────────────
+ * Deterministic keyword classifier: same requirement -> same result, so the
+ * demo (and the backend's fallback path) is stable. Mirrors the backend's
+ * coercion: the framework is constrained to the tenant's active frameworks and
+ * severity is always Critical/High/Low. */
+
+const TRIAGE_FRAMEWORK_LABELS: Record<string, string> = {
+  p210: "21 CFR 210/211", p11: "Part 11", annex11: "Annex 11",
+  annex15: "Annex 15", ichq9: "ICH Q9", ichq10: "ICH Q10",
+  gamp5: "GAMP 5", who: "WHO GMP", mhra: "MHRA",
+};
+
+interface TriageRule {
+  /** Lowercased keywords that trigger this rule. */
+  match: string[];
+  framework: string;
+  clause: string;
+  severity: FindingTriageSeverity;
+  evidenceGaps: string[];
+}
+
+// First matching rule wins; order = most specific/severe first.
+const TRIAGE_RULES: TriageRule[] = [
+  {
+    match: ["audit trail", "electronic record", "electronic signature", "part 11", "access control", "user access", "overwrite", "data integrity", "alcoa"],
+    framework: "p11", clause: "21 CFR Part 11 §11.10(e)", severity: "Critical",
+    evidenceGaps: ["System audit-trail export", "User access / privilege matrix", "Audit-trail review SOP"],
+  },
+  {
+    match: ["oos", "out of specification", "out-of-specification", "oot", "result", "integration", "reprocess"],
+    framework: "p210", clause: "21 CFR 211.192", severity: "Critical",
+    evidenceGaps: ["OOS investigation record", "Analyst worksheet + raw data", "QA disposition record"],
+  },
+  {
+    match: ["sterile", "aseptic", "smoke study", "airflow", "contamination", "media fill"],
+    framework: "p210", clause: "21 CFR 211.42(c)", severity: "Critical",
+    evidenceGaps: ["Smoke-study video / report", "Environmental monitoring trends", "Aseptic qualification records"],
+  },
+  {
+    match: ["validation", "qualification", "iq", "oq", "pq", "csv", "computer system", "requalification"],
+    framework: "annex15", clause: "Annex 15 §2 (Qualification)", severity: "High",
+    evidenceGaps: ["Validation Master Plan reference", "IQ/OQ/PQ protocols + reports", "Traceability matrix"],
+  },
+  {
+    match: ["risk assessment", "risk management", "quality risk"],
+    framework: "ichq9", clause: "ICH Q9 §4 (Risk Assessment)", severity: "High",
+    evidenceGaps: ["Documented risk assessment (FMEA/HACCP)", "Risk-control / mitigation plan"],
+  },
+  {
+    match: ["training", "competency", "retrain", "qualification of personnel"],
+    framework: "ichq10", clause: "ICH Q10 §2.4 (Training)", severity: "Low",
+    evidenceGaps: ["Training matrix", "Completion records / certificates", "Training-effectiveness evidence"],
+  },
+  {
+    match: ["calibration", "maintenance", "preventive maintenance", "equipment"],
+    framework: "p210", clause: "21 CFR 211.68", severity: "High",
+    evidenceGaps: ["Calibration certificates", "Preventive-maintenance schedule + logs"],
+  },
+];
+
+const TRIAGE_DEFAULT: Omit<TriageRule, "match"> = {
+  framework: "p210", clause: "21 CFR 211.22 (Quality unit responsibilities)", severity: "High",
+  evidenceGaps: ["Governing SOP", "Objective evidence of compliant practice", "Most recent review/approval record"],
+};
+
+export function mockFindingTriage(
+  requirement: string,
+  area: string,
+  purpose: string,
+  activeFrameworks: string[],
+): FindingTriageResult {
+  void purpose; // accepted for signature parity; mock derives from requirement + area.
+  const haystack = `${requirement} ${area}`.toLowerCase();
+  const rule = TRIAGE_RULES.find((r) => r.match.some((m) => haystack.includes(m)));
+  const picked = rule ?? TRIAGE_DEFAULT;
+
+  // Constrain to the tenant's active frameworks, exactly like the backend.
+  const allowed = activeFrameworks.filter((f) => f in TRIAGE_FRAMEWORK_LABELS);
+  const framework =
+    allowed.length === 0 || allowed.includes(picked.framework)
+      ? picked.framework
+      : allowed[0];
+
+  const sevReason: Record<FindingTriageSeverity, string> = {
+    Critical: "Direct patient-safety or data-integrity exposure — likely 483 observation if uncorrected.",
+    High: "Significant GMP compliance gap requiring prompt corrective action.",
+    Low: "Administrative / lower-risk gap; address within the standard cycle.",
+  };
+
+  const focus = requirement.trim().replace(/\.$/, "");
+  return {
+    framework,
+    frameworkLabel: TRIAGE_FRAMEWORK_LABELS[framework] ?? framework,
+    clause: picked.clause,
+    severity: picked.severity,
+    severityRationale: sevReason[picked.severity],
+    agiSummary:
+      `This gap maps to ${TRIAGE_FRAMEWORK_LABELS[framework] ?? framework} (${picked.clause}). ` +
+      `"${focus}" presents a ${picked.severity.toLowerCase()} compliance risk` +
+      `${area ? ` in ${area}` : ""}; ensure the evidence below is assembled before inspection.`,
+    evidenceGaps: picked.evidenceGaps,
+    suggestedCapaTitle: `Remediate: ${focus.slice(0, 64)}`,
+    confidence: rule ? 88 : 70,
     source: "mock",
   };
 }

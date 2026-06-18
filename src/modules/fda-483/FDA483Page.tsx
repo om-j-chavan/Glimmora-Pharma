@@ -66,6 +66,7 @@ import { AddObservationModal, type ObsFormData } from "./modals/AddObservationMo
 import { AddCommitmentModal, type CommitFormData } from "./modals/AddCommitmentModal";
 import { CommitmentDetailModal } from "./modals/CommitmentDetailModal";
 import { SignSubmitModal } from "./modals/SignSubmitModal";
+import { DocumentSummaryPanel } from "@/components/search/DocumentSummaryPanel";
 
 /* ── Helpers ── */
 
@@ -910,9 +911,20 @@ export function FDA483Page({
               )}
 
               {urlState.tab === "response" && (
-                <ResponseDetailTab
-                  liveEvent={liveEvent}
-                  capas={capas} role={role}
+                <div className="space-y-4">
+                  {/* Feature 3 — Document Summarizing (the 483 response can run many pages) */}
+                  <DocumentSummaryPanel
+                    title={`FDA-483 ${liveEvent.referenceNumber ?? liveEvent.id.slice(0, 8)} response`}
+                    recordId={liveEvent.id}
+                    module="fda483"
+                    content={[
+                      liveEvent.responseDraft ? `Response draft:\n${liveEvent.responseDraft}` : "",
+                      ...liveEvent.observations.map((o, i) => `Observation ${i + 1}: ${o.text}${o.rootCause ? `\nRoot cause: ${o.rootCause}` : ""}`),
+                    ].filter(Boolean).join("\n\n")}
+                  />
+                  <ResponseDetailTab
+                    liveEvent={liveEvent}
+                    capas={capas} role={role}
                   canSign={(isCustomerAdmin ? false : canSign) && fda.canSign}
                   canSubmit={canSubmitResponse}
                   agiMode={agiMode}
@@ -998,7 +1010,8 @@ export function FDA483Page({
                     return draft;
                   }}
                   onSignSubmit={() => setSignOpen(true)}
-                />
+                  />
+                </div>
               )}
 
               {urlState.tab === "audit" && (

@@ -40,6 +40,21 @@ export {
 
 import { AI_API_BASE } from "./aiAuth";
 
+// Type-only imports of the gateway result shapes. These are erased at compile
+// time, so they do NOT create a runtime import cycle with ./ai (which imports
+// the fetch* functions below from this module).
+import type {
+  RegulatoryIntelligenceResult,
+  DeviationClusterInput,
+  DeviationIntelligenceResult,
+  DriftDetectionResult,
+  ResponseDraftEvent,
+  RcaMethod,
+  RcaSuggestion,
+  CAPAPrefill,
+  FindingTriageResult,
+} from "./ai";
+
 /* ── Error type ────────────────────────────────────────────────── */
 
 export class AiBackendError extends Error {
@@ -407,6 +422,92 @@ export async function scanStageDocument(
     method: "POST",
     formBody: fd,
     token,
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════ */
+/* AGI agents (Regulatory / Deviation / Batch / Drift)            */
+/* ══════════════════════════════════════════════════════════════ */
+/**
+ * Real-backend counterparts to the mock-first gateway in src/lib/ai/index.ts.
+ * Each returns the SAME shape the gateway's mock returns (the backend routers
+ * emit those camelCase keys directly), so the gateway can return the result
+ * unchanged. These AGI surfaces are tenant-agnostic / send their own input, so
+ * they don't require the AI auth token. The gateway wraps each call in a
+ * try/catch that falls back to the deterministic mock on failure.
+ */
+
+/** Feature E — FDA/EMA/ICH guidance monitoring (LLM over the agent's prompt). */
+export function fetchRegulatoryIntelligence(): Promise<RegulatoryIntelligenceResult> {
+  return request<RegulatoryIntelligenceResult>(
+    "/api/v1/regulatory-intelligence/scan",
+    { method: "GET" },
+  );
+}
+
+/** Feature F — semantic clustering of the tenant's own deviation history. */
+export function fetchDeviationClusters(
+  deviations: DeviationClusterInput[],
+): Promise<DeviationIntelligenceResult> {
+  return request<DeviationIntelligenceResult>(
+    "/api/v1/deviation-intelligence/analyze",
+    { method: "POST", jsonBody: { deviations } },
+  );
+}
+
+/** Feature H — drift/anomaly detection grounded in the real audit trail. */
+export function fetchDriftDetection(): Promise<DriftDetectionResult> {
+  return request<DriftDetectionResult>("/api/v1/drift-detection/scan", {
+    method: "GET",
+  });
+}
+
+/** Feature C — formal FDA-483 response-letter draft (LLM long-form generation). */
+export function fetchResponseDraft(
+  event: ResponseDraftEvent,
+): Promise<{ draft: string; characterCount: number }> {
+  return request<{ draft: string; characterCount: number }>(
+    "/api/v1/response-draft/generate",
+    { method: "POST", jsonBody: event },
+  );
+}
+
+/** Feature A — method-shaped RCA suggestions for an observation (LLM). */
+export function fetchRcaSuggestions(
+  method: RcaMethod,
+  observationText: string,
+  observationSeverity: string,
+  siteContext: string,
+): Promise<RcaSuggestion[]> {
+  return request<RcaSuggestion[]>("/api/v1/rca-suggestions/generate", {
+    method: "POST",
+    jsonBody: { method, observationText, observationSeverity, siteContext },
+  });
+}
+
+/** Feature B — CAPA pre-fill draft from an observation + RCA root cause (LLM). */
+export function fetchCapaPrefill(
+  observationText: string,
+  rcaRootCause: string,
+  observationSeverity: string,
+): Promise<CAPAPrefill> {
+  return request<CAPAPrefill>("/api/v1/capa-prefill/generate", {
+    method: "POST",
+    jsonBody: { observationText, rcaRootCause, observationSeverity },
+  });
+}
+
+/** Feature I — triage a finding's requirement into framework + severity +
+ *  risk summary + evidence gaps (LLM picks from the active frameworks). */
+export function fetchFindingTriage(
+  requirement: string,
+  area: string,
+  purpose: string,
+  activeFrameworks: string[],
+): Promise<FindingTriageResult> {
+  return request<FindingTriageResult>("/api/v1/finding-triage/classify", {
+    method: "POST",
+    jsonBody: { requirement, area, purpose, activeFrameworks },
   });
 }
 

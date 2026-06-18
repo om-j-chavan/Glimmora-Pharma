@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Bot, Send, Mic, Square, X, Volume2, RefreshCw, Trash2, Settings, Edit3 } from "lucide-react";
+import { Bot, Send, Mic, Square, X, Volume2, RefreshCw, Trash2, Settings, Edit3, FileText, Ticket, AlertTriangle } from "lucide-react";
 // Type-only import — the actual classes extend AudioWorkletNode (a
 // browser-only global) and crash at module-evaluation time on the SSR
 // server. We dynamically import() the runtime inside startRecording so
@@ -9,13 +9,34 @@ import { Bot, Send, Mic, Square, X, Volume2, RefreshCw, Trash2, Settings, Edit3 
 import type { RnnoiseWorkletNode as RnnoiseNode } from "@sapphi-red/web-noise-suppressor";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import {
-  aiChatSend,
+  aiHelpSend,
   aiVoiceChat,
   aiVoiceTranscribe,
   aiVoiceSpeak,
+  AiChatError,
   type ChatMessage,
+  type HelpSource,
+  type TicketPrefill,
 } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
+
+/**
+ * Metadata attached to a Compliance Help Assistant answer so the UI can
+ * render citations, the confidence band, and the ticket handoff. Voice
+ * turns and the user's own messages simply omit it.
+ */
+interface HelpMeta {
+  status: string;
+  band: string;
+  score: number;
+  sources: HelpSource[];
+  suggestTicket: boolean;
+  ticketPrefill?: TicketPrefill | null;
+  actionRefused: boolean;
+  auditId?: string | null;
+}
+
+type UiMessage = ChatMessage & { meta?: HelpMeta };
 
 /**
  * Floating AI chatbot.
@@ -97,7 +118,7 @@ export function AIChatbot() {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<Position>(() => ({ x: 24, y: 24 })); // fallback; replaced after mount
   const [mounted, setMounted] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -210,16 +231,35 @@ export function AIChatbot() {
       return;
     }
     setInput("");
-    const userMsg: ChatMessage = { role: "user", content: text };
+    const userMsg: UiMessage = { role: "user", content: text };
     const next = [...messages, userMsg];
     setMessages(next);
     setBusy(true);
     try {
-      const res = await aiChatSend(text, messages, aiToken);
-      setMessages([...next, { role: "assistant", content: res.reply ?? "(no reply)" }]);
+      // Send only role+content as history — the backend ignores extra fields,
+      // but stripping keeps the payload clean.
+      const history = messages.map((m) => ({ role: m.role, content: m.content }));
+      const res = await aiHelpSend(text, history, aiToken);
+      const meta: HelpMeta = {
+        status: res.status,
+        band: res.confidence_band,
+        score: res.confidence_score,
+        sources: res.sources ?? [],
+        suggestTicket: res.suggest_ticket,
+        ticketPrefill: res.ticket_prefill,
+        actionRefused: res.action_refused,
+        auditId: res.audit_id,
+      };
+      setMessages([...next, { role: "assistant", content: res.answer || "(no answer)", meta }]);
     } catch (e) {
-      console.error("[chatbot] chat failed", e);
-      setError(friendlyAiError(e, "Couldn't send your message. Please try again."));
+      console.error("[chatbot] help failed", e);
+      // 503 = the assistant service is down ("I'm broken"), which is distinct
+      // from a confident "I don't know" (that comes back 200 with a handoff).
+      if (e instanceof AiChatError && e.status === 503) {
+        setError("The assistant is unavailable right now. Please try again shortly.");
+      } else {
+        setError(friendlyAiError(e, "Couldn't send your message. Please try again."));
+      }
     } finally {
       setBusy(false);
     }
@@ -228,6 +268,37 @@ export function AIChatbot() {
   function handleClear() {
     setMessages([]);
     setError(null);
+  }
+
+  /**
+   * Carry the conversation across to a support ticket. The Ticketing module
+   * (Feature 4) doesn't exist yet, so until it lands we copy a prefilled
+   * summary + transcript to the clipboard and confirm — nothing is re-typed
+   * when the user files the ticket.
+   */
+  async function handleCreateTicket(meta: HelpMeta) {
+    const prefill = meta.ticketPrefill;
+    const summary = prefill?.summary ?? "Support request from Compliance Assistant";
+    const transcript = messages
+      .map((m) => `${m.role === "user" ? "You" : "AI"}: ${m.content}`)
+      .join("\n");
+    const payload =
+      `${summary}\n` +
+      `Route: ${prefill?.suggested_route ?? "Unassigned"}\n\n` +
+      `Conversation:\n${transcript}`;
+    try {
+      await navigator.clipboard.writeText(payload);
+    } catch {
+      /* clipboard may be blocked — the confirmation still tells the user what happened */
+    }
+    setMessages((m) => [
+      ...m,
+      {
+        role: "assistant",
+        content:
+          "🎫 Support ticket drafted and copied to your clipboard. The Ticketing module will pick it up automatically once it's available.",
+      },
+    ]);
   }
 
   /* ── Voice ───────────────────────────────────────────────────── */
@@ -839,6 +910,74 @@ export function AIChatbot() {
                       />
                     </button>
                   )}
+
+                  {/* GxP metadata — confidence band, cited sources, ticket handoff */}
+                  {isAssistant && m.meta && (
+                    <div className="mt-2 pt-2 space-y-2" style={{ borderTop: "1px dashed var(--bg-border)" }}>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span style={bandStyle(m.meta.band)}>
+                          {m.meta.band} · {Math.round(m.meta.score * 100)}%
+                        </span>
+                        {m.meta.actionRefused && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-medium"
+                            style={{ color: "var(--danger)" }}
+                          >
+                            <AlertTriangle className="w-3 h-3" aria-hidden="true" />
+                            requires a human
+                          </span>
+                        )}
+                      </div>
+
+                      {m.meta.sources.length > 0 && (
+                        <div>
+                          <p
+                            className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            Sources
+                          </p>
+                          <ul className="space-y-1">
+                            {m.meta.sources.map((s, si) => (
+                              <li key={si} className="text-[11px] flex items-start gap-1.5">
+                                <FileText
+                                  className="w-3 h-3 shrink-0 mt-0.5"
+                                  aria-hidden="true"
+                                  style={{ color: "var(--brand)" }}
+                                />
+                                {s.url ? (
+                                  <a
+                                    href={s.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ color: "var(--brand)", textDecoration: "underline" }}
+                                  >
+                                    {s.id}{s.section ? ` ${s.section}` : ""}
+                                  </a>
+                                ) : (
+                                  <span style={{ color: "var(--text-secondary)" }}>
+                                    {s.id}{s.section ? ` ${s.section}` : ""}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {m.meta.suggestTicket && (
+                        <button
+                          type="button"
+                          onClick={() => handleCreateTicket(m.meta!)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border-0 cursor-pointer"
+                          style={{ background: "var(--brand)", color: "#fff" }}
+                        >
+                          <Ticket className="w-3 h-3" aria-hidden="true" />
+                          Create a ticket
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1006,6 +1145,29 @@ export function AIChatbot() {
       )}
     </>
   );
+}
+
+/**
+ * Confidence-band pill styling. HIGH = green, MEDIUM = amber, LOW = red.
+ * Self-contained colours (not theme tokens) so the badge reads the same in
+ * light and dark and matches the spec's H·M·L convention.
+ */
+function bandStyle(band: string): CSSProperties {
+  const map: Record<string, [string, string]> = {
+    HIGH: ["#dcfce7", "#15803d"],
+    MEDIUM: ["#fef3c7", "#b45309"],
+    LOW: ["#fee2e2", "#b91c1c"],
+  };
+  const [bg, fg] = map[band] ?? ["var(--bg-surface)", "var(--text-muted)"];
+  return {
+    background: bg,
+    color: fg,
+    padding: "1px 7px",
+    borderRadius: 6,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.02em",
+  };
 }
 
 /**

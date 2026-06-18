@@ -38,6 +38,7 @@ import { CAPATrackerTab } from "./tabs/CAPATrackerTab";
 import { CAPAMetricsTab } from "./tabs/CAPAMetricsTab";
 import { AddCAPAModal, type CAPAForm } from "./modals/AddCAPAModal";
 import { AIGenerateCAPAModal, type AICapaResponse, type AICapaForm } from "./modals/AIGenerateCAPAModal";
+import { CapaSmartSearch } from "./components/CapaSmartSearch";
 import type { LinkableRecord } from "@/lib/queries/capas";
 
 /* ── Constants ── */
@@ -306,16 +307,24 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
       )}
 
       {activeTab === "tracker" && (
-        <CAPATrackerTab
-          capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
-          isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
-          timezone={timezone} dateFormat={dateFormat}
-          onAddOpen={() => setAddOpen(true)}
-          onAiOpen={canUseAiCapa ? () => setAiOpen(true) : undefined}
-          onReopen={canReopen ? (id) => { setReopenTarget(id); setReopenReason(""); setReopenError(null); } : undefined}
-          onNavigateCapa={() => router.push("/gap-assessment")}
-          effectivenessDue={effectivenessDue}
-        />
+        <div className="space-y-4">
+          {/* Feature 2 — Plain-English Record Search */}
+          <CapaSmartSearch
+            capas={capas}
+            sites={allSites}
+            onOpenCapa={(id) => setSelectedCAPAId(id)}
+          />
+          <CAPATrackerTab
+            capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
+            isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
+            timezone={timezone} dateFormat={dateFormat}
+            onAddOpen={() => setAddOpen(true)}
+            onAiOpen={canUseAiCapa ? () => setAiOpen(true) : undefined}
+            onReopen={canReopen ? (id) => { setReopenTarget(id); setReopenReason(""); setReopenError(null); } : undefined}
+            onNavigateCapa={() => router.push("/gap-assessment")}
+            effectivenessDue={effectivenessDue}
+          />
+        </div>
       )}
 
       {activeTab === "metrics" && (

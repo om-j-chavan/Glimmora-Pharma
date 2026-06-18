@@ -27,6 +27,7 @@ import { roleLabel } from "@/lib/labels/roles";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { RcaMethodFields, parseRcaDetail, rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
 import { CAPA_RCA_METHODS, rcaMethodOptions, type CapaRCAMethod } from "@/constants/rcaMethods";
+import { DocumentSummaryPanel } from "@/components/search/DocumentSummaryPanel";
 
 /* ── Helpers ── */
 
@@ -424,6 +425,22 @@ export function GapRegisterTab({
               )}
             </div>
 
+            {/* Feature 3 — Document Summarizing (view mode only) */}
+            {!isEditing && (
+              <DocumentSummaryPanel
+                title={findingRef(selectedFinding)}
+                recordId={selectedFinding.id}
+                module="finding"
+                content={[
+                  `Requirement: ${selectedFinding.requirement}`,
+                  selectedFinding.purpose ? `Purpose: ${selectedFinding.purpose}` : "",
+                  `Framework: ${selectedFinding.framework}; Area: ${selectedFinding.area}; Severity: ${selectedFinding.severity}`,
+                  selectedFinding.rootCause ? `Root cause: ${selectedFinding.rootCause}` : "",
+                  selectedFinding.agiSummary ? `AI summary: ${selectedFinding.agiSummary}` : "",
+                ].filter(Boolean).join("\n\n")}
+              />
+            )}
+
             {/* ── Requirement ── */}
             {isEditing ? (
               <div>
@@ -565,7 +582,13 @@ export function GapRegisterTab({
                   )}
                 />
                 <div className="mt-2">
-                  <RcaMethodFields method={(form.watch("rcaMethod") || undefined) as CapaRCAMethod | undefined} detail={detail} onChange={setDetail} />
+                  <RcaMethodFields
+                    method={(form.watch("rcaMethod") || undefined) as CapaRCAMethod | undefined}
+                    detail={detail}
+                    onChange={setDetail}
+                    recordId={selectedFinding.id}
+                    draftContext={[selectedFinding.requirement, selectedFinding.purpose].filter(Boolean).join("\n\n")}
+                  />
                 </div>
               </div>
             ) : selectedFinding.rootCause ? (

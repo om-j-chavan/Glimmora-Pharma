@@ -148,6 +148,20 @@ function formatTimestamp(iso: string | Date, timezone: string): string {
   return d.tz(timezone).format("DD MMM YYYY HH:mm");
 }
 
+/** Calendar-day heading for the grouped list ("Today" / "Yesterday" /
+ *  "Monday, 14 Jun 2026"). Purely presentational — it slices the already
+ *  filtered+ordered list into day sections so the timeline reads at a glance.
+ *  Computed in the tenant timezone so the day boundaries match what the user
+ *  sees in each row's timestamp. */
+function dayGroupLabel(iso: string | Date, timezone: string): string {
+  const d = dayjs(iso).tz(timezone);
+  const today = dayjs().tz(timezone).startOf("day");
+  const diffDays = today.diff(d.startOf("day"), "day");
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return d.format("dddd, DD MMM YYYY");
+}
+
 /* ── Filter state ────────────────────────────────────────────────────── */
 
 interface LocalFilters {
@@ -242,6 +256,23 @@ export function AuditTrailPage({ logs, totalCount, truncated, limit }: AuditTrai
     }
     return result;
   }, [logs, filters]);
+
+  /** Slice the filtered (and already newest-first) events into contiguous
+   *  day sections for the grouped list. Same data, same order — only the
+   *  presentation gains date headers. */
+  const groups = useMemo(() => {
+    const out: { key: string; label: string; events: AuditLog[] }[] = [];
+    let current: { key: string; label: string; events: AuditLog[] } | null = null;
+    for (const e of filtered) {
+      const key = dayjs(e.createdAt).tz(timezone).format("YYYY-MM-DD");
+      if (!current || current.key !== key) {
+        current = { key, label: dayGroupLabel(e.createdAt, timezone), events: [] };
+        out.push(current);
+      }
+      current.events.push(e);
+    }
+    return out;
+  }, [filtered, timezone]);
 
   const AUDIT_HEADERS = ["Timestamp", "User", "Role", "Module", "Action", "Record ID", "Record Title", "Old Value", "New Value"];
   function buildAuditRows() {
@@ -518,18 +549,32 @@ export function AuditTrailPage({ logs, totalCount, truncated, limit }: AuditTrai
           )}
         </div>
       ) : (
-        <ul className="divide-y divide-(--bg-border)" aria-label="Audit trail entries">
-          {filtered.map((event) => (
-            <AuditEventRow
-              key={event.id}
-              event={event}
-              severity={severityOf(event.action)}
-              actionLabel={formatAction(event.action)}
-              timestampLabel={formatTimestamp(event.createdAt, timezone)}
-              timestampIso={dayjs(event.createdAt).toISOString()}
-            />
+        <div aria-label="Audit trail entries">
+          {groups.map((group) => (
+            <section key={group.key} aria-label={group.label}>
+              {/* Sticky day header — gives the stream temporal structure so a
+                  reviewer can see "today vs. last week" at a glance. */}
+              <h2 className="sticky top-0 z-10 flex items-center justify-between px-6 py-2 bg-(--bg-elevated) border-y border-(--card-border) text-[11px] font-semibold uppercase tracking-wide text-(--text-secondary)">
+                <span>{group.label}</span>
+                <span className="font-normal normal-case text-(--text-muted)">
+                  {group.events.length.toLocaleString()} {entryWord(group.events.length)}
+                </span>
+              </h2>
+              <ul className="divide-y divide-(--bg-border)">
+                {group.events.map((event) => (
+                  <AuditEventRow
+                    key={event.id}
+                    event={event}
+                    severity={severityOf(event.action)}
+                    actionLabel={formatAction(event.action)}
+                    timestampLabel={formatTimestamp(event.createdAt, timezone)}
+                    timestampIso={dayjs(event.createdAt).toISOString()}
+                  />
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
       </div>
 

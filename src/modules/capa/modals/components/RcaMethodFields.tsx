@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { Sparkles } from "lucide-react";
 import type { RCAMethod } from "@/store/capa.slice";
+import { AiDraftModal, type DraftMode, type DraftPayload } from "@/components/search/AiDraftModal";
 
 /**
  * Batch 2 — method-driven RCA inputs + (de)serialization.
@@ -67,12 +70,52 @@ export function RcaMethodFields({
   detail,
   onChange,
   disabled,
+  draftContext,
+  recordId,
 }: {
   method: RCAMethod | undefined;
   detail: RcaDetail;
   onChange: (next: RcaDetail) => void;
   disabled?: boolean;
+  /** Problem context for the AI Draft helper (e.g. title + description).
+   *  When provided, an "AI Draft" button appears on the free-text methods. */
+  draftContext?: string;
+  recordId?: string;
 }) {
+  // Feature 5 — AI Draft Helper state (hooks must be unconditional, before
+  // the per-method early returns below).
+  const [draftOpen, setDraftOpen] = useState(false);
+  const [aiAssisted, setAiAssisted] = useState(false);
+  const canDraft = !!draftContext?.trim() && !disabled;
+
+  const draftButton = canDraft ? (
+    <button
+      type="button"
+      onClick={() => setDraftOpen(true)}
+      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md border-0 cursor-pointer"
+      style={{ background: "var(--brand)", color: "#fff" }}
+    >
+      <Sparkles className="w-3 h-3" aria-hidden="true" /> AI Draft
+    </button>
+  ) : null;
+
+  const aiMarker = aiAssisted ? (
+    <p className="text-[11px] italic mt-1" style={{ color: "var(--text-muted)" }}>AI-assisted draft — edited by you</p>
+  ) : null;
+
+  /** Render the method-aware draft modal that applies its payload on insert. */
+  const draftModal = (mode: DraftMode, apply: (p: DraftPayload) => void) => canDraft ? (
+    <AiDraftModal
+      open={draftOpen}
+      onClose={() => setDraftOpen(false)}
+      context={draftContext!}
+      mode={mode}
+      recordId={recordId ?? "-"}
+      module="capa"
+      onInsert={(p) => { apply(p); setAiAssisted(true); }}
+    />
+  ) : null;
+
   if (!method) {
     return <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Select an RCA method above to record the analysis.</p>;
   }
@@ -85,8 +128,15 @@ export function RcaMethodFields({
       next[i] = val;
       onChange({ ...detail, whys: next });
     };
+    const applyWhys = (p: DraftPayload) => {
+      const next = [...whys];
+      while (next.length < 5) next.push("");
+      (p.whys ?? []).slice(0, 5).forEach((w, i) => { next[i] = w; });
+      onChange({ ...detail, whys: next });
+    };
     return (
       <div className="space-y-2">
+        {canDraft && <div className="flex justify-end">{draftButton}</div>}
         {[0, 1, 2, 3, 4].map((i) => (
           <div key={i}>
             <label htmlFor={`why-${i}`} className={labelCls}>
@@ -97,6 +147,8 @@ export function RcaMethodFields({
               value={whys[i] ?? ""} onChange={(e) => setWhy(i, e.target.value)} />
           </div>
         ))}
+        {aiMarker}
+        {draftModal("fiveWhy", applyWhys)}
       </div>
     );
   }
@@ -104,9 +156,13 @@ export function RcaMethodFields({
   if (method === "Fishbone") {
     const buckets = detail.buckets ?? {};
     const setBucket = (k: FishboneKey, val: string) => onChange({ ...detail, buckets: { ...buckets, [k]: val } });
+    const applyBuckets = (p: DraftPayload) => onChange({ ...detail, buckets: { ...buckets, ...(p.buckets ?? {}) } });
     return (
       <div className="grid grid-cols-2 gap-3">
-        <p className="col-span-2 text-[10px]" style={{ color: "var(--text-muted)" }}>Fill at least one category.</p>
+        <div className="col-span-2 flex items-center justify-between">
+          <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Fill at least one category.</p>
+          {draftButton}
+        </div>
         {FISHBONE_KEYS.map((k) => (
           <div key={k}>
             <label htmlFor={`fb-${k}`} className={labelCls}>{k}</label>
@@ -114,28 +170,52 @@ export function RcaMethodFields({
               value={buckets[k] ?? ""} onChange={(e) => setBucket(k, e.target.value)} />
           </div>
         ))}
+        {aiMarker && <div className="col-span-2">{aiMarker}</div>}
+        {draftModal("fishbone", applyBuckets)}
       </div>
     );
   }
 
   if (method === "Fault Tree") {
+    const applyDraft = (p: DraftPayload) => {
+      const t = (p.text ?? "").trim();
+      if (!t) return;
+      const base = (detail.faultTree ?? "").trim();
+      onChange({ ...detail, faultTree: base ? `${base}\n\n${t}` : t });
+    };
     return (
       <div>
-        <label htmlFor="ft" className={labelCls}>Top event + contributing factors<span className="text-(--danger)"> *</span></label>
+        <div className="flex items-center justify-between mb-1">
+          <label htmlFor="ft" className={labelCls + " mb-0"}>Top event + contributing factors<span className="text-(--danger)"> *</span></label>
+          {draftButton}
+        </div>
         <textarea id="ft" rows={5} className="input text-[12px] resize-none" disabled={disabled}
           placeholder="Top event: …&#10;Contributing factors:&#10;- …&#10;- …"
           value={detail.faultTree ?? ""} onChange={(e) => onChange({ ...detail, faultTree: e.target.value })} />
+        {aiMarker}
+        {draftModal("text", applyDraft)}
       </div>
     );
   }
 
   // Other
+  const applyOther = (p: DraftPayload) => {
+    const t = (p.text ?? "").trim();
+    if (!t) return;
+    const base = (detail.text ?? "").trim();
+    onChange({ ...detail, text: base ? `${base}\n\n${t}` : t });
+  };
   return (
     <div>
-      <label htmlFor="rca-other" className={labelCls}>Root cause analysis<span className="text-(--danger)"> *</span></label>
+      <div className="flex items-center justify-between mb-1">
+        <label htmlFor="rca-other" className={labelCls + " mb-0"}>Root cause analysis<span className="text-(--danger)"> *</span></label>
+        {draftButton}
+      </div>
       <textarea id="rca-other" rows={4} className="input text-[12px] resize-none" disabled={disabled}
         placeholder="Describe the root cause…"
         value={detail.text ?? ""} onChange={(e) => onChange({ ...detail, text: e.target.value })} />
+      {aiMarker}
+      {draftModal("text", applyOther)}
     </div>
   );
 }

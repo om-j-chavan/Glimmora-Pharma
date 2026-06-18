@@ -4,13 +4,13 @@ import { test, expect } from "@playwright/test";
  * Feature test — Deviation Intelligence (recurring-pattern clustering).
  *
  * Covers the AGI panel embedded in Deviation Management:
- *   1. The panel analyses the tenant's deviations and clusters recurring
- *      patterns by area.
+ *   1. The panel is on-demand: it analyses only after the user clicks
+ *      "Run Deviation Intelligence AI" (no auto-run on mount).
  *   2. With the seeded data (Manufacturing ×2, QC Lab ×2, Sterile
  *      Manufacturing ×1) it surfaces exactly 2 patterns, each with a
  *      suggested root cause.
  *   3. Clicking a clustered deviation reference opens its detail.
- *   4. Re-analyse re-runs the clustering (deterministic — same result).
+ *   4. Re-run re-runs the clustering (deterministic — same result).
  *
  * Data is the deterministic mock in src/lib/ai/mockData.ts driven by the
  * live seeded deviations. Login: QA Head. Requires `npm run db:seed`.
@@ -36,12 +36,21 @@ test("Deviation Intelligence: clusters recurring patterns and links members", as
   // ── Deviation Management page ──
   await page.goto("/deviation");
 
-  // The AGI panel is present and analyses on mount.
-  await expect(page.getByText("Deviation Intelligence")).toBeVisible({
-    timeout: 10_000,
+  // ── 1. On-demand: no results card until the header run button is clicked ──
+  // The run button lives in the page header; the results card (and its
+  // clustered patterns) is absent until it's clicked.
+  const runButton = page.getByRole("button", {
+    name: /run deviation intelligence ai/i,
   });
+  await expect(runButton).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByText("Recurring deviations in Manufacturing"),
+  ).toHaveCount(0);
 
-  // ── 1. Recurring-pattern clusters surface (Manufacturing + QC Lab) ──
+  await runButton.click();
+
+  // The results card mounts and recurring-pattern clusters surface
+  // (Manufacturing + QC Lab)
   await expect(
     page.getByText("Recurring deviations in Manufacturing"),
   ).toBeVisible({ timeout: 10_000 });
@@ -63,9 +72,9 @@ test("Deviation Intelligence: clusters recurring patterns and links members", as
   // Close the modal (Escape) before re-analysing.
   await page.keyboard.press("Escape");
 
-  // ── 4. Re-analyse re-runs the clustering (deterministic) ──
+  // ── 4. Re-run re-runs the clustering (deterministic) ──
   await page
-    .getByRole("button", { name: /re-analyse deviation patterns/i })
+    .getByRole("button", { name: /re-run deviation intelligence ai/i })
     .click();
   await expect(
     page.getByText("Recurring deviations in Manufacturing"),

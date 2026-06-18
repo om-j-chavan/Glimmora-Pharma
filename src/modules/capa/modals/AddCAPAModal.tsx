@@ -57,6 +57,9 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSite
   const method = watch("rcaMethod");
   const source = watch("source");
   const siteId = watch("siteId");
+  // Feature 5 — problem context for the AI Draft helper on the RCA field.
+  const draftTitle = watch("title");
+  const draftDescription = watch("description");
   const descReg = reg("description");
 
   // Batch 2b #3 — source-aware linkable records (OPEN + selected-site only).
@@ -165,7 +168,12 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSite
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">RCA method</p>
             <Controller name="rcaMethod" control={control} render={({ field }) => <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select method..." width="w-full" options={rcaMethodOptions(CAPA_RCA_METHODS)} />} />
           </div>
-          <RcaMethodFields method={method} detail={detail} onChange={setDetail} />
+          <RcaMethodFields
+            method={method}
+            detail={detail}
+            onChange={setDetail}
+            draftContext={[draftTitle, draftDescription].filter(Boolean).join("\n\n")}
+          />
         </div>
       </form>
     </Modal>

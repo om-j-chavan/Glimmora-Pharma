@@ -196,7 +196,14 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users }: EditCAPA
             </p>
             <Controller name="rcaMethod" control={form.control} render={({ field }) => <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select method..." width="w-full" disabled={rcaLocked} options={rcaMethodOptions(CAPA_RCA_METHODS)} />} />
           </div>
-          <RcaMethodFields method={method} detail={detail} onChange={setDetail} disabled={rcaLocked} />
+          <RcaMethodFields
+            method={method}
+            detail={detail}
+            onChange={setDetail}
+            disabled={rcaLocked}
+            recordId={capa.id}
+            draftContext={[form.watch("title"), form.watch("description")].filter(Boolean).join("\n\n")}
+          />
         </div>
       </form>
     </Modal>

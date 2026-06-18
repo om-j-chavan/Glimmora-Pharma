@@ -80,6 +80,39 @@ export interface ChatResponse {
   customer_id?: string;
 }
 
+/* ── GxP Compliance Help Assistant (Feature 1) ─────────────────── */
+// Grounded-only endpoint: answers strictly from approved SOPs/policies,
+// returns citations + a confidence band, and hands off to a support ticket
+// when not confident. See backend app/help_service.py.
+
+export interface HelpSource {
+  id: string;
+  section?: string;
+  title?: string;
+  url?: string;
+}
+
+export interface TicketPrefill {
+  summary: string;
+  attach_conversation?: boolean;
+  suggested_route?: string | null;
+}
+
+export interface HelpResponse {
+  status: "answered" | "no_confident_answer" | string;
+  confidence_band: "HIGH" | "MEDIUM" | "LOW" | string;
+  confidence_score: number;
+  answer: string;
+  sources: HelpSource[];
+  suggest_ticket: boolean;
+  ticket_prefill?: TicketPrefill | null;
+  action_refused: boolean;
+  audit_id?: string | null;
+  customer_id?: string | null;
+  feature_id?: string;
+  model?: string;
+}
+
 /* ── Endpoints ─────────────────────────────────────────────────── */
 
 export async function aiChatSend(
@@ -97,6 +130,175 @@ export async function aiChatSend(
     token,
   );
   return (await res.json()) as ChatResponse;
+}
+
+/* ── Plain-English Record Search (Feature 2) ───────────────────── */
+// Translator only — returns a filter spec, never executes it. The list
+// screen runs the filters client-side (see src/lib/aiSearch.ts).
+
+export interface SearchConditionDTO {
+  field: string;
+  op: string;
+  value: unknown;
+}
+
+export interface SearchResultResponse {
+  status: "understood" | "unclear" | "empty_intent" | string;
+  module: string;
+  filters: { logic: "AND" | "OR" | string; conditions: SearchConditionDTO[] };
+  understood_as: string;
+  confidence: number;
+  confidence_band: "HIGH" | "MEDIUM" | "LOW" | string;
+  unsupported_terms: string[];
+  suggestions: string[];
+  audit_id?: string | null;
+  customer_id?: string | null;
+  feature_id?: string;
+}
+
+/**
+ * Translate a plain-English request into a structured filter spec. The caller
+ * executes the returned filters against the loaded records.
+ */
+export async function aiSearchSend(
+  message: string,
+  token: string | null,
+  module = "capa",
+): Promise<SearchResultResponse> {
+  const res = await authedFetch(
+    "/api/ai/search",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, module }),
+    },
+    token,
+  );
+  return (await res.json()) as SearchResultResponse;
+}
+
+/* ── CAPA / Root-Cause Draft Helper (Feature 5) ────────────────── */
+
+export interface DraftResponse {
+  status: "drafted" | "error" | string;
+  draft: string;                              // free-text kinds
+  whys?: string[];                            // rca_5why
+  buckets?: Record<string, string>;           // rca_fishbone
+  kind: string;
+  tone: "formal" | "concise" | string;
+  disclaimer: string;
+  audit_id?: string | null;
+  customer_id?: string | null;
+  feature_id?: string;
+}
+
+export type DraftKind = "rca" | "capa_description" | "rca_5why" | "rca_fishbone";
+
+export interface DraftOptions {
+  kind?: DraftKind;
+  tone?: "formal" | "concise";
+  recordId?: string;
+  module?: string;
+}
+
+/**
+ * Generate an editable first-draft (RCA or CAPA description). The AI never
+ * signs or approves — the returned text is a starting point the human edits.
+ */
+export async function aiDraftSend(
+  context: string,
+  opts: DraftOptions,
+  token: string | null,
+): Promise<DraftResponse> {
+  const res = await authedFetch(
+    "/api/ai/draft",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context,
+        kind: opts.kind ?? "rca",
+        tone: opts.tone ?? "formal",
+        record_id: opts.recordId ?? "-",
+        module: opts.module ?? "-",
+      }),
+    },
+    token,
+  );
+  return (await res.json()) as DraftResponse;
+}
+
+/* ── Document Summarizing (Feature 3) ──────────────────────────── */
+
+export interface SummaryResponse {
+  status: "summarized" | "skipped" | "error" | string;
+  reason: string;
+  bullets: string[];
+  length: "short" | "detailed" | string;
+  lens: "qa" | "management" | "risks" | string;
+  disclaimer: string;
+  audit_id?: string | null;
+  customer_id?: string | null;
+  feature_id?: string;
+}
+
+export interface SummaryOptions {
+  title?: string;
+  length?: "short" | "detailed";
+  lens?: "qa" | "management" | "risks";
+  recordId?: string;
+  module?: string;
+}
+
+/**
+ * Summarize a long record into plain bullets. Grounded only in the supplied
+ * text; short records come back status "skipped". Read-only — never mutates.
+ */
+export async function aiSummarizeSend(
+  content: string,
+  opts: SummaryOptions,
+  token: string | null,
+): Promise<SummaryResponse> {
+  const res = await authedFetch(
+    "/api/ai/summarize",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content,
+        title: opts.title ?? "",
+        length: opts.length ?? "short",
+        lens: opts.lens ?? "qa",
+        record_id: opts.recordId ?? "-",
+        module: opts.module ?? "-",
+      }),
+    },
+    token,
+  );
+  return (await res.json()) as SummaryResponse;
+}
+
+/**
+ * Send a question to the GxP Compliance Help Assistant. Unlike aiChatSend,
+ * the reply carries cited sources, a confidence band, and (on low confidence)
+ * a structured ticket suggestion. A 503 here means the assistant service is
+ * unavailable ("I'm broken"), distinct from a confident "I don't know".
+ */
+export async function aiHelpSend(
+  message: string,
+  history: ChatMessage[],
+  token: string | null,
+): Promise<HelpResponse> {
+  const res = await authedFetch(
+    "/api/ai/help",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, chat_history: history }),
+    },
+    token,
+  );
+  return (await res.json()) as HelpResponse;
 }
 
 /**

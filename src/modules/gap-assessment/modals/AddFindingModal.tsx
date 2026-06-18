@@ -2,7 +2,8 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Upload, X } from "lucide-react";
+import { Plus, Upload, X, Sparkles, Bot } from "lucide-react";
+import { classifyFinding, type FindingTriageResult } from "@/lib/ai";
 import type { FindingSeverity } from "@/store/findings.slice";
 import type { DocType } from "@/store/evidence.slice";
 import type { SiteConfig } from "@/store/settings.slice";
@@ -63,9 +64,11 @@ interface AddFindingModalProps {
   /** Creator identity — owner is auto-assigned to the current user (read-only). */
   currentUserName: string;
   currentUserRole: string;
+  /** Gates the AI "Suggest classification" action (AGI mode + CAPA agent on). */
+  aiEnabled?: boolean;
 }
 
-export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, currentUserName, currentUserRole }: AddFindingModalProps) {
+export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, currentUserName, currentUserRole, aiEnabled = true }: AddFindingModalProps) {
   const { register: reg, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } = useForm<FindingForm>({
     resolver: zodResolver(findingSchema),
     defaultValues: { severity: "High", siteId: lockedSiteId ?? "", raiseCapaImmediately: false },
@@ -74,6 +77,43 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
   // Gap RCA (Batch B) — structured method detail (mirrors CAPA's create modal).
   const [detail, setDetail] = useState<RcaDetail>({});
   const rcaMethod = watch("rcaMethod");
+
+  // Feature I — Finding Triage (AGI). Pre-fills framework + severity and shows
+  // a risk summary + evidence gaps. Advisory only: the values land in the form
+  // fields, which the user can still change before saving.
+  const [triage, setTriage] = useState<FindingTriageResult | null>(null);
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageError, setTriageError] = useState("");
+  const watchRequirement = watch("requirement");
+
+  async function runTriage() {
+    const requirement = (watchRequirement ?? "").trim();
+    if (requirement.length < 10) {
+      setTriageError("Describe the requirement (at least 10 characters) first.");
+      return;
+    }
+    setTriageError("");
+    setTriageLoading(true);
+    try {
+      const result = await classifyFinding(
+        requirement,
+        watch("area") ?? "",
+        watch("purpose") ?? "",
+        activeFrameworks,
+      );
+      setTriage(result);
+      // Auto-apply: framework only if it's one the tenant has enabled (else the
+      // dropdown can't render it), severity always (Critical/High/Low taxonomy).
+      if (activeFrameworks.includes(result.framework)) {
+        setValue("framework", result.framework, { shouldValidate: true });
+      }
+      setValue("severity", result.severity as FindingSeverity, { shouldValidate: true });
+    } catch {
+      setTriageError("Couldn't classify right now. Pick the fields manually.");
+    } finally {
+      setTriageLoading(false);
+    }
+  }
 
   function inferDocType(fileName: string): DocType {
     const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
@@ -121,6 +161,8 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     reset();
     setEvidenceFile(null);
     setDetail({});
+    setTriage(null);
+    setTriageError("");
   }
 
   function handleClose() {
@@ -128,6 +170,8 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     setDetail({});
     reset();
     setEvidenceFile(null);
+    setTriage(null);
+    setTriageError("");
   }
 
   return (
@@ -175,6 +219,63 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
             <label htmlFor="f-req" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Requirement <span className="text-(--danger)">*</span></label>
             <input id="f-req" type="text" className="input text-[12px]" placeholder="e.g. Annex 11 §11 — Audit trail completeness" {...reg("requirement")} />
             {errors.requirement && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.requirement.message}</p>}
+
+            {/* Feature I — Finding Triage. Classifies framework + severity and
+                surfaces a risk summary + evidence gaps the user can act on. */}
+            {aiEnabled && (
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  icon={Sparkles}
+                  loading={triageLoading}
+                  onClick={runTriage}
+                  disabled={(watchRequirement ?? "").trim().length < 10}
+                >
+                  {triageLoading ? "Analysing…" : "Suggest classification (AI)"}
+                </Button>
+                {triageError && <p role="alert" className="text-[11px] text-(--danger) mt-1.5">{triageError}</p>}
+
+                {triage && (
+                  <div className="agi-panel mt-2.5" role="status" aria-live="polite">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" />
+                        <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>AGI Triage</span>
+                      </div>
+                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                        {triage.confidence}% confidence · {triage.source === "backend" ? "live" : "demo"}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <span className="badge badge-blue text-[10px]">{triage.frameworkLabel}</span>
+                      {triage.clause && <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{triage.clause}</span>}
+                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>·</span>
+                      <span className="badge text-[10px]" style={{
+                        background: triage.severity === "Critical" ? "var(--danger-bg)" : triage.severity === "High" ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)",
+                        color: triage.severity === "Critical" ? "#ef4444" : triage.severity === "High" ? "#f59e0b" : "#10b981",
+                      }}>{triage.severity}</span>
+                    </div>
+                    {triage.agiSummary && <p className="text-[11px] leading-relaxed mb-2" style={{ color: "var(--text-secondary)" }}>{triage.agiSummary}</p>}
+                    {triage.severityRationale && <p className="text-[10px] italic mb-2" style={{ color: "var(--text-muted)" }}>{triage.severityRationale}</p>}
+                    {triage.evidenceGaps.length > 0 && (
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Evidence to assemble</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {triage.evidenceGaps.map((g, i) => (
+                            <span key={i} className="text-[10px] rounded-md px-2 py-1" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)", color: "var(--text-secondary)" }}>{g}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>
+                      Framework &amp; severity pre-filled below — review and edit before saving.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="col-span-2">
             <label htmlFor="f-purpose" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Purpose <span className="text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span></label>

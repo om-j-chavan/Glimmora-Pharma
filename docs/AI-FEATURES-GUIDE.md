@@ -158,47 +158,7 @@ Overdue 4**. The **Deviation Intelligence** panel shows **"2 patterns"** with a 
 
 ---
 
-## 4. ✅ Batch Readiness — *"spell-checker for batch records before release"*
-
-![Batch Records readiness](./screenshots/05-batch-records.png)
-
-### What it is (simple words)
-Before a batch of medicine can be sold, its **batch record** (50–100+ pages) must be
-**100% complete**. This AI scans it first and instantly shows what's **complete, missing,
-or needs a second look** — plus a ready-made pre-release checklist.
-
-### Real-life example
-You're a **QA reviewer** with three batches waiting. Instead of reading hundreds of pages,
-the AI tells you at a glance: one is **Ready (100%)**, one **Needs review (78%)**, one is
-**Not ready (50%)** with 5 blanks — so you send the bad one back in minutes.
-
-### Step by step
-1. Open **Batch Records**. Each batch shows a readiness badge.
-2. Click a batch to analyse it.
-3. The AI shows its **completeness %**, **missing entries**, **review items**, and a
-   **suggested pre-release checklist**.
-4. Act fast: send incomplete batches back; pass complete ones to the QP.
-
-### What this screenshot shows
-The **Batch Records** page. Cards: **Batches 3 · Ready 1 · Not ready 1**. The batch list
-shows **STB-2026-041 — Ready for review (100%)**, **STB-2026-042 — Needs review (78%)**,
-**STB-2026-043 — Not ready (50%)**. The detail panel for **STB-2026-041** (Sterile Tablets
-50 mg, Chennai) shows **100%**, **9 of 9 record entries complete**, and a green
-**Suggested pre-release checklist**: *Manufacturing steps recorded & signed, In-process
-controls within limits, QC results attached and reviewed, Batch record reviewed*. A note
-reminds: *"Batch release and disposition remain a QP decision."*
-
-### ❌ What the AI cannot do
-- Release or approve batches
-- Make batch disposition decisions
-- Override QP release authority
-
-### Where it shows
-**Batch Records** page.
-
----
-
-## 5. ✅ Drift Detection — *"smoke detector for system changes"*
+## 4. ✅ Drift Detection — *"smoke detector for system changes"*
 
 ![Drift Detection panel](./screenshots/06-drift-detection.png)
 
@@ -266,7 +226,6 @@ attention, each with a one-click link to act.
 | **FDA 483 Draft Response** | One-click reply letter to the FDA | FDA 483 → Response tab | signs/submits to FDA |
 | **Regulatory Intelligence** | News alerts for new medicine rules | Dashboard + own page | interprets/decides compliance |
 | **Deviation Intelligence** | Connects the dots across repeating problems | Deviation Management | closes or approves anything |
-| **Batch Readiness** | Spell-checker for batch records before release | Batch Records | releases/approves a batch |
 | **Drift Detection** | Smoke detector for system changes | Dashboard + CSV/CSA | changes systems or access |
 
 ---
@@ -278,7 +237,6 @@ attention, each with a one-click link to act.
    - **FDA 483 & Regulatory** → open `WL-MUM-2026-001` → Response tab → **AI Draft**
    - **Regulatory Intelligence**
    - **Deviation Management** (Deviation Intelligence panel at the top)
-   - **Batch Records**
    - **CSV/CSA Validation** (Drift Detection panel at the top)
 3. To turn any agent on/off: **Settings → AGI Policy**.
 
@@ -286,8 +244,8 @@ attention, each with a one-click link to act.
 
 ## ℹ️ Honest status (what's built vs not)
 
-**Built and working (5 of 7 agents):** FDA 483 Draft Response, Regulatory Intelligence,
-Deviation Intelligence, Batch Readiness, Drift Detection.
+**Built and working (4 of 6 agents):** FDA 483 Draft Response, Regulatory Intelligence,
+Deviation Intelligence, Drift Detection.
 
 **Not built yet (2 agents — only the on/off switch exists):**
 - **CAPA Effectiveness Monitor** — would check whether your fixes (CAPAs) actually worked

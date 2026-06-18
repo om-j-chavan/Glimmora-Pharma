@@ -21,16 +21,50 @@ import {
   mockRegulatoryIntelligence,
   buildRegulatoryUpdates,
   mockDeviationIntelligence,
-  listBatchRecords as listBatchRecordsMock,
-  analyzeBatchReadiness as analyzeBatchReadinessMock,
-  mockBatchReadiness,
   mockDriftDetection,
   buildDriftAlerts,
+  mockFindingTriage,
 } from "./mockData";
-import { scanStageDocument } from "../aiBackend";
+import {
+  scanStageDocument,
+  fetchRegulatoryIntelligence,
+  fetchDeviationClusters,
+  fetchDriftDetection,
+  fetchResponseDraft,
+  fetchRcaSuggestions,
+  fetchCapaPrefill,
+  fetchFindingTriage,
+} from "../aiBackend";
 import type { DriftAlert } from "@/types/agi";
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
 
+/**
+ * Per-feature mock switches. A feature serves real backend data when its flag
+ * is `false`. Features A/B/C (RCA suggestions, CAPA pre-fill, FDA-483 response
+ * draft) have no real backend yet, so they stay mocked. D/E/F/G/H are wired to
+ * the FastAPI backend (see src/lib/aiBackend.ts + the matching routers).
+ *
+ * Robustness contract: each real branch falls back to the deterministic mock
+ * if the backend call throws, so an advisory AGI surface never crashes its
+ * page — it degrades to the stable demo data and logs a warning. (The mock's
+ * `source: "mock"` badge then tells you the data is not live.)
+ */
+export const AI_MOCK = {
+  rcaSuggestions: false, // Feature A — POST /api/v1/rca-suggestions/generate
+  capaPrefill: false, // Feature B — POST /api/v1/capa-prefill/generate
+  responseDraft: false, // Feature C — POST /api/v1/response-draft/generate
+  documentReview: false, // Feature D — POST /api/v1/document-review/scan
+  regulatoryIntelligence: false, // Feature E — GET  /api/v1/regulatory-intelligence/scan
+  deviationIntelligence: false, // Feature F — POST /api/v1/deviation-intelligence/analyze
+  driftDetection: false, // Feature H — GET  /api/v1/drift-detection/scan
+  findingTriage: false, // Feature I — POST /api/v1/finding-triage/classify
+} as const;
+
+/**
+ * @deprecated Legacy global switch. Retained only because external docs/tests
+ * still reference it; new code reads the per-feature flags in {@link AI_MOCK}.
+ * Kept `true` so any straggler still reading it stays safely mocked.
+ */
 export const MOCK_AI_RESPONSES = true;
 
 function logMockUsage(featureName: string) {
@@ -96,15 +130,26 @@ export async function getRcaSuggestions(
   observationSeverity: string,
   siteContext: string,
 ): Promise<RcaSuggestion[]> {
-  if (MOCK_AI_RESPONSES) {
+  if (AI_MOCK.rcaSuggestions) {
     logMockUsage("getRcaSuggestions");
     // Modest latency so the LOADING panel state is demoable.
     await delay(750);
     return mockRcaSuggestions(method, observationText);
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  void [method, observationText, observationSeverity, siteContext];
-  throw new Error("Real AI not yet wired");
+  try {
+    return await fetchRcaSuggestions(
+      method,
+      observationText,
+      observationSeverity,
+      siteContext,
+    );
+  } catch (err) {
+    console.error(
+      "[ai] getRcaSuggestions: backend failed, falling back to mock.",
+      err,
+    );
+    return mockRcaSuggestions(method, observationText);
+  }
 }
 
 /* ── Feature B — CAPA pre-fill ───────────────────────────────────── */
@@ -122,14 +167,24 @@ export async function getCapaPrefill(
   rcaRootCause: string,
   observationSeverity: string,
 ): Promise<CAPAPrefill> {
-  if (MOCK_AI_RESPONSES) {
+  if (AI_MOCK.capaPrefill) {
     logMockUsage("getCapaPrefill");
     await delay(600);
     return mockCapaPrefill(observationText, rcaRootCause, observationSeverity);
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  void [observationText, rcaRootCause, observationSeverity];
-  throw new Error("Real AI not yet wired");
+  try {
+    return await fetchCapaPrefill(
+      observationText,
+      rcaRootCause,
+      observationSeverity,
+    );
+  } catch (err) {
+    console.error(
+      "[ai] getCapaPrefill: backend failed, falling back to mock.",
+      err,
+    );
+    return mockCapaPrefill(observationText, rcaRootCause, observationSeverity);
+  }
 }
 
 /* ── Feature C — Response draft ──────────────────────────────────── */
@@ -153,16 +208,21 @@ export interface ResponseDraftEvent {
 export async function getResponseDraft(
   event: ResponseDraftEvent,
 ): Promise<{ draft: string; characterCount: number }> {
-  if (MOCK_AI_RESPONSES) {
+  if (AI_MOCK.responseDraft) {
     logMockUsage("getResponseDraft");
     // Artificial 1.5s delay mirrors real LLM latency (~1-3s).
-    // Remove when real backend wires up.
     await delay(1500);
     return mockResponseDraft(event);
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  void event;
-  throw new Error("Real AI not yet wired");
+  try {
+    return await fetchResponseDraft(event);
+  } catch (err) {
+    console.error(
+      "[ai] getResponseDraft: backend failed, falling back to mock.",
+      err,
+    );
+    return mockResponseDraft(event);
+  }
 }
 
 /* ── Feature D — CSV validation Document Review ──────────────────── */
@@ -232,7 +292,7 @@ function mapBackendSeverity(s: string): DocumentReviewSeverity {
 export async function getDocumentReview(
   input: DocumentReviewInput,
 ): Promise<DocumentReviewResult> {
-  if (MOCK_AI_RESPONSES) {
+  if (AI_MOCK.documentReview) {
     logMockUsage("getDocumentReview");
     // ~1.1s shim so the "Scanning…" state is visible. The *reported*
     // scan duration in the result is a separate, larger number for copy.
@@ -323,13 +383,21 @@ export interface RegulatoryIntelligenceResult {
 }
 
 export async function getRegulatoryIntelligence(): Promise<RegulatoryIntelligenceResult> {
-  if (MOCK_AI_RESPONSES) {
+  if (AI_MOCK.regulatoryIntelligence) {
     logMockUsage("getRegulatoryIntelligence");
     // ~1.4s shim so the "Scanning agency feeds…" state is visible.
     await delay(1400);
     return mockRegulatoryIntelligence();
   }
-  throw new Error("Real AI not yet wired");
+  try {
+    return await fetchRegulatoryIntelligence();
+  } catch (err) {
+    console.error(
+      "[ai] getRegulatoryIntelligence: backend failed, falling back to mock.",
+      err,
+    );
+    return mockRegulatoryIntelligence();
+  }
 }
 
 /**
@@ -413,98 +481,21 @@ export interface DeviationIntelligenceResult {
 export async function getDeviationIntelligence(
   deviations: DeviationClusterInput[],
 ): Promise<DeviationIntelligenceResult> {
-  if (MOCK_AI_RESPONSES) {
+  if (AI_MOCK.deviationIntelligence) {
     logMockUsage("getDeviationIntelligence");
     // ~0.9s shim so the "Analysing deviation history…" state is visible.
     await delay(900);
     return mockDeviationIntelligence(deviations);
   }
-  void deviations;
-  throw new Error("Real AI not yet wired");
-}
-
-/* ── Feature G — Batch Readiness Agent ───────────────────────────────
- * Analyses batch-record completeness BEFORE release. CAN DO: analyse
- * completeness, flag missing entries, highlight review items, suggest a
- * pre-release checklist. CANNOT DO: release/approve batches, make
- * disposition decisions, or override QP release authority (those stay
- * human — see the AGI policy). Advisory only.
- *
- * The batch records themselves come from the MES/batch-execution system in
- * production; here `listBatchRecords()` is a deterministic demo source. To
- * wire a real backend: set MOCK_AI_RESPONSES=false, fetch real batch records,
- * and implement the completeness model in getBatchReadiness — the return
- * shape MUST stay identical so the Batch Records UI needs no changes. */
-
-export type BatchRecordEntryStatus = "complete" | "missing" | "review";
-export type BatchLifecycle = "in_process" | "under_review" | "released";
-export type BatchReadinessLevel = "ready" | "needs_review" | "not_ready";
-
-export interface BatchRecordEntry {
-  id: string;
-  /** Record section, e.g. "Manufacturing", "QC Testing". */
-  section: string;
-  /** The specific record line, e.g. "Line clearance signature". */
-  label: string;
-  status: BatchRecordEntryStatus;
-}
-
-export interface BatchRecord {
-  /** Batch number, e.g. "STB-2026-042". */
-  id: string;
-  product: string;
-  stage: string;
-  site: string;
-  manufactureDate: string; // ISO YYYY-MM-DD
-  status: BatchLifecycle;
-  entries: BatchRecordEntry[];
-}
-
-/** Pure completeness assessment (no timestamp) — used for at-a-glance list
- *  badges as well as the full async scan. */
-export interface BatchReadinessAssessment {
-  batchId: string;
-  completenessPct: number;
-  totalEntries: number;
-  completeEntries: number;
-  /** Entries with nothing recorded — flagged for completion. */
-  missingEntries: BatchRecordEntry[];
-  /** Entries recorded but flagged for a second look. */
-  reviewItems: BatchRecordEntry[];
-  /** Suggested pre-release checklist (one gate per record section). */
-  checklist: { id: string; label: string; done: boolean }[];
-  readiness: BatchReadinessLevel;
-}
-
-export interface BatchReadinessResult extends BatchReadinessAssessment {
-  scannedAt: string;
-  source: "mock" | "backend";
-}
-
-/** Demo batch-record source (real backend = MES integration). Deterministic. */
-export function listBatchRecords(): BatchRecord[] {
-  return listBatchRecordsMock();
-}
-
-/** Synchronous, deterministic completeness assessment — drives the list-row
- *  readiness badges without awaiting the full scan. */
-export function analyzeBatchReadiness(
-  batch: BatchRecord,
-): BatchReadinessAssessment {
-  return analyzeBatchReadinessMock(batch);
-}
-
-export async function getBatchReadiness(
-  batch: BatchRecord,
-): Promise<BatchReadinessResult> {
-  if (MOCK_AI_RESPONSES) {
-    logMockUsage("getBatchReadiness");
-    // ~1.1s shim so the "Analysing batch record…" state is visible.
-    await delay(1100);
-    return mockBatchReadiness(batch);
+  try {
+    return await fetchDeviationClusters(deviations);
+  } catch (err) {
+    console.error(
+      "[ai] getDeviationIntelligence: backend failed, falling back to mock.",
+      err,
+    );
+    return mockDeviationIntelligence(deviations);
   }
-  void batch;
-  throw new Error("Real AI not yet wired");
 }
 
 /* ── Feature H — Drift Detection ─────────────────────────────────────
@@ -527,13 +518,21 @@ export interface DriftDetectionResult {
 }
 
 export async function getDriftDetection(): Promise<DriftDetectionResult> {
-  if (MOCK_AI_RESPONSES) {
+  if (AI_MOCK.driftDetection) {
     logMockUsage("getDriftDetection");
     // ~1.0s shim so the "Scanning systems for drift…" state is visible.
     await delay(1000);
     return mockDriftDetection();
   }
-  throw new Error("Real AI not yet wired");
+  try {
+    return await fetchDriftDetection();
+  } catch (err) {
+    console.error(
+      "[ai] getDriftDetection: backend failed, falling back to mock.",
+      err,
+    );
+    return mockDriftDetection();
+  }
 }
 
 /**
@@ -552,4 +551,68 @@ export function driftAlertSummary(): {
     critical: alerts.filter((a) => a.severity === "Critical").length,
     auditTrail: alerts.filter((a) => a.type === "Audit Trail Anomaly").length,
   };
+}
+
+/* ── Feature I — Finding Triage (Gap Assessment) ─────────────────────
+ * When a compliance gap is reported, the user must pick the right regulatory
+ * framework, classify severity, and articulate the risk + missing evidence.
+ * This agent triages the free-text requirement: it maps the finding to a
+ * framework + clause, suggests a severity (Critical/High/Low), drafts a risk
+ * summary, lists evidence gaps, and proposes a CAPA title.
+ *
+ * CAN DO: classify framework/severity, summarise risk, flag evidence gaps,
+ * suggest a CAPA title. CANNOT DO: create the finding, lock a classification,
+ * or raise the CAPA — every field is a suggestion the human reviews and edits
+ * before saving (severity/area/framework lock only AFTER human-confirmed
+ * create, so the suggestion is pre-commitment by design).
+ *
+ * Real backend: POST /api/v1/finding-triage/classify (LLM picks framework +
+ * clause from the tenant's active frameworks; Python coerces the enums). On any
+ * backend error this falls back to the deterministic mock so the modal never
+ * breaks — the `source: "mock"` badge then signals the data is not live. */
+
+export type FindingTriageSeverity = "Critical" | "High" | "Low";
+
+export interface FindingTriageResult {
+  /** Framework KEY (p210, p11, annex11, …) — selects the modal's dropdown. */
+  framework: string;
+  /** Human label for the key (e.g. "Part 11"). */
+  frameworkLabel: string;
+  /** Most specific clause, e.g. "21 CFR 211.194(a)" / "Annex 11 §9". */
+  clause: string;
+  severity: FindingTriageSeverity;
+  /** One-line justification for the severity. */
+  severityRationale: string;
+  /** 2-3 sentence compliance-risk summary (fills the Finding.agiSummary slot). */
+  agiSummary: string;
+  /** Records/documents needed to close the gap (advisory chips). */
+  evidenceGaps: string[];
+  /** Proposed corrective-action title for a follow-on CAPA. */
+  suggestedCapaTitle: string;
+  /** 0–100 heuristic confidence. */
+  confidence: number;
+  source: "mock" | "backend";
+}
+
+export async function classifyFinding(
+  requirement: string,
+  area: string,
+  purpose: string,
+  activeFrameworks: string[],
+): Promise<FindingTriageResult> {
+  if (AI_MOCK.findingTriage) {
+    logMockUsage("classifyFinding");
+    // ~0.9s shim so the "Analysing…" state is visible.
+    await delay(900);
+    return mockFindingTriage(requirement, area, purpose, activeFrameworks);
+  }
+  try {
+    return await fetchFindingTriage(requirement, area, purpose, activeFrameworks);
+  } catch (err) {
+    console.error(
+      "[ai] classifyFinding: backend failed, falling back to mock.",
+      err,
+    );
+    return mockFindingTriage(requirement, area, purpose, activeFrameworks);
+  }
 }

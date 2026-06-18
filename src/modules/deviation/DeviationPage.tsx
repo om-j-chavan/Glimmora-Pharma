@@ -43,7 +43,14 @@ import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity"
 import { addSchema, type AddForm } from "./DeviationPage.schemas";
 import { adaptDeviation, type PrismaDeviationWithCapa } from "./DeviationPage.adapter";
 import { InvestigationSection, CapaDecisionSection } from "./DeviationInvestigation";
-import { DeviationIntelligencePanel } from "./DeviationIntelligencePanel";
+import {
+  DeviationIntelligencePanel,
+  DeviationIntelligenceRunButton,
+  useDeviationIntelligence,
+} from "./DeviationIntelligencePanel";
+import { SmartRecordSearch } from "@/components/search/SmartRecordSearch";
+import { DocumentSummaryPanel } from "@/components/search/DocumentSummaryPanel";
+import { buildDeviationSource } from "@/lib/searchSources";
 import type { DeviationClusterInput } from "@/lib/ai";
 import type { Deviation as PrismaDeviation } from "@prisma/client";
 
@@ -100,6 +107,10 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       })),
     [tenantDevs],
   );
+
+  // On-demand Deviation Intelligence — the run trigger lives in the page header
+  // (see PageHeader actions); the results card mounts only after a run.
+  const deviationIntel = useDeviationIntelligence(deviationIntelInput);
 
   const openCount = tenantDevs.filter((d) => d.status === "open").length;
   const investigatingCount = tenantDevs.filter((d) => d.status === "under_investigation").length;
@@ -315,6 +326,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
         actions={
           <div className="flex items-center gap-3">
             <StatusGuide module="Deviation Management" statuses={DEVIATION_STATUSES} />
+            <DeviationIntelligenceRunButton state={deviationIntel} />
             {devCan.canCreate ? <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>Report Deviation</Button> : <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Contact QA Head to report deviations</p>}
           </div>
         }
@@ -328,6 +340,12 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
         </p>
       </div>
 
+      {/* Feature 2 — Plain-English Record Search */}
+      <SmartRecordSearch
+        title="Deviation Search"
+        sources={[buildDeviationSource(tenantDevs, allSites, setSelectedId)]}
+      />
+
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard icon={ClipboardList} color="#0ea5e9" label="Total" value={String(tenantDevs.length)} sub="All deviations" />
@@ -337,10 +355,10 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       </div>
 
       {/* Deviation Intelligence — AGI pattern clustering (read-only analysis).
-          Renders only when the `deviation` agent is on and there are
-          deviations to analyse. */}
+          On demand: triggered by the header run button, this card mounts only
+          while analysis is running or once it has results. */}
       <DeviationIntelligencePanel
-        deviations={deviationIntelInput}
+        state={deviationIntel}
         onOpenDeviation={setSelectedId}
       />
 
@@ -429,6 +447,21 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
             <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.title}</p>
             <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{selected.description}</p>
+
+            {/* Feature 3 — Document Summarizing */}
+            <DocumentSummaryPanel
+              title={`Deviation ${selected.reference ?? selected.id.slice(0, 8)}`}
+              recordId={selected.id}
+              module="deviation"
+              content={[
+                `Title: ${selected.title}`,
+                `Description: ${selected.description}`,
+                `Category: ${selected.category}; Type: ${selected.type}; Area: ${selected.area}`,
+                `Impact — Patient safety: ${selected.patientSafetyImpact}; Product quality: ${selected.productQualityImpact}; Regulatory: ${selected.regulatoryImpact}`,
+                selected.immediateAction ? `Immediate action: ${selected.immediateAction}` : "",
+                selected.rootCause ? `Root cause: ${selected.rootCause}` : "",
+              ].filter(Boolean).join("\n\n")}
+            />
 
             <div className="grid grid-cols-2 gap-3 text-[11px]">
               <div><p style={{ color: "var(--text-muted)" }}>Category</p><p className="capitalize font-medium" style={{ color: "var(--text-primary)" }}>{selected.category}</p></div>

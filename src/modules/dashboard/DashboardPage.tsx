@@ -25,6 +25,8 @@ import { displayUserName } from "@/lib/identity-display";
 import { regulatoryAlertSummary, driftAlertSummary } from "@/lib/ai";
 import { planLabel } from "@/lib/plans";
 import { ActionPlanTable } from "./ActionPlanTable";
+import { SmartRecordSearch } from "@/components/search/SmartRecordSearch";
+import { buildCapaSource, buildDeviationSource, buildFindingSource } from "@/lib/searchSources";
 
 /* ══════════════════════════════════════ */
 
@@ -63,7 +65,7 @@ export interface DashboardPageProps {
 
 export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardPageProps = {}) {
   const router = useRouter();
-  const { findings, capas, systems, roadmap, fda483Events, tenantId } = useTenantData();
+  const { findings, capas, deviations, systems, roadmap, fda483Events, tenantId } = useTenantData();
   const { org, sites, users } = useTenantConfig();
   const agiSettings = useAppSelector((s) => s.settings.agi);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
@@ -266,6 +268,17 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
 
       {/* Setup checklist */}
       <SetupChecklist />
+
+      {/* Feature 2 — Plain-English Record Search (cross-module) */}
+      <SmartRecordSearch
+        title="Search"
+        defaultScope="all"
+        sources={[
+          buildCapaSource(capas, sites, (id) => router.push(`/capa/${id}`)),
+          buildDeviationSource(deviations, sites, () => router.push("/deviation")),
+          buildFindingSource(findings, sites, () => router.push("/gap-assessment")),
+        ]}
+      />
 
       {/* KPI cards */}
       <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">

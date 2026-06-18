@@ -15,6 +15,8 @@ import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { SmartRecordSearch } from "@/components/search/SmartRecordSearch";
+import { buildFindingSource } from "@/lib/searchSources";
 import {
   setFindings,
   type Finding,
@@ -458,16 +460,26 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
       )}
 
       {activeTab === "register" && (
-        <GapRegisterTab
-          filteredFindings={baseFindings} findingsTotal={findings.length}
-          selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding} isViewOnly={isViewOnly} users={users}
-          timezone={timezone} dateFormat={dateFormat} capas={capas}
-          agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
-          renderFilters={renderFilters}
-          onAddOpen={() => setAddOpen(true)} onRaiseCapa={handleRaiseCapa}
-          onNavigateCapa={() => router.push("/capa")}
-          onManageEvidence={(fid, link) => { setEvidenceFindingId(fid); setEvidenceCurrentLink(link); setEvidenceModalOpen(true); }}
-        />
+        <div className="space-y-4">
+          {/* Feature 2 — Plain-English Record Search */}
+          <SmartRecordSearch
+            title="Findings Search"
+            sources={[buildFindingSource(findings, sites, (fid) => {
+              const f = findings.find((x) => x.id === fid);
+              if (f) setSelectedFinding(f);
+            })]}
+          />
+          <GapRegisterTab
+            filteredFindings={baseFindings} findingsTotal={findings.length}
+            selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding} isViewOnly={isViewOnly} users={users}
+            timezone={timezone} dateFormat={dateFormat} capas={capas}
+            agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
+            renderFilters={renderFilters}
+            onAddOpen={() => setAddOpen(true)} onRaiseCapa={handleRaiseCapa}
+            onNavigateCapa={() => router.push("/capa")}
+            onManageEvidence={(fid, link) => { setEvidenceFindingId(fid); setEvidenceCurrentLink(link); setEvidenceModalOpen(true); }}
+          />
+        </div>
       )}
 
       {activeTab === "evidence" && (
@@ -487,6 +499,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
         sites={sites} systems={systems} activeFrameworks={activeFrameworks as string[]}
         lockedSiteId={selectedSiteId}
         currentUserName={authUser?.name ?? ""} currentUserRole={authUser?.role ?? ""}
+        aiEnabled={agiMode !== "manual" && agiCapa}
       />
 
       <EvidenceLinkModal

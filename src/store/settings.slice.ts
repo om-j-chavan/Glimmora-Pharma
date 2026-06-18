@@ -23,7 +23,6 @@ export interface AGISettings {
     capa: boolean;
     deviation: boolean;
     fda483: boolean;
-    batch: boolean;
     drift: boolean;
     regulatory: boolean;
     supplier: boolean;
@@ -54,7 +53,6 @@ const initialState: SettingsState = {
       capa: true,
       deviation: true,
       fda483: true,
-      batch: true,
       drift: true,
       regulatory: true,
       supplier: true,
