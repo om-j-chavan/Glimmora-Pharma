@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Eye, EyeOff, RefreshCw } from "lucide-react";
-import { evaluatePasswordStrength, generateStrongPassword } from "@/lib/passwords";
+import { generateStrongPassword } from "@/lib/passwords";
 import { type AccountFormData, type AccountFormSetter } from "../../helpers";
 
 const LABEL = "block text-[11px] font-medium mb-1" as const;
@@ -23,9 +23,6 @@ interface AccountPasswordFieldsProps {
 export function AccountPasswordFields({ form, set, setPasswords, markTouched, errorVisible, errors, mode, onToast }: AccountPasswordFieldsProps) {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  // Computed once per render — feeds the strength meter.
-  const passwordStrength = evaluatePasswordStrength(form.newPassword);
 
   const handleGeneratePassword = async () => {
     const pwd = generateStrongPassword(16);
@@ -75,7 +72,7 @@ export function AccountPasswordFields({ form, set, setPasswords, markTouched, er
               className={`input ${errorVisible("newPassword") ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
               style={{ paddingRight: 36 }}
               aria-invalid={errorVisible("newPassword")}
-              aria-describedby={errorVisible("newPassword") ? "pw-new-error" : (form.newPassword ? "pw-new-strength" : undefined)}
+              aria-describedby={errorVisible("newPassword") ? "pw-new-error" : undefined}
             />
             <button
               type="button"
@@ -88,37 +85,6 @@ export function AccountPasswordFields({ form, set, setPasswords, markTouched, er
               {showNewPassword ? <EyeOff className="w-4 h-4" aria-hidden="true" /> : <Eye className="w-4 h-4" aria-hidden="true" />}
             </button>
           </div>
-          {form.newPassword.length > 0 && (() => {
-            // 4-segment strength bar. Colour ramps from danger -> success;
-            // label gives screen-reader-friendly context (the bar alone is
-            // colour-only, so the label is the accessible cue).
-            const segColor =
-              passwordStrength <= 1 ? "var(--danger)" :
-              passwordStrength === 2 ? "var(--warning)" :
-              passwordStrength === 3 ? "#eab308" :
-              "var(--success)";
-            const segLabel =
-              passwordStrength <= 1 ? "Very weak" :
-              passwordStrength === 2 ? "Weak" :
-              passwordStrength === 3 ? "Good" :
-              "Strong";
-            return (
-              <div id="pw-new-strength" className="mt-1.5" role="status" aria-live="polite">
-                <div className="flex gap-1" aria-hidden="true">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div
-                      key={i}
-                      className="h-1 flex-1 rounded-full transition-colors"
-                      style={{ background: i <= passwordStrength ? segColor : "var(--bg-elevated)" }}
-                    />
-                  ))}
-                </div>
-                <p className="text-[10px] mt-1" style={{ color: segColor }}>
-                  Strength: {segLabel}
-                </p>
-              </div>
-            );
-          })()}
           {errorVisible("newPassword") && <p id="pw-new-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{errors.newPassword}</p>}
         </div>
         <div>

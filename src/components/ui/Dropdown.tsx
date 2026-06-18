@@ -112,7 +112,19 @@ export function Dropdown({
       ? Math.max(viewportPad, rect.top - neededHeight - gap)
       : rect.bottom + gap;
 
-    setMenuPos({ top, left: rect.left, width: rect.width });
+    // Horizontal clamp: keep the menu inside the viewport. Default-aligns the
+    // menu's left edge to the trigger, but if that pushes its right edge off
+    // screen (e.g. a right-aligned ⋮ actions menu), shift it left so it ends
+    // within the viewport — effectively right-aligning it to the trigger.
+    // Uses the menu's real width once rendered (the raf re-measure below picks
+    // it up); falls back to the trigger width on first paint.
+    const actualMenuWidth = menuRef.current?.offsetWidth ?? 0;
+    const menuW = actualMenuWidth > 0 ? actualMenuWidth : rect.width;
+    let left = rect.left;
+    const maxLeft = window.innerWidth - viewportPad - menuW;
+    if (left > maxLeft) left = Math.max(viewportPad, maxLeft);
+
+    setMenuPos({ top, left, width: rect.width });
   }, []);
 
   // Open handler

@@ -105,6 +105,137 @@ export const getAuditLogs = cache(async (tenantId: string): Promise<AuditLogQuer
   };
 });
 
+/* ── Audit Trail view enrichment ──────────────────────────────────────────
+   The audit log stores recordId (the affected entity's internal UUID) and a
+   denormalised recordTitle. Neither is the entity's PROPER domain id (e.g.
+   "CAPA-CHN-2026-001"). To show that — and link to the source the way the
+   other modules link — we resolve recordId → the entity's reference per
+   module family, tenant-scoped, and attach a navigable href.
+
+   Deep links only exist where a per-id route exists (CAPA). The other modules
+   are modal-based with no per-record URL, so they link to their list route —
+   "where the other modules would link". */
+
+type AuditFamily = "capa" | "deviation" | "changeControl" | "fda483" | "finding" | "system";
+
+const AUDIT_LIST_ROUTE: Record<AuditFamily, string> = {
+  capa: "/capa",
+  deviation: "/deviation",
+  changeControl: "/change-control",
+  fda483: "/fda-483",
+  finding: "/gap-assessment",
+  system: "/csv-csa",
+};
+
+/** Map an AuditLog.module string to its domain family (or null = no entity). */
+function auditModuleFamily(module: string): AuditFamily | null {
+  if (module.startsWith("CAPA")) return "capa"; // covers "CAPA / Approvals" etc.
+  if (module === "Deviation Management") return "deviation";
+  if (module === "Change Control") return "changeControl";
+  if (module === "FDA 483") return "fda483";
+  if (module === "Gap Assessment") return "finding";
+  if (module === "CSV/CSA") return "system";
+  return null;
+}
+
+/** An AuditLog row enriched with a human domain id + a link to the source. */
+export type AuditTrailRow = AuditLog & {
+  /** Proper domain id (resolved reference) ?? recordTitle ?? short UUID ?? "—". */
+  displayId: string;
+  /** Navigable source-record link, or null when the module has no entity/route. */
+  href: string | null;
+};
+
+export interface AuditTrailView {
+  rows: AuditTrailRow[];
+  totalCount: number;
+  truncated: boolean;
+  limit: number;
+}
+
+/** Resolve recordId → reference for the loaded slice, batched per family. */
+async function resolveAuditReferences(
+  tenantId: string,
+  logs: AuditLog[],
+): Promise<Map<string, string>> {
+  const buckets: Record<AuditFamily, Set<string>> = {
+    capa: new Set(), deviation: new Set(), changeControl: new Set(),
+    fda483: new Set(), finding: new Set(), system: new Set(),
+  };
+  for (const log of logs) {
+    if (!log.recordId) continue;
+    const fam = auditModuleFamily(log.module);
+    if (fam) buckets[fam].add(log.recordId);
+  }
+
+  const ref = new Map<string, string>();
+  const set = (rows: { id: string; ref: string | null }[]) =>
+    rows.forEach((r) => r.ref && ref.set(r.id, r.ref));
+  const ids = (s: Set<string>) => Array.from(s);
+
+  await Promise.all([
+    buckets.capa.size
+      ? prisma.cAPA.findMany({ where: { tenantId, id: { in: ids(buckets.capa) } }, select: { id: true, reference: true } })
+          .then((r) => set(r.map((x) => ({ id: x.id, ref: x.reference }))))
+      : null,
+    buckets.deviation.size
+      ? prisma.deviation.findMany({ where: { tenantId, id: { in: ids(buckets.deviation) } }, select: { id: true, reference: true } })
+          .then((r) => set(r.map((x) => ({ id: x.id, ref: x.reference }))))
+      : null,
+    buckets.changeControl.size
+      ? prisma.changeControl.findMany({ where: { tenantId, id: { in: ids(buckets.changeControl) } }, select: { id: true, reference: true } })
+          .then((r) => set(r.map((x) => ({ id: x.id, ref: x.reference }))))
+      : null,
+    buckets.fda483.size
+      ? prisma.fDA483Event.findMany({ where: { tenantId, id: { in: ids(buckets.fda483) } }, select: { id: true, referenceNumber: true } })
+          .then((r) => set(r.map((x) => ({ id: x.id, ref: x.referenceNumber }))))
+      : null,
+    buckets.finding.size
+      ? prisma.finding.findMany({ where: { tenantId, id: { in: ids(buckets.finding) } }, select: { id: true, reference: true } })
+          .then((r) => set(r.map((x) => ({ id: x.id, ref: x.reference }))))
+      : null,
+    buckets.system.size
+      ? prisma.gxPSystem.findMany({ where: { tenantId, id: { in: ids(buckets.system) } }, select: { id: true, name: true } })
+          .then((r) => set(r.map((x) => ({ id: x.id, ref: x.name }))))
+      : null,
+  ]);
+
+  return ref;
+}
+
+/**
+ * Audit-trail view: the same tenant-scoped, capped slice as getAuditLogs, with
+ * each row enriched with a proper domain id + source link. Used by the
+ * /audit-trail page so the table and detail modal can reference records by
+ * their real ids (CAPA-…, DEV-…, CC-…) instead of raw UUIDs.
+ */
+export const getAuditTrailView = cache(async (tenantId: string): Promise<AuditTrailView> => {
+  const where = { tenantId };
+  const [logs, totalCount] = await Promise.all([
+    prisma.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: AUDIT_LOG_DISPLAY_LIMIT }),
+    prisma.auditLog.count({ where }),
+  ]);
+
+  const refMap = await resolveAuditReferences(tenantId, logs);
+
+  const rows: AuditTrailRow[] = logs.map((log) => {
+    const fam = auditModuleFamily(log.module);
+    const resolved = log.recordId ? refMap.get(log.recordId) : undefined;
+    const displayId = resolved ?? log.recordTitle ?? (log.recordId ? log.recordId.slice(0, 8) : "—");
+    // CAPA is the only module with a per-id route — deep-link only when the
+    // recordId actually resolved to a CAPA (so sub-entity ids don't 404).
+    const href =
+      fam === "capa" && resolved && log.recordId
+        ? `/capa/${log.recordId}`
+        : fam
+          ? AUDIT_LIST_ROUTE[fam]
+          : null;
+    return { ...log, displayId, href };
+  });
+
+  return { rows, totalCount, truncated: totalCount > AUDIT_LOG_DISPLAY_LIMIT, limit: AUDIT_LOG_DISPLAY_LIMIT };
+});
+
 /**
  * AGI-related activity from the audit log — agent toggles + AI suggestion
  * shown/accepted/dismissed events. Used by /agi-console activity feed.

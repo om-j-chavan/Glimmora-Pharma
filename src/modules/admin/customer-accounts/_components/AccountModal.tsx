@@ -99,10 +99,10 @@ export function AccountModal({
 
     if (mode === "create") {
       if (!form.newPassword) e.newPassword = "Required";
-      else if (form.newPassword.length < 6) e.newPassword = "Must be at least 6 characters";
+      else if (form.newPassword.length < 8) e.newPassword = "Password must be at least 8 characters";
       if (form.newPassword !== form.confirmPassword) e.confirmPassword = "Passwords don't match";
     } else if (form.newPassword) {
-      if (form.newPassword.length < 6) e.newPassword = "Must be at least 6 characters";
+      if (form.newPassword.length < 8) e.newPassword = "Password must be at least 8 characters";
       if (form.newPassword !== form.confirmPassword) e.confirmPassword = "Passwords don't match";
     }
     return e;
@@ -121,8 +121,8 @@ export function AccountModal({
 
   // Live form-validity check for the Save button's disabled state. Mirrors
   // validate() but is pure (no setErrors side effect) so it runs every render.
-  // No length minimums — the strength meter is informational and never blocks
-  // submission; only required-ness, username/email format, and match are gated.
+  // Gates required-ness, username/email format, the 8-char password floor
+  // (Part-11 minimum), and the confirm-match.
   const canSave =
     form.customerName.trim().length >= 2 &&
     form.username.trim().length >= 2 &&
@@ -130,8 +130,8 @@ export function AccountModal({
     form.email.trim().length > 0 &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
     (mode === "edit"
-      ? (!form.newPassword || (form.newPassword.length >= 6 && form.newPassword === form.confirmPassword))
-      : form.newPassword.length >= 6 && form.newPassword === form.confirmPassword);
+      ? (!form.newPassword || (form.newPassword.length >= 8 && form.newPassword === form.confirmPassword))
+      : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword);
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {

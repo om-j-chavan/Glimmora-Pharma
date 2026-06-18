@@ -97,7 +97,12 @@ export function useTenantData() {
       raidItemsRaw.filter((r) => {
         if (r.tenantId && r.tenantId !== tenantId) return false;
         if (r.siteId && !accessibleSiteIds.includes(r.siteId)) return false;
-        if (selectedSiteId && r.siteId !== selectedSiteId) return false;
+        // RAID items are tenant-level (no siteId) — only apply the selected-site
+        // filter to items that actually carry a site, mirroring the evidenceDocs
+        // guard above. Without the `r.siteId &&` guard, every RAID row (siteId
+        // "") was dropped whenever a site was selected, so newly-added items
+        // never appeared in the table.
+        if (selectedSiteId && r.siteId && r.siteId !== selectedSiteId) return false;
         return true;
       }),
     [raidItemsRaw, tenantId, selectedSiteId, accessibleSiteIds],

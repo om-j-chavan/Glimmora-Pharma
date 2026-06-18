@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Package, Plus, Download } from "lucide-react";
+import { Package, Plus, Download, Upload, FileText, X } from "lucide-react";
 import type { Document as PrismaDocument } from "@prisma/client";
 // Type-only import — band-aid for the global view to surface CAPA Evidence
 // files. Phase 4 of the document-store unification removes this.
@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
+import { DatePicker } from "@/components/ui/DatePicker";
 
 import { DocumentLibraryTab } from "./tabs/DocumentLibraryTab";
 
@@ -89,7 +90,9 @@ function adaptPrismaDoc(d: PrismaDocument): EvidenceDocument {
     effectiveDate: typeof meta.effectiveDate === "string" ? meta.effectiveDate : d.createdAt.toISOString(),
     expiryDate: typeof meta.expiryDate === "string" ? meta.expiryDate : undefined,
     tags: Array.isArray(meta.tags) ? meta.tags as string[] : [],
-    url: typeof meta.url === "string" ? meta.url : undefined,
+    // Prefer the authenticated download route when a file was actually stored
+    // (via fileStorage); fall back to an external URL for link-only documents.
+    url: d.storageKey ? `/api/documents/${d.id}` : (typeof meta.url === "string" ? meta.url : undefined),
     sizeKb: undefined,
     complianceTags: Array.isArray(meta.complianceTags) ? meta.complianceTags as string[] : [],
     createdAt: d.createdAt.toISOString(),
@@ -395,6 +398,9 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
   const [addDocOpen, setAddDocOpen] = useState(false);
   const [addedPopup, setAddedPopup] = useState(false);
+  // Optional file attached in the Add Document modal — uploaded via the shared
+  // fileStorage pipeline (createDocument FormData), not base64.
+  const [docFile, setDocFile] = useState<File | null>(null);
 
   const allDocs = getAllDocuments();
 
@@ -549,12 +555,14 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
       capaId: data.capaId || undefined,
     };
 
-    const result = await createDocument({
-      fileName: data.title,
-      description: JSON.stringify(meta),
-      linkedModule: data.area,
-      linkedRecordId: data.reference,
-    });
+    const fd = new FormData();
+    fd.set("fileName", data.title);
+    fd.set("description", JSON.stringify(meta));
+    fd.set("linkedModule", data.area);
+    fd.set("linkedRecordId", data.reference);
+    if (docFile) fd.set("file", docFile);
+
+    const result = await createDocument(fd);
 
     if (!result.success) {
       console.error("[evidence] createDocument failed:", result.error);
@@ -563,6 +571,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
 
     setAddDocOpen(false);
     setAddedPopup(true);
+    setDocFile(null);
     docForm.reset();
     router.refresh(); // Re-runs the Server Component → fresh `docs` prop arrives.
   }
@@ -706,7 +715,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
       {/* Add Document Modal */}
       <Modal
         open={addDocOpen}
-        onClose={() => setAddDocOpen(false)}
+        onClose={() => { setAddDocOpen(false); setDocFile(null); }}
         title="Add document"
       >
         <form
@@ -715,6 +724,28 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
           className="space-y-4"
         >
           <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
+                File (optional)
+              </label>
+              {docFile ? (
+                <div className="flex items-center gap-2 rounded-lg border px-3 py-2 border-(--bg-border) bg-(--bg-surface)">
+                  <FileText className="w-4 h-4 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
+                  <span className="flex-1 min-w-0 truncate text-[12px]" style={{ color: "var(--text-primary)" }}>{docFile.name}</span>
+                  <span className="text-[11px] shrink-0" style={{ color: "var(--text-muted)" }}>{(docFile.size / 1024).toFixed(0)} KB</span>
+                  <button type="button" onClick={() => setDocFile(null)} aria-label="Remove file" className="border-none bg-transparent cursor-pointer shrink-0" style={{ color: "var(--text-muted)" }}>
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              ) : (
+                <label htmlFor="doc-file" className="flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-4 cursor-pointer text-center transition-colors border-(--bg-border) hover:border-(--brand)">
+                  <Upload className="w-5 h-5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                  <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>Click to choose a file</span>
+                  <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>PDF, PNG, JPG, DOCX, XLSX, CSV, TXT · max 10 MB</span>
+                  <input id="doc-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.docx,.csv,.txt" className="hidden" onChange={(e) => setDocFile(e.target.files?.[0] ?? null)} />
+                </label>
+              )}
+            </div>
             <div className="col-span-2">
               <label
                 htmlFor="doc-title"
@@ -837,33 +868,45 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
               />
             </div>
             <div>
-              <label
-                htmlFor="doc-eff"
-                className={lbl}
-                style={{ color: "var(--text-muted)" }}
-              >
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
                 Effective date *
               </label>
-              <input
-                id="doc-eff"
-                type="date"
-                className="input text-[12px]"
-                {...docForm.register("effectiveDate")}
+              <Controller
+                name="effectiveDate"
+                control={docForm.control}
+                render={({ field }) => (
+                  <DatePicker
+                    id="doc-eff"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    placeholder="Select date"
+                    className="w-full"
+                  />
+                )}
               />
+              {docForm.formState.errors.effectiveDate && (
+                <p role="alert" className="text-[11px] text-[#ef4444] mt-1">
+                  {docForm.formState.errors.effectiveDate.message}
+                </p>
+              )}
             </div>
             <div>
-              <label
-                htmlFor="doc-exp"
-                className={lbl}
-                style={{ color: "var(--text-muted)" }}
-              >
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
                 Expiry date
               </label>
-              <input
-                id="doc-exp"
-                type="date"
-                className="input text-[12px]"
-                {...docForm.register("expiryDate")}
+              <Controller
+                name="expiryDate"
+                control={docForm.control}
+                render={({ field }) => (
+                  <DatePicker
+                    id="doc-exp"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    min={docForm.watch("effectiveDate") || undefined}
+                    placeholder="Select date"
+                    className="w-full"
+                  />
+                )}
               />
             </div>
             <div>
@@ -952,7 +995,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
             <Button
               variant="ghost"
               type="button"
-              onClick={() => setAddDocOpen(false)}
+              onClick={() => { setAddDocOpen(false); setDocFile(null); }}
             >
               Cancel
             </Button>

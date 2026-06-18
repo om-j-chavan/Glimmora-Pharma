@@ -21,7 +21,15 @@ import { setCredentials, setActiveSite, setSelectedSite, type AuthUser, type Ten
 import { login as nextAuthLogin, fetchCurrentUser } from "@/lib/authClient";
 import { flushPersist } from "@/store/persistence";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+
+// Password resets are handled manually by the Glimmora-Pharma support team
+// (no self-service reset on this 21 CFR Part 11 platform).
+// TODO: replace placeholder support contact details with the real values.
+const SUPPORT_EMAIL = "support@glimmora-pharma.com"; // TODO: placeholder
+const SUPPORT_PHONE_DISPLAY = "+1 (555) 014-2273"; // TODO: placeholder
+const SUPPORT_PHONE_TEL = "+15550142273"; // TODO: placeholder (E.164 of the above)
 
 const schema = z.object({
   email: z.string().min(1, "Username or email is required"),
@@ -62,6 +70,7 @@ export function LoginPage() {
   const toast = useToast();
   const [showCreds, setShowCreds] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [loadingName, setLoadingName] = useState("");
 
@@ -346,7 +355,7 @@ export function LoginPage() {
               <label htmlFor="password" className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
                 Passcode <span style={{ color: "var(--danger)" }} aria-hidden="true">*</span>
               </label>
-              <span className="text-[11px] cursor-pointer underline" style={{ color: "var(--brand)" }}>Forgot passcode?</span>
+              <button type="button" onClick={() => setForgotOpen(true)} className="text-[11px] cursor-pointer underline border-none bg-transparent p-0" style={{ color: "var(--brand)" }}>Forgot passcode?</button>
             </div>
             <div className="relative">
               <Lock className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -452,6 +461,50 @@ export function LoginPage() {
         </div>
         )}
       </div>
+
+      {/* Forgot-password → contact support. Resets are handled manually by the
+          support team (no self-service reset on this Part 11 platform). The
+          Modal handles backdrop/Esc dismissal, the Close (X) button,
+          aria-labelledby via `title`, and focus-return to the trigger. */}
+      <Modal
+        open={forgotOpen}
+        onClose={() => setForgotOpen(false)}
+        title="Forgot your password?"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="primary"
+              icon={Mail}
+              onClick={() => {
+                window.location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Password reset request")}`;
+              }}
+            >
+              Email support
+            </Button>
+            <Button variant="secondary" onClick={() => setForgotOpen(false)}>
+              Close
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-[13px]" style={{ color: "var(--text-secondary)" }}>
+          <p>
+            To keep GxP records secure, our team handles password resets directly.
+            Reach out and we&apos;ll verify you and get you back in.
+          </p>
+          <p>
+            Email{" "}
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="underline" style={{ color: "var(--brand)" }}>
+              {SUPPORT_EMAIL}
+            </a>{" "}
+            or call{" "}
+            <a href={`tel:${SUPPORT_PHONE_TEL}`} className="underline" style={{ color: "var(--brand)" }}>
+              {SUPPORT_PHONE_DISPLAY}
+            </a>
+            .
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 }

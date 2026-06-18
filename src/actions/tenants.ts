@@ -28,14 +28,14 @@ const CreateTenantSchema = z.object({
   email: z.string().email(),
   username: z.string().min(2),
   customerCode: z.string().min(2),
-  password: z.string().min(6),
+  password: z.string().min(8, "Password must be at least 8 characters"),
   language: z.string().default("en"),
   timezone: z.string().default("Asia/Kolkata"),
   isActive: z.boolean().default(true),
 });
 
 const UpdateTenantSchema = CreateTenantSchema.partial().extend({
-  password: z.string().min(6).optional(),
+  password: z.string().min(8, "Password must be at least 8 characters").optional(),
 });
 
 const AssignPlanSchema = z.object({

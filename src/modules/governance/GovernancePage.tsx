@@ -6,7 +6,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
-import { BarChart3, AlertTriangle, Download, BarChart2, Shield } from "lucide-react";
+import { BarChart3, AlertTriangle, Download, BarChart2 } from "lucide-react";
 import type { RAIDItem as PrismaRAIDItem } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
+import { DatePicker } from "@/components/ui/DatePicker";
 import { displayUserName } from "@/lib/identity-display";
 
 /* ── Adapt Prisma RAIDItem → slice RAIDItem shape ── */
@@ -275,11 +276,6 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
     dl(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>RAID Log Export</title><style>body{font-family:-apple-system,Arial,sans-serif;padding:40px;color:#0a1628}h1{font-size:22px;font-weight:700;margin-bottom:4px}.meta{color:#475569;font-size:12px;margin-bottom:20px}table{width:100%;border-collapse:collapse}thead tr{background:#0a1f38}th{padding:9px 12px;text-align:left;color:#94a3b8;font-size:10px;font-weight:600;text-transform:uppercase;border:1px solid #1e3a5a}.footer{margin-top:24px;font-size:10px;color:#94a3b8}</style></head><body><h1>RAID Log Export</h1><p class="meta">${raidItems.length} items \u00b7 Generated: ${dayjs().format("DD MMM YYYY HH:mm")} UTC \u00b7 ${companyName || "Pharma Glimmora"}</p><table><thead><tr><th>ID</th><th>Type</th><th>Title</th><th>Priority</th><th>Status</th><th>Owner</th><th>Due date</th><th>Resolution / Notes</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:20px;color:#94a3b8">No RAID items</td></tr>'}</tbody></table><div class="footer">Exported by: ${ownerName(user?.id ?? "")}</div></body></html>`, `RAID-Log-${dayjs().format("YYYY-MM-DD")}.html`);
   }
 
-  function exportReadiness() {
-    const siteRows = visibleSites.map((site) => { const sr = siteReadiness.find((s) => s.site.id === site.id)!; const col = sr.score >= 80 ? "#10b981" : sr.score >= 60 ? "#f59e0b" : "#ef4444"; return `<tr><td style="padding:10px 12px;border:1px solid #e2e8f0;font-weight:500">${site.name}</td><td style="padding:10px 12px;border:1px solid #e2e8f0">${site.risk}</td><td style="padding:10px 12px;border:1px solid #e2e8f0;font-size:18px;font-weight:700;color:${col}">${sr.score}%</td><td style="padding:10px 12px;border:1px solid #e2e8f0">${sr.findingsCount}</td><td style="padding:10px 12px;border:1px solid #e2e8f0">${sr.capasCount}</td><td style="padding:10px 12px;border:1px solid #e2e8f0">${sr.criticalCount}</td></tr>`; }).join("");
-    dl(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Inspection Readiness Pack</title><style>body{font-family:-apple-system,Arial,sans-serif;padding:40px;color:#0a1628}.header{border-bottom:2px solid #10b981;padding-bottom:16px;margin-bottom:24px}.logo{font-size:13px;font-weight:700;color:#10b981}h1{font-size:22px;font-weight:700;margin:10px 0 4px}.score-big{font-size:48px;font-weight:700;color:${readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444"}}table{width:100%;border-collapse:collapse;margin:20px 0}thead tr{background:#0a1f38}th{padding:9px 12px;text-align:left;color:#94a3b8;font-size:10px;font-weight:600;text-transform:uppercase;border:1px solid #1e3a5a}</style></head><body><div class="header"><div class="logo">${companyName || "Pharma Glimmora"}</div><h1>Inspection Readiness Pack</h1><p style="color:#475569;font-size:12px">Generated: ${dayjs().format("DD MMM YYYY HH:mm")} UTC \u00b7 Prepared by: ${ownerName(user?.id ?? "")}</p></div><p style="font-size:12px;color:#475569;margin-bottom:8px">Overall readiness score</p><p class="score-big">${readinessScore}%</p><table style="margin-top:28px"><thead><tr><th>Site</th><th>Risk</th><th>Readiness</th><th>Open findings</th><th>Open CAPAs</th><th>Critical</th></tr></thead><tbody>${siteRows || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8">No sites configured</td></tr>'}</tbody></table></body></html>`, `Inspection-Readiness-Pack-${dayjs().format("YYYY-MM-DD")}.html`);
-  }
-
   const lbl = "text-[11px] font-semibold uppercase tracking-wider block mb-1";
 
   /* ══════════════════════════════════════ */
@@ -290,7 +286,6 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
       <header className="flex items-start justify-between flex-wrap gap-4">
         <div><h1 className="page-title">Governance &amp; KPIs</h1><p className="page-subtitle mt-1">{visibleSites.length} sites &middot; {capas.length} CAPAs &middot; {findings.length} findings &middot; {raidItems.length} RAID items</p></div>
         <div className="flex items-center gap-2">
-          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}><span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span><span className="text-[20px] font-bold" style={{ color: noData ? "var(--text-muted)" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444" }}>{noData ? "\u2014" : `${readinessScore}%`}</span></div>
           <div className="relative" ref={exportMenuRef}>
             <Button
               variant="secondary"
@@ -310,7 +305,6 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
                 {[
                   { label: "Monthly Quality KPI Report", Icon: BarChart2, onClick: exportMonthly },
                   { label: "RAID Log Export", Icon: AlertTriangle, onClick: exportRAID },
-                  { label: "Inspection Readiness Pack", Icon: Shield, onClick: exportReadiness },
                 ].map((opt) => (
                   <button
                     key={opt.label}
@@ -345,14 +339,14 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
       </div>
 
       {/* Add RAID Modal */}
-      <Modal open={addRaidOpen} onClose={() => { setAddRaidOpen(false); setEditingRaid(null); }} title={editingRaid ? "Edit RAID Entry" : "Log RAID Entry"}>
+      <Modal open={addRaidOpen} onClose={() => { setAddRaidOpen(false); setEditingRaid(null); }} title={editingRaid ? "Edit RAID Entry" : "Add RAID Entry"}>
         <form onSubmit={raidForm.handleSubmit(onRaidSave)} noValidate className="space-y-4"><div className="grid grid-cols-2 gap-3">
           <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Type *</label><Controller name="type" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Risk", "Action", "Issue", "Decision"].map((t) => ({ value: t, label: t }))} />} /></div>
           <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Priority *</label><Controller name="priority" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Critical", "High", "Medium", "Low"].map((p) => ({ value: p, label: p }))} />} /></div>
           <div className="col-span-2"><label htmlFor="raid-title" className={lbl} style={{ color: "var(--text-muted)" }}>Title *</label><input id="raid-title" className="input text-[12px]" placeholder="e.g. LIMS validation overdue" {...raidForm.register("title")} />{raidForm.formState.errors.title && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.title.message}</p>}</div>
           <div className="col-span-2"><label htmlFor="raid-desc" className={lbl} style={{ color: "var(--text-muted)" }}>Description *</label><textarea id="raid-desc" rows={2} className="input text-[12px] resize-none" {...raidForm.register("description")} />{raidForm.formState.errors.description && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.description.message}</p>}</div>
-          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} /></div>
-          <div><label htmlFor="raid-due" className={lbl} style={{ color: "var(--text-muted)" }}>Due date *</label><input id="raid-due" type="date" className="input text-[12px]" {...raidForm.register("dueDate")} /></div>
+          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} />{raidForm.formState.errors.owner && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.owner.message}</p>}</div>
+          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Due date *</label><Controller name="dueDate" control={raidForm.control} render={({ field }) => <DatePicker id="raid-due" value={field.value ?? ""} onChange={field.onChange} placeholder="Select date" className="w-full" />} />{raidForm.formState.errors.dueDate && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.dueDate.message}</p>}</div>
           <div className="col-span-2"><label htmlFor="raid-impact" className={lbl} style={{ color: "var(--text-muted)" }}>Impact (optional)</label><input id="raid-impact" className="input text-[12px]" placeholder="Business or compliance impact" {...raidForm.register("impact")} /></div>
           <div className="col-span-2"><label htmlFor="raid-mitig" className={lbl} style={{ color: "var(--text-muted)" }}>Mitigation (optional)</label><input id="raid-mitig" className="input text-[12px]" placeholder="How is this being mitigated?" {...raidForm.register("mitigation")} /></div>
         </div><div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => { setAddRaidOpen(false); setEditingRaid(null); }}>Cancel</Button><Button variant="primary" type="submit" loading={raidForm.formState.isSubmitting}>{editingRaid ? "Save changes" : "Add item"}</Button></div></form>

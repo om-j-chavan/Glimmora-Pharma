@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
+import { requireAuth, resolveUserFk } from "@/lib/auth";
 
 type ActionResult<T = unknown> =
   | { success: true; data: T }
@@ -22,6 +22,15 @@ const CreateRAIDSchema = z.object({
 
 const UpdateRAIDSchema = CreateRAIDSchema.partial();
 
+// RAID management roles (confirmed matrix). customer_admin + qa_head create,
+// delete, and manage any item; the assigned owner may additionally edit / close
+// / reopen their OWN item. Mirrors the UI gate in RAIDTab.tsx. super_admin is
+// intentionally excluded — platform admin does not author tenant GxP records.
+const RAID_MANAGE_ROLES = new Set(["customer_admin", "qa_head"]);
+function canManageRaid(role: string): boolean {
+  return RAID_MANAGE_ROLES.has(role);
+}
+
 export async function createRAIDItem(
   input: z.input<typeof CreateRAIDSchema>,
 ): Promise<ActionResult> {
@@ -31,13 +40,8 @@ export async function createRAIDItem(
     return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
-  }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  if (!canManageRaid(session.user.role)) {
+    return { success: false, error: "You do not have permission to add RAID entries." };
   }
   try {
     const item = await prisma.rAIDItem.create({
@@ -80,13 +84,13 @@ export async function updateRAIDItem(
     return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
-  }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  const existing = await prisma.rAIDItem.findFirst({
+    where: { id, tenantId: session.user.tenantId },
+    select: { owner: true },
+  });
+  if (!existing) return { success: false, error: "RAID item not found" };
+  if (!canManageRaid(session.user.role) && existing.owner !== session.user.id) {
+    return { success: false, error: "You do not have permission to modify this RAID entry." };
   }
   try {
     const { dueDate, ...rest } = parsed.data;
@@ -119,13 +123,13 @@ export async function updateRAIDItem(
 export async function closeRAIDItem(id: string, resolutionNote: string): Promise<ActionResult> {
   const session = await requireAuth();
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
-  }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  const existing = await prisma.rAIDItem.findFirst({
+    where: { id, tenantId: session.user.tenantId },
+    select: { owner: true },
+  });
+  if (!existing) return { success: false, error: "RAID item not found" };
+  if (!canManageRaid(session.user.role) && existing.owner !== session.user.id) {
+    return { success: false, error: "You do not have permission to modify this RAID entry." };
   }
   try {
     // Schema has no resolutionNote field — fold it into mitigation
@@ -162,13 +166,13 @@ export async function closeRAIDItem(id: string, resolutionNote: string): Promise
 export async function reopenRAIDItem(id: string, reason: string): Promise<ActionResult> {
   const session = await requireAuth();
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
-  }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  const existing = await prisma.rAIDItem.findFirst({
+    where: { id, tenantId: session.user.tenantId },
+    select: { owner: true },
+  });
+  if (!existing) return { success: false, error: "RAID item not found" };
+  if (!canManageRaid(session.user.role) && existing.owner !== session.user.id) {
+    return { success: false, error: "You do not have permission to modify this RAID entry." };
   }
   try {
     const item = await prisma.rAIDItem.update({
@@ -203,13 +207,8 @@ export async function reopenRAIDItem(id: string, reason: string): Promise<Action
 export async function deleteRAIDItem(id: string): Promise<ActionResult> {
   const session = await requireAuth();
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
-  }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  if (!canManageRaid(session.user.role)) {
+    return { success: false, error: "You do not have permission to delete RAID entries." };
   }
   try {
     await prisma.rAIDItem.delete({

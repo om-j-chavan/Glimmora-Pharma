@@ -1,9 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
+import { fileStorage } from "@/lib/fileStorage";
+import { sanitizeFilename } from "@/lib/sanitize";
 import { DOCUMENT_APPROVE_ROLES, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/permissions/roleSets";
 import {
   canonicalizeDocumentApprovalContent,
@@ -23,18 +26,52 @@ const ApproveDocumentSchema = z.object({
 
 const CreateDocumentSchema = z.object({
   fileName: z.string().min(1),
-  fileType: z.string().optional(),
-  fileSize: z.string().optional(),
   description: z.string().optional(),
   linkedModule: z.string().optional(),
   linkedRecordId: z.string().optional(),
 });
 
-export async function createDocument(
-  input: z.input<typeof CreateDocumentSchema>,
-): Promise<ActionResult> {
+// File upload limits — mirrors src/actions/evidence.ts so the standalone
+// document upload uses the SAME allowlist, size cap, and retention as CAPA
+// evidence (those consts can't be exported from a "use server" module).
+const DOC_MAX_FILE_MB = Number(process.env.EVIDENCE_MAX_FILE_MB ?? "10");
+const DOC_MAX_FILE_BYTES = DOC_MAX_FILE_MB * 1024 * 1024;
+const DOC_ALLOWED_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/csv",
+  "text/plain",
+]);
+const DOC_RETENTION_YEARS = 7;
+function nowPlusYears(years: number): Date {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + years);
+  return d;
+}
+
+/**
+ * Create a Document. Accepts FormData so an optional file can be uploaded via
+ * the SAME storage pipeline as CAPA evidence: bytes → fileStorage.save() →
+ * Document.{storageKey,sha256,fileSize,fileType,…,retainUntil}. Metadata-only
+ * (or URL-linked) documents are still allowed — the file is optional.
+ *
+ * FormData fields: fileName, description, linkedModule, linkedRecordId, file?.
+ */
+export async function createDocument(formData: FormData): Promise<ActionResult> {
   const session = await requireAuth();
-  const parsed = CreateDocumentSchema.safeParse(input);
+  const get = (k: string) => {
+    const v = formData.get(k);
+    return typeof v === "string" && v.length > 0 ? v : undefined;
+  };
+  const parsed = CreateDocumentSchema.safeParse({
+    fileName: get("fileName") ?? "",
+    description: get("description"),
+    linkedModule: get("linkedModule"),
+    linkedRecordId: get("linkedRecordId"),
+  });
   if (!parsed.success) {
     return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
@@ -52,10 +89,47 @@ export async function createDocument(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
+
+  // ── Optional file: validate + persist bytes via the shared fileStorage ──
+  let fileFields: Record<string, unknown> = {};
+  const file = formData.get("file");
+  if (file instanceof File && file.size > 0) {
+    if (file.size > DOC_MAX_FILE_BYTES) {
+      return { success: false, error: `File exceeds ${DOC_MAX_FILE_MB} MB limit` };
+    }
+    if (!DOC_ALLOWED_MIME_TYPES.has(file.type)) {
+      return { success: false, error: "FILE_TYPE_NOT_ALLOWED" };
+    }
+    try {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const sha256 = createHash("sha256").update(buffer).digest("hex");
+      const sanitized = sanitizeFilename(file.name);
+      const dot = sanitized.lastIndexOf(".");
+      const ext = dot > 0 ? sanitized.slice(dot).toLowerCase() : "";
+      // Hash-prefixed key — idempotent on duplicate uploads of the same bytes.
+      const storageKey = `documents/${session.user.tenantId}/${sha256}-${sanitized}`;
+      const { url } = await fileStorage.save(storageKey, buffer, file.type);
+      fileFields = {
+        fileType: file.type,
+        fileSize: String(file.size),
+        sha256,
+        storageKey: url,
+        originalFileName: sanitized,
+        fileExtension: ext,
+        retainUntil: nowPlusYears(DOC_RETENTION_YEARS),
+        uploadedAt: new Date(),
+      };
+    } catch (err) {
+      console.error("[action] createDocument file save failed:", err);
+      return { success: false, error: "Failed to store the uploaded file" };
+    }
+  }
+
   try {
     const doc = await prisma.document.create({
       data: {
         ...parsed.data,
+        ...fileFields,
         tenantId: session.user.tenantId,
         version: "v1.0",
         status: "draft",

@@ -2,7 +2,7 @@ import { AuditTrailPage } from "@/modules/audit-trail/AuditTrailPage";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
 import { requireRoleOrDeny } from "@/lib/authz";
-import { getAuditLogs } from "@/lib/queries";
+import { getAuditTrailView } from "@/lib/queries";
 
 export const metadata = {
   title: "Audit Trail — Pharma Glimmora",
@@ -14,7 +14,7 @@ export default async function Page() {
   const session = await requireAuth();
   await requireRoleOrDeny(session, ALLOWED_ROLES, { module: "audit_trail" });
 
-  const result = await getAuditLogs(session.user.tenantId);
+  const result = await getAuditTrailView(session.user.tenantId);
 
   return (
     <ErrorBoundary moduleName="Audit Trail">

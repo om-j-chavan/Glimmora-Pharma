@@ -40,15 +40,18 @@ export function RAIDTab({
   role, currentUserId, timezone, dateFormat, ownerName, onAddRaidOpen, onCloseRaid,
   onEditRaid, onDeleteRaid, onReopenRaid,
 }: RAIDTabProps) {
-  // ── Role-based permissions ──
-  const isAdmin = role === "customer_admin" || role === "super_admin";
-  const isQAHead = role === "qa_head";
-  const canAdd = role !== "viewer";
-  const canDeleteAny = isAdmin || isQAHead;
+  // ── Role-based permissions (confirmed RAID matrix) ──
+  // Manage = customer_admin + qa_head (create / delete / manage any). The
+  // assigned owner may edit/close/reopen their OWN item. super_admin is
+  // intentionally excluded (platform admin does not author tenant GxP records);
+  // the server enforces the same gate in src/actions/raid.ts.
+  const canManage = role === "customer_admin" || role === "qa_head";
+  const canAdd = canManage;
+  const canDeleteAny = canManage;
   const isOwner = (r: RAIDItem) => !!currentUserId && r.owner === currentUserId;
-  const canEditItem = (r: RAIDItem) => isAdmin || isQAHead || isOwner(r);
-  const canCloseItem = (r: RAIDItem) => r.status !== "Closed" && (isAdmin || isQAHead || isOwner(r));
-  const canReopenItem = (r: RAIDItem) => r.status === "Closed" && (isAdmin || isQAHead || isOwner(r));
+  const canEditItem = (r: RAIDItem) => canManage || isOwner(r);
+  const canCloseItem = (r: RAIDItem) => r.status !== "Closed" && (canManage || isOwner(r));
+  const canReopenItem = (r: RAIDItem) => r.status === "Closed" && (canManage || isOwner(r));
   const hasAnyAction = (r: RAIDItem) => canEditItem(r) || canCloseItem(r) || canReopenItem(r) || canDeleteAny;
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -83,11 +86,11 @@ export function RAIDTab({
         <Dropdown placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} width="w-36" options={[{ value: "", label: "All statuses" }, ...["Open", "In Progress", "Closed", "Escalated"].map((s) => ({ value: s, label: s }))]} />
         <Dropdown placeholder="All priorities" value={priorityFilter} onChange={setPriorityFilter} width="w-36" options={[{ value: "", label: "All priorities" }, ...["Critical", "High", "Medium", "Low"].map((p) => ({ value: p, label: p }))]} />
         {anyRaidFilter && <Button variant="ghost" size="sm" onClick={() => { setTypeFilter(""); setStatusFilter(""); setPriorityFilter(""); }}>Clear filters</Button>}
-        <div className="ml-auto">{canAdd && <Button variant="primary" size="sm" icon={Plus} onClick={onAddRaidOpen}>Log RAID Entry</Button>}</div>
+        <div className="ml-auto">{canAdd && <Button variant="primary" size="sm" icon={Plus} onClick={onAddRaidOpen}>Add RAID Entry</Button>}</div>
       </div>
       <div className="flex items-center gap-3 flex-wrap mb-4"><Badge variant="red">{raidItems.filter((r) => r.type === "Risk").length} Risks</Badge><Badge variant="blue">{raidItems.filter((r) => r.type === "Action").length} Actions</Badge><Badge variant="amber">{raidItems.filter((r) => r.type === "Issue").length} Issues</Badge><Badge variant="green">{raidItems.filter((r) => r.type === "Decision").length} Decisions</Badge></div>
       {raidItems.length === 0 ? (
-        <div className="card p-10 text-center"><AlertTriangle className="w-12 h-12 mx-auto mb-3" style={{ color: "#334155" }} aria-hidden="true" /><p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No RAID items yet</p><p className="text-[12px] mb-3" style={{ color: "var(--text-secondary)" }}>Log risks, actions, issues and decisions to track governance items.</p>{canAdd && <Button variant="primary" size="sm" icon={Plus} onClick={onAddRaidOpen}>Add first item</Button>}</div>
+        <div className="card p-10 text-center"><AlertTriangle className="w-12 h-12 mx-auto mb-3" style={{ color: "#334155" }} aria-hidden="true" /><p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No RAID items yet</p><p className="text-[12px] mb-3" style={{ color: "var(--text-secondary)" }}>Log risks, actions, issues and decisions to track governance items.</p>{canAdd && <Button variant="primary" size="sm" icon={Plus} onClick={onAddRaidOpen}>Add First Item</Button>}</div>
       ) : filteredRaid.length === 0 ? (
         <div className="card p-8 text-center"><p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>No items match filters</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => { setTypeFilter(""); setStatusFilter(""); setPriorityFilter(""); }}>Clear filters</Button></div>
       ) : (

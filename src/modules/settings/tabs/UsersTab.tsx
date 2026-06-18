@@ -11,6 +11,8 @@ import {
   Save,
   Lock,
   CreditCard,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -112,6 +114,32 @@ const STATUS_OPTIONS = [
   { value: "Inactive", label: "Inactive" },
 ];
 
+/** Show/hide eye button for a password field. Rendered as an Input
+ *  rightAdornment. Real <button> → keyboard-focusable; aria-label + aria-pressed
+ *  announce state. */
+function PasswordToggle({
+  shown,
+  onToggle,
+  target,
+}: {
+  shown: boolean;
+  onToggle: () => void;
+  target: string;
+}) {
+  const Icon = shown ? EyeOff : Eye;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={shown ? `Hide ${target}` : `Show ${target}`}
+      aria-pressed={shown}
+      className="inline-flex items-center justify-center w-7 h-7 rounded-md border-none bg-transparent cursor-pointer text-(--text-muted) hover:text-(--text-primary) hover:bg-(--bg-hover) transition-colors"
+    >
+      <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+    </button>
+  );
+}
+
 function UserForm({
   defaultValues,
   onSubmit,
@@ -129,6 +157,11 @@ function UserForm({
   roleOptions: { value: string; label: string }[];
   mode?: "add" | "edit";
 }) {  const { allSites: tenantSites } = useTenantConfig();
+
+  // Password visibility — default hidden, one toggle per field, covers both the
+  // Add and Edit modals (this form backs both).
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const {
     register,
@@ -222,19 +255,33 @@ function UserForm({
         <Input
           id="user-password"
           label={mode === "edit" ? "New Password (optional)" : "Password"}
-          type="password"
+          type={showPassword ? "text" : "password"}
           required={mode === "add"}
           placeholder="Enter password"
           error={errors.password?.message}
+          rightAdornment={
+            <PasswordToggle
+              shown={showPassword}
+              onToggle={() => setShowPassword((v) => !v)}
+              target="password"
+            />
+          }
           {...register("password")}
         />
         <Input
           id="user-confirm-password"
           label="Confirm Password"
-          type="password"
+          type={showConfirmPassword ? "text" : "password"}
           required={mode === "add"}
           placeholder="Re-enter password"
           error={errors.confirmPassword?.message}
+          rightAdornment={
+            <PasswordToggle
+              shown={showConfirmPassword}
+              onToggle={() => setShowConfirmPassword((v) => !v)}
+              target="confirm password"
+            />
+          }
           {...register("confirmPassword")}
         />
       </div>

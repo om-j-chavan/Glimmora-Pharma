@@ -26,7 +26,7 @@ const CARDS: Array<{ key: AccountCardFilter; label: string; icon: typeof Ban; co
 
 export function AccountStatCards({ stats, activeFilter, onSelect }: AccountStatCardsProps) {
   return (
-    <div className="grid grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       {CARDS.map((c) => {
         const count = stats[c.key];
         const active = activeFilter === c.key;

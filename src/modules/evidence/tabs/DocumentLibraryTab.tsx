@@ -1,3 +1,6 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import clsx from "clsx";
 import {
   FolderOpen, Plus, Search, Filter, LayoutGrid, List,
@@ -8,7 +11,9 @@ import dayjs from "@/lib/dayjs";
 import type { EvidenceDocument, DocType, DocArea, DocStatus } from "@/store/evidence.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker } from "@/components/ui/DatePicker";
 import { Badge } from "@/components/ui/Badge";
+import { Pagination } from "@/components/ui/Pagination";
 
 type LucideIcon = React.ComponentType<{ className?: string; style?: React.CSSProperties; "aria-hidden"?: boolean | "true" | "false" }>;
 
@@ -75,6 +80,18 @@ export function DocumentLibraryTab({
   setSelectedDocs, systems, role, timezone, dateFormat,
   onAddDocOpen, onNavigate,
 }: DocumentLibraryTabProps) {
+  // Client-side pagination (no server pagination pattern exists in the app yet
+  // — confirmed against CAPA/Deviation). Grid shows more per page than the
+  // denser table. Page resets to 1 whenever the result set or view changes.
+  const [page, setPage] = useState(1);
+  const pageSize = viewMode === "grid" ? 12 : 25;
+  useEffect(() => {
+    setPage(1);
+  }, [search, areaFilter, typeFilter, systemFilter, statusFilter, dateFrom, dateTo, viewMode]);
+  const totalPages = Math.max(1, Math.ceil(filteredDocs.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageDocs = filteredDocs.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   return (
     <>
       {/* Search */}
@@ -91,8 +108,8 @@ export function DocumentLibraryTab({
         <Dropdown placeholder="All types" value={typeFilter} onChange={setTypeFilter} width="w-36" options={[{ value: "", label: "All types" }, ...DOC_TYPES.map((t) => ({ value: t, label: t }))]} />
         <Dropdown placeholder="All systems" value={systemFilter} onChange={setSystemFilter} width="w-44" options={[{ value: "", label: "All systems" }, ...systems.map((s) => ({ value: s.id, label: s.name }))]} />
         <Dropdown placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} width="w-36" options={[{ value: "", label: "All statuses" }, ...DOC_STATUSES.map((s) => ({ value: s, label: s }))]} />
-        <input type="date" className="input text-[12px] w-36" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-        <input type="date" className="input text-[12px] w-36" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
+        <DatePicker id="doc-filter-from" value={dateFrom} onChange={setDateFrom} max={dateTo || undefined} placeholder="From date" className="w-36" />
+        <DatePicker id="doc-filter-to" value={dateTo} onChange={setDateTo} min={dateFrom || undefined} placeholder="To date" className="w-36" />
         {anyFilter && <Button variant="ghost" size="sm" onClick={clearFilters}>Clear filters</Button>}
 
         {/* View toggle */}
@@ -133,7 +150,7 @@ export function DocumentLibraryTab({
       ) : viewMode === "grid" ? (
         /* GRID VIEW */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" role="list" aria-label="Documents grid">
-          {filteredDocs.map((doc) => {
+          {pageDocs.map((doc) => {
             const DocIcon = DOC_TYPE_ICONS[doc.type]; const iconColor = DOC_TYPE_COLORS[doc.type]; const isSel = selectedDocs.has(doc.id);
             return (
               <div key={doc.id} role="listitem" className={clsx("card cursor-pointer transition-all duration-150 hover:border-[#0ea5e9]", isSel && "ring-2 ring-[#0ea5e9] ring-offset-1")}>
@@ -163,19 +180,19 @@ export function DocumentLibraryTab({
       ) : (
         /* LIST VIEW */
         <div className="card overflow-hidden"><div className="overflow-x-auto">
-          <table className="data-table" aria-label="Evidence document library">
+          <table className="data-table" style={{ minWidth: 1000 }} aria-label="Evidence document library">
             <caption className="sr-only">GxP evidence documents with status and compliance tags</caption>
             <thead><tr>
               <th scope="col"><input type="checkbox" className="w-4 h-4 accent-[#0ea5e9]" checked={selectedDocs.size === filteredDocs.length && filteredDocs.length > 0} onChange={() => setSelectedDocs(selectedDocs.size === filteredDocs.length ? new Set() : new Set(filteredDocs.map((d) => d.id)))} aria-label="Select all" /></th>
               <th scope="col">Document</th><th scope="col">Type</th><th scope="col">Area</th><th scope="col">Status</th><th scope="col">Version</th><th scope="col">Effective date</th><th scope="col">Compliance</th><th scope="col">Links</th>
             </tr></thead>
             <tbody>
-              {filteredDocs.map((doc) => {
+              {pageDocs.map((doc) => {
                 const DocIcon = DOC_TYPE_ICONS[doc.type]; const iconColor = DOC_TYPE_COLORS[doc.type];
                 return (
                   <tr key={doc.id} className={clsx(selectedDocs.has(doc.id) && "bg-(--brand-muted)")}>
                     <td><input type="checkbox" className="w-4 h-4 accent-[#0ea5e9]" checked={selectedDocs.has(doc.id)} onChange={() => toggleDocSelection(doc.id)} aria-label={`Select ${doc.title}`} /></td>
-                    <th scope="row"><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: iconColor + "18" }}><DocIcon className="w-3.5 h-3.5" style={{ color: iconColor }} aria-hidden="true" /></div><div><p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{doc.title}</p><p className="font-mono text-[10px]" style={{ color: "var(--text-muted)" }}>{doc.reference}</p></div></div></th>
+                    <th scope="row"><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-md shrink-0 flex items-center justify-center" style={{ background: iconColor + "18" }}><DocIcon className="w-3.5 h-3.5" style={{ color: iconColor }} aria-hidden="true" /></div><div className="min-w-0 max-w-[260px]"><p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }} title={doc.title}>{doc.title}</p><p className="font-mono text-[10px] truncate" style={{ color: "var(--text-muted)" }} title={doc.reference}>{doc.reference}</p></div></div></th>
                     <td><Badge variant="gray">{doc.type}</Badge></td>
                     <td><Badge variant="gray">{doc.area}</Badge></td>
                     <td>{docStatusBadge(doc.status)}</td>
@@ -194,6 +211,18 @@ export function DocumentLibraryTab({
             </tbody>
           </table>
         </div></div>
+      )}
+
+      {/* Pagination — shown for both views (grid + list) when there are results. */}
+      {allDocs.length > 0 && filteredDocs.length > 0 && (
+        <Pagination
+          page={safePage}
+          pageSize={pageSize}
+          total={filteredDocs.length}
+          onChange={setPage}
+          itemLabel="document"
+          className="mt-4"
+        />
       )}
     </>
   );

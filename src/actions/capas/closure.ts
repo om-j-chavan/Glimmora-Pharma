@@ -539,7 +539,14 @@ export async function loadCAPACCDeps(
   });
   if (!capa) return { success: false, error: "CAPA not found" };
   const links = await prisma.cAPAChangeControlLink.findMany({
-    where: { capaId },
+    // Tenant-scope the links read, mirroring the CAPA findFirst gate above.
+    // super_admin is cross-tenant by design; everyone else is pinned to their
+    // own tenant. session.user.tenantId is "" (never undefined) for a
+    // tenantless principal, so a missing tenant matches zero rows — fail-closed.
+    where:
+      session.user.role === "super_admin"
+        ? { capaId }
+        : { capaId, tenantId: session.user.tenantId },
     include: {
       changeControl: {
         select: {
