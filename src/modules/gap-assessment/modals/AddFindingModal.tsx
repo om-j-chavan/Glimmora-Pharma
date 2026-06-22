@@ -358,7 +358,17 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
             <Dropdown placeholder="Select method..." value={watch("rcaMethod") ?? ""} onChange={(v) => setValue("rcaMethod", v as FindingForm["rcaMethod"])} width="w-full"
               options={rcaMethodOptions(CAPA_RCA_METHODS)} />
             <div className="mt-2">
-              <RcaMethodFields method={rcaMethod} detail={detail} onChange={setDetail} />
+              {/* AI Draft helper — same component the CAPA modals use. Passing
+                  draftContext (Requirement + Purpose) turns on the "AI Draft"
+                  button so the 5 Why / Fishbone / free-text methods can be
+                  AI-drafted here too. No recordId yet (create modal) — the
+                  component falls back to "-". */}
+              <RcaMethodFields
+                method={rcaMethod}
+                detail={detail}
+                onChange={setDetail}
+                draftContext={[watchRequirement, watch("purpose")].filter(Boolean).join("\n\n")}
+              />
             </div>
           </div>
           <div className="col-span-2 pt-1">
