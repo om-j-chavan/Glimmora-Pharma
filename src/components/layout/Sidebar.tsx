@@ -21,6 +21,7 @@ import {
   SlidersHorizontal,
   GraduationCap,
   Radar,
+  LifeBuoy,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -75,7 +76,10 @@ const NAV_GROUPS: NavGroup[] = [
     id: "admin",
     label: "System & Config",
     icon: SlidersHorizontal,
-    items: [{ path: "settings", label: "Settings", icon: Settings }],
+    items: [
+      { path: "settings", label: "Settings", icon: Settings },
+      { path: "support", label: "Support", icon: LifeBuoy },
+    ],
   },
 ];
 
@@ -130,6 +134,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           // through the owner/driver paths, NOT the capa matrix entry. Visible
           // to every non-super_admin role (viewer gets a read-only page).
           if (item.path === "worklist") return true;
+          // Support desk is available to every customer role (viewers included).
+          if (item.path === "support") return true;
           // Phase 6 cleanup FIX 1 — CAPA module locked to the shared
           // CAPA_MODULE_VIEW_ROLES (qa_head + customer_admin); other roles use
           // the Worklist. super_admin already returned [] above. Imported from

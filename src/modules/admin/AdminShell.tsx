@@ -7,6 +7,7 @@ import {
   Users,
   SlidersHorizontal,
   ScrollText,
+  LifeBuoy,
   LogOut,
   Menu,
   Bell,
@@ -31,6 +32,7 @@ const NAV_ITEMS: Array<{
   { path: "/admin", label: "Customer Accounts", icon: Users, end: true },
   { path: "/admin/settings", label: "Platform Settings", icon: SlidersHorizontal, end: false, roles: ["super_admin"] },
   { path: "/admin/audit", label: "Audit", icon: ScrollText, end: false, roles: ["super_admin"] },
+  { path: "/admin/support", label: "Support", icon: LifeBuoy, end: false, roles: ["super_admin"] },
 ];
 
 export function AdminShell({ children }: { children?: React.ReactNode }) {

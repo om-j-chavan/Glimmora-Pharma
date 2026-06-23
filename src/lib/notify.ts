@@ -16,7 +16,13 @@ export type NotificationType =
   | "CAPA_CLOSED"
   | "REWORK_ASSIGNED"
   | "DUE_SOON"
-  | "OVERDUE";
+  | "OVERDUE"
+  // Support desk (in-app only for now; email is a future channel behind the
+  // same notify() entry point — add a transport here, no call-site changes).
+  | "TICKET_ASSIGNED"
+  | "TICKET_REPLY"
+  | "TICKET_STATUS_CHANGED"
+  | "TICKET_RESOLVED";
 
 export interface NotifyInput {
   tenantId: string;

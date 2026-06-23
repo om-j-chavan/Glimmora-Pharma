@@ -116,7 +116,7 @@ export const getAuditLogs = cache(async (tenantId: string): Promise<AuditLogQuer
    are modal-based with no per-record URL, so they link to their list route —
    "where the other modules would link". */
 
-type AuditFamily = "capa" | "deviation" | "changeControl" | "fda483" | "finding" | "system";
+type AuditFamily = "capa" | "deviation" | "changeControl" | "fda483" | "finding" | "system" | "support";
 
 const AUDIT_LIST_ROUTE: Record<AuditFamily, string> = {
   capa: "/capa",
@@ -125,6 +125,7 @@ const AUDIT_LIST_ROUTE: Record<AuditFamily, string> = {
   fda483: "/fda-483",
   finding: "/gap-assessment",
   system: "/csv-csa",
+  support: "/support",
 };
 
 /** Map an AuditLog.module string to its domain family (or null = no entity). */
@@ -135,6 +136,7 @@ function auditModuleFamily(module: string): AuditFamily | null {
   if (module === "FDA 483") return "fda483";
   if (module === "Gap Assessment") return "finding";
   if (module === "CSV/CSA") return "system";
+  if (module === "Support") return "support";
   return null;
 }
 
@@ -160,7 +162,7 @@ async function resolveAuditReferences(
 ): Promise<Map<string, string>> {
   const buckets: Record<AuditFamily, Set<string>> = {
     capa: new Set(), deviation: new Set(), changeControl: new Set(),
-    fda483: new Set(), finding: new Set(), system: new Set(),
+    fda483: new Set(), finding: new Set(), system: new Set(), support: new Set(),
   };
   for (const log of logs) {
     if (!log.recordId) continue;
@@ -197,6 +199,10 @@ async function resolveAuditReferences(
     buckets.system.size
       ? prisma.gxPSystem.findMany({ where: { tenantId, id: { in: ids(buckets.system) } }, select: { id: true, name: true } })
           .then((r) => set(r.map((x) => ({ id: x.id, ref: x.name }))))
+      : null,
+    buckets.support.size
+      ? prisma.ticket.findMany({ where: { tenantId, id: { in: ids(buckets.support) } }, select: { id: true, reference: true } })
+          .then((r) => set(r.map((x) => ({ id: x.id, ref: x.reference }))))
       : null,
   ]);
 

@@ -1623,3 +1623,107 @@ model Notification {
   @@index([recipientUserId, isRead, createdAt])
   @@index([tenantId])
 }
+
+// ── SUPPORT (central Glimmora support desk) ──
+// Customer users raise tickets; super_admin manages across all tenants.
+// status/priority/category are String columns + TS unions (src/lib/support/
+// constants.ts) — matching every other module (no Prisma enums). tenantId is a
+// plain indexed string with NO Tenant relation (mirrors Notification/EmailOTP),
+// so this is purely additive. Append-only: tickets/messages/activity are never
+// hard-deleted (Cancelled is a terminal status, not a delete). Attachments are
+// Document rows (sourceModule="Support", sourceId=ticket.id) via the existing
+// upload pipeline — no attachment table here.
+model Ticket {
+  id        String  @id @default(cuid())
+  reference String? @unique // SUP-<CUSTOMERCODE>-<year>-NNN
+  tenantId  String
+
+  subject     String
+  category    String
+  priority    String
+  status      String @default("New")
+  description String
+
+  // Auto-captured requester identity (session id may be a User.id or a
+  // Tenant.id for tenant-row admins — stored verbatim, name/role denormalised).
+  requesterId   String
+  requesterName String
+  requesterRole String
+
+  // Null = Unassigned. Manual assignment only (no auto-routing).
+  assigneeId   String?
+  assigneeName String?
+
+  // Optional link to a domain record — REQUEST only; never mutates the record.
+  relatedModule   String?
+  relatedRecordId String?
+  relatedRecordRef String?
+
+  slaDueAt           DateTime?
+  resolutionSummary  String?
+  resolutionCategory String?
+  resolvedAt         DateTime?
+  resolvedById       String?
+  autoCloseAfter     DateTime?
+  closedAt           DateTime?
+  closedById         String?
+  reopenReason       String?
+  cancelledAt        DateTime?
+  cancelReason       String?
+
+  // Auto-captured context (not user inputs).
+  appVersion String?
+  originUrl  String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages   TicketMessage[]
+  activities TicketActivity[]
+
+  @@index([tenantId, status])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([slaDueAt])
+  @@index([tenantId, createdAt])
+}
+
+// Threaded conversation + admin-only internal notes (append-only).
+model TicketMessage {
+  id         String  @id @default(cuid())
+  ticketId   String
+  tenantId   String
+  authorId   String
+  authorName String
+  authorRole String
+  body       String
+  // Internal notes are visible to support managers only — NEVER returned to the
+  // requester (enforced in queries + actions).
+  isInternal Boolean @default(false)
+  createdAt  DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+}
+
+// Human-readable per-ticket timeline (append-only). Distinct from the central
+// AuditLog: this is the in-page activity panel; AuditLog is the compliance trail.
+model TicketActivity {
+  id        String  @id @default(cuid())
+  ticketId  String
+  tenantId  String
+  type      String
+  actorId   String?
+  actorName String
+  actorRole String?
+  summary   String
+  fromValue String?
+  toValue   String?
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+}

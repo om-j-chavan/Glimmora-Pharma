@@ -19,6 +19,7 @@ import {
   type TicketPrefill,
 } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
+import { RaiseTicketModal, type RaiseTicketPrefill } from "@/modules/support/RaiseTicketModal";
 
 /**
  * Metadata attached to a Compliance Help Assistant answer so the UI can
@@ -139,6 +140,10 @@ export function AIChatbot() {
   // and RNNoise-processed audio. Live-updatable while recording.
   const [suppressionLevel, setSuppressionLevel] = useState<number>(() => loadSuppressionLevel());
   const [showSettings, setShowSettings] = useState(false);
+  // Support handoff — prefilled Raise Ticket modal (reuses the one create path).
+  const [raiseOpen, setRaiseOpen] = useState(false);
+  const [raisePrefill, setRaisePrefill] = useState<RaiseTicketPrefill | undefined>(undefined);
+  const [raiseTranscript, setRaiseTranscript] = useState<string | undefined>(undefined);
 
   const dragState = useRef<{ active: boolean; offsetX: number; offsetY: number; moved: boolean }>({
     active: false, offsetX: 0, offsetY: 0, moved: false,
@@ -271,34 +276,32 @@ export function AIChatbot() {
   }
 
   /**
-   * Carry the conversation across to a support ticket. The Ticketing module
-   * (Feature 4) doesn't exist yet, so until it lands we copy a prefilled
-   * summary + transcript to the clipboard and confirm — nothing is re-typed
-   * when the user files the ticket.
+   * Carry the conversation across to a real support ticket. This opens the
+   * SAME RaiseTicketModal the Support module uses (one validated create path —
+   * tenant scoping, SLA, activity + central AuditLog, notify), prefilled from
+   * what the assistant knows and with the conversation attached via the
+   * createTicket { transcript } seam. The user confirms/edits before filing;
+   * nothing is written here directly. Lands Unassigned like every ticket.
    */
-  async function handleCreateTicket(meta: HelpMeta) {
+  function handleCreateTicket(meta: HelpMeta) {
     const prefill = meta.ticketPrefill;
-    const summary = prefill?.summary ?? "Support request from Compliance Assistant";
+    // Transcript = the conversation the user could already see (no extra PII).
     const transcript = messages
       .map((m) => `${m.role === "user" ? "You" : "AI"}: ${m.content}`)
       .join("\n");
-    const payload =
-      `${summary}\n` +
-      `Route: ${prefill?.suggested_route ?? "Unassigned"}\n\n` +
-      `Conversation:\n${transcript}`;
-    try {
-      await navigator.clipboard.writeText(payload);
-    } catch {
-      /* clipboard may be blocked — the confirmation still tells the user what happened */
-    }
-    setMessages((m) => [
-      ...m,
-      {
-        role: "assistant",
-        content:
-          "🎫 Support ticket drafted and copied to your clipboard. The Ticketing module will pick it up automatically once it's available.",
-      },
-    ]);
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    setRaisePrefill({
+      subject: prefill?.summary || (lastUser ? lastUser.content.slice(0, 80) : "Support request from Help Assistant"),
+      // Defaults per spec — user-editable in the modal.
+      category: "How-to/Training",
+      priority: "Medium",
+      description: lastUser?.content ?? prefill?.summary ?? "",
+    });
+    setRaiseTranscript(transcript);
+    // Hide the chat panel so the ticket modal (z-50) isn't covered by it
+    // (the panel sits at z-1000). It reopens on a successful create.
+    setOpen(false);
+    setRaiseOpen(true);
   }
 
   /* ── Voice ───────────────────────────────────────────────────── */
@@ -1143,6 +1146,26 @@ export function AIChatbot() {
           </div>
         </div>
       )}
+
+      {/* Support handoff — the SAME RaiseTicketModal / createTicket path the
+          Support module uses. Rendered outside the panel; the panel is hidden
+          while it's open and reopens on success to show the confirmation. */}
+      <RaiseTicketModal
+        open={raiseOpen}
+        onClose={() => setRaiseOpen(false)}
+        prefill={raisePrefill}
+        transcript={raiseTranscript}
+        onCreated={(t) => {
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              content: `🎫 Ticket ${t.reference ?? ""} created. Track it under Support → ${t.reference ?? t.id} (/support/${t.id}).`,
+            },
+          ]);
+          setOpen(true);
+        }}
+      />
     </>
   );
 }

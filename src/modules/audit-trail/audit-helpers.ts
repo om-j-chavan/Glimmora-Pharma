@@ -44,6 +44,7 @@ export const MODULES: { value: string; label: string }[] = [
   { value: "Admin", label: "Admin" },
   { value: "auth", label: "Authentication" },
   { value: "AGI Console", label: "AGI Console" },
+  { value: "Support", label: "Support" },
 ];
 
 export const ACTION_GROUPS = [

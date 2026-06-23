@@ -22,4 +22,6 @@ export { getRAIDItems, getDocuments, getDocumentStats, getCAPAEvidenceFiles, get
 export type { AuditTrailRow, AuditTrailView } from "./governance";
 export { getInspections, getInspection, getReadinessStats, getOverallReadiness, getPlaybooks, computeReadinessScore } from "./inspections";
 export { getSites, getUsers } from "./settings";
+export { getTickets, getTicket, getSupportTenantOptions, getSupportAssigneeOptions, getTicketAttachments } from "./support";
+export type { TicketListFilters, TicketListResult, TicketDetail, TicketAttachment } from "./support";
 export { getDashboardStats } from "./dashboard";
