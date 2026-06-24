@@ -32,7 +32,9 @@ export function PermissionsTab() {
   const dispatch = useAppDispatch();
   const matrix = useAppSelector((s) => s.permissions?.matrix);  const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
-  const isSuperAdmin = role === "super_admin" || role === "customer_admin";
+  // Editing the role-permission matrix is a platform-admin action only.
+  // customer_admin must be read-only here (privilege-escalation fix).
+  const isSuperAdmin = role === "super_admin";
 
   const [savedPopup, setSavedPopup] = useState(false);
   const [resetConfirm, setResetConfirm] = useState<RoleKey | null>(null);

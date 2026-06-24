@@ -107,6 +107,7 @@ const SEVERITY_OPTIONS = [
   { value: "", label: "All severities" },
   { value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const },
   { value: "High", label: "High", badge: "H", badgeVariant: "amber" as const },
+  { value: "Medium", label: "Medium", badge: "M", badgeVariant: "amber" as const },
   { value: "Low", label: "Low", badge: "L", badgeVariant: "green" as const },
 ];
 const STATUS_OPTIONS = [
@@ -317,6 +318,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
   function severityToRisk(s: FindingSeverity): "Critical" | "High" | "Medium" | "Low" {
     if (s === "Critical") return "Critical";
     if (s === "High") return "High";
+    if (s === "Medium") return "Medium";
     return "Low";
   }
 

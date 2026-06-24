@@ -31,7 +31,7 @@ import {
   type TenantUserConfig,
 } from "@/store/auth.slice";
 import { aiSignup, generateUserId, AiAuthError } from "@/lib/aiAuth";
-import { checkUserCap } from "@/actions/settings";
+import { createUser, setUserGxpSignatory, setUserStatus } from "@/actions/settings";
 import { planLabel } from "@/lib/plans";
 import { roleLabel } from "@/lib/labels/roles";
 import { errorCodeLabel } from "@/lib/labels/errorCodes";
@@ -83,6 +83,9 @@ const roleChip: Record<string, string> = {
     "bg-(--bg-elevated) text-(--text-secondary) border border-(--bg-border)",
 };
 
+// Matches the server min (CreateUserSchema/UpdateUserSchema password .min(6)).
+const PASSWORD_MIN = 6;
+
 function makeUserSchema(mode: "add" | "edit") {
   const base = z.object({
     name: z.string().min(2, "Name is required"),
@@ -93,14 +96,31 @@ function makeUserSchema(mode: "add" | "edit") {
     allSites: z.boolean(),
     assignedSites: z.array(z.string()),
     password: mode === "add"
-      ? z.string().min(1, "Password is required")
+      ? z.string().min(PASSWORD_MIN, `Password must be at least ${PASSWORD_MIN} characters`)
       : z.string().optional(),
     confirmPassword: z.string().optional(),
   });
-  return base.refine((d) => !d.password || d.password === d.confirmPassword, {
-    message: "Passwords do not match",
-    path: ["confirmPassword"],
-  });
+  return base
+    // Edit mode: changing the password is optional, but if EITHER field is
+    // touched the password itself must be present and meet the min length.
+    // Closes the gap where entering only confirmPassword passed validation.
+    .refine(
+      (d) => {
+        if (mode !== "edit") return true;
+        const touched = !!(d.password || d.confirmPassword);
+        return !touched || (!!d.password && d.password.length >= PASSWORD_MIN);
+      },
+      { message: `Password must be at least ${PASSWORD_MIN} characters`, path: ["password"] },
+    )
+    // Whenever a password is being set (always in add; in edit when either field
+    // is touched), confirmPassword must match it.
+    .refine(
+      (d) => {
+        const settingPw = mode === "add" || !!(d.password || d.confirmPassword);
+        return !settingPw || d.password === d.confirmPassword;
+      },
+      { message: "Passwords do not match", path: ["confirmPassword"] },
+    );
 }
 
 type UserFormValues = z.infer<ReturnType<typeof makeUserSchema>>;
@@ -442,6 +462,24 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const [planLimitOpen, setPlanLimitOpen] = useState(false);
   // Human-labelled message from a server-side cap block (hard enforcement).
   const [capError, setCapError] = useState<string | null>(null);
+  // Server-side error for the signatory / status mutations (Part 11 controls).
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Persist GxP signatory authority server-side (with audit) BEFORE mirroring to
+  // Redux. On failure the Redux state is left untouched so the UI doesn't show a
+  // change that wasn't persisted.
+  const persistSignatory = async (userId: string, value: boolean) => {
+    const res = await setUserGxpSignatory(userId, value);
+    if (!res.success) { setActionError(res.error || "Failed to update signatory authority."); return; }
+    dispatch(updateTenantUser({ tenantId, userId, patch: { gxpSignatory: value } }));
+  };
+
+  // Persist active/inactive status server-side (with audit), then mirror to Redux.
+  const persistStatus = async (userId: string, isActive: boolean) => {
+    const res = await setUserStatus(userId, isActive);
+    if (!res.success) { setActionError(res.error || "Failed to update user status."); return; }
+    dispatch(updateTenantUser({ tenantId, userId, patch: { status: isActive ? "Active" : "Inactive" } }));
+  };
   const [subPopupOpen, setSubPopupOpen] = useState(false);
 
   const roleOptions = isSuperAdmin
@@ -450,47 +488,61 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
 
 
   const handleAdd = async (data: UserFormValues) => {
-    // Server-side hard cap gate. The Add button is also client-disabled at the
-    // limit, but a disabled button is not enforcement — this is the real block
-    // (and it covers NO_PLAN_ASSIGNED / PLAN_EXPIRED / PLAN_CAP_EXCEEDED).
-    const cap = await checkUserCap();
-    if (!cap.success) {
-      setCapError(errorCodeLabel(cap.error ?? "PLAN_CAP_EXCEEDED"));
+    // AI backend + our @@unique([tenantId, username]) require username ≥ 3 chars;
+    // pad a short email local-part with a random suffix.
+    const localPart = data.email.split("@")[0] ?? "";
+    const aiId = generateUserId();
+    const username =
+      localPart.length >= 3 ? localPart : `${localPart}_${aiId.slice(-4)}`;
+
+    // 1) Authoritative DB User row so the account can actually authenticate via
+    //    NextAuth (which reads the User table). The hard cap, role-grant ceiling,
+    //    tenant isolation (tenant from session, not client), and the USER_CREATED
+    //    audit are all enforced server-side inside createUser. Must succeed
+    //    before we touch Redux.
+    const created = await createUser({
+      name: data.name,
+      email: data.email,
+      username,
+      role: data.role,
+      siteId: data.allSites ? undefined : (data.assignedSites[0] ?? undefined),
+      password: data.password ?? "",
+      gxpSignatory: data.gxpSignatory,
+    });
+    if (!created.success) {
+      // Cap codes map to friendly labels; other errors (role ceiling, duplicate
+      // email, validation) pass through unchanged.
+      setCapError(errorCodeLabel(created.error ?? "Failed to create user"));
       return;
     }
-    const userId = generateUserId();
-    // For non-(super|customer)-admin users, customer_id is inherited from the
-    // tenant's customer admin (their aiUserId). If no admin has signed up yet
-    // we fall back to the tenant id, but the backend will reject this — flag
-    // that case so the operator knows to provision the customer admin first.
+    const dbUser = created.data as { id: string };
+
+    // 2) Best-effort AI backend provisioning (unchanged). A failure here is
+    //    non-fatal — the DB user already exists and can log in.
     const customerAdmin = users.find(
       (u) => u.role === "customer_admin" && u.aiUserId,
     );
     const customerId = customerAdmin?.aiUserId ?? tenantId;
-    // AI backend requires username ≥ 3 chars. The email's local part can
-    // be shorter (e.g. "qa@..." → "qa"), so pad with the user_id suffix.
-    const localPart = data.email.split("@")[0] ?? "";
-    const username =
-      localPart.length >= 3 ? localPart : `${localPart}_${userId.slice(-4)}`;
-
     let aiUserId: string | undefined;
     let aiAccessToken: string | undefined;
     try {
       const res = await aiSignup({
-        user_id: userId,
+        user_id: aiId,
         username,
         email: data.email,
         password: data.password ?? "",
         customer_id: customerId,
         role: data.role,
       });
-      aiUserId = userId;
+      aiUserId = aiId;
       aiAccessToken = res.access_token;
     } catch (err) {
       const reason = err instanceof AiAuthError ? err.message : "unknown";
-      console.error("[UsersTab] AI signup failed — saving locally only:", reason);
+      console.error("[UsersTab] AI signup failed — DB user created, AI token deferred:", reason);
     }
 
+    // 3) Mirror to Redux using the DB id so #5's status/signatory toggles and
+    //    edits operate on the real User row.
     dispatch(
       addTenantUser({
         tenantId,
@@ -501,7 +553,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           gxpSignatory: data.gxpSignatory,
           status: data.status,
           allSites: data.allSites,
-          id: userId,
+          id: dbUser.id,
           assignedSites: data.allSites ? [] : data.assignedSites,
           password: data.password,
           username,
@@ -575,9 +627,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       setUserToDeactivate(userId);
       setDeactivatePopup(true);
     } else {
-      dispatch(
-        updateTenantUser({ tenantId, userId, patch: { status: "Active" } }),
-      );
+      void persistStatus(userId, true);
     }
   };
 
@@ -825,15 +875,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                 <Toggle
                   id={`sig-${u.id}`}
                   checked={u.gxpSignatory}
-                  onChange={() =>
-                    dispatch(
-                      updateTenantUser({
-                        tenantId,
-                        userId: u.id,
-                        patch: { gxpSignatory: !u.gxpSignatory },
-                      }),
-                    )
-                  }
+                  onChange={() => void persistSignatory(u.id, !u.gxpSignatory)}
                   label={`GxP Signatory for ${u.name}`}
                   disabled={readOnly}
                   hideLabel
@@ -991,6 +1033,13 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         onDismiss={() => setCapError(null)}
       />
       <Popup
+        isOpen={!!actionError}
+        variant="error"
+        title="Action failed"
+        description={actionError ?? ""}
+        onDismiss={() => setActionError(null)}
+      />
+      <Popup
         isOpen={deactivatePopup}
         variant="confirmation"
         title="Deactivate this user?"
@@ -1012,14 +1061,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             label: "Yes, deactivate",
             style: "primary",
             onClick: () => {
-              if (userToDeactivate)
-                dispatch(
-                  updateTenantUser({
-                    tenantId,
-                    userId: userToDeactivate,
-                    patch: { status: "Inactive" },
-                  }),
-                );
+              if (userToDeactivate) void persistStatus(userToDeactivate, false);
               setDeactivatePopup(false);
               setUserToDeactivate(null);
             },

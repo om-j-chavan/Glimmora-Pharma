@@ -47,6 +47,21 @@ function isAdmin(role: string): boolean {
   return role === "customer_admin" || role === "super_admin";
 }
 
+// Role-grant ceiling. A customer_admin may provision only site-level roles in
+// their own tenant — never another customer_admin or a platform super_admin.
+// Only super_admin may create those elevated roles. Mirrors the UI's role
+// options (UsersTab TENANT_ROLES_FOR_CUSTOMER_ADMIN); enforced here as the
+// authoritative server-side gate.
+const CUSTOMER_ADMIN_GRANTABLE_ROLES = new Set<string>([
+  "qa_head",
+  "qc_lab_director",
+  "regulatory_affairs",
+  "csv_val_lead",
+  "it_cdo",
+  "operations_head",
+  "viewer",
+]);
+
 export async function createSite(
   input: z.input<typeof CreateSiteSchema>,
 ): Promise<ActionResult> {
@@ -210,6 +225,25 @@ export async function createUser(
     };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  // Role-grant ceiling (privilege-escalation guard). A non-super_admin actor
+  // cannot mint a role above the site-level set — blocks a customer_admin from
+  // creating a super_admin / customer_admin. Enforced server-side regardless of
+  // what the client sends.
+  if (session.user.role !== "super_admin" && !CUSTOMER_ADMIN_GRANTABLE_ROLES.has(parsed.data.role)) {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Settings",
+        action: "USER_CREATE_ROLE_DENIED",
+        recordTitle: parsed.data.name,
+        newValue: parsed.data.role,
+      },
+    });
+    return { success: false, error: "You are not permitted to create a user with that role." };
+  }
   // Hard cap enforcement (Phase 1) — blocks creation past plan.maxUsers, and on
   // no-plan / expired-plan. Runs AFTER the role gate; never a bypass. For
   // super_admin this is the platform tenant (no plan) → NO_PLAN_ASSIGNED.
@@ -349,6 +383,105 @@ export async function updateUser(
   } catch (err) {
     console.error("[action] updateUser failed:", err);
     return { success: false, error: "Failed to update user" };
+  }
+}
+
+/**
+ * Persist a User's GxP signatory authority (Part 11). Granting/revoking
+ * signatory authority is itself a Part 11 event, so it writes a dedicated
+ * AuditLog row with old→new (module "Settings").
+ *
+ * Server-side authorization (never trust the client):
+ *  (a) tenant isolation — the target is loaded tenant-scoped; a customer_admin
+ *      can only touch users in their OWN tenant (super_admin crosses tenants).
+ *  (b) role authz — isAdmin (customer_admin | super_admin) only, the same gate
+ *      the rest of the user-management actions use.
+ *  (c) no self-escalation — an actor cannot flip their own signatory authority.
+ */
+export async function setUserGxpSignatory(id: string, value: boolean): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!isAdmin(session.user.role)) return { success: false, error: "Access denied" };
+  if (id === session.user.id) {
+    return { success: false, error: "You cannot change your own signatory authority." };
+  }
+  // Load tenant-scoped — the tenant pin comes from the SESSION, not the client.
+  const target = await prisma.user.findFirst({
+    where: scopedWhere(session, id, { allowPlatformAdmin: true }),
+    select: { id: true, name: true, gxpSignatory: true },
+  });
+  if (!target) return { success: false, error: "FORBIDDEN" };
+  if (target.gxpSignatory === value) return { success: true, data: null };
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    await prisma.user.update({
+      where: scopedWhere(session, id, { allowPlatformAdmin: true }),
+      data: { gxpSignatory: value },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Settings",
+        action: value ? "USER_SIGNATORY_GRANTED" : "USER_SIGNATORY_REVOKED",
+        recordId: id,
+        recordTitle: target.name,
+        oldValue: String(target.gxpSignatory),
+        newValue: String(value),
+      },
+    });
+    revalidatePath("/settings");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] setUserGxpSignatory failed:", err);
+    return { success: false, error: "Failed to update signatory authority" };
+  }
+}
+
+/**
+ * Persist a User's active/inactive status (Prisma User.isActive — an inactive
+ * user cannot log in). Writes a dedicated AuditLog row with old→new. Same
+ * server-side authz as setUserGxpSignatory (tenant-scoped load, isAdmin only,
+ * no self-deactivation).
+ */
+export async function setUserStatus(id: string, isActive: boolean): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!isAdmin(session.user.role)) return { success: false, error: "Access denied" };
+  if (id === session.user.id) {
+    return { success: false, error: "You cannot change your own account status." };
+  }
+  const target = await prisma.user.findFirst({
+    where: scopedWhere(session, id, { allowPlatformAdmin: true }),
+    select: { id: true, name: true, isActive: true },
+  });
+  if (!target) return { success: false, error: "FORBIDDEN" };
+  if (target.isActive === isActive) return { success: true, data: null };
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    await prisma.user.update({
+      where: scopedWhere(session, id, { allowPlatformAdmin: true }),
+      data: { isActive },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Settings",
+        action: isActive ? "USER_ACTIVATED" : "USER_DEACTIVATED",
+        recordId: id,
+        recordTitle: target.name,
+        oldValue: String(target.isActive),
+        newValue: String(isActive),
+      },
+    });
+    revalidatePath("/settings");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] setUserStatus failed:", err);
+    return { success: false, error: "Failed to update user status" };
   }
 }
 

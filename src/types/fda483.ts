@@ -36,7 +36,7 @@ export type EventStatus =
   | "Closed"
   | "Warning Letter";
 
-export type ObservationSeverity = "Critical" | "High" | "Low";
+export type ObservationSeverity = "Critical" | "High" | "Medium" | "Low";
 
 export type ObservationStatus =
   | "Open"

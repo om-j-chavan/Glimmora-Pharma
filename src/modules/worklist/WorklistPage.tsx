@@ -225,6 +225,7 @@ export function WorklistPage({
             { value: "", label: "All priorities" },
             { value: "Critical", label: "Critical" },
             { value: "High", label: "High" },
+            { value: "Medium", label: "Medium" },
             { value: "Low", label: "Low" },
           ]}
         />

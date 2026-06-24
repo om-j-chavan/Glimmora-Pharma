@@ -36,6 +36,10 @@ const SignCloseCAPASchema = z.object({
   // "verify", "confirm". Embedded in the canonical content so the
   // signed record carries the operator's stated meaning.
   signatureMeaning: z.string().min(1, "Signature meaning is required"),
+  // The signer's attestation that they confirmed the effectiveness check at
+  // sign time (the SignClose modal's "Effectiveness check confirmed" toggle).
+  // Recorded in the closure-signature audit row so the toggle is not decorative.
+  effectivenessConfirmed: z.boolean().optional(),
   ccBlockOverride: z
     .object({ reason: z.string().min(20) })
     .optional(),
@@ -447,6 +451,7 @@ export async function signAndCloseCAPA(
           signerId: session.user.id,
           contentHashPrefix: contentHash.slice(0, 16),
           signatureMeaning: parsed.data.signatureMeaning,
+          effectivenessConfirmed: parsed.data.effectivenessConfirmed ?? false,
           capaId: capa.id,
         }),
       },

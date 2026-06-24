@@ -39,7 +39,7 @@ const CreateFindingSchema = z.object({
   purpose: z.string().optional(),
   area: z.string().min(1, "Area is required"),
   framework: z.string().optional(),
-  severity: z.enum(["Critical", "High", "Low"]),
+  severity: z.enum(["Critical", "High", "Medium", "Low"]),
   // Owner is server-stamped to the creator (session) — accepted but ignored if
   // sent, so it can't be spoofed from the client. Optional for that reason.
   owner: z.string().optional(),
@@ -60,7 +60,7 @@ const UpdateFindingSchema = z.object({
   requirement: z.string().min(MIN_REQUIREMENT).optional(),
   purpose: z.string().optional(),
   area: z.string().min(1).optional(),
-  severity: z.enum(["Critical", "High", "Low"]).optional(),
+  severity: z.enum(["Critical", "High", "Medium", "Low"]).optional(),
   status: z.enum(["Open", "In Progress", "Closed"]).optional(),
   owner: z.string().min(1).optional(),
   targetDate: z.string().optional(),
