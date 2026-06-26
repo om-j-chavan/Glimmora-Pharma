@@ -11,7 +11,7 @@ import {
   setTenantPlan,
   type Tenant,
 } from "@/store/auth.slice";
-import { fetchTenants, createTenantApi, updateTenantApi } from "@/lib/tenantApi";
+import { fetchTenants, createTenantApi, updateTenantApi, TenantApiError } from "@/lib/tenantApi";
 import { toggleTenantMFA, assignPlan } from "@/actions/tenants";
 import { useToast } from "@/components/ui/Toast";
 import {
@@ -213,7 +213,14 @@ export function useCustomerAccounts({
             startDate: data.plan.startDate,
             expiryDate: data.plan.expiryDate,
           });
-          if (!planRes.success) console.warn("[admin] assignPlan failed:", planRes.error);
+          if (!planRes.success) {
+            // Surface, don't swallow. Roll back the optimistic plan update
+            // (mirrors the MFA rollback below) so Redux matches the DB, and
+            // tell the user instead of falsely reporting success.
+            dispatch(updateTenant({ id: editingTenant.id, patch: { plan: editingTenant.plan } }));
+            toast.error(`${data.customerName} updated, but its plan could not be saved: ${planRes.error}`);
+            return;
+          }
         }
         setSyncError(null);
         toast.success(`Customer ${data.customerName} updated.`);
@@ -291,7 +298,17 @@ export function useCustomerAccounts({
       } catch (err) {
         console.error("[admin] failed to persist new tenant", err);
         setSyncError(null);
-        toast.error(`Could not create ${data.customerName}: ${mapCustomerError(err)}`);
+        if (err instanceof TenantApiError && err.planAssignmentFailed) {
+          // The tenant row WAS created; only its plan failed. Show it (as a
+          // plan-less Active account, matching the DB) and surface a
+          // plan-specific error instead of a misleading "could not create".
+          // This makes the no-plan state visible; it does not prevent it
+          // (see the create+assign atomicity note in tenantApi.ts).
+          dispatch(addTenant({ ...newTenant, plan: null }));
+          toast.error(`${data.customerName} created, but its plan could not be assigned: ${err.message}`);
+        } else {
+          toast.error(`Could not create ${data.customerName}: ${mapCustomerError(err)}`);
+        }
         return;
       }
       dispatch(addTenant(newTenant));
