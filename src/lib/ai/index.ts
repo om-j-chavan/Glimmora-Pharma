@@ -24,6 +24,8 @@ import {
   mockDriftDetection,
   buildDriftAlerts,
   mockFindingTriage,
+  mockApprovalBrief,
+  mockReadinessGuidance,
 } from "./mockData";
 import {
   scanStageDocument,
@@ -34,6 +36,8 @@ import {
   fetchRcaSuggestions,
   fetchCapaPrefill,
   fetchFindingTriage,
+  fetchApprovalBrief,
+  fetchReadinessGuidance,
 } from "../aiBackend";
 import type { DriftAlert } from "@/types/agi";
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
@@ -58,6 +62,8 @@ export const AI_MOCK = {
   deviationIntelligence: false, // Feature F — POST /api/v1/deviation-intelligence/analyze
   driftDetection: false, // Feature H — GET  /api/v1/drift-detection/scan
   findingTriage: false, // Feature I — POST /api/v1/finding-triage/classify
+  approvalBrief: false, // Feature J — POST /api/v1/capa-approval-brief/generate
+  readinessGuidance: false, // Feature K — POST /api/v1/capa-readiness-guidance/generate
 } as const;
 
 /**
@@ -614,5 +620,140 @@ export async function classifyFinding(
       err,
     );
     return mockFindingTriage(requirement, area, purpose, activeFrameworks);
+  }
+}
+
+/* ── Feature J — CAPA Approval Brief (reviewer assist) ────────────────
+ * When a QA Head / Regulatory Affairs reviewer is about to APPROVE a CAPA,
+ * this agent summarises the record on one screen: a plain overview, what looks
+ * solid, and what to scrutinise before signing.
+ *
+ * CAN DO: summarise the CAPA, surface strengths, flag what to verify. CANNOT
+ * DO: approve/reject, recommend a verdict, change status, or replace the QA
+ * Head sign-off (see the AGI policy). Read-only support — every output is
+ * advisory and the e-signed decision stays with the human.
+ *
+ * Real backend: POST /api/v1/capa-approval-brief/generate (LLM writes the
+ * prose; Python appends the exact gate facts — unresolved concerns, missing
+ * approvals — so those are never hallucinated). On any backend error this falls
+ * back to the deterministic mock, badged `source: "mock"`. */
+
+export interface ApprovalBriefInput {
+  reference: string;
+  title: string;
+  description: string;
+  risk: string;
+  /** Human-readable root cause (capa.rca). */
+  rootCause: string;
+  /** Free-text corrective actions summary (capa.correctiveActions). */
+  correctiveActions: string;
+  rcaApproved: boolean;
+  /** "aligned" | "cosmetic" | "needs_review" | "" (not reviewed). */
+  alignmentStatus: string;
+  approvalsCollected: number;
+  approvalsRequired: number;
+  unresolvedConcerns: number;
+}
+
+export interface ApprovalBriefResult {
+  /** 2-3 sentence plain-language summary. */
+  overview: string;
+  /** Aspects that look solid. */
+  strengths: string[];
+  /** Things the reviewer should scrutinise before signing (gate facts first). */
+  watchOuts: string[];
+  /** ISO timestamp of when the brief was generated. */
+  generatedAt: string;
+  source: "mock" | "backend";
+}
+
+export async function getApprovalBrief(
+  input: ApprovalBriefInput,
+): Promise<ApprovalBriefResult> {
+  if (AI_MOCK.approvalBrief) {
+    logMockUsage("getApprovalBrief");
+    // ~0.9s shim so the "Preparing brief…" state is visible.
+    await delay(900);
+    return mockApprovalBrief(input);
+  }
+  try {
+    return await fetchApprovalBrief(input);
+  } catch (err) {
+    console.error(
+      "[ai] getApprovalBrief: backend failed, falling back to mock.",
+      err,
+    );
+    return mockApprovalBrief(input);
+  }
+}
+
+/* ── Feature K — CAPA Readiness Pre-flight Copilot ────────────────────
+ * While a CAPA is being authored (open / in_progress), getCAPAReadiness()
+ * computes which submission conditions are still unmet. This agent turns that
+ * terse, computed list into plain-language coaching: for each unmet condition,
+ * WHY it matters and HOW to fix it, plus a suggested order to tackle them.
+ *
+ * CAN DO: explain blockers, suggest fix steps + order. CANNOT DO: submit,
+ * approve, close, change status, or mark a condition met (see the AGI policy).
+ * Only REAL user actions flip readiness flags, and submitForReview re-enforces
+ * getCAPAReadiness() server-side — the copilot can coach but never bypass it.
+ *
+ * Grounded by design: the unmet list is COMPUTED and sent in, so the LLM writes
+ * prose only for the exact keys that are genuinely unmet — it can't invent or
+ * omit a blocker. On any backend error this falls back to the deterministic
+ * mock, badged `source: "mock"`. */
+
+export interface ReadinessUnmetCondition {
+  /** ReadinessKey: rca | alignment | diGate | actions | evidence | criteria. */
+  key: string;
+  label: string;
+  detail?: string;
+}
+
+export interface ReadinessGuidanceInput {
+  title: string;
+  risk: string;
+  /** Human-readable root cause (capa.rca), for context. */
+  rootCause: string;
+  /** The computed unmet conditions from getCAPAReadiness(). */
+  unmet: ReadinessUnmetCondition[];
+}
+
+export interface ReadinessGuidanceItem {
+  /** Echoes the readiness key so the UI can map back to its tab. */
+  key: string;
+  /** One sentence: why this condition matters. */
+  why: string;
+  /** One sentence: the concrete action that resolves it. */
+  how: string;
+}
+
+export interface ReadinessGuidanceResult {
+  /** One encouraging sentence: how many items remain + the first step. */
+  summary: string;
+  /** Keys in the suggested order to tackle (canonical gate order). */
+  priorityOrder: string[];
+  items: ReadinessGuidanceItem[];
+  generatedAt: string;
+  source: "mock" | "backend";
+}
+
+export async function getReadinessGuidance(
+  input: ReadinessGuidanceInput,
+): Promise<ReadinessGuidanceResult> {
+  if (AI_MOCK.readinessGuidance) {
+    logMockUsage("getReadinessGuidance");
+    // ~0.8s shim so the "Reviewing your CAPA…" state is visible.
+    await delay(800);
+    return mockReadinessGuidance(input);
+  }
+  try {
+    return await fetchReadinessGuidance(input);
+  } catch (err) {
+    console.error(
+      "[ai] getReadinessGuidance: backend failed, falling back to mock.",
+      err,
+    );
+    return mockReadinessGuidance(input);
   }
 }

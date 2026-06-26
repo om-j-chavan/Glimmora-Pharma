@@ -25,7 +25,7 @@ interface AgentEntry {
 
 const AGENTS: AgentEntry[] = [
   { key: "capa", name: "CAPA Effectiveness Monitor", desc: "Detects weak RCA, flags overdue effectiveness checks",
-    canDo: ["Detect incomplete RCA (empty Whys)", "Flag effectiveness checks overdue", "Suggest similar past CAPAs", "Highlight weak root cause patterns"],
+    canDo: ["Detect incomplete RCA (empty Whys)", "Flag effectiveness checks overdue", "Suggest similar past CAPAs", "Highlight weak root cause patterns", "Summarise a CAPA for approvers (read-only brief)", "Coach the author on unmet submission-readiness items"],
     cannotDo: ["Close or approve CAPAs", "Make compliance decisions", "Override QA Head", "Change CAPA status automatically"],
     triggers: "When CAPA is created or updated", showsIn: "CAPA Tracker detail panel" },
   { key: "deviation", name: "Deviation Intelligence", desc: "Clusters and surfaces recurring deviation patterns",

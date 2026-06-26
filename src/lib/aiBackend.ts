@@ -53,6 +53,10 @@ import type {
   RcaSuggestion,
   CAPAPrefill,
   FindingTriageResult,
+  ApprovalBriefInput,
+  ApprovalBriefResult,
+  ReadinessGuidanceInput,
+  ReadinessGuidanceResult,
 } from "./ai";
 
 /* ── Error type ────────────────────────────────────────────────── */
@@ -509,6 +513,28 @@ export function fetchFindingTriage(
     method: "POST",
     jsonBody: { requirement, area, purpose, activeFrameworks },
   });
+}
+
+/** Feature J — read-only approval brief for a CAPA awaiting approval (LLM
+ *  prose + Python-appended gate facts). Reviewer assist only; never a verdict. */
+export function fetchApprovalBrief(
+  input: ApprovalBriefInput,
+): Promise<ApprovalBriefResult> {
+  return request<ApprovalBriefResult>("/api/v1/capa-approval-brief/generate", {
+    method: "POST",
+    jsonBody: input,
+  });
+}
+
+/** Feature K — plain-language coaching for a CAPA's unmet readiness conditions
+ *  (LLM prose grounded in the computed unmet list). Authoring guidance only. */
+export function fetchReadinessGuidance(
+  input: ReadinessGuidanceInput,
+): Promise<ReadinessGuidanceResult> {
+  return request<ReadinessGuidanceResult>(
+    "/api/v1/capa-readiness-guidance/generate",
+    { method: "POST", jsonBody: input },
+  );
 }
 
 /* ══════════════════════════════════════════════════════════════ */

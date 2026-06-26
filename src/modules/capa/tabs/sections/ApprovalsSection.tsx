@@ -32,6 +32,7 @@ import {
 import type { CAPA } from "@/store/capa.slice";
 import { roleLabel } from "../utils/commentTree";
 import { SignApprovalModal } from "../modals/SignApprovalModal";
+import { ApprovalBriefPanel } from "./ApprovalBriefPanel";
 
 /* ── Substage 5.2 — Approvals subsection ──
  *
@@ -202,14 +203,23 @@ export function ApprovalsSection({
   };
 
   return (
-    <section
-      className="rounded-lg p-3"
-      style={{
-        background: "var(--card-bg)",
-        border: "1px solid var(--card-border)",
-      }}
-      aria-labelledby="approvals-heading"
-    >
+    <>
+      {/* Feature J — read-only AI brief to support the reviewer. Self-gates on
+          AGI mode/agent + pending_qa_review; renders null otherwise. */}
+      <ApprovalBriefPanel
+        capa={capa}
+        approvalsCollected={totalCollected}
+        approvalsRequired={totalRequired}
+        unresolvedConcerns={progress.unresolvedConcerns}
+      />
+      <section
+        className="rounded-lg p-3"
+        style={{
+          background: "var(--card-bg)",
+          border: "1px solid var(--card-border)",
+        }}
+        aria-labelledby="approvals-heading"
+      >
       <div className="flex items-center justify-between mb-2">
         <h3
           id="approvals-heading"
@@ -446,6 +456,7 @@ export function ApprovalsSection({
           {actionError}
         </p>
       )}
-    </section>
+      </section>
+    </>
   );
 }

@@ -43,6 +43,25 @@ import type { LinkableRecord } from "@/lib/queries/capas";
 
 /* ── Constants ── */
 
+/**
+ * Maps the CAPA modal's source vocabulary onto the server's
+ * CreateCAPASchema enum. Shared by the manual create path (handleAddCAPA)
+ * and the AI create path so the two can never drift. Unmapped values fall
+ * back to "Other" at the call site.
+ */
+const UI_TO_SERVER_CAPA_SOURCE: Record<
+  string,
+  "Gap Assessment" | "Deviation" | "FDA 483" | "Internal Audit" | "External Audit" | "Customer Complaint" | "Other"
+> = {
+  "483": "FDA 483",
+  "Internal Audit": "Internal Audit",
+  Deviation: "Deviation",
+  Complaint: "Customer Complaint",
+  OOS: "Other",
+  "Change Control": "Other",
+  "Gap Assessment": "Gap Assessment",
+};
+
 type TabId = "blueprint" | "tracker" | "metrics";
 const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
   { id: "blueprint", label: "QMS Blueprint", Icon: GitBranch },
@@ -223,7 +242,11 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
       const res = await createCAPAServer({
         title: data.title,
         description: data.description,
-        source: data.source as never,
+        // Map the modal's source vocabulary ("483", "Complaint", "OOS",
+        // "Change Control", …) onto the server CreateCAPASchema enum. Without
+        // this, 4 of 7 sources fail server-side zod validation ("Validation
+        // failed"). Mirrors the mapping the AI path already applies below.
+        source: UI_TO_SERVER_CAPA_SOURCE[data.source] ?? "Other",
         risk: data.risk as never,
         owner: data.owner,
         dueDate: data.dueDate,
@@ -376,17 +399,9 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
             form.initial_severity === "Low" ? "Low" : "High";
 
           // Map AI free-text source → the createCAPA Zod enum the server
-          // expects. Unmatched values land in "Other".
-          const SERVER_SOURCE_MAP: Record<string, "Gap Assessment" | "Deviation" | "FDA 483" | "Internal Audit" | "External Audit" | "Customer Complaint" | "Other"> = {
-            "483": "FDA 483",
-            "Internal Audit": "Internal Audit",
-            "Deviation": "Deviation",
-            "Complaint": "Customer Complaint",
-            "OOS": "Other",
-            "Change Control": "Other",
-            "Gap Assessment": "Gap Assessment",
-          };
-          const serverSource = SERVER_SOURCE_MAP[form.source] ?? "Other";
+          // expects. Unmatched values land in "Other". Shares the module-level
+          // map with the manual create path so the two cannot drift.
+          const serverSource = UI_TO_SERVER_CAPA_SOURCE[form.source] ?? "Other";
 
           // Redux's CAPASource type uses the legacy AI-form vocabulary
           // (different enum from the server's Zod schema). Keep both in sync

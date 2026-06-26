@@ -22,6 +22,10 @@ import type {
   DriftDetectionResult,
   FindingTriageResult,
   FindingTriageSeverity,
+  ApprovalBriefInput,
+  ApprovalBriefResult,
+  ReadinessGuidanceInput,
+  ReadinessGuidanceResult,
 } from "./index";
 import type { DriftAlert } from "@/types/agi";
 
@@ -1413,6 +1417,165 @@ export function mockFindingTriage(
     evidenceGaps: picked.evidenceGaps,
     suggestedCapaTitle: `Remediate: ${focus.slice(0, 64)}`,
     confidence: rule ? 88 : 70,
+    source: "mock",
+  };
+}
+
+/* ── Feature J — CAPA Approval Brief ───────────────────────────────────
+ * Deterministic reviewer brief derived from the CAPA's own fields. Same
+ * advisory contract as the backend: NEVER a verdict — just a summary, the
+ * solid bits, and what to scrutinise (hard gate facts first). Fixed
+ * `generatedAt` so demos + tests are stable. */
+
+// Stable timestamp so the mock is fully deterministic (no Date.now()).
+const MOCK_BRIEF_GENERATED_AT = "2026-01-01T00:00:00.000Z";
+
+export function mockApprovalBrief(
+  input: ApprovalBriefInput,
+): ApprovalBriefResult {
+  const rootCause = input.rootCause.trim();
+  const actions = input.correctiveActions.trim();
+
+  const overview =
+    `${input.reference || "This CAPA"} (${input.risk} risk) addresses: ` +
+    `${input.title.trim() || input.description.trim().slice(0, 120) || "an open quality issue"}. ` +
+    (rootCause
+      ? `Identified root cause: ${rootCause.slice(0, 160)}.`
+      : "No root cause text is recorded yet.");
+
+  // Strengths — derived from the readiness-relevant flags that are positive.
+  const strengths: string[] = [];
+  if (input.rcaApproved) strengths.push("Root cause analysis has been QA-approved.");
+  if (input.alignmentStatus === "aligned") {
+    strengths.push("Corrective actions reviewed as aligned to the root cause.");
+  }
+  if (actions.length > 40) {
+    strengths.push("A substantive corrective-action plan is documented.");
+  }
+  if (input.approvalsRequired > 0 && input.approvalsCollected >= input.approvalsRequired) {
+    strengths.push("All required approvals have been collected.");
+  }
+  if (strengths.length === 0) {
+    strengths.push("No completed gates yet — review each item from scratch.");
+  }
+
+  // Watch-outs — hard gate facts FIRST (mirrors the backend's Python append),
+  // then heuristic prompts so the reviewer never misses a blocker.
+  const watchOuts: string[] = [];
+  if (input.unresolvedConcerns > 0) {
+    watchOuts.push(
+      `${input.unresolvedConcerns} unresolved concern${input.unresolvedConcerns === 1 ? "" : "s"} ` +
+        "must be resolved before approval is accepted.",
+    );
+  }
+  const missing = Math.max(0, input.approvalsRequired - input.approvalsCollected);
+  if (missing > 0) {
+    watchOuts.push(
+      `${missing} of ${input.approvalsRequired} required approval${input.approvalsRequired === 1 ? "" : "s"} still outstanding.`,
+    );
+  }
+  if (!input.rcaApproved) watchOuts.push("Root cause analysis is not yet QA-approved.");
+  if (input.alignmentStatus === "cosmetic") {
+    watchOuts.push("Alignment review flagged the actions as cosmetic — confirm they address the cause.");
+  }
+  if (rootCause.length > 0 && rootCause.length < 30) {
+    watchOuts.push("Root cause statement looks thin — verify it is a true systemic cause.");
+  }
+  if (actions.length < 40) {
+    watchOuts.push("Corrective-action detail is sparse — confirm actions are specific and verifiable.");
+  }
+  if (input.risk === "Critical") {
+    watchOuts.push("Critical risk — confirm both QA Head and Regulatory Affairs sign-offs are in place.");
+  }
+  if (watchOuts.length === 0) {
+    watchOuts.push("No blocking gaps detected — confirm the evidence supports each completed action.");
+  }
+
+  return {
+    overview,
+    strengths,
+    watchOuts,
+    generatedAt: MOCK_BRIEF_GENERATED_AT,
+    source: "mock",
+  };
+}
+
+/* ── Feature K — CAPA Readiness Pre-flight Copilot ─────────────────────
+ * Deterministic per-condition coaching keyed off the readiness key. Same
+ * advisory contract + grounding as the backend: prose only for the exact
+ * unmet keys passed in, ordered by the canonical gate order. Fixed
+ * `generatedAt` for stable demos + tests. */
+
+const READINESS_GATE_ORDER = [
+  "rca",
+  "alignment",
+  "diGate",
+  "actions",
+  "evidence",
+  "criteria",
+];
+
+// Per-key why/how templates — phrasing mirrors the backend FALLBACK so mock and
+// real output read identically.
+const READINESS_GUIDANCE: Record<string, { why: string; how: string }> = {
+  rca: {
+    why: "The root cause is the foundation — every corrective action and the QA approval depend on it.",
+    how: "Complete the analysis on the RCA tab, then request QA review. This clears once QA approves it.",
+  },
+  alignment: {
+    why: "QA must confirm the actions truly address the root cause, not just the symptom — cosmetic fixes fail the effectiveness check.",
+    how: "Open the Action Plans tab and run the alignment review; mark it aligned or record an override rationale.",
+  },
+  diGate: {
+    why: "A data-integrity concern was raised on this CAPA; it must be cleared before the record can advance.",
+    how: "Resolve the data-integrity check and clear the DI gate from the Overview tab.",
+  },
+  actions: {
+    why: "Open corrective actions mean the fix isn't finished — inspectors expect every committed action complete or formally skipped.",
+    how: "Go to the Action Plans tab and complete each remaining action (or skip it with a documented reason).",
+  },
+  evidence: {
+    why: "The evidence categories prove the work actually happened; gaps are the most common reason a CAPA bounces back from QA.",
+    how: "On the Evidence tab, mark each category Complete or Not Applicable.",
+  },
+  criteria: {
+    why: "Effectiveness criteria define how you'll prove in 90 days that the fix held — QA expects a measurable target.",
+    how: "On the Criteria tab, add at least one criterion with a metric, target value, and monitoring period.",
+  },
+};
+
+export function mockReadinessGuidance(
+  input: ReadinessGuidanceInput,
+): ReadinessGuidanceResult {
+  const unmetKeys = input.unmet.map((u) => u.key);
+
+  const items = unmetKeys.map((key) => {
+    const tpl = READINESS_GUIDANCE[key] ?? {
+      why: "This item is required before submission.",
+      how: "Complete it on the relevant tab.",
+    };
+    return { key, why: tpl.why, how: tpl.how };
+  });
+
+  // Canonical gate order, filtered to unmet keys; unknown keys appended last.
+  const priorityOrder = [
+    ...READINESS_GATE_ORDER.filter((k) => unmetKeys.includes(k)),
+    ...unmetKeys.filter((k) => !READINESS_GATE_ORDER.includes(k)),
+  ];
+
+  const n = unmetKeys.length;
+  const summary =
+    n === 0
+      ? "Everything looks ready — submit from the Action Plans tab."
+      : `${n} item${n === 1 ? "" : "s"} left before you can submit — start with ${
+          READINESS_GUIDANCE[priorityOrder[0]] ? priorityOrder[0] : "the first item"
+        }.`;
+
+  return {
+    summary,
+    priorityOrder,
+    items,
+    generatedAt: MOCK_BRIEF_GENERATED_AT,
     source: "mock",
   };
 }

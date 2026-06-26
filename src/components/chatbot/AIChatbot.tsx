@@ -19,6 +19,9 @@ import {
   type TicketPrefill,
 } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
+import { isDataQuestion, formatDataAnswer } from "@/lib/aiData";
+import { getSmallTalkReply } from "@/lib/aiSmallTalk";
+import { getComplianceSnapshot } from "@/actions/complianceSnapshot";
 import { RaiseTicketModal, type RaiseTicketPrefill } from "@/modules/support/RaiseTicketModal";
 
 /**
@@ -53,9 +56,24 @@ type UiMessage = ChatMessage & { meta?: HelpMeta };
 
 const STORAGE_KEY = "glimmora-chatbot-pos";
 const SUPPRESSION_KEY = "glimmora-chatbot-suppression";
-const PANEL_WIDTH = 360;
-const PANEL_HEIGHT = 480;
 const BUBBLE_SIZE = 56;
+// Focus-mode drawer dimensions (used when the panel is open). The panel docks
+// to the right as an elevated drawer over a dimming + blurred backdrop, so the
+// user's attention stays on the conversation. Width is responsive; height fills
+// the viewport minus a uniform margin.
+const DRAWER_WIDTH = 420;
+const DRAWER_MARGIN = 16;
+
+/**
+ * Suggested questions shown on first open so a new user isn't staring at a
+ * blank box. Tapping one fills the ask box (per the spec's "tap to fill"
+ * affordance) — it does NOT auto-send, so the user can edit before asking.
+ */
+const SUGGESTED_QUESTIONS = [
+  "How do I close a CAPA?",
+  "Where is the audit trail?",
+  "What is a deviation?",
+] as const;
 
 function loadSuppressionLevel(): number {
   if (typeof window === "undefined") return 100;
@@ -163,6 +181,14 @@ export function AIChatbot() {
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  /** Fill the ask box from a tapped suggestion and focus it (no auto-send). */
+  function handleSuggestion(q: string) {
+    setInput(q);
+    // Defer focus so the value is in the box before the caret lands.
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
 
   // Bottom-right default position once we know the viewport. Restore from
   // localStorage if the user has dragged before.
@@ -181,6 +207,25 @@ export function AIChatbot() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
+
+  // Focus-mode affordances while the panel is open:
+  //  - Escape closes (standard modal convention for keyboard users).
+  //  - Move focus into the ask box so a keyboard/screen-reader user lands
+  //    inside the dialog rather than behind it.
+  // Recording is left alone — Escape during a recording would be surprising,
+  // so we only bind the close shortcut when not actively capturing audio.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && voiceState === "idle") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const t = window.setTimeout(() => inputRef.current?.focus(), 60);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.clearTimeout(t);
+    };
+  }, [open, voiceState]);
 
   /* ── Drag handlers (right-click) ─────────────────────────────── */
 
@@ -240,6 +285,36 @@ export function AIChatbot() {
     const next = [...messages, userMsg];
     setMessages(next);
     setBusy(true);
+
+    // Small talk first ("hi", "thanks", "tell me a joke", "who are you?") —
+    // answered instantly with a friendly canned reply, no LLM call. The helper
+    // returns null for anything naming a compliance term, so a real question is
+    // never swallowed by a pleasantry. Synchronous → no busy spinner needed.
+    const smallTalk = getSmallTalkReply(text, next.length);
+    if (smallTalk) {
+      setMessages([...next, { role: "assistant", content: smallTalk }]);
+      setBusy(false);
+      return;
+    }
+
+    // Live-data / count questions ("how many open CAPAs?", "any overdue
+    // deviations?") are answered from the tenant's actual records via a
+    // read-only server action — the grounded /help corpus cannot (and must
+    // not) answer these. Knowledge / how-to questions fall through to the
+    // grounded path below, unchanged.
+    if (isDataQuestion(text)) {
+      try {
+        const snapshot = await getComplianceSnapshot();
+        setMessages([...next, { role: "assistant", content: formatDataAnswer(text, snapshot) }]);
+      } catch (e) {
+        console.error("[chatbot] data query failed", e);
+        setError(friendlyAiError(e, "Couldn't read your live data just now. Please try again."));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     try {
       // Send only role+content as history — the backend ignores extra fields,
       // but stripping keeps the payload clean.
@@ -698,26 +773,46 @@ export function AIChatbot() {
 
   if (!mounted) return null;
 
-  // Panel anchors to the bubble. If bubble is in the right half of the
-  // viewport, panel opens to the bubble's left; otherwise to the right.
-  // Same idea vertically — opens upward if there's no room below.
-  const opensLeft = pos.x + PANEL_WIDTH + BUBBLE_SIZE + 16 > window.innerWidth;
-  const opensUp = pos.y + PANEL_HEIGHT + BUBBLE_SIZE + 16 > window.innerHeight;
+  // Focus-mode drawer: dock to the right edge, full height minus a uniform
+  // margin, elevated above the dimming backdrop. We intentionally no longer
+  // anchor the open panel to the bubble — in focus mode the user wants one
+  // stable, distraction-free surface, not a floating tile that can land
+  // half-off-screen. The launcher bubble keeps its draggable position for the
+  // *closed* state.
   const panelStyle: CSSProperties = {
     position: "fixed",
-    left: opensLeft ? pos.x - PANEL_WIDTH - 12 : pos.x + BUBBLE_SIZE + 12,
-    top: opensUp ? Math.max(8, pos.y + BUBBLE_SIZE - PANEL_HEIGHT) : pos.y,
-    width: PANEL_WIDTH,
-    height: PANEL_HEIGHT,
+    top: DRAWER_MARGIN,
+    right: DRAWER_MARGIN,
+    bottom: DRAWER_MARGIN,
+    width: `min(${DRAWER_WIDTH}px, calc(100vw - ${DRAWER_MARGIN * 2}px))`,
     zIndex: 1000,
+    animation: "ai-panel-in 0.24s cubic-bezier(0.16, 1, 0.3, 1)",
   };
 
   return (
     <>
-      {/* Floating bubble */}
+      {/* Focus-mode animations — backdrop fade + panel slide/scale-in. Kept
+          inline so the component is self-contained (no global CSS dependency).
+          Respect reduced-motion: users who opt out get an instant, jump-free
+          appearance instead of the transform. */}
+      <style>{`
+        @keyframes ai-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes ai-panel-in {
+          from { opacity: 0; transform: translateX(20px) scale(0.985); }
+          to   { opacity: 1; transform: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [data-ai-backdrop], [data-ai-panel] { animation: none !important; }
+        }
+      `}</style>
+
+      {/* Floating launcher bubble — hidden while the panel is open. In focus
+          mode the header close button, the backdrop click, and Escape handle
+          closing, so a second floating control would only add clutter. */}
+      {!open && (
       <button
         type="button"
-        aria-label={open ? "Close AI assistant" : "Open AI assistant"}
+        aria-label="Open AI assistant"
         onClick={() => {
           if (dragState.current.moved) {
             // Don't toggle if this was the end of a drag gesture.
@@ -748,17 +843,42 @@ export function AIChatbot() {
           transition: "transform 0.15s",
         }}
       >
-        {open ? <X className="w-6 h-6" aria-hidden="true" /> : <Bot className="w-6 h-6" aria-hidden="true" />}
+        <Bot className="w-6 h-6" aria-hidden="true" />
       </button>
+      )}
 
       {/* Hidden audio element for voice playback */}
       <audio ref={audioRef} className="sr-only" />
 
+      {/* Dimming + blurred backdrop. Sits above the app (z-999) but below the
+          panel (z-1000), so the application is visibly de-emphasised AND
+          non-interactive while the assistant is open. Clicking it closes the
+          panel (standard modal scrim behaviour). aria-hidden so screen readers
+          treat the dialog as the active surface. */}
+      {open && (
+        <div
+          data-ai-backdrop
+          aria-hidden="true"
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 999,
+            background: "rgba(15, 23, 42, 0.45)",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
+            animation: "ai-backdrop-in 0.2s ease",
+          }}
+        />
+      )}
+
       {/* Panel */}
       {open && (
         <div
+          data-ai-panel
           role="dialog"
-          aria-label="AI Assistant"
+          aria-modal="true"
+          aria-label="Compliance Assistant"
           style={{
             ...panelStyle,
             background: "var(--card-bg)",
@@ -775,13 +895,35 @@ export function AIChatbot() {
             className="flex items-center justify-between px-3 py-2.5"
             style={{ borderBottom: "1px solid var(--card-border)", background: "var(--bg-elevated)" }}
           >
-            <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4" aria-hidden="true" style={{ color: "var(--brand)" }} />
-              <span className="text-[12px] font-semibold" style={{ color: "var(--card-text)" }}>
-                AI Assistant
+            <div className="flex items-center gap-2 min-w-0">
+              {/* Traffic-light status dots */}
+              <span className="flex items-center gap-1 shrink-0" aria-hidden="true">
+                <span className="w-2 h-2 rounded-full" style={{ background: "#ef4444" }} />
+                <span className="w-2 h-2 rounded-full" style={{ background: "#f59e0b" }} />
+                <span className="w-2 h-2 rounded-full" style={{ background: "#22c55e" }} />
+              </span>
+              <span className="flex flex-col min-w-0">
+                <span className="text-[12px] font-semibold truncate leading-tight" style={{ color: "var(--card-text)" }}>
+                  Compliance Assistant
+                </span>
+                <span className="text-[9px] truncate leading-tight" style={{ color: "var(--text-muted)" }}>
+                  Answers cited from approved SOPs &amp; app guidance
+                </span>
               </span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
+              {/* READY / WORKING status badge */}
+              <span
+                aria-live="polite"
+                className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded mr-0.5"
+                style={{
+                  background: busy ? "var(--warning-bg)" : "var(--brand-muted)",
+                  color: busy ? "#b45309" : "var(--brand)",
+                  border: `1px solid ${busy ? "var(--warning)" : "var(--brand-border)"}`,
+                }}
+              >
+                {busy ? "WORKING" : "READY"}
+              </span>
               <button
                 type="button"
                 aria-label="Voice settings"
@@ -864,10 +1006,50 @@ export function AIChatbot() {
           {/* Message list */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2" style={{ background: "var(--bg-base)" }}>
             {messages.length === 0 && !busy && (
-              <p className="text-[11px] text-center" style={{ color: "var(--text-muted)" }}>
-                Ask anything about CAPAs, deviations, audits, or compliance.
-                Hold the mic to record, release to send.
-              </p>
+              <div className="space-y-3">
+                {/* Greeting bubble with an AI avatar badge */}
+                <div className="flex items-start gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 inline-flex items-center justify-center text-[9px] font-bold rounded-md mt-0.5"
+                    style={{ width: 22, height: 22, background: "var(--brand)", color: "#fff" }}
+                  >
+                    AI
+                  </span>
+                  <div
+                    className="rounded-lg px-2.5 py-2 text-[12px]"
+                    style={{
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--bg-border)",
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Hi. Ask me about CAPAs, deviations, audit trails, or how to use the system.
+                  </div>
+                </div>
+
+                {/* Tappable suggested questions — fill the ask box on tap. */}
+                <div className="space-y-1.5">
+                  {SUGGESTED_QUESTIONS.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => handleSuggestion(q)}
+                      className="w-full flex items-center justify-between gap-2 text-left px-2.5 py-2 rounded-lg text-[12px] transition-colors cursor-pointer"
+                      style={{
+                        background: "var(--bg-surface)",
+                        border: "1px solid var(--bg-border)",
+                        color: "var(--text-primary)",
+                      }}
+                    >
+                      <span className="truncate">{q}</span>
+                      <span className="text-[10px] italic shrink-0" style={{ color: "var(--text-muted)" }}>
+                        tap to fill
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {messages.map((m, i) => {
               // Show a "speak this reply" button on assistant turns whose
@@ -1041,9 +1223,10 @@ export function AIChatbot() {
                   <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
                 </button>
                 <input
+                  ref={inputRef}
                   type="text"
-                  className="input text-[12px] flex-1"
-                  placeholder={busy ? "Waiting…" : "Type a message…"}
+                  className="input text-[13px] flex-1"
+                  placeholder={busy ? "Waiting…" : "Ask a question…"}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}

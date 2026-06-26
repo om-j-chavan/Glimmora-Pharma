@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { auth } from "@/lib/auth";
 
 // In production (DO App Platform) this is the internal private URL of the api
 // service — never leaves DO's private network. In dev it falls back to localhost.
@@ -10,14 +11,49 @@ const AI_BASE =
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+// Allowlist of upstream path prefixes this proxy may reach. Prevents the
+// catch-all from being abused as an open relay / SSRF pivot into arbitrary
+// upstream paths. These are the only two surfaces the client uses: the
+// versioned compliance API (/api/v1/*) and the AI helper API (/api/ai/*,
+// which includes chat, draft, search, voice and health).
+const ALLOWED_PATH_PREFIXES = ["api/v1/", "api/ai/"];
+
+function isAllowedPath(joined: string): boolean {
+  // Reject path-traversal / absolute-URL injection outright.
+  if (joined.includes("..") || joined.includes("://")) return false;
+  return ALLOWED_PATH_PREFIXES.some((p) => joined === p || joined.startsWith(p));
+}
+
 async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  // ── AuthN: this proxy is the single ingress to the AI backend. Without a
+  // session it was an open relay (cost abuse, SSRF, cross-tenant exposure).
+  const session = await auth();
+  if (!session) {
+    return new Response(JSON.stringify({ detail: "Authentication required." }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   const { path } = await ctx.params;
-  const target = `${AI_BASE}/${path.join("/")}${req.nextUrl.search}`;
+  const joined = path.join("/");
+  if (!isAllowedPath(joined)) {
+    return new Response(JSON.stringify({ detail: "Forbidden upstream path." }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  const target = `${AI_BASE}/${joined}${req.nextUrl.search}`;
   const headers = new Headers(req.headers);
   headers.delete("host");
   headers.delete("connection");
   headers.delete("content-length");
   headers.delete("accept-encoding");
+  // The user's own AI access token (`auth`) is still forwarded — the upstream
+  // derives tenant scope from it. We strip only the NextAuth session cookie,
+  // which the upstream never reads and should not receive.
+  headers.delete("cookie");
   let body: BodyInit | undefined;
   if (!["GET", "HEAD"].includes(req.method)) {
     const buf = await req.arrayBuffer();

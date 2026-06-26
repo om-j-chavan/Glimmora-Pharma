@@ -42,6 +42,7 @@ import { EffectivenessSection } from "./tabs/sections/EffectivenessSection";
 import { EvidenceCollectionPanel } from "./tabs/EvidenceCollectionPanel";
 import { EffectivenessCriteriaPanel } from "./tabs/EffectivenessCriteriaPanel";
 import { SubmissionChecklist } from "./modals/components/SubmissionChecklist";
+import { ReadinessCopilotPanel } from "./modals/components/ReadinessCopilotPanel";
 import { FlowExplainer } from "./components/FlowExplainer";
 import { CapaAuditTrailBar } from "./components/CapaAuditTrailBar";
 import { SignCloseModal } from "./modals/SignCloseModal";
@@ -242,7 +243,14 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
               </div>
             )}
           </div>
-          {checklistOpen && <div className="mt-2"><SubmissionChecklist conditions={readiness.conditions} onChangeTab={setActiveTab} /></div>}
+          {checklistOpen && (
+            <div className="mt-2 space-y-2">
+              <SubmissionChecklist conditions={readiness.conditions} onChangeTab={setActiveTab} />
+              {/* Feature K — AI coaching for the unmet items. Self-gates on AGI
+                  mode/agent + presence of unmet conditions; renders null otherwise. */}
+              <ReadinessCopilotPanel capa={capa} readiness={readiness} onChangeTab={setActiveTab} />
+            </div>
+          )}
         </div>
       );
     }
