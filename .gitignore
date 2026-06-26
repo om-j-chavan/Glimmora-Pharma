@@ -38,6 +38,13 @@ dist-ssr
 # tsc scratch output
 tsc-errors.txt
 
+# Stray dev artifacts (shadow.db covered by *.db; tsconfig.tsbuildinfo by *.tsbuildinfo)
+oapi.tmp.json
+
+# Root-level dev screenshots only — legitimate asset PNGs under public/ and
+# docs/ stay tracked.
+/*.png
+
 # Local SQLite database
 prisma/dev.db
 prisma/dev.db-journal
