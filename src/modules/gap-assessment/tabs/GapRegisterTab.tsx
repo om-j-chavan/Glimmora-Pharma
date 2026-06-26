@@ -114,7 +114,7 @@ export function GapRegisterTab({
   agiMode, agiCapa, isAnyFilterActive, renderFilters,
   onAddOpen, onRaiseCapa, onNavigateCapa, onManageEvidence,
 }: GapRegisterTabProps) {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
   const router = useRouter();
   const user = useAppSelector((s) => s.auth.user);
   // Capability mirrors of the server (exclude super_admin from authoring).

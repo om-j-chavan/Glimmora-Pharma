@@ -29,7 +29,17 @@ const eventSchema = z.object({
   internalOwnerId: z.string().min(1, "Internal owner required"),
   leadInvestigator: z.string().optional(),
   status: z.enum(["Open", "Response Due", "Response Submitted", "Closed"]),
-});
+})
+  // Date ordering invariants (YYYY-MM-DD compares lexicographically). No
+  // past-date checks — back-dating a historical inspection is legitimate.
+  .refine((d) => !d.inspectionEndDate || d.inspectionEndDate >= d.inspectionDate, {
+    message: "Inspection end date cannot be before the start date",
+    path: ["inspectionEndDate"],
+  })
+  .refine((d) => !d.responseDeadline || d.responseDeadline >= d.inspectionDate, {
+    message: "Response deadline cannot be before the inspection start date",
+    path: ["responseDeadline"],
+  });
 
 export type EventFormData = z.infer<typeof eventSchema>;
 

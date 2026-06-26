@@ -112,14 +112,16 @@ export function formatAction(action: string): string {
     .replace(/_/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase())
-    .replace("Capa", "CAPA")
-    .replace("Di ", "DI ")
-    .replace("Fda", "FDA")
-    .replace("Rca", "RCA")
-    .replace("Agi", "AGI")
-    .replace("Raid", "RAID")
-    .replace("Rtm", "RTM")
-    .replace("Csv", "CSV");
+    // Global flags — string-arg .replace only hits the FIRST match, so an action
+    // with a repeated token (e.g. "Capa … Capa") left later ones un-fixed.
+    .replace(/Capa/g, "CAPA")
+    .replace(/Di /g, "DI ")
+    .replace(/Fda/g, "FDA")
+    .replace(/Rca/g, "RCA")
+    .replace(/Agi/g, "AGI")
+    .replace(/Raid/g, "RAID")
+    .replace(/Rtm/g, "RTM")
+    .replace(/Csv/g, "CSV");
 }
 
 /** Relative for recent ("3m ago"), absolute for older — an inspector

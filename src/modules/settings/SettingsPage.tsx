@@ -29,7 +29,17 @@ export function SettingsPage() {
   const [active, setActive] = useState<TabId>("org");
   const { canManageSettings, isQAHead, role } = usePermissions();
   const readOnly = !canManageSettings;
-  const visibleTabs = isQAHead ? ALL_TABS.filter((t) => t.id !== "permissions") : ALL_TABS;
+  // Tab-level view gating. Both the tab bar and the panels below map over
+  // visibleTabs, so excluding a tab here removes the tab button AND its rendered
+  // panel (the data never reaches a denied role's DOM).
+  //  - Permissions: qa_head excluded (existing behaviour).
+  //  - Subscription: plan / user-site limits / billing term / retention is
+  //    admin-tier info → customer_admin / super_admin only.
+  const visibleTabs = ALL_TABS.filter((t) => {
+    if (t.id === "permissions" && isQAHead) return false;
+    if (t.id === "subscription" && !canManageSettings) return false;
+    return true;
+  });
 
   return (
     <div className="flex flex-col -m-3 sm:-m-4 lg:-m-5 h-full min-h-0">
@@ -85,8 +95,10 @@ export function SettingsPage() {
             {tab.id === "org" && <OrgTab readOnly={readOnly} />}
             {tab.id === "sites" && <SitesTab readOnly={readOnly} />}
             {tab.id === "users" && <UsersTab readOnly={readOnly} />}
-            {/* Subscription is inherently read-only — no readOnly prop / no controls. */}
-            {tab.id === "subscription" && <SubscriptionTab />}
+            {/* Subscription is inherently read-only — no readOnly prop / no controls.
+                Customer-Admin-only view (defense-in-depth; visibleTabs already
+                excludes it for other roles). */}
+            {tab.id === "subscription" && canManageSettings && <SubscriptionTab />}
             {tab.id === "frameworks" && <FrameworksTab readOnly={readOnly} />}
             {tab.id === "agi" && <AGIPolicyTab readOnly={readOnly && role !== "it_cdo"} />}
             {tab.id === "permissions" && <PermissionsTab />}

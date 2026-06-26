@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, ShieldCheck, X, Info,
+  ClipboardList, ShieldCheck, X, Info, FileText,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -17,7 +17,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
-  setDeviations, addDeviationDocument, removeDeviationDocument,
+  setDeviations,
   type DeviationSeverity,
 } from "@/store/deviation.slice";
 import {
@@ -26,15 +26,17 @@ import {
   submitDeviationForReview as submitDeviationForReviewAction,
   closeDeviation as closeDeviationAction,
   rejectDeviation as rejectDeviationAction,
+  attachDeviationDocument,
 } from "@/actions/deviations";
 import { createCAPA as createCAPAAction } from "@/actions/capas";
+import { deleteDocument } from "@/actions/documents";
 import { displayName, displayUserName, displaySiteName } from "@/lib/identity-display";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
-import { PageHeader, StatCard, DocumentUpload, StatusGuide } from "@/components/shared";
+import { PageHeader, StatCard, StatusGuide } from "@/components/shared";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
 import {
   STATUS_VARIANT, STATUS_LABEL, IMPACT_COLOR, CATEGORIES, AREAS,
@@ -81,6 +83,37 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // Capability mirrors of the server (exclude super_admin from authoring).
   const devCan = usePermissions("deviation");
   const capaCan = usePermissions("capa");
+  // Evidence-author capability — mirrors createDocument's COMPLIANCE_AUTHOR_ROLES
+  // server gate (the SAME gate attachDeviationDocument enforces). Tightens the
+  // attach/delete affordance from the old "not viewer" to the author set, so UI
+  // and server agree (qc_lab_director / it_cdo / operations_head lose attach).
+  const canAttachDocs = usePermissions("evidence").canCreate;
+  const [docBusy, setDocBusy] = useState(false);
+
+  // Attach evidence via the shared document pipeline (persists server-side, so
+  // it survives router.refresh()/reload). Tenant + role are enforced in the
+  // server action; this just submits the file and refreshes. Errors surface via
+  // the module's existing error popup.
+  async function handleAttachDoc(deviationId: string, file: File) {
+    setDocBusy(true);
+    const fd = new FormData();
+    fd.set("fileName", file.name);
+    fd.set("file", file);
+    const res = await attachDeviationDocument(deviationId, fd);
+    setDocBusy(false);
+    if (!res.success) { setErrorMsg(res.error || "Failed to attach document."); setErrorPopup(true); return; }
+    router.refresh();
+  }
+
+  // Soft-delete via the shared deleteDocument action (tenant-scoped server-side;
+  // can't remove a document off another tenant's deviation).
+  async function handleDeleteDoc(docId: string) {
+    setDocBusy(true);
+    const res = await deleteDocument(docId);
+    setDocBusy(false);
+    if (!res.success) { setErrorMsg(res.error || "Failed to delete document."); setErrorPopup(true); return; }
+    router.refresh();
+  }
   // QA-decider gate for the Tier 2 CAPA decision — mirrors the server check
   // in saveCAPADecision (qa_head OR super_admin).
   const isQADecider = currentRole === "qa_head" || currentRole === "super_admin";
@@ -537,16 +570,40 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               )}
             </div>
 
-            {/* Documents */}
-            <DocumentUpload
-              recordId={selected.id}
-              recordTitle={selected.title}
-              module="Deviation Management"
-              existingDocs={selected.documents ?? []}
-              onUpload={(doc) => { dispatch(addDeviationDocument({ deviationId: selected.id, doc })); }}
-              onDelete={(docId) => dispatch(removeDeviationDocument({ deviationId: selected.id, docId }))}
-              readOnly={selected.status === "closed" || selected.status === "rejected" || isViewer}
-            />
+            {/* Documents — persisted via the shared document pipeline (#11), so
+                they survive router.refresh()/reload. Attach/delete gated by
+                canAttachDocs (COMPLIANCE_AUTHOR_ROLES — UI matches the server). */}
+            {(() => {
+              const docsLocked = selected.status === "closed" || selected.status === "rejected";
+              const canManageDocs = canAttachDocs && !docsLocked;
+              return (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Documents</p>
+                  {(selected.documents ?? []).length === 0 ? (
+                    <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No documents attached.</p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {(selected.documents ?? []).map((d) => (
+                        <li key={d.id} className="flex items-center gap-2 text-[12px]">
+                          <FileText className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
+                          <a href={d.dataUrl} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate underline" style={{ color: "var(--brand)" }}>{d.fileName}</a>
+                          {canManageDocs && (
+                            <button type="button" onClick={() => handleDeleteDoc(d.id)} disabled={docBusy} aria-label={`Delete ${d.fileName}`} className="border-none bg-transparent cursor-pointer shrink-0" style={{ color: "var(--text-muted)" }}><X className="w-3.5 h-3.5" aria-hidden="true" /></button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {canManageDocs && (
+                    <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer underline" style={{ color: "var(--brand)" }}>
+                      <Plus className="w-3.5 h-3.5" aria-hidden="true" /> {docBusy ? "Uploading…" : "Attach document"}
+                      <input type="file" className="hidden" disabled={docBusy} accept=".pdf,.png,.jpg,.jpeg,.xlsx,.docx,.csv,.txt"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAttachDoc(selected.id, f); e.target.value = ""; }} />
+                    </label>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Owner + Due */}
             <div className="grid grid-cols-2 gap-3 text-[11px] pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>

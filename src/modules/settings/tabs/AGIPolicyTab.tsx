@@ -73,7 +73,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
   const computedMode = computeMode(agi.agents);
   const [saved, setSaved] = useState(false);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
   return (
     <section aria-labelledby="agi-heading" className="space-y-6">

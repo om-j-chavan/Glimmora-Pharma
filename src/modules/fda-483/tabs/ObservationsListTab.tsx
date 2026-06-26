@@ -23,6 +23,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   ClipboardList,
   Plus,
@@ -145,9 +146,7 @@ export function ObservationsListTab({
   onNavigateToInvestigation,
 }: ObservationsListTabProps) {
   const router = useRouter();
-  const isDark =
-    typeof document !== "undefined" &&
-    document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
   const fullyLocked =
     liveEvent.status === "Response Submitted" || liveEvent.status === "Closed";

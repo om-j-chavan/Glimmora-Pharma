@@ -199,8 +199,8 @@ export function AGIPage({ activityLogs: _activityLogs = [] }: AGIPageProps = {})
       </Modal>
 
       {/* Popups */}
-      <Popup isOpen={alertAddedPopup} variant="success" title="Drift alert logged" description="Alert added to the monitoring board." onDismiss={() => setAlertAddedPopup(false)} />
-      <Popup isOpen={resolvedPopup} variant="success" title="Alert resolved" description="Drift alert marked as resolved with action documented." onDismiss={() => setResolvedPopup(false)} />
+      <Popup isOpen={alertAddedPopup} variant="success" title="Drift alert logged to audit trail" description="Recorded in the audit trail. Drift alerts aren't persisted as a monitoring record yet, so this won't remain on the board after a refresh." onDismiss={() => setAlertAddedPopup(false)} />
+      <Popup isOpen={resolvedPopup} variant="success" title="Resolution logged to audit trail" description="The corrective action was recorded in the audit trail. Resolutions aren't persisted yet, so the alert won't stay resolved after a refresh." onDismiss={() => setResolvedPopup(false)} />
     </main>
   );
 }

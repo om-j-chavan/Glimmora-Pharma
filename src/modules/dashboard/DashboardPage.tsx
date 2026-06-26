@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
@@ -13,9 +13,16 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import dayjs from "@/lib/dayjs";
 import { chartDefaults } from "@/lib/chartColors";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { setFindings } from "@/store/findings.slice";
+import { setCAPAs } from "@/store/capa.slice";
+import { setDeviations } from "@/store/deviation.slice";
+import { adaptFinding, type FindingWithEdits } from "@/modules/gap-assessment/GapPage.adapter";
+import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
+import { adaptDeviation, type PrismaDeviationWithCapa } from "@/modules/deviation/DeviationPage.adapter";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
@@ -61,10 +68,37 @@ export interface DashboardPageProps {
    * the slice-shaped data.
    */
   stats?: DashboardServerStats;
+  /**
+   * Raw server rows used to SEED the Redux slices the dashboard reads (findings
+   * / capas / deviations), so KPIs render on first paint instead of waiting for
+   * another module's mount to hydrate the store. Same per-module hydration
+   * pattern as CAPAPage / DeviationPage / GapPage.
+   * (systems / roadmap / fda483Events have no slices post server-first
+   * migration — useTenantData returns [] for them — so they can't be seeded
+   * here; that's a separate deferred migration, not the first-paint bug.)
+   */
+  findings?: FindingWithEdits[];
+  capas?: Parameters<typeof mapCAPAFromPrisma>[0][];
+  deviations?: PrismaDeviationWithCapa[];
 }
 
-export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardPageProps = {}) {
+export function DashboardPage({
+  readinessScore: readinessScoreProp,
+  findings: serverFindings,
+  capas: serverCAPAs,
+  deviations: serverDeviations,
+}: DashboardPageProps = {}) {
   const router = useRouter();
+  const dispatch = useAppDispatch();
+  // Seed Redux from the server-fetched rows on mount / when props change. The
+  // tenant/site filtering happens on READ in useTenantData (by currentTenant,
+  // seeded by AppShell), so this dispatch is unconditional — identical to how
+  // every module page hydrates its own slice.
+  useEffect(() => {
+    if (serverFindings) dispatch(setFindings(serverFindings.map(adaptFinding)));
+    if (serverCAPAs) dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
+    if (serverDeviations) dispatch(setDeviations(serverDeviations.map(adaptDeviation)));
+  }, [serverFindings, serverCAPAs, serverDeviations, dispatch]);
   const { findings, capas, deviations, systems, roadmap, fda483Events, tenantId } = useTenantData();
   const { org, sites, users } = useTenantConfig();
   const agiSettings = useAppSelector((s) => s.settings.agi);

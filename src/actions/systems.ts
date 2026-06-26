@@ -75,8 +75,8 @@ const RiskEnum = z.enum(["HIGH", "MEDIUM", "LOW"]);
 const SystemWritableSchema = z.object({
   name: z.string().min(2),
   type: z.string().min(1),
-  vendor: z.string().optional(),
-  version: z.string().optional(),
+  vendor: z.string().min(1),
+  version: z.string().min(1),
   gxpRelevance: z.string().optional(),
   // RUNG 3K — closed value space (was z.string()): only canonical
   // ComplianceStatus values are accepted at the server-action boundary.
@@ -95,7 +95,7 @@ const SystemWritableSchema = z.object({
   criticalFunctions: z.string().optional(),
   riskFactors: z.string().optional(),
   plannedActions: z.string().optional(),
-  owner: z.string().optional(),
+  owner: z.string().min(1),
   patientSafetyRisk: RiskEnum.optional(),
   productQualityImpact: RiskEnum.optional(),
   regulatoryExposure: RiskEnum.optional(),
@@ -804,7 +804,7 @@ export async function updateStageNotes(stageId: string, notes: string): Promise<
 
 const AddRoadmapActivitySchema = z.object({
   systemId: z.string().min(1),
-  title: z.string().min(2),
+  title: z.string().min(3),
   type: z.string().min(1),
   startDate: z.string().optional(),
   endDate: z.string().optional(),

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { ChangeControl as PrismaChangeControl } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -41,6 +42,8 @@ export function ChangeControlListPage({ initial }: Props) {
   const [typeFilter, setTypeFilter] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const { org } = useTenantConfig();
+  const dateFormat = org.dateFormat;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -257,7 +260,7 @@ export function ChangeControlListPage({ initial }: Props) {
                       style={{ color: "var(--text-secondary)" }}
                     >
                       {cc.targetImplementationDate
-                        ? dayjs.utc(cc.targetImplementationDate).format("DD MMM YYYY")
+                        ? dayjs.utc(cc.targetImplementationDate).format(dateFormat)
                         : "—"}
                     </span>
                   </td>
