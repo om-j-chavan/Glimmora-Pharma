@@ -17,6 +17,12 @@ const LABEL = "block text-[11px] font-medium mb-1" as const;
 interface AccountPlanFieldsProps {
   plan: PlanDraft | null;
   onPlanChange: (plan: PlanDraft | null) => void;
+  /** Visible inline error for the Max users cap, supplied by the modal's
+   *  validation (undefined when valid or not yet surfaced). Mirrors the
+   *  field-error pattern in AccountInfoFields. */
+  maxUsersError?: string;
+  /** Marks the Max users field touched so its error surfaces on blur. */
+  onMaxUsersBlur?: () => void;
 }
 
 /**
@@ -26,7 +32,7 @@ interface AccountPlanFieldsProps {
  * plan along with the rest of the form (assignPlan-on-save wiring lives in the
  * parent hook).
  */
-export function AccountPlanFields({ plan, onPlanChange }: AccountPlanFieldsProps) {
+export function AccountPlanFields({ plan, onPlanChange, maxUsersError, onMaxUsersBlur }: AccountPlanFieldsProps) {
   const activeSub = plan;
 
   const updateSub = (patch: Partial<PlanDraft>) => {
@@ -99,7 +105,27 @@ export function AccountPlanFields({ plan, onPlanChange }: AccountPlanFieldsProps
             />
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Max users</label><input type="number" min={1} max={TAILORED_CEILINGS.maxUsers} value={activeSub.maxUsers} disabled={activeSub.tier !== "TAILORED"} onChange={(e) => updateSub({ maxUsers: Number(e.target.value) })} className="input text-[12px]" /></div>
+            <div>
+              <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Max users</label>
+              {/* valueAsNumber yields NaN (not 0) for an emptied field, and the
+                  value falls back to "" so the box shows blank instead of a
+                  silently-coerced 0 — letting the modal's validation catch it. */}
+              <input
+                type="number"
+                min={1}
+                max={TAILORED_CEILINGS.maxUsers}
+                value={Number.isFinite(activeSub.maxUsers) ? activeSub.maxUsers : ""}
+                disabled={activeSub.tier !== "TAILORED"}
+                onChange={(e) => updateSub({ maxUsers: e.target.valueAsNumber })}
+                onBlur={onMaxUsersBlur}
+                aria-invalid={!!maxUsersError}
+                aria-describedby={maxUsersError ? "plan-max-users-error" : undefined}
+                className={`input text-[12px] ${maxUsersError ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
+              />
+              {maxUsersError && (
+                <p id="plan-max-users-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{maxUsersError}</p>
+              )}
+            </div>
             <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Max sites</label><input type="number" min={1} max={TAILORED_CEILINGS.maxSites} value={activeSub.maxSites} disabled={activeSub.tier !== "TAILORED"} onChange={(e) => updateSub({ maxSites: Number(e.target.value) })} className="input text-[12px]" /></div>
             <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Retention (yr)</label><input type="number" min={1} max={TAILORED_CEILINGS.minRetentionYears} value={activeSub.minRetentionYears} disabled={activeSub.tier !== "TAILORED"} onChange={(e) => updateSub({ minRetentionYears: Number(e.target.value) })} className="input text-[12px]" /></div>
           </div>

@@ -105,6 +105,15 @@ export function AccountModal({
       if (form.newPassword.length < 8) e.newPassword = "Password must be at least 8 characters";
       if (form.newPassword !== form.confirmPassword) e.confirmPassword = "Passwords don't match";
     }
+
+    // Plan caps — only when a plan is assigned. The "Max users" cap is the
+    // tenant's account allowance; an empty/0 value is otherwise floored to 1
+    // server-side (resolvePlanCaps) and saved with no warning (Bug 2). Block it
+    // here with an inline message, exactly like the fields above.
+    if (form.plan && (!Number.isFinite(form.plan.maxUsers) || form.plan.maxUsers < 1)) {
+      e.planMaxUsers = "Max users must be at least 1";
+    }
+
     return e;
   }, [form, mode]);
 
@@ -131,7 +140,9 @@ export function AccountModal({
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
     (mode === "edit"
       ? (!form.newPassword || (form.newPassword.length >= 8 && form.newPassword === form.confirmPassword))
-      : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword);
+      : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword) &&
+    // Plan, when assigned, must grant at least one user account (Bug 2).
+    (!form.plan || (Number.isFinite(form.plan.maxUsers) && form.plan.maxUsers >= 1));
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {
@@ -140,6 +151,7 @@ export function AccountModal({
     email: "Email",
     newPassword: "Password",
     confirmPassword: "Confirm Password",
+    planMaxUsers: "Max users",
   };
   const blockingFields = Object.keys(errors).filter((k) => labels[k]).map((k) => labels[k]);
   const showHint = blockingFields.length > 0 && (Object.values(touched).some(Boolean) || submitAttempted);
@@ -246,7 +258,12 @@ export function AccountModal({
 
         {/* Plan assignment is now an inline section of the form — no separate
             popup. The account's single Save submits the plan with it. */}
-        <AccountPlanFields plan={form.plan} onPlanChange={(p) => set("plan", p)} />
+        <AccountPlanFields
+          plan={form.plan}
+          onPlanChange={(p) => set("plan", p)}
+          maxUsersError={errorVisible("planMaxUsers") ? errors.planMaxUsers : undefined}
+          onMaxUsersBlur={() => markTouched("planMaxUsers")}
+        />
 
         <AccountPasswordFields
           form={form}
