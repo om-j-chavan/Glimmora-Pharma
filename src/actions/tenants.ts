@@ -48,7 +48,18 @@ const AssignPlanSchema = z.object({
   minRetentionYears: z.number().int().positive().optional(),
   startDate: z.string().min(1),
   expiryDate: z.string().min(1),
-});
+})
+  // Bug 8 — the subscription window must be ordered. Date.parse mirrors
+  // isPlanUsable in tenantStatus.ts; an unparseable date falls through to the
+  // non-empty field checks above instead of raising a confusing order error.
+  .refine(
+    (d) => {
+      const start = Date.parse(d.startDate);
+      const end = Date.parse(d.expiryDate);
+      return Number.isNaN(start) || Number.isNaN(end) || start <= end;
+    },
+    { message: "Expiry date must be on or after the start date", path: ["expiryDate"] },
+  );
 
 export async function createTenant(
   input: z.input<typeof CreateTenantSchema>,
@@ -292,6 +303,14 @@ export async function assignPlan(
     maxSites: parsed.data.maxSites,
     minRetentionYears: parsed.data.minRetentionYears,
   });
+
+  // Bug 2 — a usable plan must grant at least one user account and one site,
+  // regardless of tier. validateTailoredCaps above only guards TAILORED; assert
+  // the resolved caps here so a 0/empty account cap can never persist as a plan.
+  if (caps.maxUsers < 1 || caps.maxSites < 1) {
+    return { success: false, error: "A plan must allow at least one user account and one site." };
+  }
+
   const displayName = tier === "TAILORED" ? (parsed.data.displayName?.trim() || null) : null;
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
