@@ -15,19 +15,41 @@ import { getToken } from "next-auth/jwt";
  * Pages still call `requireAuth()` for the session object (tenantId for Prisma);
  * this proxy is defense-in-depth, not a replacement for the per-page lookup.
  *
- * Fail-open guard: when NEXTAUTH_SECRET is unset (local dev only — production
- * mandates it via assertProductionSecret in the NextAuth route), the gate is
- * skipped so it can't desync from the secret NextAuth used to sign the cookie
- * and cause a false redirect loop. MFA session invalidation is enforced in the
- * JWT callback (an invalidated token decodes empty → getToken returns null →
- * the standard /login redirect below).
+ * Missing-secret guard: without NEXTAUTH_SECRET we cannot verify ANY token, so
+ * every request is effectively unauthenticated. Production mandates the secret
+ * via assertProductionSecret in the NextAuth route; this is the edge-layer
+ * backstop and it FAILS CLOSED — a prod request without the secret is refused
+ * (401/500 for APIs, /login redirect for pages) rather than waved through.
+ * Development still allows the request through (so a missing local secret can't
+ * desync from the cookie NextAuth signed and cause a false redirect loop) but
+ * logs a loud warning. MFA session invalidation is enforced in the JWT callback
+ * (an invalidated token decodes empty → getToken returns null → the standard
+ * /login redirect below).
  */
 export async function proxy(req: NextRequest) {
-  const secret = process.env.NEXTAUTH_SECRET;
-  if (!secret) return NextResponse.next();
-
   const { pathname } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
+
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    // Fail closed in production — refuse rather than serve protected content.
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[proxy] NEXTAUTH_SECRET is not set in production — refusing all requests. " +
+          "Set NEXTAUTH_SECRET (32+ bytes) to restore service.",
+      );
+      if (isApi) {
+        return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
+      }
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
+    // Development only — allow through, but make the disabled gate impossible to miss.
+    console.warn(
+      "[proxy] NEXTAUTH_SECRET is unset — edge auth gate DISABLED (development only). " +
+        "Production refuses all requests without it.",
+    );
+    return NextResponse.next();
+  }
 
   const token = await getToken({ req, secret });
 
