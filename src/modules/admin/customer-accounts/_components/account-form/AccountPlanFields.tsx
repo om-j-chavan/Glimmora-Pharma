@@ -23,6 +23,12 @@ interface AccountPlanFieldsProps {
   maxUsersError?: string;
   /** Marks the Max users field touched so its error surfaces on blur. */
   onMaxUsersBlur?: () => void;
+  /** Same as maxUsersError/onMaxUsersBlur, for the Max sites cap. */
+  maxSitesError?: string;
+  onMaxSitesBlur?: () => void;
+  /** Same, for the Retention (years) cap. */
+  retentionError?: string;
+  onRetentionBlur?: () => void;
 }
 
 /**
@@ -32,7 +38,7 @@ interface AccountPlanFieldsProps {
  * plan along with the rest of the form (assignPlan-on-save wiring lives in the
  * parent hook).
  */
-export function AccountPlanFields({ plan, onPlanChange, maxUsersError, onMaxUsersBlur }: AccountPlanFieldsProps) {
+export function AccountPlanFields({ plan, onPlanChange, maxUsersError, onMaxUsersBlur, maxSitesError, onMaxSitesBlur, retentionError, onRetentionBlur }: AccountPlanFieldsProps) {
   const activeSub = plan;
 
   const updateSub = (patch: Partial<PlanDraft>) => {
@@ -126,8 +132,46 @@ export function AccountPlanFields({ plan, onPlanChange, maxUsersError, onMaxUser
                 <p id="plan-max-users-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{maxUsersError}</p>
               )}
             </div>
-            <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Max sites</label><input type="number" min={1} max={TAILORED_CEILINGS.maxSites} value={activeSub.maxSites} disabled={activeSub.tier !== "TAILORED"} onChange={(e) => updateSub({ maxSites: Number(e.target.value) })} className="input text-[12px]" /></div>
-            <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Retention (yr)</label><input type="number" min={1} max={TAILORED_CEILINGS.minRetentionYears} value={activeSub.minRetentionYears} disabled={activeSub.tier !== "TAILORED"} onChange={(e) => updateSub({ minRetentionYears: Number(e.target.value) })} className="input text-[12px]" /></div>
+            <div>
+              <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Max sites</label>
+              {/* valueAsNumber → NaN (not 0) on empty; blank fallback so an
+                  emptied field is caught by validation, not silently coerced. */}
+              <input
+                type="number"
+                min={1}
+                max={TAILORED_CEILINGS.maxSites}
+                value={Number.isFinite(activeSub.maxSites) ? activeSub.maxSites : ""}
+                disabled={activeSub.tier !== "TAILORED"}
+                onChange={(e) => updateSub({ maxSites: e.target.valueAsNumber })}
+                onBlur={onMaxSitesBlur}
+                aria-invalid={!!maxSitesError}
+                aria-describedby={maxSitesError ? "plan-max-sites-error" : undefined}
+                className={`input text-[12px] ${maxSitesError ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
+              />
+              {maxSitesError && (
+                <p id="plan-max-sites-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{maxSitesError}</p>
+              )}
+            </div>
+            <div>
+              <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Retention (yr)</label>
+              {/* minRetentionYears — a minimum, floor 1 (same as users/sites).
+                  valueAsNumber + blank fallback as above. */}
+              <input
+                type="number"
+                min={1}
+                max={TAILORED_CEILINGS.minRetentionYears}
+                value={Number.isFinite(activeSub.minRetentionYears) ? activeSub.minRetentionYears : ""}
+                disabled={activeSub.tier !== "TAILORED"}
+                onChange={(e) => updateSub({ minRetentionYears: e.target.valueAsNumber })}
+                onBlur={onRetentionBlur}
+                aria-invalid={!!retentionError}
+                aria-describedby={retentionError ? "plan-retention-error" : undefined}
+                className={`input text-[12px] ${retentionError ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
+              />
+              {retentionError && (
+                <p id="plan-retention-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{retentionError}</p>
+              )}
+            </div>
           </div>
           {activeSub.tier !== "TAILORED" ? (
             <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Caps are fixed for this tier. Choose Tailored to set custom caps.</p>

@@ -106,12 +106,21 @@ export function AccountModal({
       if (form.newPassword !== form.confirmPassword) e.confirmPassword = "Passwords don't match";
     }
 
-    // Plan caps — only when a plan is assigned. The "Max users" cap is the
-    // tenant's account allowance; an empty/0 value is otherwise floored to 1
-    // server-side (resolvePlanCaps) and saved with no warning (Bug 2). Block it
-    // here with an inline message, exactly like the fields above.
-    if (form.plan && (!Number.isFinite(form.plan.maxUsers) || form.plan.maxUsers < 1)) {
-      e.planMaxUsers = "Max users must be at least 1";
+    // Plan caps — only when a plan is assigned. Each cap is otherwise floored
+    // to 1 server-side (resolvePlanCaps) and saved with no warning (Bug 2), so
+    // block an empty/<1 value here with an inline message, like the fields
+    // above. Retention is minRetentionYears — a minimum with the same ≥1 floor
+    // as users/sites (see resolvePlanCaps / validateTailoredCaps in plans.ts).
+    if (form.plan) {
+      if (!Number.isFinite(form.plan.maxUsers) || form.plan.maxUsers < 1) {
+        e.planMaxUsers = "Max users must be at least 1";
+      }
+      if (!Number.isFinite(form.plan.maxSites) || form.plan.maxSites < 1) {
+        e.planMaxSites = "Max sites must be at least 1";
+      }
+      if (!Number.isFinite(form.plan.minRetentionYears) || form.plan.minRetentionYears < 1) {
+        e.planRetention = "Retention must be at least 1 year";
+      }
     }
 
     return e;
@@ -141,8 +150,11 @@ export function AccountModal({
     (mode === "edit"
       ? (!form.newPassword || (form.newPassword.length >= 8 && form.newPassword === form.confirmPassword))
       : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword) &&
-    // Plan, when assigned, must grant at least one user account (Bug 2).
-    (!form.plan || (Number.isFinite(form.plan.maxUsers) && form.plan.maxUsers >= 1));
+    // Plan, when assigned, must have all caps >= 1 (users/sites/retention) (Bug 2).
+    (!form.plan ||
+      (Number.isFinite(form.plan.maxUsers) && form.plan.maxUsers >= 1 &&
+        Number.isFinite(form.plan.maxSites) && form.plan.maxSites >= 1 &&
+        Number.isFinite(form.plan.minRetentionYears) && form.plan.minRetentionYears >= 1));
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {
@@ -152,6 +164,8 @@ export function AccountModal({
     newPassword: "Password",
     confirmPassword: "Confirm Password",
     planMaxUsers: "Max users",
+    planMaxSites: "Max sites",
+    planRetention: "Retention (yr)",
   };
   const blockingFields = Object.keys(errors).filter((k) => labels[k]).map((k) => labels[k]);
   const showHint = blockingFields.length > 0 && (Object.values(touched).some(Boolean) || submitAttempted);
@@ -263,6 +277,10 @@ export function AccountModal({
           onPlanChange={(p) => set("plan", p)}
           maxUsersError={errorVisible("planMaxUsers") ? errors.planMaxUsers : undefined}
           onMaxUsersBlur={() => markTouched("planMaxUsers")}
+          maxSitesError={errorVisible("planMaxSites") ? errors.planMaxSites : undefined}
+          onMaxSitesBlur={() => markTouched("planMaxSites")}
+          retentionError={errorVisible("planRetention") ? errors.planRetention : undefined}
+          onRetentionBlur={() => markTouched("planRetention")}
         />
 
         <AccountPasswordFields
