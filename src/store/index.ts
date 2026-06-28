@@ -10,6 +10,7 @@ import permissionsReducer from "./permissions.slice";
 import notificationsReducer from "./notifications.slice";
 import readinessReducer from "./readiness.slice";
 import deviationReducer from "./deviation.slice";
+import systemsReducer from "./systems.slice";
 import { loadPersistedState, persistMiddleware } from "./persistence";
 
 const combinedReducer = combineReducers({
@@ -24,6 +25,7 @@ const combinedReducer = combineReducers({
   notifications: notificationsReducer,
   readiness: readinessReducer,
   deviation: deviationReducer,
+  systems: systemsReducer,
 });
 
 type RootStateInternal = ReturnType<typeof combinedReducer>;
