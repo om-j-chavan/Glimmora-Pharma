@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, ShieldCheck, X, Info, FileText, Wrench,
+  ClipboardList, X, Info, FileText, Wrench,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -22,7 +22,6 @@ import {
 import {
   createDeviation as createDeviationAction,
   startInvestigation as startInvestigationAction,
-  submitDeviationForReview as submitDeviationForReviewAction,
   closeDeviation as closeDeviationAction,
   rejectDeviation as rejectDeviationAction,
   attachDeviationDocument,
@@ -386,17 +385,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     router.refresh();
   }
 
-  async function handleSubmitForReview() {
-    if (!selected) return;
-    const result = await submitDeviationForReviewAction(selected.id);
-    if (!result.success) {
-      setErrorMsg(result.error || "Failed to submit for review. Please try again.");
-      setErrorPopup(true);
-      return;
-    }
-    router.refresh();
-  }
-
   async function handleStartInvestigation() {
     if (!selected) return;
     const result = await startInvestigationAction(selected.id);
@@ -581,17 +569,21 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{selected.immediateAction}</p>
             </div>
 
-            {/* Tier 2, Item 4 — Investigation (RCA). Replaces the old read-only
-                "Root cause" block; the Completed state renders the readable RCA. */}
-            <InvestigationSection
-              deviation={selected}
-              currentUserId={user?.id}
-              isQA={isQADecider}
-              writable={selected.status !== "closed" && selected.status !== "rejected" && !isViewer}
-              resolveUser={ownerName}
-              onChanged={(msg) => { setSuccessMsg(msg); setSuccessPopup(true); router.refresh(); }}
-              onError={(msg) => { setErrorMsg(msg); setErrorPopup(true); }}
-            />
+            {/* Tier 2, Item 4 — Investigation (RCA). INVESTIGATION-FIRST phase
+                model: hidden at "open" (only the Start Investigation action shows
+                there); appears once under investigation and stays (read-only RCA
+                via STATE C) at pending_qa_review / capa_pending / closed. */}
+            {selected.status !== "open" && (
+              <InvestigationSection
+                deviation={selected}
+                currentUserId={user?.id}
+                isQA={isQADecider}
+                writable={selected.status !== "closed" && selected.status !== "rejected" && !isViewer}
+                resolveUser={ownerName}
+                onChanged={(msg) => { setSuccessMsg(msg); setSuccessPopup(true); router.refresh(); }}
+                onError={(msg) => { setErrorMsg(msg); setErrorPopup(true); }}
+              />
+            )}
 
             {/* Tier 2, Item 3 — CAPA Decision (made after investigation, by QA;
                 hidden until the investigation is complete). */}
@@ -603,7 +595,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               resolveUser={ownerName}
               onChanged={(msg) => { setSuccessMsg(msg); setSuccessPopup(true); router.refresh(); }}
               onError={(msg) => { setErrorMsg(msg); setErrorPopup(true); }}
-              onRaiseCAPA={handleRaiseCAPAFromDetail}
               linkedCapaId={selected.linkedCAPAId}
               linkedCapaRef={selected.linkedCAPARef}
             />
@@ -674,11 +665,12 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               <p className="text-[10px]" style={{ color: "#10b981" }}>Closed by {selected.closedBy} · {selected.closedDate ? dayjs.utc(selected.closedDate).tz(timezone).format(dateFormat) : ""}</p>
             )}
 
-            {/* SME Section 1, Stage 1 — CAPA Decision Gate banner.
-                Shown when a Critical deviation has no linked CAPA and is not
-                yet closed/rejected. Mirrors the server-side gate in
-                closeDeviation and links to the existing Raise CAPA flow. */}
-            {capaRequired && selected.status !== "closed" && selected.status !== "rejected" && (
+            {/* SME Section 1, Stage 1 — CAPA Decision Gate banner. Critical
+                deviation with no linked CAPA. INVESTIGATION-FIRST: this is a
+                Raise-CAPA / close-gate affordance, so it appears only at the
+                disposition phase (pending_qa_review), not during investigation.
+                Mirrors the server-side gate in closeDeviation. */}
+            {capaRequired && selected.status === "pending_qa_review" && (
               <div
                 role="alert"
                 className="flex items-start gap-2.5 p-3 rounded-lg border"
@@ -707,14 +699,14 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </div>
             )}
 
-            {/* Stage 3 (deviation redesign) — PRIORITY ROUTING. The triage
-                priority decides the path: HIGH/MEDIUM raise a CAPA (deviation →
-                CAPA Pending, stays open + linked until the CAPA closes, then QA
-                SIGN-closes — NO auto-close); LOW is worked as a lightweight
-                assigned task (the DeviationTask subsystem lands in Stage 4).
-                Hidden once a CAPA is linked, when the Critical close-gate banner
-                above already offers Raise CAPA, and (low) once a task exists. */}
-            {selected.status !== "closed" && selected.status !== "rejected" && selected.status !== "capa_pending" && !selected.linkedCAPAId && !capaRequired && !selected.activeTask && selected.priority && (
+            {/* PRIORITY ROUTING (disposition). INVESTIGATION-FIRST: this is the
+                single priority-based disposition surface and appears ONLY after
+                the investigation completes (status pending_qa_review) — NOT from
+                "open" onward. HIGH/MEDIUM → Raise CAPA (→ capa_pending; QA
+                sign-closes when the CAPA closes); LOW → Assign Task. Also hidden
+                once a CAPA is linked, when the Critical close-gate banner already
+                offers Raise CAPA, and (low) once a task exists. */}
+            {selected.status === "pending_qa_review" && !selected.linkedCAPAId && !capaRequired && !selected.activeTask && selected.priority && (
               <div className="p-3 rounded-lg border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
                 {selected.priority === "High" || selected.priority === "Medium" ? (
                   <>
@@ -736,10 +728,10 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </div>
             )}
 
-            {/* Stage 4 (deviation redesign) — low-priority TASK PANEL. Shows the
-                assigned task's state in the deviation detail. QA review actions
-                (Send for Rework / Sign & Close) are added in Stage 4 part 2. */}
-            {selected.activeTask && selected.status !== "closed" && selected.status !== "rejected" && (
+            {/* Stage 4 — low-priority TASK PANEL (disposition phase). Shows the
+                assigned task's state + QA review actions. INVESTIGATION-FIRST:
+                only at pending_qa_review (a task is only assignable there). */}
+            {selected.activeTask && selected.status === "pending_qa_review" && (
               <div className="p-3 rounded-lg border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Low-priority task</p>
@@ -779,15 +771,19 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </div>
             )}
 
-            {/* Action buttons */}
-            {selected.status !== "closed" && selected.status !== "rejected" && (
+            {/* Action buttons — only the phases that own a status-action button:
+                "open" (Start Investigation) and "pending_qa_review" (Sign & Close
+                / Reject). under_investigation acts via the InvestigationSection;
+                capa_pending waits on the CAPA. */}
+            {(selected.status === "open" || selected.status === "pending_qa_review") && (
               <div className="space-y-2 pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
                 {selected.status === "open" && isQAHead && (
                   <Button variant="primary" size="sm" fullWidth icon={Search} onClick={handleStartInvestigation}>Start Investigation</Button>
                 )}
-                {selected.status === "under_investigation" && (user?.id === selected.owner || isQAHead) && (
-                  <Button variant="primary" size="sm" fullWidth icon={ShieldCheck} onClick={handleSubmitForReview}>Submit for QA Review</Button>
-                )}
+                {/* INVESTIGATION-FIRST — the former "Submit for QA Review" step is
+                    gone: completeInvestigation now advances under_investigation →
+                    pending_qa_review directly. During under_investigation the RCA
+                    lives in the InvestigationSection above ("Complete Investigation"). */}
                 {selected.status === "pending_qa_review" && isQAHead && (
                   <>
                     <Button

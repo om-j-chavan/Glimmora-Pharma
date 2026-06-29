@@ -802,6 +802,18 @@ export async function completeInvestigation(
         investigationCompletedById: actor.userId,
       },
     });
+    // INVESTIGATION-FIRST model — completing the investigation hands the
+    // deviation off to QA review (pending_qa_review), where QA dispositions it
+    // by priority (low → task, high/med → CAPA) and performs the signed close.
+    // (Replaces the former separate submitDeviationForReview step.) Guarded to
+    // advance ONLY from under_investigation, so re-editing a completed RCA at a
+    // later status never resets capa_pending / pending_qa_review back.
+    if (existing.status === "under_investigation") {
+      await prisma.deviation.updateMany({
+        where: { id, tenantId: session.user.tenantId, status: "under_investigation" },
+        data: { status: "pending_qa_review" },
+      });
+    }
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,
