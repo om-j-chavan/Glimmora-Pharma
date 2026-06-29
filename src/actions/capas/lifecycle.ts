@@ -290,7 +290,11 @@ export async function createCAPA(
           if (linkedDeviationId) {
             await tx.deviation.update({
               where: { id: linkedDeviationId, tenantId: session.user.tenantId },
-              data: { linkedCAPAId: created.id },
+              // Stage 3 (deviation redesign) — raising a CAPA from a deviation
+              // parks it in "capa_pending": it stays OPEN + linked until the CAPA
+              // closes (which UNBLOCKS it → pending_qa_review; QA then SIGN-closes
+              // via closeDeviation). NO auto-close anywhere.
+              data: { linkedCAPAId: created.id, status: "capa_pending" },
             });
           }
           return created;

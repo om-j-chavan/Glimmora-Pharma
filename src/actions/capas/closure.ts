@@ -419,6 +419,20 @@ export async function signAndCloseCAPA(
       });
     }
 
+    // Stage 3 (deviation redesign) — CAPA-close UNBLOCKS a linked deviation but
+    // does NOT close it: NO auto-close. A deviation parked in "capa_pending"
+    // (set when the CAPA was raised) moves to "pending_qa_review" so QA can
+    // perform the Part 11 SIGNED close via closeDeviation (the only close path).
+    // Status-guarded via updateMany so a deviation in any other state is never
+    // disturbed (no-op if not capa_pending). Mirrors the Finding cascade above
+    // (post-tx, best-effort).
+    if (capa.deviationId) {
+      await prisma.deviation.updateMany({
+        where: { id: capa.deviationId, tenantId: session.user.tenantId, status: "capa_pending" },
+        data: { status: "pending_qa_review" },
+      });
+    }
+
     // CHANGE CONTROL HIDDEN — depsForAudit removed because the gate it
     // backed is bypassed. To re-enable, uncomment.
     // const depsForAudit = ccDepsSnapshot(deps);

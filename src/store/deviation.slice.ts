@@ -30,6 +30,10 @@ export interface Deviation {
   type: DeviationType;
   category: DeviationCategory;
   severity: DeviationSeverity;
+  /** Stage 2/3 (deviation redesign) — QA triage priority ("Low"|"Medium"|"High");
+   *  drives the priority split (high/med → CAPA, low → task). Optional: legacy
+   *  rows predate it. */
+  priority?: string;
   siteId: string;
   area: string;
   detectedBy: string;

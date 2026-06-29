@@ -655,6 +655,41 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </div>
             )}
 
+            {/* Stage 3 (deviation redesign) — PRIORITY ROUTING. The triage
+                priority decides the path: HIGH/MEDIUM raise a CAPA (deviation →
+                CAPA Pending, stays open + linked until the CAPA closes, then QA
+                SIGN-closes — NO auto-close); LOW is worked as a lightweight
+                assigned task (the DeviationTask subsystem lands in Stage 4).
+                Hidden once a CAPA is linked and when the Critical close-gate
+                banner above already offers Raise CAPA. */}
+            {selected.status !== "closed" && selected.status !== "rejected" && selected.status !== "capa_pending" && !selected.linkedCAPAId && !capaRequired && selected.priority && (
+              <div className="p-3 rounded-lg border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
+                {selected.priority === "High" || selected.priority === "Medium" ? (
+                  <>
+                    <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.priority} priority — raise a CAPA</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>The deviation stays open and linked (CAPA Pending) until the CAPA closes; QA then signs it closed.</p>
+                    {capaCan.canCreate && (
+                      <div className="mt-2"><Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA</Button></div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Low priority — assign as a task</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Low-priority deviations are worked as a lightweight assigned task (assign → submit → QA review). The task subsystem arrives in the next stage.</p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Stage 3 — CAPA Pending: the deviation waits on its linked CAPA.
+                Closing the CAPA unblocks it to QA review for a signed close. */}
+            {selected.status === "capa_pending" && (
+              <div className="p-3 rounded-lg border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
+                <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>CAPA Pending</p>
+                <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>A CAPA is raised and linked. This deviation stays open until the CAPA closes — that moves it back to QA review for a Part 11 signed close. No auto-close.</p>
+              </div>
+            )}
+
             {/* Action buttons */}
             {selected.status !== "closed" && selected.status !== "rejected" && (
               <div className="space-y-2 pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>

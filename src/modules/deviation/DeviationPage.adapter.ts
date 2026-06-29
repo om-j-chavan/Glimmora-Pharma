@@ -64,6 +64,8 @@ export function adaptDeviation(p: PrismaDeviationWithCapa): Deviation {
     type: p.type as Deviation["type"],
     category: p.category as Deviation["category"],
     severity: p.severity as DeviationSeverity,
+    // Stage 2/3 (deviation redesign) — QA triage priority drives the split.
+    priority: p.priority ?? undefined,
     area: p.area,
     detectedBy: p.detectedBy,
     detectedDate: p.detectedDate.toISOString(),
