@@ -17,6 +17,20 @@ export type ImpactLevel = "high" | "medium" | "low" | "none";
 // Phase 1.5 — unified to canonical spaced values via the shared constant.
 export type DeviationRCAMethod = InvestigationRCAMethod;
 
+/** Stage 4 (deviation redesign) — the current active low-priority task on a
+ *  deviation (serialised; Dates → ISO). Null when none is open. */
+export interface DeviationActiveTask {
+  id: string;
+  assignee: string;
+  assigneeId: string | null;
+  message: string;
+  dueDate: string | null;
+  status: string;
+  completionNotes: string | null;
+  submittedAt: string | null;
+  reworkReason: string | null;
+}
+
 export interface Deviation {
   id: string;
   // Human-readable reference (e.g. "DEV-CHN-2026-001"). Optional in
@@ -34,6 +48,8 @@ export interface Deviation {
    *  drives the priority split (high/med → CAPA, low → task). Optional: legacy
    *  rows predate it. */
   priority?: string;
+  /** Stage 4 — the current active low-priority task (assign → submit → review). */
+  activeTask?: DeviationActiveTask | null;
   siteId: string;
   area: string;
   detectedBy: string;

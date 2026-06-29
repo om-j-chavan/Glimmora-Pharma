@@ -9,7 +9,7 @@ export const getDeviations = cache(async (tenantId: string) => {
     // detail views can render "CAPA-…" instead of the raw cuid.
     include: { sourcedCAPA: { select: { id: true, reference: true } } },
   });
-  if (rows.length === 0) return rows.map((r) => ({ ...r, documents: [] }));
+  if (rows.length === 0) return rows.map((r) => ({ ...r, documents: [], activeTask: null }));
 
   // Persisted evidence attachments (shared Document pipeline, linked by
   // linkedModule/linkedRecordId — there is no FK relation). ONE tenant-scoped
@@ -36,7 +36,27 @@ export const getDeviations = cache(async (tenantId: string) => {
     if (arr) arr.push(d);
     else byDev.set(d.linkedRecordId, [d]);
   }
-  return rows.map((r) => ({ ...r, documents: byDev.get(r.id) ?? [] }));
+
+  // Stage 4 (deviation redesign) — the current ACTIVE low-priority task per
+  // deviation (newest non-terminal one), so the detail panel can show its
+  // status and QA can review it. ONE tenant-scoped query for ALL deviations.
+  const tasks = await prisma.deviationTask.findMany({
+    where: {
+      tenantId, deviationId: { in: devIds }, deletedAt: null,
+      status: { in: ["pending", "in_progress", "submitted", "rework"] },
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true, deviationId: true, assignee: true, assigneeId: true, message: true,
+      dueDate: true, status: true, completionNotes: true, submittedAt: true, reworkReason: true,
+    },
+  });
+  const taskByDev = new Map<string, (typeof tasks)[number]>();
+  for (const t of tasks) {
+    if (!taskByDev.has(t.deviationId)) taskByDev.set(t.deviationId, t); // newest active wins
+  }
+
+  return rows.map((r) => ({ ...r, documents: byDev.get(r.id) ?? [], activeTask: taskByDev.get(r.id) ?? null }));
 });
 
 export const getDeviation = cache(async (id: string, tenantId: string) => {

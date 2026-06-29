@@ -52,8 +52,26 @@ export interface WorklistGroup {
   evidenceNeedsInit: boolean;
 }
 
+/** Stage 4 (deviation redesign) — a low-priority DeviationTask assigned to the
+ *  user. Rendered as its own worklist section, additively (the CAPA groups are
+ *  untouched). The "close" outcome is the SIGNED closeDeviation, not here. */
+export interface WorklistDeviationTask {
+  id: string;
+  deviationId: string;
+  deviationReference: string | null;
+  deviationTitle: string;
+  message: string;
+  dueDate: string | null;
+  status: string;
+  completionNotes: string | null;
+  reworkReason: string | null;
+}
+
 export interface Worklist {
   groups: WorklistGroup[];
+  /** Stage 4 — low-priority deviation tasks assigned to the user (UNION source
+   *  alongside the CAPA groups above). */
+  deviationTasks: WorklistDeviationTask[];
   openCount: number;
   reworkCount: number;
   nextDue: string | null;
@@ -61,9 +79,11 @@ export interface Worklist {
 
 const ACTIVE_STATUSES = ["open", "in_progress", "pending_qa_review", "pending_verification"];
 const OPEN_ITEM_STATUSES = new Set(["pending", "in_progress", "rework"]);
+// Stage 4 — DeviationTask statuses that still need worklist attention.
+const DEV_TASK_ACTIVE_STATUSES = ["pending", "in_progress", "submitted", "rework"];
 
 export const getWorklist = cache(async (userId: string, tenantId: string): Promise<Worklist> => {
-  const [items, drivenCapas] = await Promise.all([
+  const [items, drivenCapas, devTasks] = await Promise.all([
     prisma.cAPAActionItem.findMany({
       // Exclude soft-deleted items and items whose parent CAPA was soft-deleted.
       where: { ownerId: userId, tenantId, deletedAt: null, capa: { deletedAt: null } },
@@ -80,6 +100,17 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     prisma.cAPA.findMany({
       where: { tenantId, ownerId: userId, status: { in: ACTIVE_STATUSES }, deletedAt: null },
       select: { id: true, reference: true, description: true, status: true, dueDate: true, risk: true, ownerId: true },
+    }),
+    // Stage 4 — low-priority DeviationTasks assigned to this user (the UNION
+    // source). Excludes soft-deleted tasks and tasks on resolved deviations.
+    prisma.deviationTask.findMany({
+      where: {
+        assigneeId: userId, tenantId, deletedAt: null,
+        status: { in: DEV_TASK_ACTIVE_STATUSES },
+        deviation: { is: { status: { notIn: ["closed", "rejected"] }, deletedAt: null } },
+      },
+      orderBy: { dueDate: "asc" },
+      include: { deviation: { select: { id: true, reference: true, title: true } } },
     }),
   ]);
 
@@ -167,11 +198,38 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     return ad.localeCompare(bd);
   });
 
-  const openItems = items.filter((i) => OPEN_ITEM_STATUSES.has(i.status));
-  const reworkCount = items.filter((i) => i.status === "rework").length;
-  const nextDue = openItems.length > 0
-    ? openItems.map((i) => i.dueDate).sort((a, b) => a.getTime() - b.getTime())[0].toISOString()
-    : null;
+  // Stage 4 — serialise the deviation-task union (additive; the CAPA groups
+  // above are untouched).
+  const deviationTasks: WorklistDeviationTask[] = devTasks.map((t) => ({
+    id: t.id,
+    deviationId: t.deviationId,
+    deviationReference: t.deviation.reference,
+    deviationTitle: t.deviation.title,
+    message: t.message,
+    dueDate: t.dueDate ? t.dueDate.toISOString() : null,
+    status: t.status,
+    completionNotes: t.completionNotes,
+    reworkReason: t.reworkReason,
+  }));
 
-  return { groups, openCount: openItems.length, reworkCount, nextDue };
+  const openItems = items.filter((i) => OPEN_ITEM_STATUSES.has(i.status));
+  // Open deviation tasks count toward the worklist totals (submitted ones are
+  // awaiting QA, so they're excluded from "open" like complete CAPA items).
+  const openDevTasks = deviationTasks.filter((t) => OPEN_ITEM_STATUSES.has(t.status));
+  const reworkCount =
+    items.filter((i) => i.status === "rework").length +
+    deviationTasks.filter((t) => t.status === "rework").length;
+  const dueCandidates = [
+    ...openItems.map((i) => i.dueDate.toISOString()),
+    ...openDevTasks.map((t) => t.dueDate).filter((d): d is string => d !== null),
+  ].sort((a, b) => a.localeCompare(b));
+  const nextDue = dueCandidates.length > 0 ? dueCandidates[0] : null;
+
+  return {
+    groups,
+    deviationTasks,
+    openCount: openItems.length + openDevTasks.length,
+    reworkCount,
+    nextDue,
+  };
 });

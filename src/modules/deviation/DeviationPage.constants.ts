@@ -12,6 +12,12 @@ export const STATUS_VARIANT: Record<DeviationStatus, "gray" | "blue" | "amber" |
 export const STATUS_LABEL: Record<DeviationStatus, string> = {
   open: "Open", under_investigation: "Under Investigation", pending_qa_review: "Pending QA Review", capa_pending: "CAPA Pending", closed: "Closed", rejected: "Rejected",
 };
+// Stage 4 (deviation redesign) — DeviationTask status labels for the
+// low-priority task panel + worklist rows.
+export const DEV_TASK_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending", in_progress: "In Progress", submitted: "Submitted for Review",
+  rework: "Needs Rework", closed: "Closed", cancelled: "Cancelled",
+};
 export const IMPACT_COLOR: Record<string, string> = { high: "#ef4444", medium: "#f59e0b", low: "#10b981", none: "#64748b" };
 export const CATEGORIES = ["process", "equipment", "material", "environmental", "personnel", "documentation", "system", "other"];
 export const AREAS = ["QC Lab", "Manufacturing", "Warehouse", "Utilities", "QMS", "R&D", "Packaging"];

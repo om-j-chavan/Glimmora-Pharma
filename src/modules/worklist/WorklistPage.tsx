@@ -18,6 +18,7 @@ import { submitForReview } from "@/actions/capas";
 import { updateEvidenceStatus, initializeEvidenceForCAPA } from "@/actions/evidence";
 import type { Worklist, WorklistGroup, WorklistItem } from "@/lib/queries/worklist";
 import { TaskPanel } from "./TaskPanel";
+import { DeviationTaskPanel } from "./DeviationTaskPanel";
 import { StatusPill, ACTION_STATUS_TOKEN } from "@/modules/capa/lib/statusTokens";
 
 const ITEM_STATUS_LABEL: Record<string, string> = {
@@ -26,6 +27,10 @@ const ITEM_STATUS_LABEL: Record<string, string> = {
   complete: "Complete",
   skipped: "Skipped",
   rework: "Rework",
+};
+// Stage 4 (deviation redesign) — low-priority deviation-task row labels.
+const DEV_TASK_ROW_LABEL: Record<string, string> = {
+  pending: "Pending", in_progress: "In Progress", submitted: "Submitted", rework: "Rework",
 };
 const EVIDENCE_LABEL: Record<string, string> = {
   BATCH_RECORDS: "Batch records",
@@ -75,6 +80,8 @@ export function WorklistPage({
   const canWrite = !isViewer;
 
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // Stage 4 (deviation redesign) — open low-priority deviation-task panel.
+  const [selectedDevTaskId, setSelectedDevTaskId] = useState<string | null>(null);
   const [busyCapa, setBusyCapa] = useState<string | null>(null);
   const [naModal, setNaModal] = useState<{ evidenceItemId: string; category: string } | null>(null);
   const [naReason, setNaReason] = useState("");
@@ -464,6 +471,29 @@ export function WorklistPage({
         );
       })}
 
+      {/* Stage 4 (deviation redesign) — low-priority deviation tasks assigned
+          to the user (UNION source alongside the CAPA groups above). */}
+      {worklist.deviationTasks.length > 0 && (
+        <section className="mb-3 rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
+          <div className="px-4 py-2.5 flex items-center gap-1.5" style={{ borderBottom: "1px solid var(--card-border)" }}>
+            <ListChecks className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+            <h2 className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Deviation tasks ({worklist.deviationTasks.length})</h2>
+          </div>
+          <div>
+            {worklist.deviationTasks.map((t) => (
+              <button key={t.id} type="button" onClick={() => setSelectedDevTaskId(t.id)} className="w-full text-left flex items-center gap-3 p-3 border-none cursor-pointer bg-transparent hover:bg-(--bg-hover)" style={{ borderBottom: "1px solid var(--bg-border)" }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{t.deviationReference ?? t.deviationId.slice(0, 8)} · {t.deviationTitle}</p>
+                  <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>{t.message}</p>
+                </div>
+                {t.dueDate && <span className="text-[11px] shrink-0" style={{ color: "var(--text-muted)" }}>{dayjs.utc(t.dueDate).format("DD MMM")}</span>}
+                <Badge variant={t.status === "submitted" ? "purple" : t.status === "rework" ? "red" : "amber"}>{DEV_TASK_ROW_LABEL[t.status] ?? t.status}</Badge>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Task panel */}
       {selectedTaskId && (
         <TaskPanel
@@ -475,6 +505,14 @@ export function WorklistPage({
           onChanged={() => router.refresh()}
         />
       )}
+
+      {/* Deviation task panel (assignee: start / upload / submit) */}
+      {selectedDevTaskId && (() => {
+        const t = worklist.deviationTasks.find((d) => d.id === selectedDevTaskId);
+        return t ? (
+          <DeviationTaskPanel task={t} onClose={() => setSelectedDevTaskId(null)} onChanged={() => router.refresh()} />
+        ) : null;
+      })()}
 
       {/* N/A reason modal */}
       {naModal && (

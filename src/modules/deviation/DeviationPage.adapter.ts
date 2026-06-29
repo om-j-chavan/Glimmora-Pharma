@@ -23,6 +23,19 @@ export interface DeviationDocRow {
 export type PrismaDeviationWithCapa = PrismaDeviation & {
   sourcedCAPA?: { id: string; reference: string | null } | null;
   documents?: DeviationDocRow[];
+  // Stage 4 (deviation redesign) — the current active low-priority task row
+  // (selected/serialised by getDeviations). Null when none is open.
+  activeTask?: {
+    id: string;
+    assignee: string;
+    assigneeId: string | null;
+    message: string;
+    dueDate: Date | null;
+    status: string;
+    completionNotes: string | null;
+    submittedAt: Date | null;
+    reworkReason: string | null;
+  } | null;
 };
 
 function toDocFileType(ext: string | null, mime: string | null): DocFileType {
@@ -66,6 +79,20 @@ export function adaptDeviation(p: PrismaDeviationWithCapa): Deviation {
     severity: p.severity as DeviationSeverity,
     // Stage 2/3 (deviation redesign) — QA triage priority drives the split.
     priority: p.priority ?? undefined,
+    // Stage 4 — current active low-priority task (Dates → ISO).
+    activeTask: p.activeTask
+      ? {
+          id: p.activeTask.id,
+          assignee: p.activeTask.assignee,
+          assigneeId: p.activeTask.assigneeId,
+          message: p.activeTask.message,
+          dueDate: p.activeTask.dueDate ? p.activeTask.dueDate.toISOString() : null,
+          status: p.activeTask.status,
+          completionNotes: p.activeTask.completionNotes,
+          submittedAt: p.activeTask.submittedAt ? p.activeTask.submittedAt.toISOString() : null,
+          reworkReason: p.activeTask.reworkReason,
+        }
+      : null,
     area: p.area,
     detectedBy: p.detectedBy,
     detectedDate: p.detectedDate.toISOString(),

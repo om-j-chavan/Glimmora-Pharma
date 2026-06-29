@@ -28,6 +28,7 @@ import {
   attachDeviationDocument,
 } from "@/actions/deviations";
 import { createCAPA as createCAPAAction } from "@/actions/capas";
+import { assignDeviationTask } from "@/actions/deviation-tasks";
 import { deleteDocument } from "@/actions/documents";
 import { displayName, displayUserName, displaySiteName } from "@/lib/identity-display";
 import { Button } from "@/components/ui/Button";
@@ -38,7 +39,7 @@ import { Popup } from "@/components/ui/Popup";
 import { PageHeader, StatCard, StatusGuide } from "@/components/shared";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
 import {
-  STATUS_VARIANT, STATUS_LABEL, IMPACT_COLOR, CATEGORIES, AREAS,
+  STATUS_VARIANT, STATUS_LABEL, IMPACT_COLOR, CATEGORIES, AREAS, DEV_TASK_STATUS_LABEL,
 } from "./DeviationPage.constants";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
 import { addSchema, type AddForm } from "./DeviationPage.schemas";
@@ -171,6 +172,13 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  // Stage 4 (deviation redesign) — low-priority "Assign task" modal state.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignAssigneeId, setAssignAssigneeId] = useState("");
+  const [assignMessage, setAssignMessage] = useState("");
+  const [assignDueDate, setAssignDueDate] = useState("");
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assignBusy, setAssignBusy] = useState(false);
   const [successPopup, setSuccessPopup] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   // Failure surface — paired with successPopup above. Server actions
@@ -292,6 +300,27 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     }
     const capaData = result.data as { id: string; reference?: string | null };
     setSuccessMsg(`CAPA ${capaData.reference ?? capaData.id.slice(0, 8)} raised from ${selected.reference ?? selected.id.slice(0, 8)}`);
+    setSuccessPopup(true);
+    router.refresh();
+  }
+
+  // Stage 4 (deviation redesign) — QA assigns a low-priority deviation as a
+  // lightweight task. Server (assignDeviationTask) enforces qa_head + low
+  // priority + active-user assignee.
+  async function handleAssignTask() {
+    if (!selected) return;
+    setAssignBusy(true);
+    setAssignError(null);
+    const result = await assignDeviationTask(selected.id, {
+      assigneeId: assignAssigneeId,
+      message: assignMessage,
+      dueDate: assignDueDate || undefined,
+    });
+    setAssignBusy(false);
+    if (!result.success) { setAssignError(result.error || "Failed to assign task."); return; }
+    setAssignOpen(false);
+    setAssignAssigneeId(""); setAssignMessage(""); setAssignDueDate("");
+    setSuccessMsg(`Task assigned for ${selected.reference ?? selected.id.slice(0, 8)}`);
     setSuccessPopup(true);
     router.refresh();
   }
@@ -660,9 +689,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 CAPA Pending, stays open + linked until the CAPA closes, then QA
                 SIGN-closes — NO auto-close); LOW is worked as a lightweight
                 assigned task (the DeviationTask subsystem lands in Stage 4).
-                Hidden once a CAPA is linked and when the Critical close-gate
-                banner above already offers Raise CAPA. */}
-            {selected.status !== "closed" && selected.status !== "rejected" && selected.status !== "capa_pending" && !selected.linkedCAPAId && !capaRequired && selected.priority && (
+                Hidden once a CAPA is linked, when the Critical close-gate banner
+                above already offers Raise CAPA, and (low) once a task exists. */}
+            {selected.status !== "closed" && selected.status !== "rejected" && selected.status !== "capa_pending" && !selected.linkedCAPAId && !capaRequired && !selected.activeTask && selected.priority && (
               <div className="p-3 rounded-lg border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
                 {selected.priority === "High" || selected.priority === "Medium" ? (
                   <>
@@ -675,8 +704,28 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 ) : (
                   <>
                     <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Low priority — assign as a task</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Low-priority deviations are worked as a lightweight assigned task (assign → submit → QA review). The task subsystem arrives in the next stage.</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Low-priority deviations are worked as a lightweight assigned task (assign → submit → QA review).</p>
+                    {isQAHead && (
+                      <div className="mt-2"><Button variant="secondary" size="sm" icon={Plus} onClick={() => { setAssignError(null); setAssignOpen(true); }}>Assign Task</Button></div>
+                    )}
                   </>
+                )}
+              </div>
+            )}
+
+            {/* Stage 4 (deviation redesign) — low-priority TASK PANEL. Shows the
+                assigned task's state in the deviation detail. QA review actions
+                (Send for Rework / Sign & Close) are added in Stage 4 part 2. */}
+            {selected.activeTask && selected.status !== "closed" && selected.status !== "rejected" && (
+              <div className="p-3 rounded-lg border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Low-priority task</p>
+                  <Badge variant={selected.activeTask.status === "submitted" ? "purple" : selected.activeTask.status === "rework" ? "red" : "amber"}>{DEV_TASK_STATUS_LABEL[selected.activeTask.status] ?? selected.activeTask.status}</Badge>
+                </div>
+                <p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}>Assigned to <strong>{selected.activeTask.assignee}</strong>{selected.activeTask.dueDate ? ` · due ${dayjs.utc(selected.activeTask.dueDate).tz(timezone).format(dateFormat)}` : ""}</p>
+                <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>{selected.activeTask.message}</p>
+                {selected.activeTask.completionNotes && (
+                  <p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {selected.activeTask.completionNotes}</p>
                 )}
               </div>
             )}
@@ -864,6 +913,39 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
             <Button variant="secondary" onClick={() => setRejectModal(false)}>Cancel</Button>
             <Button variant="primary" disabled={!rejectReason.trim()} onClick={handleReject}>Reject</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Stage 4 (deviation redesign) — Assign low-priority task. Assignee pool
+          = ANY active tenant user (broadened from the old compliance-only
+          picker). Server (assignDeviationTask) re-validates qa_head + low
+          priority + active assignee. */}
+      <Modal open={assignOpen} onClose={assignBusy ? () => undefined : () => { setAssignOpen(false); setAssignError(null); }} title="Assign Task">
+        <div className="space-y-4">
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Assign <strong>{selected?.reference ?? selected?.id}</strong> to a user as a lightweight task. They complete the work and submit it for your review; closure is still your signed sign-off.</p>
+          <div>
+            <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Assignee *</p>
+            <Dropdown
+              options={users.filter((u) => u.status === "Active" && u.role !== "viewer").map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
+              value={assignAssigneeId}
+              onChange={setAssignAssigneeId}
+              width="w-full"
+              placeholder="Select a user..."
+            />
+          </div>
+          <div>
+            <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Instruction *</p>
+            <textarea rows={3} className="input w-full resize-none" value={assignMessage} onChange={(e) => setAssignMessage(e.target.value)} placeholder="What should the assignee do? (≥ 5 characters)" disabled={assignBusy} />
+          </div>
+          <div>
+            <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date (optional)</p>
+            <input type="date" className="input w-full" value={assignDueDate} onChange={(e) => setAssignDueDate(e.target.value)} disabled={assignBusy} />
+          </div>
+          {assignError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{assignError}</p>}
+          <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
+            <Button variant="secondary" onClick={() => { setAssignOpen(false); setAssignError(null); }} disabled={assignBusy}>Cancel</Button>
+            <Button variant="primary" icon={Plus} onClick={handleAssignTask} disabled={assignBusy || !assignAssigneeId || assignMessage.trim().length < 5} loading={assignBusy}>Assign Task</Button>
           </div>
         </div>
       </Modal>
