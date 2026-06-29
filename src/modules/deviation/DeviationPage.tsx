@@ -32,9 +32,12 @@ import { deleteDocument } from "@/actions/documents";
 import { displayName, displayUserName, displaySiteName } from "@/lib/identity-display";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { Input } from "@/components/ui/Input";
+import { DatePicker } from "@/components/ui/DatePicker";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
+import { DocumentUpload, type LinkedDocument } from "@/components/shared/DocumentUpload";
 import { PageHeader, StatCard, StatusGuide } from "@/components/shared";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
 import {
@@ -56,6 +59,19 @@ import type { DeviationClusterInput } from "@/lib/ai";
 import type { Deviation as PrismaDeviation } from "@prisma/client";
 
 /* ══════════════════════════════════════ */
+
+/** Convert a base64 data URL (what DocumentUpload hands back in onUpload) into a
+ *  File, so a doc staged in the create modal can be sent through the shared
+ *  attachDeviationDocument → createDocument(FormData) pipeline after the
+ *  deviation is created. */
+function dataUrlToFile(dataUrl: string, fileName: string): File {
+  const [meta, b64] = dataUrl.split(",");
+  const mime = meta.match(/data:(.*?);base64/)?.[1] ?? "application/octet-stream";
+  const bin = atob(b64 ?? "");
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], fileName, { type: mime });
+}
 
 export interface DeviationPageProps {
   /** Server-fetched deviations (Prisma rows + linked-CAPA reference) —
@@ -163,6 +179,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // is hit it surfaces via the server error string in handleClose.
   const capaRequired = !!selected && normalizeSeverityForDisplay(selected.severity, "fda") === "Critical" && !selected.linkedCAPAId;
   const [addOpen, setAddOpen] = useState(false);
+  // Documents staged in the create modal (optional). Attached to the new
+  // deviation after it's created (onReport), via attachDeviationDocument.
+  const [pendingDocs, setPendingDocs] = useState<LinkedDocument[]>([]);
   const [closeModal, setCloseModal] = useState(false);
   const [rejectModal, setRejectModal] = useState(false);
   const [closeNotes, setCloseNotes] = useState("");
@@ -267,13 +286,29 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       }
       const created = result.data as PrismaDeviation;
       // Tier 2, Item 3 — reporting a deviation creates ONLY the Deviation
-      // record. The CAPA decision is now made AFTER the investigation (see the
-      // CAPA Decision section in the detail modal), so no CAPA is auto-raised
-      // here. The old "Raise CAPA immediately" checkbox has been removed.
+      // record (no CAPA is auto-raised; the CAPA disposition happens after
+      // investigation). Then attach any documents staged in the create modal,
+      // reusing the shared Deviation-doc pipeline (attachDeviationDocument →
+      // createDocument; linkedModule "Deviation Management").
+      let docFailed = false;
+      for (const d of pendingDocs) {
+        if (!d.dataUrl) continue;
+        const fd = new FormData();
+        fd.set("fileName", d.fileName);
+        fd.set("file", dataUrlToFile(d.dataUrl, d.fileName));
+        const attached = await attachDeviationDocument(created.id, fd);
+        if (!attached.success) docFailed = true;
+      }
       setAddOpen(false);
       reset();
-      setSuccessMsg(`${created.reference ?? created.id.slice(0, 8)} reported`);
-      setSuccessPopup(true);
+      setPendingDocs([]);
+      if (docFailed) {
+        setErrorMsg(`${created.reference ?? created.id.slice(0, 8)} reported, but a document failed to attach. Add it from the detail view.`);
+        setErrorPopup(true);
+      } else {
+        setSuccessMsg(`${created.reference ?? created.id.slice(0, 8)} reported`);
+        setSuccessPopup(true);
+      }
       router.refresh();
     } catch (err) {
       // Unexpected throw (network/runtime) — previously unhandled, which was
@@ -807,12 +842,25 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       )}
 
       {/* ═══ REPORT MODAL ═══ */}
-      <Modal open={addOpen} onClose={() => { setAddOpen(false); reset(); }} title="Report Deviation">
-        <form onSubmit={handleSubmit(onReport)} noValidate className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+      <Modal
+        open={addOpen}
+        onClose={() => { setAddOpen(false); reset(); setPendingDocs([]); }}
+        title="Report Deviation"
+        persistent
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => { setAddOpen(false); reset(); setPendingDocs([]); }}>Cancel</Button>
+            <Button icon={Plus} onClick={handleSubmit(onReport)} disabled={!isValid || isSubmitting} loading={isSubmitting}>
+              {isSubmitting ? "Saving…" : "Report Deviation"}
+            </Button>
+          </div>
+        }
+      >
+        <form onSubmit={handleSubmit(onReport)} noValidate className="space-y-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Basic information</p>
             <div className="space-y-3">
-              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Title *</p><Controller name="title" control={control} render={({ field }) => <input {...field} className="input w-full" style={errors.title ? { borderColor: "#ef4444" } : undefined} placeholder="Short descriptive title" />} />{errors.title && <p className="text-[11px] text-[#ef4444] mt-1">{errors.title.message}</p>}</div>
+              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Title *</p><Controller name="title" control={control} render={({ field }) => <Input id="dev-title" {...field} error={errors.title?.message} placeholder="Short descriptive title" />} /></div>
               <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Description *</p><Controller name="description" control={control} render={({ field }) => <textarea {...field} rows={3} className="input w-full resize-none" style={errors.description ? { borderColor: "#ef4444" } : undefined} placeholder="What happened?" />} />{errors.description && <p className="text-[11px] text-[#ef4444] mt-1">{errors.description.message}</p>}</div>
               <div className="grid grid-cols-3 gap-3">
                 <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Type *</p><Controller name="type" control={control} render={({ field }) => <Dropdown options={[{ value: "planned", label: "Planned" }, { value: "unplanned", label: "Unplanned" }]} value={field.value} onChange={field.onChange} width="w-full" className={errors.type ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.type && <p className="text-[11px] text-[#ef4444] mt-1">{errors.type.message}</p>}</div>
@@ -842,22 +890,27 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Triage</p>
             <div className="grid grid-cols-2 gap-3">
               <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Priority * <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(from severity, editable)</span></p><Controller name="priority" control={control} render={({ field }) => <Dropdown options={[{ value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select..." className={errors.priority ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.priority && <p className="text-[11px] text-[#ef4444] mt-1">{errors.priority.message}</p>}</div>
-              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date *</p><Controller name="dueDate" control={control} render={({ field }) => <input type="date" {...field} className="input w-full" style={errors.dueDate ? { borderColor: "#ef4444" } : undefined} />} />{errors.dueDate && <p className="text-[11px] text-[#ef4444] mt-1">{errors.dueDate.message}</p>}</div>
+              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date *</p><Controller name="dueDate" control={control} render={({ field }) => <DatePicker id="dev-due" value={field.value ?? ""} onChange={field.onChange} error={errors.dueDate?.message} />} /></div>
             </div>
-            <div className="mt-2"><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Batches affected (optional, comma-separated)</p><Controller name="batchesAffected" control={control} render={({ field }) => <input {...field} className="input w-full" placeholder="e.g. STB-2026-042, STB-2026-043" />} /></div>
+            <div className="mt-2"><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Batches affected (optional, comma-separated)</p><Controller name="batchesAffected" control={control} render={({ field }) => <Input id="dev-batches" {...field} placeholder="e.g. STB-2026-042, STB-2026-043" />} /></div>
           </div>
-          <div className="flex flex-col items-end gap-1.5 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
-            {!isValid && !isSubmitting && (
-              <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Fill all required fields to enable submit</p>
-            )}
-            <div className="flex justify-end gap-2">
-              {/* Cancel stays enabled during submit (per spec). */}
-              <Button variant="secondary" onClick={() => { setAddOpen(false); reset(); }}>Cancel</Button>
-              <Button type="submit" icon={Plus} disabled={!isValid || isSubmitting} loading={isSubmitting}>
-                {isSubmitting ? "Saving…" : "Report Deviation"}
-              </Button>
-            </div>
+          {/* Optional supporting document — reuses the shared DocumentUpload.
+              Files are staged client-side (the deviation has no id yet) and
+              attached to the new deviation in onReport once it's created. */}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Supporting document (optional)</p>
+            <DocumentUpload
+              recordId="new"
+              recordTitle="New deviation"
+              module="Deviation Management"
+              existingDocs={pendingDocs}
+              onUpload={(doc) => setPendingDocs((p) => [...p, doc])}
+              onDelete={(id) => setPendingDocs((p) => p.filter((d) => d.id !== id))}
+            />
           </div>
+          {!isValid && !isSubmitting && (
+            <p className="text-[10px] text-right" style={{ color: "var(--text-muted)" }}>Fill all required fields to enable submit</p>
+          )}
         </form>
       </Modal>
 

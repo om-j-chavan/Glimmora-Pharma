@@ -51,27 +51,32 @@ export async function attachDeviationDocument(
   // Parent-tenant verification — load the deviation in the actor's tenant.
   const deviation = await prisma.deviation.findFirst({
     where: { id: deviationId, tenantId: session.user.tenantId },
-    select: { id: true, reference: true },
+    select: { id: true, reference: true, createdById: true },
   });
   if (!deviation) return { success: false, error: "FORBIDDEN" };
 
-  // Part A access-control fix — DEVIATION-level evidence attach is a QA action.
-  // Was COMPLIANCE_AUTHOR_ROLES, which leaked to non-QA authors (e.g.
-  // regulatory_affairs). The low-priority TASK assignee uploads to their task
-  // via attachDeviationTaskDocument (gated by isAssignedToTask) — not here.
-  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Only QA Head can attach evidence to a deviation." };
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  // Access gate — QA may attach to ANY deviation (Part A). ADDITIONALLY the
+  // deviation's own REPORTER may attach to THEIR deviation: this is what the
+  // create-modal optional upload uses (the reporter supplies supporting evidence
+  // while reporting it). Every other non-QA role is still blocked, and the
+  // detail-modal attach UI stays QA-only. A non-author reporter (e.g.
+  // operations_head) bypasses createDocument's author gate exactly like the task
+  // assignee does — the super_admin/viewer stops inside createDocument still apply.
+  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
+  const isReporter = !!deviation.createdById && deviation.createdById === actor.userId;
+  if (!isQA && !isReporter) {
+    return { success: false, error: "Only QA Head or the deviation's reporter can attach evidence to it." };
   }
 
   // Link server-side (ignore any client-supplied linkage), then delegate to the
   // shared pipeline (file storage + Document row + its DOCUMENT_UPLOADED audit).
   formData.set("linkedModule", "Deviation Management");
   formData.set("linkedRecordId", deviationId);
-  const created = await createDocument(formData);
+  const created = await createDocument(formData, { bypassAuthorGate: isReporter });
   if (!created.success) return created;
 
   // Deviation-module attach audit (scoped to the actor's tenant).
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   await prisma.auditLog.create({
     data: {
       tenantId: session.user.tenantId,
@@ -235,13 +240,12 @@ export async function createDeviation(
             patientSafetyImpact: parsed.data.patientSafetyImpact,
             productQualityImpact: parsed.data.productQualityImpact,
             regulatoryImpact: parsed.data.regulatoryImpact,
-            // Stage 2 (deviation redesign) — `owner` no longer collected at
-            // creation. The column stays NOT NULL (legacy/retention) so new rows
-            // write "". FLAG for Stage 3: the old submitDeviationForReview
-            // owner-gate (~line 859: session.user.id === deviation.owner) and the
-            // owner display in DeviationPage (list ~446, detail ~610) assume an
-            // owner and must be replaced when the investigation flow is removed.
-            owner: "",
+            // Owner = creator. The reporter is recorded as the deviation owner
+            // (the session identity, which equals their User.id for site users —
+            // the same value ownerName() resolves and any owner-gate compares).
+            // Replaces the Stage-2 empty-string placeholder that rendered as
+            // "Unknown user" and left selected.owner blank.
+            owner: session.user.id,
             priority: parsed.data.priority ?? severityToPriority(parsed.data.severity),
             siteId: parsed.data.siteId ?? null,
             batchesAffected: parsed.data.batchesAffected ?? null,
