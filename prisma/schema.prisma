@@ -3,7 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  // LOCAL-DEV ONLY: switched to sqlite to run offline without Postgres.
+  // DO NOT COMMIT — CI/prod use provider = "postgresql".
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -44,12 +46,9 @@ model Tenant {
   capaActionItems CAPAActionItem[]
 }
 
-enum PlanTier {
-  ESSENTIALS
-  PROFESSIONAL
-  ENTERPRISE
-  TAILORED
-}
+// LOCAL-DEV ONLY: SQLite has no enums. Original Postgres schema uses
+// `enum PlanTier { ESSENTIALS PROFESSIONAL ENTERPRISE TAILORED }`.
+// DO NOT COMMIT — restore the enum + `tier PlanTier` for CI/prod.
 
 // Subscription Phase A — exactly one Plan per Tenant (optional until assigned).
 // Caps are FROZEN onto the row at assignment time (copied from the tier
@@ -61,7 +60,7 @@ model Plan {
   id                String   @id @default(cuid())
   tenantId          String   @unique
   tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tier              PlanTier
+  tier              String   // LOCAL-DEV ONLY: PlanTier enum in Postgres
   displayName       String?  // TAILORED only; null => UI shows "TAILORED"
   maxUsers          Int      // frozen at assignment
   maxSites          Int      // frozen at assignment
