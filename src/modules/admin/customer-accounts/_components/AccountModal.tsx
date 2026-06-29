@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Upload, Save, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { MIN_TAILORED_RETENTION_YEARS } from "@/lib/plans";
 import { type AccountFormData } from "../helpers";
 import { AccountInfoFields } from "./account-form/AccountInfoFields";
 import { AccountSettingsFields } from "./account-form/AccountSettingsFields";
@@ -133,6 +134,10 @@ export function AccountModal({
       }
       if (!Number.isFinite(form.plan.minRetentionYears) || form.plan.minRetentionYears < 1) {
         e.planRetention = "Retention must be at least 1 year";
+      } else if (form.plan.tier === "TAILORED" && form.plan.minRetentionYears < MIN_TAILORED_RETENTION_YEARS) {
+        // TAILORED only — retention is a compliance FLOOR (not a usage count);
+        // can't promise below the 7-year Part 11 floor. Mirrors the server gate.
+        e.planRetention = `Retention must be at least ${MIN_TAILORED_RETENTION_YEARS} years (compliance floor)`;
       }
       if (!Number.isFinite(form.plan.durationMonths) || form.plan.durationMonths < 1) {
         e.planDuration = "Duration must be at least 1 month";
@@ -172,8 +177,9 @@ export function AccountModal({
         Number.isFinite(form.plan.maxSites) && form.plan.maxSites >= 1 &&
         Number.isFinite(form.plan.minRetentionYears) && form.plan.minRetentionYears >= 1 &&
         Number.isFinite(form.plan.durationMonths) && form.plan.durationMonths >= 1 &&
-        // TAILORED: caps may not drop below current active usage (equal ok).
-        (form.plan.tier !== "TAILORED" || (form.plan.maxUsers >= currentUserCount && form.plan.maxSites >= currentSiteCount))));
+        // TAILORED: caps may not drop below current active usage, and retention
+        // may not drop below the compliance floor (equal ok for both).
+        (form.plan.tier !== "TAILORED" || (form.plan.maxUsers >= currentUserCount && form.plan.maxSites >= currentSiteCount && form.plan.minRetentionYears >= MIN_TAILORED_RETENTION_YEARS))));
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {

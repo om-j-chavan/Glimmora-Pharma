@@ -42,6 +42,16 @@ export const TAILORED_CEILINGS: PlanCaps = {
   durationMonths: 120, // 10 years
 };
 
+/**
+ * Compliance FLOOR for a TAILORED plan's retention promise. A tenant must not
+ * promise LESS retention than the data layer already enforces: every evidence
+ * file / document / stage-doc is kept for a hard 7-year "Part 11 retention
+ * floor" (retainUntil = upload + 7y — see src/actions/evidence.ts, documents.ts,
+ * systems.ts). Distinct from the >=1 floor and the ceiling; gates TAILORED only
+ * (fixed tiers use their presets). NOT coupled to duration or usage counts.
+ */
+export const MIN_TAILORED_RETENTION_YEARS = 7;
+
 export const PLAN_TIER_VALUES: readonly PlanTier[] = [
   "ESSENTIALS",
   "PROFESSIONAL",

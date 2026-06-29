@@ -9,7 +9,7 @@ import { BCRYPT_COST } from "@/lib/passwords";
 import { getTenants } from "@/lib/queries/tenants";
 import type { Tenant as ReduxTenant } from "@/store/auth.slice";
 import { sanitizeServerError } from "@/lib/errors";
-import { resolvePlanCaps, validateTailoredCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
+import { resolvePlanCaps, validateTailoredCaps, resolveExpiry, MIN_TAILORED_RETENTION_YEARS, type PlanTier } from "@/lib/plans";
 
 export async function listTenants(): Promise<ReduxTenant[]> {
   const session = await requireAuth();
@@ -323,6 +323,12 @@ export async function assignPlan(
     }
     if (caps.maxSites < siteCount) {
       return { success: false, error: `Cannot set Max sites below current usage: ${siteCount} site${siteCount === 1 ? "" : "s"} active` };
+    }
+    // Retention is a COMPLIANCE FLOOR (not a usage count): a TAILORED plan must
+    // not promise less than the 7-year Part 11 retention the data layer keeps.
+    // Equal allowed (strict <). Independent of duration and usage.
+    if (caps.minRetentionYears < MIN_TAILORED_RETENTION_YEARS) {
+      return { success: false, error: `Retention must be at least ${MIN_TAILORED_RETENTION_YEARS} years (Part 11 compliance floor)` };
     }
   }
 
