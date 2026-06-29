@@ -15,7 +15,6 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   setDeviations,
   type DeviationSeverity,
@@ -118,7 +117,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // in saveCAPADecision (qa_head OR super_admin).
   const isQADecider = currentRole === "qa_head" || currentRole === "super_admin";
   const { tenantId, org, users, allSites } = useTenantConfig();
-  const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
 
@@ -196,13 +194,13 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     return r;
   }, [tenantDevs, searchQuery, statusFilter, sevFilter, catFilter]);
 
-  const { control, handleSubmit, reset, setError, formState: { errors, isValid, isSubmitting } } = useForm<AddForm>({
+  const { control, handleSubmit, reset, setError, setValue, formState: { errors, isValid, isSubmitting } } = useForm<AddForm>({
     resolver: zodResolver(addSchema),
     // Validate on blur (and re-validate on change once touched) so required-
     // field misses surface inline before submit, and isValid can gate the
     // submit button.
     mode: "onTouched",
-    defaultValues: { type: "unplanned", severity: "Major", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium" },
+    defaultValues: { type: "unplanned", severity: "Major", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium" },
   });
 
   function severityToRisk(s: DeviationSeverity): "Critical" | "High" | "Medium" | "Low" {
@@ -212,6 +210,15 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     const canon = normalizeSeverityForDisplay(s, "fda");
     if (canon === "Critical") return "Critical";
     if (canon === "Major") return "High";
+    return "Low";
+  }
+
+  // Stage 2 (deviation redesign) — pre-fill triage priority from FDA severity.
+  // Critical → High, Major → Medium, Minor → Low. The reporter can override.
+  function severityToPriority(s: DeviationSeverity): "Low" | "Medium" | "High" {
+    const canon = normalizeSeverityForDisplay(s, "fda");
+    if (canon === "Critical") return "High";
+    if (canon === "Major") return "Medium";
     return "Low";
   }
 
@@ -228,7 +235,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
         patientSafetyImpact: data.patientSafetyImpact,
         productQualityImpact: data.productQualityImpact,
         regulatoryImpact: data.regulatoryImpact,
-        owner: data.owner,
+        priority: data.priority,
         dueDate: dayjs(data.dueDate).utc().toISOString(),
         siteId: allSites[0]?.id || undefined,
         batchesAffected: data.batchesAffected || undefined,
@@ -690,7 +697,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               <div className="grid grid-cols-3 gap-3">
                 <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Type *</p><Controller name="type" control={control} render={({ field }) => <Dropdown options={[{ value: "planned", label: "Planned" }, { value: "unplanned", label: "Unplanned" }]} value={field.value} onChange={field.onChange} width="w-full" className={errors.type ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.type && <p className="text-[11px] text-[#ef4444] mt-1">{errors.type.message}</p>}</div>
                 <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Category *</p><Controller name="category" control={control} render={({ field }) => <Dropdown options={CATEGORIES.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select..." className={errors.category ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.category && <p className="text-[11px] text-[#ef4444] mt-1">{errors.category.message}</p>}</div>
-                <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Severity *</p><Controller name="severity" control={control} render={({ field }) => <Dropdown options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} value={field.value} onChange={field.onChange} width="w-full" className={errors.severity ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.severity && <p className="text-[11px] text-[#ef4444] mt-1">{errors.severity.message}</p>}</div>
+                <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Severity *</p><Controller name="severity" control={control} render={({ field }) => <Dropdown options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} value={field.value} onChange={(v) => { field.onChange(v); setValue("priority", severityToPriority(v as DeviationSeverity), { shouldValidate: true }); }} width="w-full" className={errors.severity ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.severity && <p className="text-[11px] text-[#ef4444] mt-1">{errors.severity.message}</p>}</div>
               </div>
               <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Area *</p><Controller name="area" control={control} render={({ field }) => <Dropdown options={AREAS.map((a) => ({ value: a, label: a }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select area..." className={errors.area ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.area && <p className="text-[11px] text-[#ef4444] mt-1">{errors.area.message}</p>}</div>
             </div>
@@ -712,9 +719,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             </div>
           </div>
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Assignment</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Triage</p>
             <div className="grid grid-cols-2 gap-3">
-              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Owner *</p><Controller name="owner" control={control} render={({ field }) => <Dropdown options={complianceUsers.map((u) => ({ value: u.id, label: u.name }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select..." className={errors.owner ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.owner && <p className="text-[11px] text-[#ef4444] mt-1">{errors.owner.message}</p>}</div>
+              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Priority * <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(from severity, editable)</span></p><Controller name="priority" control={control} render={({ field }) => <Dropdown options={[{ value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select..." className={errors.priority ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.priority && <p className="text-[11px] text-[#ef4444] mt-1">{errors.priority.message}</p>}</div>
               <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date *</p><Controller name="dueDate" control={control} render={({ field }) => <input type="date" {...field} className="input w-full" style={errors.dueDate ? { borderColor: "#ef4444" } : undefined} />} />{errors.dueDate && <p className="text-[11px] text-[#ef4444] mt-1">{errors.dueDate.message}</p>}</div>
             </div>
             <div className="mt-2"><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Batches affected (optional, comma-separated)</p><Controller name="batchesAffected" control={control} render={({ field }) => <input {...field} className="input w-full" placeholder="e.g. STB-2026-042, STB-2026-043" />} /></div>

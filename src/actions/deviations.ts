@@ -92,6 +92,16 @@ const CloseDeviationSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
+// Stage 2 (deviation redesign) — default triage priority from FDA severity.
+// Critical → High, Major → Medium, Minor → Low. The reporter/QA can override
+// in the UI; this is only the fallback when a caller omits priority.
+function severityToPriority(severity: string): "Low" | "Medium" | "High" {
+  const canon = normalizeSeverityForDisplay(severity, "fda");
+  if (canon === "Critical") return "High";
+  if (canon === "Major") return "Medium";
+  return "Low";
+}
+
 const CreateDeviationSchema = z.object({
   title: z.string().min(5),
   description: z.string().min(10),
@@ -108,7 +118,10 @@ const CreateDeviationSchema = z.object({
   patientSafetyImpact: z.enum(["high", "medium", "low", "none"]),
   productQualityImpact: z.enum(["high", "medium", "low", "none"]),
   regulatoryImpact: z.enum(["high", "medium", "low", "none"]),
-  owner: z.string().min(1),
+  // Stage 2 (deviation redesign) — `owner` is no longer collected at creation.
+  // Triage priority instead; optional here, defaulted from severity via
+  // severityToPriority when the caller omits it.
+  priority: z.enum(["Low", "Medium", "High"]).optional(),
   dueDate: z.string().min(1),
   detectedDate: z.string().optional(),
   siteId: z.string().optional(),
@@ -219,7 +232,14 @@ export async function createDeviation(
             patientSafetyImpact: parsed.data.patientSafetyImpact,
             productQualityImpact: parsed.data.productQualityImpact,
             regulatoryImpact: parsed.data.regulatoryImpact,
-            owner: parsed.data.owner,
+            // Stage 2 (deviation redesign) — `owner` no longer collected at
+            // creation. The column stays NOT NULL (legacy/retention) so new rows
+            // write "". FLAG for Stage 3: the old submitDeviationForReview
+            // owner-gate (~line 859: session.user.id === deviation.owner) and the
+            // owner display in DeviationPage (list ~446, detail ~610) assume an
+            // owner and must be replaced when the investigation flow is removed.
+            owner: "",
+            priority: parsed.data.priority ?? severityToPriority(parsed.data.severity),
             siteId: parsed.data.siteId ?? null,
             batchesAffected: parsed.data.batchesAffected ?? null,
             tenantId: session.user.tenantId,
