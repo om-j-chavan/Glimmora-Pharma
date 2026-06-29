@@ -19,6 +19,7 @@ type PrismaTenantRow = {
     maxUsers: number;
     maxSites: number;
     minRetentionYears: number;
+    durationMonths: number;
     startDate: Date;
     expiryDate: Date;
     createdAt: Date;
@@ -76,6 +77,7 @@ function mapPlan(plan: NonNullable<PrismaTenantRow["plan"]>): PlanConfig {
     maxUsers: plan.maxUsers,
     maxSites: plan.maxSites,
     minRetentionYears: plan.minRetentionYears,
+    durationMonths: plan.durationMonths,
     startDate: plan.startDate.toISOString(),
     expiryDate: plan.expiryDate.toISOString(),
     createdAt: plan.createdAt.toISOString(),

@@ -65,6 +65,12 @@ model Plan {
   maxUsers          Int      // frozen at assignment
   maxSites          Int      // frozen at assignment
   minRetentionYears Int      // promise only; NO purge logic in Phase 1
+  // Subscription term in months (tier preset; TAILORED custom). expiryDate is
+  // DERIVED = startDate + durationMonths and frozen below. Separate from
+  // minRetentionYears (retention is a compliance floor, NOT the term).
+  // @default(12) backfills existing rows (≈ their 1-yr seeded term); real
+  // writes always set it explicitly.
+  durationMonths    Int      @default(12)
   startDate         DateTime
   expiryDate        DateTime
   createdAt         DateTime @default(now())

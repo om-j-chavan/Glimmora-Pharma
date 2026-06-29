@@ -132,8 +132,8 @@ export async function createTenantApi(tenant: Tenant): Promise<void> {
         maxUsers: plan.maxUsers,
         maxSites: plan.maxSites,
         minRetentionYears: plan.minRetentionYears,
+        durationMonths: plan.durationMonths,
         startDate: plan.startDate,
-        expiryDate: plan.expiryDate,
       });
       if (!planRes.success) {
         // Surface the failure instead of swallowing it; planAssignmentFailed

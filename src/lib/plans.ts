@@ -10,9 +10,12 @@
  * minRetentionYears is a retention PROMISE only — there is no purge logic in
  * Phase 1.
  *
- * This module is pure and dependency-free so it can be imported from the
- * server (actions, seed), the client (admin UI), and shared hooks alike.
+ * This module depends only on the shared dayjs util, so it can be imported
+ * from the server (actions, seed), the client (admin UI), and shared hooks
+ * alike. (Relative import so the seed's tsx runtime resolves it.)
  */
+
+import dayjs from "./dayjs";
 
 export type PlanTier = "ESSENTIALS" | "PROFESSIONAL" | "ENTERPRISE" | "TAILORED";
 
@@ -20,13 +23,15 @@ export interface PlanCaps {
   maxUsers: number;
   maxSites: number;
   minRetentionYears: number;
+  /** Subscription term in months. expiryDate = startDate + durationMonths. */
+  durationMonths: number;
 }
 
 /** Fixed-tier defaults. TAILORED is intentionally absent — it has no preset. */
 export const PLAN_TIERS = {
-  ESSENTIALS: { maxUsers: 10, maxSites: 2, minRetentionYears: 1 },
-  PROFESSIONAL: { maxUsers: 30, maxSites: 5, minRetentionYears: 3 },
-  ENTERPRISE: { maxUsers: 100, maxSites: 10, minRetentionYears: 7 },
+  ESSENTIALS: { maxUsers: 10, maxSites: 2, minRetentionYears: 1, durationMonths: 12 },
+  PROFESSIONAL: { maxUsers: 30, maxSites: 5, minRetentionYears: 3, durationMonths: 12 },
+  ENTERPRISE: { maxUsers: 100, maxSites: 10, minRetentionYears: 7, durationMonths: 12 },
 } as const satisfies Record<Exclude<PlanTier, "TAILORED">, PlanCaps>;
 
 /** Upper bounds a TAILORED plan's custom caps may not exceed. */
@@ -34,6 +39,7 @@ export const TAILORED_CEILINGS: PlanCaps = {
   maxUsers: 1000,
   maxSites: 50,
   minRetentionYears: 10,
+  durationMonths: 120, // 10 years
 };
 
 export const PLAN_TIER_VALUES: readonly PlanTier[] = [
@@ -63,6 +69,7 @@ export function resolvePlanCaps(tier: PlanTier, custom?: Partial<PlanCaps>): Pla
     maxUsers: clamp(custom?.maxUsers, TAILORED_CEILINGS.maxUsers),
     maxSites: clamp(custom?.maxSites, TAILORED_CEILINGS.maxSites),
     minRetentionYears: clamp(custom?.minRetentionYears, TAILORED_CEILINGS.minRetentionYears),
+    durationMonths: clamp(custom?.durationMonths, TAILORED_CEILINGS.durationMonths),
   };
 }
 
@@ -76,6 +83,7 @@ export function validateTailoredCaps(custom: Partial<PlanCaps>): string | null {
     ["maxUsers", "Max users", TAILORED_CEILINGS.maxUsers],
     ["maxSites", "Max sites", TAILORED_CEILINGS.maxSites],
     ["minRetentionYears", "Min retention (years)", TAILORED_CEILINGS.minRetentionYears],
+    ["durationMonths", "Duration (months)", TAILORED_CEILINGS.durationMonths],
   ];
   for (const [key, label, ceiling] of checks) {
     const v = custom[key];
@@ -84,6 +92,17 @@ export function validateTailoredCaps(custom: Partial<PlanCaps>): string | null {
     if (v > ceiling) return `${label} cannot exceed ${ceiling} for a Tailored plan.`;
   }
   return null;
+}
+
+/**
+ * Derive a subscription expiry from a start date + a term in months, using
+ * calendar-month math (dayjs adds whole months and clamps end-of-month:
+ * Jan 31 + 1mo → Feb 28 — NOT start + N*30 days). Returns an ISO string.
+ * Single source of truth for the derived expiry, used by both the server write
+ * (assignPlan) and the optimistic client (draftToPlanConfig / form preview).
+ */
+export function resolveExpiry(startISO: string, months: number): string {
+  return dayjs.utc(startISO).add(months, "month").toISOString();
 }
 
 /** Display label for a plan: the tier name, or the TAILORED display name. */

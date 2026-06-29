@@ -9,7 +9,7 @@ import { BCRYPT_COST } from "@/lib/passwords";
 import { getTenants } from "@/lib/queries/tenants";
 import type { Tenant as ReduxTenant } from "@/store/auth.slice";
 import { sanitizeServerError } from "@/lib/errors";
-import { resolvePlanCaps, validateTailoredCaps, type PlanTier } from "@/lib/plans";
+import { resolvePlanCaps, validateTailoredCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
 
 export async function listTenants(): Promise<ReduxTenant[]> {
   const session = await requireAuth();
@@ -46,20 +46,13 @@ const AssignPlanSchema = z.object({
   maxUsers: z.number().int().positive().optional(),
   maxSites: z.number().int().positive().optional(),
   minRetentionYears: z.number().int().positive().optional(),
+  // Subscription term (>= 1 month). expiryDate is DERIVED server-side
+  // (start + durationMonths) and is no longer accepted from the client, so the
+  // old "expiry >= start" order refine is gone — a positive term is always
+  // ordered (replaces Bug 8's manual-date check).
+  durationMonths: z.number().int().positive().optional(),
   startDate: z.string().min(1),
-  expiryDate: z.string().min(1),
-})
-  // Bug 8 — the subscription window must be ordered. Date.parse mirrors
-  // isPlanUsable in tenantStatus.ts; an unparseable date falls through to the
-  // non-empty field checks above instead of raising a confusing order error.
-  .refine(
-    (d) => {
-      const start = Date.parse(d.startDate);
-      const end = Date.parse(d.expiryDate);
-      return Number.isNaN(start) || Number.isNaN(end) || start <= end;
-    },
-    { message: "Expiry date must be on or after the start date", path: ["expiryDate"] },
-  );
+});
 
 export async function createTenant(
   input: z.input<typeof CreateTenantSchema>,
@@ -302,6 +295,7 @@ export async function assignPlan(
     maxUsers: parsed.data.maxUsers,
     maxSites: parsed.data.maxSites,
     minRetentionYears: parsed.data.minRetentionYears,
+    durationMonths: parsed.data.durationMonths,
   });
 
   // Bug 2 — a usable plan must grant at least one user account and one site,
@@ -321,8 +315,10 @@ export async function assignPlan(
       maxUsers: caps.maxUsers,
       maxSites: caps.maxSites,
       minRetentionYears: caps.minRetentionYears,
+      durationMonths: caps.durationMonths,
       startDate: new Date(parsed.data.startDate),
-      expiryDate: new Date(parsed.data.expiryDate),
+      // DERIVED, never hand-entered: expiry = start + the frozen duration.
+      expiryDate: new Date(resolveExpiry(parsed.data.startDate, caps.durationMonths)),
     };
     const plan = await prisma.plan.upsert({
       where: { tenantId: parsed.data.tenantId },

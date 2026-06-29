@@ -121,6 +121,9 @@ export function AccountModal({
       if (!Number.isFinite(form.plan.minRetentionYears) || form.plan.minRetentionYears < 1) {
         e.planRetention = "Retention must be at least 1 year";
       }
+      if (!Number.isFinite(form.plan.durationMonths) || form.plan.durationMonths < 1) {
+        e.planDuration = "Duration must be at least 1 month";
+      }
     }
 
     return e;
@@ -154,7 +157,8 @@ export function AccountModal({
     (!form.plan ||
       (Number.isFinite(form.plan.maxUsers) && form.plan.maxUsers >= 1 &&
         Number.isFinite(form.plan.maxSites) && form.plan.maxSites >= 1 &&
-        Number.isFinite(form.plan.minRetentionYears) && form.plan.minRetentionYears >= 1));
+        Number.isFinite(form.plan.minRetentionYears) && form.plan.minRetentionYears >= 1 &&
+        Number.isFinite(form.plan.durationMonths) && form.plan.durationMonths >= 1));
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {
@@ -166,6 +170,7 @@ export function AccountModal({
     planMaxUsers: "Max users",
     planMaxSites: "Max sites",
     planRetention: "Retention (yr)",
+    planDuration: "Duration (mo)",
   };
   const blockingFields = Object.keys(errors).filter((k) => labels[k]).map((k) => labels[k]);
   const showHint = blockingFields.length > 0 && (Object.values(touched).some(Boolean) || submitAttempted);
@@ -281,6 +286,8 @@ export function AccountModal({
           onMaxSitesBlur={() => markTouched("planMaxSites")}
           retentionError={errorVisible("planRetention") ? errors.planRetention : undefined}
           onRetentionBlur={() => markTouched("planRetention")}
+          durationError={errorVisible("planDuration") ? errors.planDuration : undefined}
+          onDurationBlur={() => markTouched("planDuration")}
         />
 
         <AccountPasswordFields

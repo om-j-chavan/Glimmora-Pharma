@@ -76,8 +76,9 @@ export interface PlanConfig {
   maxUsers: number;
   maxSites: number;
   minRetentionYears: number;
+  durationMonths: number; // subscription term; expiryDate = startDate + durationMonths
   startDate: string; // ISO
-  expiryDate: string; // ISO
+  expiryDate: string; // ISO (derived from startDate + durationMonths)
   // Server-authoritative (Plan.createdAt @default(now())). Optional because
   // optimistic client-side inserts don't carry it — the next getTenants()
   // reload supplies the real value.

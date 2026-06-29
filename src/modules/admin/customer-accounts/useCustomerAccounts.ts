@@ -210,8 +210,8 @@ export function useCustomerAccounts({
             maxUsers: data.plan.maxUsers,
             maxSites: data.plan.maxSites,
             minRetentionYears: data.plan.minRetentionYears,
+            durationMonths: data.plan.durationMonths,
             startDate: data.plan.startDate,
-            expiryDate: data.plan.expiryDate,
           });
           if (!planRes.success) {
             // Surface, don't swallow. Roll back the optimistic plan update
@@ -416,8 +416,8 @@ export function useCustomerAccounts({
       maxUsers: draft.maxUsers,
       maxSites: draft.maxSites,
       minRetentionYears: draft.minRetentionYears,
+      durationMonths: draft.durationMonths,
       startDate: draft.startDate,
-      expiryDate: draft.expiryDate,
     });
     if (!res.success) {
       toast.error(`Could not assign plan: ${res.error}`);

@@ -5,7 +5,8 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
-import { resolvePlanCaps, type PlanTier } from "@/lib/plans";
+import { resolvePlanCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
+import dayjs from "@/lib/dayjs";
 import { type Tenant } from "@/store/auth.slice";
 import { useCustomerAccounts } from "./useCustomerAccounts";
 import { AccountStatCards } from "./_components/AccountStatCards";
@@ -218,17 +219,21 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
                 label="Start date"
                 required
                 value={ca.postCreateSubData.startDate}
-                onChange={(v) => ca.setPostCreateSubData((p) => ({ ...p, startDate: v }))}
-                max={ca.postCreateSubData.expiryDate || undefined}
+                onChange={(v) => ca.setPostCreateSubData((p) => ({ ...p, startDate: v, expiryDate: dayjs.utc(resolveExpiry(v, p.durationMonths)).format("YYYY-MM-DD") }))}
               />
-              <DatePicker
-                id="postcreate-expiry-date"
-                label="Expiry date"
-                required
-                value={ca.postCreateSubData.expiryDate}
-                onChange={(v) => ca.setPostCreateSubData((p) => ({ ...p, expiryDate: v }))}
-                min={ca.postCreateSubData.startDate || undefined}
-              />
+              <div>
+                <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
+                  Expiry date <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(auto)</span>
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  disabled
+                  value={ca.postCreateSubData.expiryDate ? dayjs.utc(ca.postCreateSubData.expiryDate).format("DD MMM YYYY") : "—"}
+                  aria-label="Computed expiry date (start + duration)"
+                  className="input text-[12px]"
+                />
+              </div>
             </div>
             <div>
               <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Plan tier <span style={{ color: "var(--danger)" }}>*</span></label>
@@ -236,7 +241,11 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
                 value={ca.postCreateSubData.tier}
                 onChange={(v) => {
                   const tier = v as PlanTier;
-                  ca.setPostCreateSubData((p) => tier === "TAILORED" ? { ...p, tier } : { ...p, tier, displayName: "", ...resolvePlanCaps(tier) });
+                  ca.setPostCreateSubData((p) => {
+                    if (tier === "TAILORED") return { ...p, tier };
+                    const caps = resolvePlanCaps(tier);
+                    return { ...p, tier, displayName: "", ...caps, expiryDate: dayjs.utc(resolveExpiry(p.startDate, caps.durationMonths)).format("YYYY-MM-DD") };
+                  });
                 }}
                 options={[
                   { value: "ESSENTIALS", label: "Essentials" },
@@ -248,7 +257,7 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
                 size="sm"
               />
             </div>
-            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{ca.postCreateSubData.maxUsers} users · {ca.postCreateSubData.maxSites} sites · {ca.postCreateSubData.minRetentionYears}yr retention</p>
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{ca.postCreateSubData.maxUsers} users · {ca.postCreateSubData.maxSites} sites · {ca.postCreateSubData.minRetentionYears}yr retention · {ca.postCreateSubData.durationMonths}mo term</p>
           </div>
           <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: "1px solid var(--bg-border)" }}>
             <button
