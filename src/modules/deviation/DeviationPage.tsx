@@ -15,6 +15,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   setDeviations,
   type DeviationSeverity,
@@ -132,6 +133,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // in saveCAPADecision (qa_head OR super_admin).
   const isQADecider = currentRole === "qa_head" || currentRole === "super_admin";
   const { tenantId, org, users, allSites } = useTenantConfig();
+  // Deviation-task assignee pool — active operational STAFF only (excludes
+  // super_admin / customer_admin / viewer). The "people who do the work".
+  const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
 
@@ -551,6 +555,31 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           onClose={() => setSelectedId(null)}
           title={`Deviation ${selected.reference ?? selected.id.slice(0, 8)}`}
           className="max-w-2xl"
+          header={
+            <div className="shrink-0 flex items-start justify-between gap-3 px-5 py-4 border-b border-(--bg-border)">
+              <p className="text-[14px] font-semibold text-(--text-primary) mt-1 truncate">{`Deviation ${selected.reference ?? selected.id.slice(0, 8)}`}</p>
+              <div className="flex items-start gap-2 shrink-0">
+                {/* Summarize — repositioned to the header top-right (collapsed it is
+                    the button; expanding renders the AI summary here). */}
+                <DocumentSummaryPanel
+                  title={`Deviation ${selected.reference ?? selected.id.slice(0, 8)}`}
+                  recordId={selected.id}
+                  module="deviation"
+                  content={[
+                    `Title: ${selected.title}`,
+                    `Description: ${selected.description}`,
+                    `Category: ${selected.category}; Type: ${selected.type}; Area: ${selected.area}`,
+                    `Impact — Patient safety: ${selected.patientSafetyImpact}; Product quality: ${selected.productQualityImpact}; Regulatory: ${selected.regulatoryImpact}`,
+                    selected.immediateAction ? `Immediate action: ${selected.immediateAction}` : "",
+                    selected.rootCause ? `Root cause: ${selected.rootCause}` : "",
+                  ].filter(Boolean).join("\n\n")}
+                />
+                <button type="button" onClick={() => setSelectedId(null)} aria-label="Close" className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors duration-150">
+                  <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          }
         >
           <div className="space-y-4">
             <div className="flex items-center gap-2">
@@ -560,21 +589,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
             <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.title}</p>
             <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{selected.description}</p>
-
-            {/* Feature 3 — Document Summarizing */}
-            <DocumentSummaryPanel
-              title={`Deviation ${selected.reference ?? selected.id.slice(0, 8)}`}
-              recordId={selected.id}
-              module="deviation"
-              content={[
-                `Title: ${selected.title}`,
-                `Description: ${selected.description}`,
-                `Category: ${selected.category}; Type: ${selected.type}; Area: ${selected.area}`,
-                `Impact — Patient safety: ${selected.patientSafetyImpact}; Product quality: ${selected.productQualityImpact}; Regulatory: ${selected.regulatoryImpact}`,
-                selected.immediateAction ? `Immediate action: ${selected.immediateAction}` : "",
-                selected.rootCause ? `Root cause: ${selected.rootCause}` : "",
-              ].filter(Boolean).join("\n\n")}
-            />
 
             <div className="grid grid-cols-2 gap-3 text-[11px]">
               <div><p style={{ color: "var(--text-muted)" }}>Category</p><p className="capitalize font-medium" style={{ color: "var(--text-primary)" }}>{selected.category}</p></div>
@@ -754,9 +768,12 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 ) : (
                   <>
                     <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Low priority — assign as a task</p>
-                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Low-priority deviations are worked as a lightweight assigned task (assign → submit → QA review).</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Low-priority deviations are worked as a lightweight assigned task (assign → submit → QA review), or raise a CAPA if systematic correction is needed.</p>
                     {isQAHead && (
-                      <div className="mt-2"><Button variant="secondary" size="sm" icon={Plus} onClick={() => { setAssignError(null); setAssignOpen(true); }}>Assign Task</Button></div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button variant="primary" size="sm" icon={Plus} onClick={() => { setAssignError(null); setAssignOpen(true); }}>Assign Task</Button>
+                        <Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA</Button>
+                      </div>
                     )}
                   </>
                 )}
@@ -1016,7 +1033,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           <div>
             <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Assignee *</p>
             <Dropdown
-              options={users.filter((u) => u.status === "Active" && u.role !== "viewer").map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
+              options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
               value={assignAssigneeId}
               onChange={setAssignAssigneeId}
               width="w-full"
@@ -1029,7 +1046,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           </div>
           <div>
             <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date (optional)</p>
-            <input type="date" className="input w-full" value={assignDueDate} onChange={(e) => setAssignDueDate(e.target.value)} disabled={assignBusy} />
+            <DatePicker id="assign-due" value={assignDueDate} onChange={setAssignDueDate} disabled={assignBusy} placeholder="Select a date" />
           </div>
           {assignError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{assignError}</p>}
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>

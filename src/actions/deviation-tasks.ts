@@ -84,7 +84,12 @@ export async function assignDeviationTask(
     select: { id: true, name: true, role: true },
   });
   if (!assignee) return { success: false, error: "Assignee must be an active user in your organisation." };
-  if (assignee.role === "viewer") return { success: false, error: "Viewers cannot be assigned tasks." };
+  // Assignees are operational STAFF who do the work — exclude platform/admin
+  // roles (super_admin, customer_admin) and viewers. Mirrors the UI pool
+  // (useComplianceUsers).
+  if (["super_admin", "customer_admin", "viewer"].includes(assignee.role)) {
+    return { success: false, error: "Tasks can only be assigned to operational staff, not platform or admin roles." };
+  }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
