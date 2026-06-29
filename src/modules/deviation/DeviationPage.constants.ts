@@ -7,10 +7,10 @@ import type { DeviationStatus } from "@/store/deviation.slice";
 // folds them into a shared status taxonomy module.
 
 export const STATUS_VARIANT: Record<DeviationStatus, "gray" | "blue" | "amber" | "purple" | "green" | "red"> = {
-  open: "blue", under_investigation: "amber", pending_qa_review: "purple", closed: "green", rejected: "red",
+  open: "blue", under_investigation: "amber", pending_qa_review: "purple", capa_pending: "gray", closed: "green", rejected: "red",
 };
 export const STATUS_LABEL: Record<DeviationStatus, string> = {
-  open: "Open", under_investigation: "Under Investigation", pending_qa_review: "Pending QA Review", closed: "Closed", rejected: "Rejected",
+  open: "Open", under_investigation: "Under Investigation", pending_qa_review: "Pending QA Review", capa_pending: "CAPA Pending", closed: "Closed", rejected: "Rejected",
 };
 export const IMPACT_COLOR: Record<string, string> = { high: "#ef4444", medium: "#f59e0b", low: "#10b981", none: "#64748b" };
 export const CATEGORIES = ["process", "equipment", "material", "environmental", "personnel", "documentation", "system", "other"];

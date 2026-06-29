@@ -10,7 +10,9 @@ export type DeviationCategory = "process" | "equipment" | "material" | "environm
 // matching the FDA-regulatory canonical form). Display code normalises
 // via src/lib/severity.ts; comparisons must do the same.
 export type DeviationSeverity = "critical" | "major" | "minor" | "Critical" | "Major" | "Minor";
-export type DeviationStatus = "open" | "under_investigation" | "pending_qa_review" | "closed" | "rejected";
+// "capa_pending" (Stage 1, deviation redesign): a CAPA was raised for a high/med
+// deviation; it stays OPEN + linked until the CAPA closes, then QA sign-closes.
+export type DeviationStatus = "open" | "under_investigation" | "pending_qa_review" | "capa_pending" | "closed" | "rejected";
 export type ImpactLevel = "high" | "medium" | "low" | "none";
 // Phase 1.5 — unified to canonical spaced values via the shared constant.
 export type DeviationRCAMethod = InvestigationRCAMethod;

@@ -45,6 +45,8 @@ model Tenant {
   trainingRecords TrainingRecord[]
   // SME Section 1, Stage 4 (FULL) — reverse for CAPAActionItem.tenantId.
   capaActionItems CAPAActionItem[]
+  // Stage 1 (deviation redesign) — reverse for DeviationTask.tenantId.
+  deviationTasks  DeviationTask[]
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -136,6 +138,11 @@ model User {
   // FKs (who completed the investigation / who made the CAPA decision).
   investigationCompletedDeviations Deviation[] @relation("DeviationInvestigationCompletedBy")
   capaDecisionDeviations           Deviation[] @relation("DeviationCapaDecisionBy")
+  // Stage 1 (deviation redesign) — reverse relations for DeviationTask actor FKs.
+  assignedDeviationTasks        DeviationTask[] @relation("DeviationTaskAssignee")
+  submittedDeviationTasks       DeviationTask[] @relation("DeviationTaskSubmittedBy")
+  reviewedDeviationTasks        DeviationTask[] @relation("DeviationTaskReviewedBy")
+  reworkRequestedDeviationTasks DeviationTask[] @relation("DeviationTaskReworkBy")
   // SME Section 1, Stage 4 (FULL) — virtual reverse fields for the
   // CAPAActionItem.ownerId / completedById FKs.
   ownedCAPAActionItems     CAPAActionItem[] @relation("CAPAActionItemOwner")
@@ -540,6 +547,10 @@ model Deviation {
   type                 String
   category             String
   severity             String
+  // Stage 1 (deviation redesign) — QA-set triage priority ("Low" | "Medium" |
+  // "High"), pre-filled from FDA severity but overridable (wiring is Stage 2/3).
+  // Nullable: legacy deviations predate priority and nothing reads it yet.
+  priority             String?
   area                 String
   detectedBy           String
   detectedDate         DateTime
@@ -627,7 +638,62 @@ model Deviation {
   // above — same logical relationship, different sides; createCAPA
   // writes both atomically.
   sourcedCAPA       CAPA?          @relation("CAPADeviationSource")
+  // Stage 1 (deviation redesign) — low-priority lightweight tasks (DeviationTask).
+  tasks             DeviationTask[] @relation("DeviationTaskDeviation")
 
+  @@index([deletedAt])
+}
+
+// Stage 1 (deviation redesign) — lightweight, assignable task for LOW-priority
+// deviations. Mirrors CAPAActionItem's shape (assign → submit → review →
+// close | rework) but is a child of a Deviation, NOT a CAPA. `assigneeId` is
+// the Worklist key (getWorklist will union `where assigneeId == userId` in
+// Stage 4). NO behavior is wired yet — this is the schema foundation only.
+model DeviationTask {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deviationId     String
+  deviation       Deviation @relation("DeviationTaskDeviation", fields: [deviationId], references: [id], onDelete: Cascade)
+  // Assignee — the Worklist key. Display-name cache + nullable userId FK, the
+  // same dual-write pattern as CAPAActionItem.owner/ownerId.
+  assignee        String
+  assigneeId      String?
+  assigneeUser    User?     @relation("DeviationTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  // QA's instruction to the assignee.
+  message         String
+  dueDate         DateTime?
+  // "pending" | "in_progress" | "submitted" | "closed" | "rework". Stored as
+  // String (SQLite has no enums), validated at the app layer (Stage 4).
+  status          String    @default("pending")
+  // Assignee submission.
+  completionNotes String?
+  submittedAt     DateTime?
+  submittedById   String?
+  submittedByUser User?     @relation("DeviationTaskSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  // QA review (Stage 4 enforces SoD: reviewer != assignee).
+  reviewedAt      DateTime?
+  reviewedById    String?
+  reviewedByUser  User?     @relation("DeviationTaskReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  // Rework — QA returns the task to the assignee.
+  reworkReason    String?
+  reworkAt        DateTime?
+  reworkById      String?
+  reworkByUser    User?     @relation("DeviationTaskReworkBy", fields: [reworkById], references: [id], onDelete: SetNull)
+  // Document link: reuse the generic Document pattern — Document.linkedModule =
+  // "Deviation Task", linkedRecordId = this task's id — exactly how Deviation
+  // docs attach today ("Deviation Management"). No FK column needed here.
+  createdAt       DateTime  @default(now())
+  createdById     String?
+  updatedAt       DateTime  @updatedAt
+  // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAActionItem).
+  deletedAt       DateTime?
+  deletedById     String?
+  deletedByName   String?
+  deletionReason  String?
+
+  @@index([tenantId, deviationId])
+  @@index([assigneeId])
   @@index([deletedAt])
 }
 
