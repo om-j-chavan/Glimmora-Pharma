@@ -19,6 +19,8 @@ export function AccountModal({
   initial,
   mode,
   isSuperAdmin = false,
+  currentUserCount = 0,
+  currentSiteCount = 0,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +31,11 @@ export function AccountModal({
    *  control MFA on their own tenant. When false, the toggle JSX + help text
    *  are hidden and the parent's save handler skips the toggleTenantMFA call. */
   isSuperAdmin?: boolean;
+  /** Tenant's CURRENT active user/site counts. A TAILORED plan's Max users /
+   *  Max sites cannot be set below these (equal allowed). 0 in create mode
+   *  (no usage yet). Mirrors the server gate in assignPlan. */
+  currentUserCount?: number;
+  currentSiteCount?: number;
 }) {
   const [form, setForm] = useState<AccountFormData>(initial);
   // Per-field "user has interacted" map. A field's error is only surfaced
@@ -114,9 +121,15 @@ export function AccountModal({
     if (form.plan) {
       if (!Number.isFinite(form.plan.maxUsers) || form.plan.maxUsers < 1) {
         e.planMaxUsers = "Max users must be at least 1";
+      } else if (form.plan.tier === "TAILORED" && form.plan.maxUsers < currentUserCount) {
+        // TAILORED only — can't set a cap below current active usage (equal ok).
+        // Mirrors the authoritative server gate in assignPlan.
+        e.planMaxUsers = `Cannot set Max users below current usage: ${currentUserCount} user${currentUserCount === 1 ? "" : "s"} active`;
       }
       if (!Number.isFinite(form.plan.maxSites) || form.plan.maxSites < 1) {
         e.planMaxSites = "Max sites must be at least 1";
+      } else if (form.plan.tier === "TAILORED" && form.plan.maxSites < currentSiteCount) {
+        e.planMaxSites = `Cannot set Max sites below current usage: ${currentSiteCount} site${currentSiteCount === 1 ? "" : "s"} active`;
       }
       if (!Number.isFinite(form.plan.minRetentionYears) || form.plan.minRetentionYears < 1) {
         e.planRetention = "Retention must be at least 1 year";
@@ -127,7 +140,7 @@ export function AccountModal({
     }
 
     return e;
-  }, [form, mode]);
+  }, [form, mode, currentUserCount, currentSiteCount]);
 
   // A field-level error is "visible" once the user has interacted with that
   // field OR clicked Save. Pristine fields stay silent.
@@ -158,7 +171,9 @@ export function AccountModal({
       (Number.isFinite(form.plan.maxUsers) && form.plan.maxUsers >= 1 &&
         Number.isFinite(form.plan.maxSites) && form.plan.maxSites >= 1 &&
         Number.isFinite(form.plan.minRetentionYears) && form.plan.minRetentionYears >= 1 &&
-        Number.isFinite(form.plan.durationMonths) && form.plan.durationMonths >= 1));
+        Number.isFinite(form.plan.durationMonths) && form.plan.durationMonths >= 1 &&
+        // TAILORED: caps may not drop below current active usage (equal ok).
+        (form.plan.tier !== "TAILORED" || (form.plan.maxUsers >= currentUserCount && form.plan.maxSites >= currentSiteCount))));
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {

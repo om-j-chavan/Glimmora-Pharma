@@ -309,6 +309,23 @@ export async function assignPlan(
     return { success: false, error: "A plan must allow at least one user account and one site." };
   }
 
+  // TAILORED only — a custom cap must NOT be set BELOW the tenant's CURRENT
+  // active usage (equal is allowed). Fixed tiers use preset caps the admin
+  // can't edit, so they're out of scope. Counts mirror planCaps.ts: ACTIVE
+  // rows are occupied seats (a deactivated user/site frees its seat).
+  if (tier === "TAILORED") {
+    const [userCount, siteCount] = await Promise.all([
+      prisma.user.count({ where: { tenantId: parsed.data.tenantId, isActive: true } }),
+      prisma.site.count({ where: { tenantId: parsed.data.tenantId, isActive: true } }),
+    ]);
+    if (caps.maxUsers < userCount) {
+      return { success: false, error: `Cannot set Max users below current usage: ${userCount} user${userCount === 1 ? "" : "s"} active` };
+    }
+    if (caps.maxSites < siteCount) {
+      return { success: false, error: `Cannot set Max sites below current usage: ${siteCount} site${siteCount === 1 ? "" : "s"} active` };
+    }
+  }
+
   const displayName = tier === "TAILORED" ? (parsed.data.displayName?.trim() || null) : null;
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);

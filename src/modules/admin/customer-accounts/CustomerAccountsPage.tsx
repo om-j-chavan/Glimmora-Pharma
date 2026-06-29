@@ -127,6 +127,8 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
         initial={ca.getFormData()}
         mode={ca.editingTenant ? "edit" : "create"}
         isSuperAdmin={ca.isSuperAdmin}
+        currentUserCount={ca.editingTenant?.config.users.filter((u) => u.status === "Active").length ?? 0}
+        currentSiteCount={ca.editingTenant?.config.sites.filter((s) => s.status === "Active").length ?? 0}
       />
 
       {/* Suspend / reactivate confirmation — soft lifecycle change (no hard delete).
