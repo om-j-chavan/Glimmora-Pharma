@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
+import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
 import { createDocument } from "@/actions/documents";
 import {
@@ -36,8 +36,8 @@ type ActionResult<T = unknown> =
  * audit) — no parallel storage. This wrapper adds the deviation-specific guards:
  *  - parent-tenant verification: the deviation must exist in the actor's tenant
  *    (tenant from the session, NEVER the client) — else FORBIDDEN, no write/audit;
- *  - role gate COMPLIANCE_AUTHOR_ROLES (same author set createDocument enforces;
- *    excludes viewer — closes the requireAuth-only gap);
+ *  - role gate DEVIATION_QA_ROLES (Part A — deviation-level evidence attach is a
+ *    QA action; the task assignee uses attachDeviationTaskDocument instead);
  *  - linkedModule/linkedRecordId are SET server-side (any client value ignored)
  *    so a document can't be linked to a spoofed/foreign deviation;
  *  - a DEVIATION_EVIDENCE_ATTACHED audit row (module "Deviation").
@@ -55,9 +55,12 @@ export async function attachDeviationDocument(
   });
   if (!deviation) return { success: false, error: "FORBIDDEN" };
 
-  // Role gate — same author set createDocument enforces (viewer excluded).
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Your role does not permit attaching evidence." };
+  // Part A access-control fix — DEVIATION-level evidence attach is a QA action.
+  // Was COMPLIANCE_AUTHOR_ROLES, which leaked to non-QA authors (e.g.
+  // regulatory_affairs). The low-priority TASK assignee uploads to their task
+  // via attachDeviationTaskDocument (gated by isAssignedToTask) — not here.
+  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can attach evidence to a deviation." };
   }
 
   // Link server-side (ignore any client-supplied linkage), then delegate to the
@@ -829,8 +832,11 @@ export async function completeInvestigation(
  */
 export async function startInvestigation(id: string): Promise<ActionResult> {
   const session = await requireAuth();
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot start an investigation." };
+  // Part A access-control fix — starting an investigation is a QA action
+  // (mirrors closeDeviation/rejectDeviation). Was only viewer-blocked, which
+  // leaked to every non-viewer author (e.g. regulatory_affairs).
+  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can start an investigation." };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {

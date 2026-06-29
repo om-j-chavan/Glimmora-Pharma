@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { getCAPAReadiness } from "@/lib/capa-readiness";
 import {
   lockCAPAArtifacts,
@@ -174,6 +174,14 @@ export async function createCAPA(
       error: "Validation failed",
       fieldErrors: parsed.error.flatten().fieldErrors,
     };
+  }
+
+  // Part A access-control fix — raising a CAPA FROM a deviation is a QA
+  // authority action (mirrors the deviation close/reject gate). Non-QA authors
+  // may still create standalone CAPAs; only the deviation-sourced raise is
+  // QA-gated. The deviation UI hides Raise CAPA for non-QA in lockstep.
+  if (parsed.data.linkedDeviationId && !DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can raise a CAPA from a deviation." };
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);

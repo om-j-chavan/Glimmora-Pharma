@@ -80,14 +80,13 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { role: currentRole } = useRole(); // ensure permissions matrix is loaded
   const { isViewer, isQAHead } = usePermissions();
-  // Capability mirrors of the server (exclude super_admin from authoring).
+  // Capability mirror for "Report Deviation" (create). The QA-authority actions
+  // in the detail modal — Start Investigation, Raise CAPA, attach evidence — are
+  // gated by isQAHead (Part A access-control fix): the old capaCan/canAttachDocs
+  // mirrors leaked those actions to non-QA author roles (e.g. regulatory_affairs).
+  // The low-priority TASK assignee's actions are NOT here — they live in the
+  // worklist (DeviationTaskPanel), gated server-side by isAssignedToTask.
   const devCan = usePermissions("deviation");
-  const capaCan = usePermissions("capa");
-  // Evidence-author capability — mirrors createDocument's COMPLIANCE_AUTHOR_ROLES
-  // server gate (the SAME gate attachDeviationDocument enforces). Tightens the
-  // attach/delete affordance from the old "not viewer" to the author set, so UI
-  // and server agree (qc_lab_director / it_cdo / operations_head lose attach).
-  const canAttachDocs = usePermissions("evidence").canCreate;
   const [docBusy, setDocBusy] = useState(false);
 
   // Attach evidence via the shared document pipeline (persists server-side, so
@@ -621,7 +620,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Linked CAPA</p>
               {selected.linkedCAPAId ? (
                 <button type="button" onClick={() => router.push(`/capa/${selected.linkedCAPAId}`)} className="text-[12px] font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPARef ?? selected.linkedCAPAId.slice(0, 8)}</button>
-              ) : selected.status !== "closed" && selected.status !== "rejected" && capaCan.canCreate ? (
+              ) : selected.status !== "closed" && selected.status !== "rejected" && isQAHead ? (
                 <Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA</Button>
               ) : (
                 <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No CAPA raised</p>
@@ -629,11 +628,13 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             </div>
 
             {/* Documents — persisted via the shared document pipeline (#11), so
-                they survive router.refresh()/reload. Attach/delete gated by
-                canAttachDocs (COMPLIANCE_AUTHOR_ROLES — UI matches the server). */}
+                they survive router.refresh()/reload. Part A: attach/delete of
+                DEVIATION-level evidence is a QA action (isQAHead), matching the
+                tightened attachDeviationDocument server gate (DEVIATION_QA_ROLES).
+                The task assignee uploads to THEIR task in the worklist instead. */}
             {(() => {
               const docsLocked = selected.status === "closed" || selected.status === "rejected";
-              const canManageDocs = canAttachDocs && !docsLocked;
+              const canManageDocs = isQAHead && !docsLocked;
               return (
                 <div className="space-y-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Documents</p>
@@ -695,7 +696,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                   <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
                     Critical deviation requires a linked CAPA before it can be closed. Raise a CAPA from this deviation to continue.
                   </p>
-                  {capaCan.canCreate && (
+                  {isQAHead && (
                     <div className="mt-2">
                       <Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>
                         Raise CAPA
@@ -719,7 +720,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                   <>
                     <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.priority} priority — raise a CAPA</p>
                     <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>The deviation stays open and linked (CAPA Pending) until the CAPA closes; QA then signs it closed.</p>
-                    {capaCan.canCreate && (
+                    {isQAHead && (
                       <div className="mt-2"><Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA</Button></div>
                     )}
                   </>
@@ -761,7 +762,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                         <Button variant="secondary" size="sm" icon={Wrench} onClick={() => { setReworkTaskError(null); setReworkTaskOpen(true); }}>Send for Rework</Button>
                       </>
                     )}
-                    {capaCan.canCreate && (
+                    {isQAHead && (
                       <Button variant="ghost" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA instead</Button>
                     )}
                   </div>
@@ -781,7 +782,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             {/* Action buttons */}
             {selected.status !== "closed" && selected.status !== "rejected" && (
               <div className="space-y-2 pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
-                {selected.status === "open" && devCan.canEdit && (
+                {selected.status === "open" && isQAHead && (
                   <Button variant="primary" size="sm" fullWidth icon={Search} onClick={handleStartInvestigation}>Start Investigation</Button>
                 )}
                 {selected.status === "under_investigation" && (user?.id === selected.owner || isQAHead) && (
