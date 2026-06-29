@@ -404,6 +404,18 @@ export async function closeDeviation(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
+  // Stage 4 (deviation redesign) — low-priority task path: if this deviation
+  // was worked as a DeviationTask, the SIGNED close also completes the task,
+  // and SoD requires the closer (reviewer) ≠ the task assignee (ID-based FK
+  // compare, REUSABLES.md). No-op for deviations with no task.
+  const activeTask = await prisma.deviationTask.findFirst({
+    where: { deviationId: id, tenantId: session.user.tenantId, deletedAt: null, status: { notIn: ["closed", "cancelled"] } },
+    select: { id: true, assigneeId: true },
+  });
+  if (activeTask?.assigneeId && activeTask.assigneeId === actor.userId) {
+    return { success: false, error: "Separation of duties: the task assignee cannot also sign its closure. A different QA Head must close it." };
+  }
+
   // SME Section 1, Stage 1 â€” CAPA Decision Gate.
   // A Critical deviation cannot be closed until a CAPA exists and is linked.
   // The linked CAPA must also still exist in this tenant (an orphan
@@ -558,6 +570,15 @@ export async function closeDeviation(
             closureSignatureId: sig.id,
           },
         });
+        // Stage 4 (deviation redesign) — complete the linked low-priority task
+        // on the signed close (the deviation IS the regulated record; the task
+        // work was lightweight). SoD was enforced above. Atomic with the close.
+        if (activeTask) {
+          await tx.deviationTask.update({
+            where: { id: activeTask.id, tenantId: session.user.tenantId },
+            data: { status: "closed", reviewedAt: closedAt, reviewedById: actor.userId },
+          });
+        }
         return { deviation: updated, signedRecord: sig };
       },
     );

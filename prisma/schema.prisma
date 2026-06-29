@@ -663,8 +663,10 @@ model DeviationTask {
   // QA's instruction to the assignee.
   message         String
   dueDate         DateTime?
-  // "pending" | "in_progress" | "submitted" | "closed" | "rework". Stored as
-  // String (SQLite has no enums), validated at the app layer (Stage 4).
+  // "pending" | "in_progress" | "submitted" | "closed" | "rework" | "cancelled"
+  // ("closed" written only by the signed closeDeviation; "cancelled" by the
+  // raise-CAPA escalation). Stored as String (SQLite has no enums), validated
+  // at the app layer (Stage 4).
   status          String    @default("pending")
   // Assignee submission.
   completionNotes String?

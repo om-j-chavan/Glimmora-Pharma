@@ -296,6 +296,13 @@ export async function createCAPA(
               // via closeDeviation). NO auto-close anywhere.
               data: { linkedCAPAId: created.id, status: "capa_pending" },
             });
+            // Stage 4 (deviation redesign) — escalation: raising a CAPA
+            // SUPERSEDES any in-flight low-priority task. Cancel open
+            // DeviationTasks so the CAPA owns the work going forward.
+            await tx.deviationTask.updateMany({
+              where: { deviationId: linkedDeviationId, tenantId: session.user.tenantId, deletedAt: null, status: { notIn: ["closed", "cancelled"] } },
+              data: { status: "cancelled" },
+            });
           }
           return created;
         });

@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, ShieldCheck, X, Info, FileText,
+  ClipboardList, ShieldCheck, X, Info, FileText, Wrench,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -28,7 +28,7 @@ import {
   attachDeviationDocument,
 } from "@/actions/deviations";
 import { createCAPA as createCAPAAction } from "@/actions/capas";
-import { assignDeviationTask } from "@/actions/deviation-tasks";
+import { assignDeviationTask, reworkDeviationTask } from "@/actions/deviation-tasks";
 import { deleteDocument } from "@/actions/documents";
 import { displayName, displayUserName, displaySiteName } from "@/lib/identity-display";
 import { Button } from "@/components/ui/Button";
@@ -179,6 +179,12 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [assignDueDate, setAssignDueDate] = useState("");
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignBusy, setAssignBusy] = useState(false);
+  // Stage 4 — QA "send for rework" modal state (the close outcome reuses the
+  // signed-close modal below).
+  const [reworkTaskOpen, setReworkTaskOpen] = useState(false);
+  const [reworkTaskReason, setReworkTaskReason] = useState("");
+  const [reworkTaskError, setReworkTaskError] = useState<string | null>(null);
+  const [reworkTaskBusy, setReworkTaskBusy] = useState(false);
   const [successPopup, setSuccessPopup] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   // Failure surface — paired with successPopup above. Server actions
@@ -321,6 +327,22 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     setAssignOpen(false);
     setAssignAssigneeId(""); setAssignMessage(""); setAssignDueDate("");
     setSuccessMsg(`Task assigned for ${selected.reference ?? selected.id.slice(0, 8)}`);
+    setSuccessPopup(true);
+    router.refresh();
+  }
+
+  // Stage 4 — QA returns a submitted task to the assignee. Server
+  // (reworkDeviationTask) enforces qa_head + SoD (reviewer ≠ assignee).
+  async function handleReworkTask() {
+    if (!selected?.activeTask) return;
+    setReworkTaskBusy(true);
+    setReworkTaskError(null);
+    const result = await reworkDeviationTask(selected.activeTask.id, { reworkReason: reworkTaskReason });
+    setReworkTaskBusy(false);
+    if (!result.success) { setReworkTaskError(result.error || "Failed to send for rework."); return; }
+    setReworkTaskOpen(false);
+    setReworkTaskReason("");
+    setSuccessMsg(`Task returned for rework — ${selected.reference ?? selected.id.slice(0, 8)}`);
     setSuccessPopup(true);
     router.refresh();
   }
@@ -727,6 +749,23 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 {selected.activeTask.completionNotes && (
                   <p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {selected.activeTask.completionNotes}</p>
                 )}
+                {/* QA review — a SUBMITTED task can be signed-closed (the Part 11
+                    closeDeviation, which also completes the task + enforces
+                    SoD) or sent back for rework. At any open stage QA may
+                    escalate to a CAPA (which cancels the task). */}
+                {isQAHead && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {selected.activeTask.status === "submitted" && (
+                      <>
+                        <Button variant="primary" size="sm" icon={CheckCircle2} onClick={() => { setCloseError(null); setCloseModal(true); }}>Sign &amp; Close</Button>
+                        <Button variant="secondary" size="sm" icon={Wrench} onClick={() => { setReworkTaskError(null); setReworkTaskOpen(true); }}>Send for Rework</Button>
+                      </>
+                    )}
+                    {capaCan.canCreate && (
+                      <Button variant="ghost" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA instead</Button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -946,6 +985,20 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
             <Button variant="secondary" onClick={() => { setAssignOpen(false); setAssignError(null); }} disabled={assignBusy}>Cancel</Button>
             <Button variant="primary" icon={Plus} onClick={handleAssignTask} disabled={assignBusy || !assignAssigneeId || assignMessage.trim().length < 5} loading={assignBusy}>Assign Task</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Stage 4 (deviation redesign) — QA sends a submitted task back for
+          rework (the CLOSE outcome reuses the signed-close modal above). */}
+      <Modal open={reworkTaskOpen} onClose={reworkTaskBusy ? () => undefined : () => { setReworkTaskOpen(false); setReworkTaskError(null); }} title="Send Task for Rework">
+        <div className="space-y-4">
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Return this task to <strong>{selected?.activeTask?.assignee}</strong> with a reason. It reappears in their worklist.</p>
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason for rework *</p><textarea rows={3} className="input w-full resize-none" value={reworkTaskReason} onChange={(e) => setReworkTaskReason(e.target.value)} placeholder="What needs to be corrected? (≥ 5 characters)" disabled={reworkTaskBusy} /></div>
+          {reworkTaskError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{reworkTaskError}</p>}
+          <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
+            <Button variant="secondary" onClick={() => { setReworkTaskOpen(false); setReworkTaskError(null); }} disabled={reworkTaskBusy}>Cancel</Button>
+            <Button variant="primary" icon={Wrench} onClick={handleReworkTask} disabled={reworkTaskBusy || reworkTaskReason.trim().length < 5} loading={reworkTaskBusy}>Send for Rework</Button>
           </div>
         </div>
       </Modal>

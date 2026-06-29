@@ -292,3 +292,83 @@ export async function attachDeviationTaskDocument(
   revalidatePath("/worklist");
   return created;
 }
+
+const ReworkSchema = z.object({
+  reworkReason: z.string().min(5, "Rework reason is required (min 5 chars)"),
+});
+
+/**
+ * REVIEW → REWORK — QA returns a SUBMITTED task to the assignee. Guard:
+ * DEVIATION_QA_ROLES + Separation of Duties (the reviewer must NOT be the task
+ * assignee — ID-based FK compare, REUSABLES.md). The CLOSE review outcome is
+ * NOT here: it is the Part 11 signed closeDeviation (deviations.ts), which also
+ * completes the task and enforces the same SoD.
+ */
+export async function reworkDeviationTask(
+  taskId: string,
+  input: z.input<typeof ReworkSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = ReworkSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can review deviation tasks." };
+  }
+  const task = await prisma.deviationTask.findFirst({
+    where: { id: taskId, tenantId: session.user.tenantId, deletedAt: null },
+    include: { deviation: { select: { id: true, reference: true, title: true } } },
+  });
+  if (!task) return { success: false, error: "Task not found" };
+  if (task.status !== "submitted") {
+    return { success: false, error: "Only a submitted task can be sent back for rework." };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  // SoD — the reviewer cannot be the task assignee (ID-based FK compare; reject
+  // if equal). REUSABLES.md.
+  if (task.assigneeId && task.assigneeId === actor.userId) {
+    return { success: false, error: "Separation of duties: you cannot review a task assigned to you. A different QA Head must review it." };
+  }
+  try {
+    const updated = await prisma.deviationTask.update({
+      where: { id: taskId, tenantId: session.user.tenantId },
+      data: {
+        status: "rework",
+        reworkReason: parsed.data.reworkReason,
+        reworkAt: new Date(),
+        reworkById: actor.userId,
+      },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Deviation Management",
+        action: "DEVIATION_TASK_REWORK",
+        recordId: task.deviation.id,
+        recordTitle: (task.deviation.reference ?? task.deviation.title).slice(0, 80),
+        newValue: JSON.stringify({ taskId, reason: parsed.data.reworkReason.slice(0, 200) }),
+      },
+    });
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: task.assigneeId,
+      actorUserId: actor.userId,
+      type: "REWORK_ASSIGNED",
+      title: `Deviation task returned for rework (${task.deviation.reference ?? task.deviation.id.slice(0, 8)})`,
+      body: parsed.data.reworkReason.slice(0, 200),
+      linkPath: "/worklist",
+      entityType: "DeviationTask",
+      entityId: taskId,
+    });
+    revalidatePath("/worklist");
+    revalidatePath("/deviation");
+    return { success: true, data: updated };
+  } catch (err) {
+    console.error("[action] reworkDeviationTask failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to send task for rework") };
+  }
+}
