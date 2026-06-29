@@ -51,6 +51,10 @@ const AssignPlanSchema = z.object({
   // old "expiry >= start" order refine is gone — a positive term is always
   // ordered (replaces Bug 8's manual-date check).
   durationMonths: z.number().int().positive().optional(),
+  // Time-only renewal: when true the write is audited as PLAN_RENEWED instead
+  // of PLAN_ASSIGNED. Tier/caps still flow through the same fields unchanged —
+  // this is the SAME write path, only the audit action differs.
+  renewal: z.boolean().optional(),
   startDate: z.string().min(1),
 });
 
@@ -332,9 +336,9 @@ export async function assignPlan(
         userName: actor.displayName,
         userRole: actor.role,
         module: "Admin",
-        action: "PLAN_ASSIGNED",
+        action: parsed.data.renewal ? "PLAN_RENEWED" : "PLAN_ASSIGNED",
         recordId: parsed.data.tenantId,
-        newValue: JSON.stringify({ tier, maxUsers: caps.maxUsers, maxSites: caps.maxSites, minRetentionYears: caps.minRetentionYears }),
+        newValue: JSON.stringify({ tier, maxUsers: caps.maxUsers, maxSites: caps.maxSites, minRetentionYears: caps.minRetentionYears, durationMonths: caps.durationMonths, startDate: frozen.startDate, expiryDate: frozen.expiryDate }),
       },
     });
     revalidatePath("/admin");

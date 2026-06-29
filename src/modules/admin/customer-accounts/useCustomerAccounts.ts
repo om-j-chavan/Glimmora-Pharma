@@ -13,6 +13,8 @@ import {
 } from "@/store/auth.slice";
 import { fetchTenants, createTenantApi, updateTenantApi, TenantApiError } from "@/lib/tenantApi";
 import { toggleTenantMFA, assignPlan } from "@/actions/tenants";
+import { resolvePlanCaps, resolveExpiry } from "@/lib/plans";
+import dayjs from "@/lib/dayjs";
 import { useToast } from "@/components/ui/Toast";
 import {
   type AccountFormData,
@@ -70,6 +72,10 @@ export function useCustomerAccounts({
   const [postCreateSubOpen, setPostCreateSubOpen] = useState(false);
   const [postCreateTenantId, setPostCreateTenantId] = useState<string | null>(null);
   const [postCreateSubData, setPostCreateSubData] = useState<PlanDraft>(makePlanDraft());
+  // Renew (time-only) flow — extends an existing plan's term; tier + caps stay.
+  const [renewingTenant, setRenewingTenant] = useState<Tenant | null>(null);
+  const [renewDraft, setRenewDraft] = useState<PlanDraft | null>(null);
+  const [renewing, setRenewing] = useState(false);
   const [savedPopup, setSavedPopup] = useState<string | null>(null);
   const toast = useToast();
 
@@ -429,6 +435,72 @@ export function useCustomerAccounts({
     setSavedPopup("Account and plan created");
   };
 
+  // ── Renew (time-only) ── extends the term; tier + caps are NOT touched here.
+  const openRenew = (tenant: Tenant) => {
+    if (!tenant.plan) return;
+    const base = planConfigToDraft(tenant.plan); // tier + caps carried as-is
+    // New start = max(current expiry, today): keep unused days if the plan is
+    // still valid, else start today. Mirrors the page's planExpired comparison
+    // (dayjs() vs dayjs.utc(expiry)).
+    const expiredNow = dayjs().isAfter(dayjs.utc(tenant.plan.expiryDate));
+    const startDate = expiredNow
+      ? dayjs().format("YYYY-MM-DD")
+      : dayjs.utc(tenant.plan.expiryDate).format("YYYY-MM-DD");
+    // Default term from the current tier preset (fixed → 12; TAILORED clamps
+    // the plan's current custom term) — same auto-fill rule as the editor.
+    const months = resolvePlanCaps(base.tier, { durationMonths: base.durationMonths }).durationMonths;
+    setRenewDraft({
+      ...base,
+      durationMonths: months,
+      startDate,
+      expiryDate: dayjs.utc(resolveExpiry(startDate, months)).format("YYYY-MM-DD"),
+    });
+    setRenewingTenant(tenant);
+  };
+  // TAILORED-only term edit; recompute the read-only expiry preview.
+  const setRenewMonths = (n: number) => {
+    setRenewDraft((d) =>
+      d ? { ...d, durationMonths: n, expiryDate: Number.isFinite(n) ? dayjs.utc(resolveExpiry(d.startDate, n)).format("YYYY-MM-DD") : "" } : d,
+    );
+  };
+  const closeRenew = () => {
+    if (!renewing) { setRenewingTenant(null); setRenewDraft(null); }
+  };
+  const confirmRenew = async () => {
+    if (!renewingTenant || !renewDraft) return;
+    const d = renewDraft;
+    if (!Number.isFinite(d.durationMonths) || d.durationMonths < 1) {
+      toast.error("Term must be at least 1 month.");
+      return;
+    }
+    setRenewing(true);
+    // Reuse the editor's write path (assignPlan). Tier + caps are passed back
+    // UNCHANGED so only the term/dates move; expiry is derived server-side.
+    // renewal: true → audited as PLAN_RENEWED.
+    const res = await assignPlan({
+      tenantId: renewingTenant.id,
+      tier: d.tier,
+      displayName: d.tier === "TAILORED" ? (d.displayName || undefined) : undefined,
+      maxUsers: d.maxUsers,
+      maxSites: d.maxSites,
+      minRetentionYears: d.minRetentionYears,
+      durationMonths: d.durationMonths,
+      startDate: d.startDate,
+      renewal: true,
+    });
+    setRenewing(false);
+    if (!res.success) {
+      toast.error(`Could not renew plan: ${res.error}`);
+      return;
+    }
+    dispatch(setTenantPlan({ tenantId: renewingTenant.id, plan: draftToPlanConfig(d, renewingTenant.plan?.id ?? `plan-${Date.now()}`) }));
+    const newExpiry = dayjs.utc(resolveExpiry(d.startDate, d.durationMonths)).format("DD MMM YYYY");
+    const name = renewingTenant.name;
+    setRenewingTenant(null);
+    setRenewDraft(null);
+    toast.success(`${name} renewed — expires ${newExpiry}.`);
+  };
+
   return {
     tenants,
     filtered,
@@ -468,6 +540,14 @@ export function useCustomerAccounts({
     postCreateClose,
     postCreateSkip,
     assignPostCreatePlan,
+    // renew (time-only)
+    renewingTenant,
+    renewDraft,
+    renewing,
+    openRenew,
+    setRenewMonths,
+    confirmRenew,
+    closeRenew,
     // success toast
     savedPopup,
     setSavedPopup,
