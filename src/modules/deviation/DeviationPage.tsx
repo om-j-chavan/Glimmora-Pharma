@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, X, Info, FileText, Wrench,
+  ClipboardList, X, Info, FileText, Wrench, Send,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -28,7 +28,8 @@ import {
   attachDeviationDocument,
 } from "@/actions/deviations";
 import { createCAPA as createCAPAAction } from "@/actions/capas";
-import { assignDeviationTask, reworkDeviationTask } from "@/actions/deviation-tasks";
+import { assignDeviationTask, reworkDeviationTask, postDeviationTaskMessage } from "@/actions/deviation-tasks";
+import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
 import { deleteDocument } from "@/actions/documents";
 import { displayName, displayUserName, displaySiteName } from "@/lib/identity-display";
 import { Button } from "@/components/ui/Button";
@@ -206,6 +207,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [reworkTaskReason, setReworkTaskReason] = useState("");
   const [reworkTaskError, setReworkTaskError] = useState<string | null>(null);
   const [reworkTaskBusy, setReworkTaskBusy] = useState(false);
+  // Stage 5 — QA's compose box for the flat task conversation.
+  const [taskMsgBody, setTaskMsgBody] = useState("");
+  const [taskMsgPosting, setTaskMsgPosting] = useState(false);
   const [successPopup, setSuccessPopup] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   // Failure surface — paired with successPopup above. Server actions
@@ -381,6 +385,18 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     setReworkTaskReason("");
     setSuccessMsg(`Task returned for rework — ${selected.reference ?? selected.id.slice(0, 8)}`);
     setSuccessPopup(true);
+    router.refresh();
+  }
+
+  // Stage 5 — QA posts to the flat task conversation (the worker posts from the
+  // worklist panel). Server gates to DEVIATION_QA_ROLES || isAssignedToTask.
+  async function handlePostTaskMessage() {
+    if (!selected?.activeTask || taskMsgBody.trim().length === 0) return;
+    setTaskMsgPosting(true);
+    const result = await postDeviationTaskMessage(selected.activeTask.id, { body: taskMsgBody.trim() });
+    setTaskMsgPosting(false);
+    if (!result.success) { setErrorMsg(result.error || "Failed to post message."); setErrorPopup(true); return; }
+    setTaskMsgBody("");
     router.refresh();
   }
 
@@ -811,6 +827,19 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                     )}
                   </div>
                 )}
+                {/* Stage 5 — flat QA↔worker conversation (same thread the worker
+                    sees in the worklist). QA composes here; rework feedback also
+                    lands here automatically via reworkDeviationTask. */}
+                <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
+                  <TaskThread messages={selected.activeTask.messages} currentUserId={user?.id} fmt={(iso) => dayjs.utc(iso).tz(timezone).format(`${dateFormat} HH:mm`)} />
+                  {isQAHead && (
+                    <div className="flex items-end gap-2 mt-2">
+                      <textarea className="input text-[12px] w-full min-h-14" placeholder="Message the assignee…" value={taskMsgBody} onChange={(e) => setTaskMsgBody(e.target.value)} maxLength={2000} disabled={taskMsgPosting} />
+                      <Button variant="secondary" size="sm" icon={Send} disabled={taskMsgPosting || taskMsgBody.trim().length === 0} loading={taskMsgPosting} onClick={handlePostTaskMessage}>Send</Button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

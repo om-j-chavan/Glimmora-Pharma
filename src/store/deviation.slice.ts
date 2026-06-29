@@ -19,6 +19,15 @@ export type DeviationRCAMethod = InvestigationRCAMethod;
 
 /** Stage 4 (deviation redesign) — the current active low-priority task on a
  *  deviation (serialised; Dates → ISO). Null when none is open. */
+export interface DeviationTaskMessageView {
+  id: string;
+  authorId: string | null;
+  authorName: string;
+  authorRole: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface DeviationActiveTask {
   id: string;
   assignee: string;
@@ -29,6 +38,8 @@ export interface DeviationActiveTask {
   completionNotes: string | null;
   submittedAt: string | null;
   reworkReason: string | null;
+  /** Stage 5 — flat QA↔worker conversation. */
+  messages: DeviationTaskMessageView[];
 }
 
 export interface Deviation {

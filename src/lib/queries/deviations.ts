@@ -49,6 +49,8 @@ export const getDeviations = cache(async (tenantId: string) => {
     select: {
       id: true, deviationId: true, assignee: true, assigneeId: true, message: true,
       dueDate: true, status: true, completionNotes: true, submittedAt: true, reworkReason: true,
+      // Stage 5 — the flat QA↔worker conversation, so the QA task panel shows it too.
+      messages: { orderBy: { createdAt: "asc" }, select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true } },
     },
   });
   const taskByDev = new Map<string, (typeof tasks)[number]>();

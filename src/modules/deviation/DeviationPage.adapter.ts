@@ -35,6 +35,8 @@ export type PrismaDeviationWithCapa = PrismaDeviation & {
     completionNotes: string | null;
     submittedAt: Date | null;
     reworkReason: string | null;
+    // Stage 5 — flat QA↔worker conversation.
+    messages: { id: string; authorId: string | null; authorName: string; authorRole: string; body: string; createdAt: Date }[];
   } | null;
 };
 
@@ -91,6 +93,10 @@ export function adaptDeviation(p: PrismaDeviationWithCapa): Deviation {
           completionNotes: p.activeTask.completionNotes,
           submittedAt: p.activeTask.submittedAt ? p.activeTask.submittedAt.toISOString() : null,
           reworkReason: p.activeTask.reworkReason,
+          messages: p.activeTask.messages.map((m) => ({
+            id: m.id, authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole,
+            body: m.body, createdAt: m.createdAt.toISOString(),
+          })),
         }
       : null,
     area: p.area,

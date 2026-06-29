@@ -47,6 +47,8 @@ model Tenant {
   capaActionItems CAPAActionItem[]
   // Stage 1 (deviation redesign) — reverse for DeviationTask.tenantId.
   deviationTasks  DeviationTask[]
+  // Stage 5 — reverse for DeviationTaskMessage.tenantId.
+  deviationTaskMessages DeviationTaskMessage[]
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -693,10 +695,32 @@ model DeviationTask {
   deletedById     String?
   deletedByName   String?
   deletionReason  String?
+  // Stage 5 — simple QA↔worker rework conversation (flat, append-only).
+  messages        DeviationTaskMessage[]
 
   @@index([tenantId, deviationId])
   @@index([assigneeId])
   @@index([deletedAt])
+}
+
+/// Stage 5 (deviation redesign) — a SIMPLE append-only QA↔worker message on a
+/// low-priority DeviationTask. Flat (NO threading), no concern/resolve — the
+/// lightweight alternative to CAPAComment. The two voices are distinguished by
+/// authorRole (QA vs the assignee). reworkDeviationTask posts the rework reason
+/// as a message so the feedback persists after the worker resubmits.
+model DeviationTaskMessage {
+  id         String        @id @default(cuid())
+  tenantId   String
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  taskId     String
+  task       DeviationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId   String?
+  authorName String
+  authorRole String
+  body       String
+  createdAt  DateTime      @default(now())
+
+  @@index([tenantId, taskId])
 }
 
 // ── FDA 483 ──

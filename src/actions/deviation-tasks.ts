@@ -345,6 +345,19 @@ export async function reworkDeviationTask(
         reworkById: actor.userId,
       },
     });
+    // Stage 5 — persist QA's rework feedback in the conversation thread so it
+    // survives the worker's resubmit (the reworkReason banner is just the
+    // "current ask"; the thread is the durable history).
+    await prisma.deviationTaskMessage.create({
+      data: {
+        tenantId: session.user.tenantId,
+        taskId,
+        authorId: actor.userId,
+        authorName: actor.displayName,
+        authorRole: actor.role,
+        body: parsed.data.reworkReason,
+      },
+    });
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,
@@ -375,5 +388,133 @@ export async function reworkDeviationTask(
   } catch (err) {
     console.error("[action] reworkDeviationTask failed:", err);
     return { success: false, error: sanitizeServerError(err, "Failed to send task for rework") };
+  }
+}
+
+const MessageSchema = z.object({
+  body: z.string().min(1, "Message cannot be empty").max(2000, "Message too long (2000 char max)"),
+});
+
+/**
+ * POST MESSAGE — the SIMPLE QA↔worker rework conversation (flat, append-only;
+ * NO threading / concern / resolve — the lightweight alternative to CAPAComment).
+ * Gated by the existing two-party split: DEVIATION_QA_ROLES (QA) OR the assignee
+ * (isAssignedToTask). authorName/authorRole are denormalised so the thread
+ * renders without extra lookups; the two voices are told apart by authorRole.
+ */
+export async function postDeviationTaskMessage(
+  taskId: string,
+  input: z.input<typeof MessageSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = MessageSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const task = await prisma.deviationTask.findFirst({
+    where: { id: taskId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, assigneeId: true, status: true, deviationId: true },
+  });
+  if (!task) return { success: false, error: "Task not found" };
+  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: task.assigneeId });
+  if (!isQA && !isAssignee) {
+    return { success: false, error: "Only QA or the assigned user can post on this task." };
+  }
+  if (task.status === "closed" || task.status === "cancelled") {
+    return { success: false, error: "This task is closed; the conversation is read-only." };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    const created = await prisma.deviationTaskMessage.create({
+      data: {
+        tenantId: session.user.tenantId,
+        taskId,
+        authorId: actor.userId,
+        authorName: actor.displayName,
+        authorRole: actor.role,
+        body: parsed.data.body.trim(),
+      },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Deviation Management",
+        action: "DEVIATION_TASK_MESSAGE_POSTED",
+        recordId: task.deviationId,
+        newValue: JSON.stringify({ taskId, messageId: created.id }),
+      },
+    });
+    revalidatePath("/worklist");
+    revalidatePath("/deviation");
+    return { success: true, data: created };
+  } catch (err) {
+    console.error("[action] postDeviationTaskMessage failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to post message") };
+  }
+}
+
+/**
+ * REMOVE TASK DOCUMENT — soft-delete a doc the worker attached to THEIR task.
+ * Gated to the assignee OR QA: the generic deleteDocument is QA/admin-only, which
+ * would lock the worker out of managing their own uploads. Verifies the document
+ * is a "Deviation Task" doc for THIS task before soft-deleting (Part 11 retention
+ * — sets deletedAt, never destroys the row).
+ */
+export async function removeDeviationTaskDocument(
+  taskId: string,
+  documentId: string,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const task = await prisma.deviationTask.findFirst({
+    where: { id: taskId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, assigneeId: true, status: true, deviationId: true },
+  });
+  if (!task) return { success: false, error: "Task not found" };
+  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: task.assigneeId });
+  if (!isQA && !isAssignee) {
+    return { success: false, error: "Only QA or the assigned user can manage this task's documents." };
+  }
+  if (task.status === "closed" || task.status === "cancelled") {
+    return { success: false, error: "This task is closed; its documents can no longer be changed." };
+  }
+  // Only a "Deviation Task" doc linked to THIS task can be removed here (never a
+  // parent-deviation doc — those are the deviation's, shown read-only).
+  const doc = await prisma.document.findFirst({
+    where: {
+      id: documentId, tenantId: session.user.tenantId, deletedAt: null,
+      linkedModule: "Deviation Task", linkedRecordId: taskId,
+    },
+    select: { id: true, fileName: true },
+  });
+  if (!doc) return { success: false, error: "Document not found on this task." };
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    await prisma.document.update({
+      where: { id: documentId, tenantId: session.user.tenantId },
+      data: { deletedAt: new Date(), deletedBy: session.user.name, deletionReason: "Removed from deviation task" },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Deviation Management",
+        action: "DEVIATION_TASK_EVIDENCE_REMOVED",
+        recordId: task.deviationId,
+        recordTitle: doc.fileName,
+        newValue: JSON.stringify({ taskId, documentId }),
+      },
+    });
+    revalidatePath("/worklist");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] removeDeviationTaskDocument failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to remove document") };
   }
 }
