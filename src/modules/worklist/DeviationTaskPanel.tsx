@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Paperclip, Send, Clock, FileText, X } from "lucide-react";
+import { Paperclip, Send, Clock } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
@@ -12,11 +12,21 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { displayUserName } from "@/lib/identity-display";
 import { roleLabel as fmtRole } from "@/lib/labels/roles";
 import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
+import { DocList, type DocItemView } from "@/components/shared/DocList";
 import {
   startDeviationTask, submitDeviationTask, attachDeviationTaskDocument,
   postDeviationTaskMessage, removeDeviationTaskDocument,
 } from "@/actions/deviation-tasks";
 import type { WorklistDeviationTask, WorklistDoc } from "@/lib/queries/worklist";
+
+/** Map a worklist Document row → the shared DocList view shape. */
+const toDocItem = (d: WorklistDoc): DocItemView => ({
+  id: d.id,
+  fileName: d.fileName,
+  downloadHref: `/api/documents/${d.id}`,
+  uploadedBy: d.uploadedBy,
+  uploadedAt: d.uploadedAt,
+});
 
 const DEV_TASK_STATUS_LABEL: Record<string, string> = {
   pending: "Pending", in_progress: "In Progress", submitted: "Submitted for Review", rework: "Needs Rework",
@@ -50,6 +60,7 @@ export function DeviationTaskPanel({
   const [notes, setNotes] = useState("");
   const [msgBody, setMsgBody] = useState("");
   const [posting, setPosting] = useState(false);
+  const [removingDocId, setRemovingDocId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const canWork = task.status === "pending" || task.status === "in_progress" || task.status === "rework";
@@ -83,9 +94,9 @@ export function DeviationTaskPanel({
   }
 
   async function removeDoc(docId: string) {
-    setBusy(true); setErr(null);
+    setBusy(true); setRemovingDocId(docId); setErr(null);
     const res = await removeDeviationTaskDocument(task.id, docId);
-    setBusy(false);
+    setBusy(false); setRemovingDocId(null);
     if (!res.success) { setErr(res.error || "Failed to remove."); toast.error(res.error || "Failed to remove document."); return; }
     toast.success("Document removed."); onChanged();
   }
@@ -159,26 +170,14 @@ export function DeviationTaskPanel({
           {/* Deviation documents — READ-ONLY */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Deviation documents (read-only)</p>
-            {task.deviationDocs.length === 0 ? (
-              <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>None attached to the deviation.</p>
-            ) : (
-              <ul className="space-y-1">
-                {task.deviationDocs.map((d) => <DocRow key={d.id} doc={d} />)}
-              </ul>
-            )}
+            <DocList docs={task.deviationDocs.map(toDocItem)} emptyText="None attached to the deviation." />
           </div>
 
           {/* Worker's own task documents — read-only here; upload/remove live in
               the "Send to QA" modal (req 5). */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Your task documents</p>
-            {task.taskDocs.length === 0 ? (
-              <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No documents uploaded yet — add them when you send your response.</p>
-            ) : (
-              <ul className="space-y-1">
-                {task.taskDocs.map((d) => <DocRow key={d.id} doc={d} />)}
-              </ul>
-            )}
+            <DocList docs={task.taskDocs.map(toDocItem)} emptyText="No documents uploaded yet — add them when you send your response." />
           </div>
 
           {/* Conversation — flat QA↔worker thread */}
@@ -217,9 +216,9 @@ export function DeviationTaskPanel({
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Supporting documents (optional)</p>
             {task.taskDocs.length > 0 && (
-              <ul className="space-y-1 mb-1.5">
-                {task.taskDocs.map((d) => <DocRow key={d.id} doc={d} onRemove={() => void removeDoc(d.id)} removing={busy} />)}
-              </ul>
+              <div className="mb-1.5">
+                <DocList docs={task.taskDocs.map(toDocItem)} onRemove={(id) => void removeDoc(id)} busyId={removingDocId} />
+              </div>
             )}
             <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", opacity: busy ? 0.6 : 1 }}>
               <Paperclip className="w-3.5 h-3.5" /> Upload file
@@ -233,22 +232,7 @@ export function DeviationTaskPanel({
   );
 }
 
-/* ── Shared sub-components (also used by the QA-side panel) ── */
-
-export function DocRow({ doc, onRemove, removing }: { doc: WorklistDoc; onRemove?: () => void; removing?: boolean }) {
-  return (
-    <li className="flex items-center gap-2 text-[12px]">
-      <FileText className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-      <a href={`/api/documents/${doc.id}`} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate underline" style={{ color: "var(--brand)" }}>{doc.fileName}</a>
-      <span className="text-[10px] shrink-0" style={{ color: "var(--text-muted)" }}>{doc.uploadedBy}</span>
-      {onRemove && (
-        <button type="button" onClick={onRemove} disabled={removing} aria-label={`Remove ${doc.fileName}`} className="border-none bg-transparent cursor-pointer shrink-0" style={{ color: "var(--text-muted)" }}>
-          <X className="w-3.5 h-3.5" aria-hidden="true" />
-        </button>
-      )}
-    </li>
-  );
-}
+/* ── Shared sub-component (also used by the QA-side panel) ── */
 
 export function TaskThread({
   messages,

@@ -18,6 +18,7 @@ import { roleLabel } from "@/lib/labels/roles";
 import type { CAPA } from "@/store/capa.slice";
 import type { UserConfig } from "@/store/settings.slice";
 import type { CAPAOriginDoc } from "@/lib/queries/capas";
+import { DocList } from "@/components/shared/DocList";
 
 const SOURCE_LABEL: Record<string, string> = {
   "483": "FDA 483 Observation",
@@ -195,16 +196,15 @@ export function OverviewBody({
             Raised from deviation {capa.deviation.reference ?? "—"} — {originDocs.length} linked document{originDocs.length === 1 ? "" : "s"}
           </p>
           <p className="text-[11px] mt-0.5 mb-2" style={{ color: "var(--text-muted)" }}>Read-only references to the originating records (not copied into evidence).</p>
-          <ul className="space-y-1">
-            {originDocs.map((d) => (
-              <li key={d.id} className="flex items-center gap-2 text-[12px]">
-                <FileText className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-                <a href={`/api/documents/${d.id}`} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate underline" style={{ color: "var(--brand)" }}>{d.fileName}</a>
-                <Badge variant={d.source === "task" ? "amber" : "gray"}>{d.source === "task" ? "Task" : "Deviation"}</Badge>
-                <span className="text-[10px] shrink-0" style={{ color: "var(--text-muted)" }}>{d.uploadedBy}</span>
-              </li>
-            ))}
-          </ul>
+          <DocList
+            docs={originDocs.map((d) => ({
+              id: d.id,
+              fileName: d.fileName,
+              downloadHref: `/api/documents/${d.id}`,
+              uploadedBy: d.uploadedBy,
+              badge: { label: d.source === "task" ? "Task" : "Deviation", tone: d.source === "task" ? "amber" : "gray" },
+            }))}
+          />
         </div>
       )}
 
