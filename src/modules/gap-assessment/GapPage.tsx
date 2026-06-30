@@ -22,6 +22,7 @@ import {
   type Finding,
   type FindingSeverity,
 } from "@/store/findings.slice";
+import { adaptFinding, type FindingWithEdits } from "./GapPage.adapter";
 import {
   createFinding as createFindingAction,
   updateFinding as updateFindingAction,
@@ -39,55 +40,6 @@ import { GapRegisterTab } from "./tabs/GapRegisterTab";
 import { GapEvidenceTab } from "./tabs/GapEvidenceTab";
 import { AddFindingModal, type FindingForm } from "./modals/AddFindingModal";
 import { EvidenceLinkModal } from "./modals/EvidenceLinkModal";
-
-/** Prisma Finding plus the edit-history rows the page query includes. */
-type FindingWithEdits = PrismaFinding & {
-  edits?: {
-    editedBy: string;
-    editedByName: string;
-    editedAt: Date;
-    reason: string | null;
-    changes: string;
-  }[];
-};
-
-/* ── Adapt Prisma Finding → slice Finding shape ── */
-function adaptFinding(p: FindingWithEdits): Finding {
-  return {
-    id: p.id,
-    reference: p.reference ?? undefined,
-    tenantId: p.tenantId,
-    siteId: p.siteId ?? "",
-    area: p.area,
-    requirement: p.requirement,
-    purpose: p.purpose ?? undefined,
-    framework: p.framework ?? "",
-    severity: p.severity as FindingSeverity,
-    status: (p.status ?? "Open") as Finding["status"],
-    owner: p.owner,
-    targetDate: p.targetDate ? p.targetDate.toISOString() : "",
-    evidenceLink: p.evidenceLink ?? "",
-    rootCause: p.rootCause ?? undefined,
-    rcaMethod: p.rcaMethod ?? undefined,
-    rcaDetail: p.rcaDetail ?? undefined,
-    capaId: p.linkedCAPAId ?? undefined,
-    createdAt: p.createdAt.toISOString(),
-    editHistory: p.edits?.length
-      ? p.edits.map((e) => ({
-          editedBy: e.editedBy,
-          editedAt: e.editedAt.toISOString(),
-          reason: e.reason ?? undefined,
-          changes: (() => {
-            try {
-              return JSON.parse(e.changes) as { field: string; oldValue: unknown; newValue: unknown }[];
-            } catch {
-              return [];
-            }
-          })(),
-        }))
-      : undefined,
-  };
-}
 
 /* ── Constants ── */
 
@@ -456,7 +408,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
             const closed = baseFindings.filter((f) => f.status === "Closed");
             if (closed.length === 0) return null;
             const latest = closed.reduce((a, b) => (dayjs(a.createdAt).isAfter(b.createdAt) ? a : b));
-            return { id: formatReference("GAP", latest), closedAt: latest.createdAt ? dayjs.utc(latest.createdAt).format("DD MMM YYYY") : undefined };
+            return { id: formatReference("GAP", latest), closedAt: latest.createdAt ? dayjs.utc(latest.createdAt).tz(timezone).format(dateFormat) : undefined };
           })()}
         />
       )}

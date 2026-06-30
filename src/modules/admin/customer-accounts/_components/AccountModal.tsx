@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Upload, Save, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { MIN_TAILORED_RETENTION_YEARS } from "@/lib/plans";
 import { type AccountFormData } from "../helpers";
 import { AccountInfoFields } from "./account-form/AccountInfoFields";
 import { AccountSettingsFields } from "./account-form/AccountSettingsFields";
@@ -19,6 +20,8 @@ export function AccountModal({
   initial,
   mode,
   isSuperAdmin = false,
+  currentUserCount = 0,
+  currentSiteCount = 0,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +32,11 @@ export function AccountModal({
    *  control MFA on their own tenant. When false, the toggle JSX + help text
    *  are hidden and the parent's save handler skips the toggleTenantMFA call. */
   isSuperAdmin?: boolean;
+  /** Tenant's CURRENT active user/site counts. A TAILORED plan's Max users /
+   *  Max sites cannot be set below these (equal allowed). 0 in create mode
+   *  (no usage yet). Mirrors the server gate in assignPlan. */
+  currentUserCount?: number;
+  currentSiteCount?: number;
 }) {
   const [form, setForm] = useState<AccountFormData>(initial);
   // Per-field "user has interacted" map. A field's error is only surfaced
@@ -105,8 +113,39 @@ export function AccountModal({
       if (form.newPassword.length < 8) e.newPassword = "Password must be at least 8 characters";
       if (form.newPassword !== form.confirmPassword) e.confirmPassword = "Passwords don't match";
     }
+
+    // Plan caps — only when a plan is assigned. Each cap is otherwise floored
+    // to 1 server-side (resolvePlanCaps) and saved with no warning (Bug 2), so
+    // block an empty/<1 value here with an inline message, like the fields
+    // above. Retention is minRetentionYears — a minimum with the same ≥1 floor
+    // as users/sites (see resolvePlanCaps / validateTailoredCaps in plans.ts).
+    if (form.plan) {
+      if (!Number.isFinite(form.plan.maxUsers) || form.plan.maxUsers < 1) {
+        e.planMaxUsers = "Max users must be at least 1";
+      } else if (form.plan.tier === "TAILORED" && form.plan.maxUsers < currentUserCount) {
+        // TAILORED only — can't set a cap below current active usage (equal ok).
+        // Mirrors the authoritative server gate in assignPlan.
+        e.planMaxUsers = `Cannot set Max users below current usage: ${currentUserCount} user${currentUserCount === 1 ? "" : "s"} active`;
+      }
+      if (!Number.isFinite(form.plan.maxSites) || form.plan.maxSites < 1) {
+        e.planMaxSites = "Max sites must be at least 1";
+      } else if (form.plan.tier === "TAILORED" && form.plan.maxSites < currentSiteCount) {
+        e.planMaxSites = `Cannot set Max sites below current usage: ${currentSiteCount} site${currentSiteCount === 1 ? "" : "s"} active`;
+      }
+      if (!Number.isFinite(form.plan.minRetentionYears) || form.plan.minRetentionYears < 1) {
+        e.planRetention = "Retention must be at least 1 year";
+      } else if (form.plan.tier === "TAILORED" && form.plan.minRetentionYears < MIN_TAILORED_RETENTION_YEARS) {
+        // TAILORED only — retention is a compliance FLOOR (not a usage count);
+        // can't promise below the 7-year Part 11 floor. Mirrors the server gate.
+        e.planRetention = `Retention must be at least ${MIN_TAILORED_RETENTION_YEARS} years (compliance floor)`;
+      }
+      if (!Number.isFinite(form.plan.durationMonths) || form.plan.durationMonths < 1) {
+        e.planDuration = "Duration must be at least 1 month";
+      }
+    }
+
     return e;
-  }, [form, mode]);
+  }, [form, mode, currentUserCount, currentSiteCount]);
 
   // A field-level error is "visible" once the user has interacted with that
   // field OR clicked Save. Pristine fields stay silent.
@@ -131,7 +170,16 @@ export function AccountModal({
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
     (mode === "edit"
       ? (!form.newPassword || (form.newPassword.length >= 8 && form.newPassword === form.confirmPassword))
-      : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword);
+      : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword) &&
+    // Plan, when assigned, must have all caps >= 1 (users/sites/retention) (Bug 2).
+    (!form.plan ||
+      (Number.isFinite(form.plan.maxUsers) && form.plan.maxUsers >= 1 &&
+        Number.isFinite(form.plan.maxSites) && form.plan.maxSites >= 1 &&
+        Number.isFinite(form.plan.minRetentionYears) && form.plan.minRetentionYears >= 1 &&
+        Number.isFinite(form.plan.durationMonths) && form.plan.durationMonths >= 1 &&
+        // TAILORED: caps may not drop below current active usage, and retention
+        // may not drop below the compliance floor (equal ok for both).
+        (form.plan.tier !== "TAILORED" || (form.plan.maxUsers >= currentUserCount && form.plan.maxSites >= currentSiteCount && form.plan.minRetentionYears >= MIN_TAILORED_RETENTION_YEARS))));
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {
@@ -140,6 +188,10 @@ export function AccountModal({
     email: "Email",
     newPassword: "Password",
     confirmPassword: "Confirm Password",
+    planMaxUsers: "Max users",
+    planMaxSites: "Max sites",
+    planRetention: "Retention (yr)",
+    planDuration: "Duration (mo)",
   };
   const blockingFields = Object.keys(errors).filter((k) => labels[k]).map((k) => labels[k]);
   const showHint = blockingFields.length > 0 && (Object.values(touched).some(Boolean) || submitAttempted);
@@ -246,7 +298,18 @@ export function AccountModal({
 
         {/* Plan assignment is now an inline section of the form — no separate
             popup. The account's single Save submits the plan with it. */}
-        <AccountPlanFields plan={form.plan} onPlanChange={(p) => set("plan", p)} />
+        <AccountPlanFields
+          plan={form.plan}
+          onPlanChange={(p) => set("plan", p)}
+          maxUsersError={errorVisible("planMaxUsers") ? errors.planMaxUsers : undefined}
+          onMaxUsersBlur={() => markTouched("planMaxUsers")}
+          maxSitesError={errorVisible("planMaxSites") ? errors.planMaxSites : undefined}
+          onMaxSitesBlur={() => markTouched("planMaxSites")}
+          retentionError={errorVisible("planRetention") ? errors.planRetention : undefined}
+          onRetentionBlur={() => markTouched("planRetention")}
+          durationError={errorVisible("planDuration") ? errors.planDuration : undefined}
+          onDurationBlur={() => markTouched("planDuration")}
+        />
 
         <AccountPasswordFields
           form={form}

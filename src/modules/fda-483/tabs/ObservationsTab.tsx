@@ -1,5 +1,6 @@
 import { useRouter } from "next/navigation";
 import dayjs from "@/lib/dayjs";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   ClipboardList,
   ClipboardCheck,
@@ -76,7 +77,7 @@ export function ObservationsTab({
   onEditObservation,
   onAddCommitment,
 }: ObservationsTabProps) {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
   // Lock levels:
   //  fullyLocked = Response Submitted or Closed → everything read-only
   //  hasLinkedCapa = any observation has a CAPA → show soft warning

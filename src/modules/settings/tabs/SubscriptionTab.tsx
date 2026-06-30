@@ -36,7 +36,7 @@ export function SubscriptionTab() {
   // No plan → minimal informational card (no controls).
   if (!plan) {
     return (
-      <div className="max-w-[760px]">
+      <div className="w-full">
         <Card
           header={
             <>
@@ -71,7 +71,7 @@ export function SubscriptionTab() {
   const label = planLabel(plan.tier, plan.displayName);
 
   return (
-    <div className="max-w-[760px] space-y-5">
+    <div className="w-full space-y-5">
       {/* 1. Plan summary */}
       <Card
         header={

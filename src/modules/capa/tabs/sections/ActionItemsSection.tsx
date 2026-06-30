@@ -79,7 +79,8 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
   // later phase). canView stays open so they can still read the plan.
   const capaCan = usePermissions("capa");
   // Phase 3 — assigned-owner access path. An owner who is NOT an author role
-  const { users } = useTenantConfig();
+  const { users, org } = useTenantConfig();
+  const dateFormat = org.dateFormat;
   const toast = useToast();
   // Live items — seeded from the Redux CAPA prop, refetched on every
   // successful mutation so the row state stays consistent with the
@@ -409,7 +410,7 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
                   </td>
                   <td className="py-2 pr-2 align-top">{userNameById(item.ownerId ?? "") || item.owner}</td>
                   <td className="py-2 pr-2 align-top">
-                    <div>{dayjs.utc(item.dueDate).format("DD MMM")}</div>
+                    <div>{dayjs.utc(item.dueDate).format(dateFormat)}</div>
                     {overdue !== null && <Badge variant="red">Overdue {overdue}d</Badge>}
                   </td>
                   <td className="py-2 pr-2 align-top">

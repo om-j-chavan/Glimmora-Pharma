@@ -63,7 +63,9 @@ export function TaskPanel({
 }) {
   const toast = useToast();
   // Resolve the uploader's role for file provenance (consistent with Evidence).
-  const { users } = useTenantConfig();
+  const { users, org } = useTenantConfig();
+  const timezone = org.timezone;
+  const dateFormat = org.dateFormat;
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -181,11 +183,11 @@ export function TaskPanel({
       {/* Task header (read-only context) */}
       <div className="mb-3">
         <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-          {capa.reference ?? capa.id.slice(0, 8)} · {capa.title} · CAPA due {capa.dueDate ? dayjs.utc(capa.dueDate).format("DD MMM YYYY") : "—"}
+          {capa.reference ?? capa.id.slice(0, 8)} · {capa.title} · CAPA due {capa.dueDate ? dayjs.utc(capa.dueDate).format(dateFormat) : "—"}
         </p>
         <p className="text-[13px] font-medium mt-2" style={{ color: "var(--text-primary)" }}>{action.description}</p>
         <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
-          Due {dayjs.utc(action.dueDate).format("DD MMM YYYY")} · <Badge variant={action.status === "rework" ? "red" : action.status === "complete" ? "green" : "amber"}>{TASK_STATUS_LABEL[action.status] ?? action.status}</Badge>
+          Due {dayjs.utc(action.dueDate).format(dateFormat)} · <Badge variant={action.status === "rework" ? "red" : action.status === "complete" ? "green" : "amber"}>{TASK_STATUS_LABEL[action.status] ?? action.status}</Badge>
         </p>
         {action.status === "rework" && action.reworkReason && (
           <div className="alert mt-2 flex items-start gap-2" style={{ background: "var(--danger-bg, #fef2f2)", border: "1px solid var(--danger)" }}>
@@ -221,7 +223,7 @@ export function TaskPanel({
                 <li key={f.id} className="text-[11px]">
                   <p className="font-medium truncate" style={{ color: "var(--text-primary)" }}>{f.fileName}</p>
                   <p style={{ color: "var(--text-muted)" }}>
-                    {EVIDENCE_CATEGORY_LABEL[f.category] ?? f.category} · {formatSize(f.fileSize)} · {uploaderLabel} · {dayjs.utc(f.createdAt).format("DD MMM")}
+                    {EVIDENCE_CATEGORY_LABEL[f.category] ?? f.category} · {formatSize(f.fileSize)} · {uploaderLabel} · {dayjs.utc(f.createdAt).tz(timezone).format(dateFormat)}
                   </p>
                 </li>
               );
@@ -250,7 +252,7 @@ export function TaskPanel({
                     {roleLabel(c.authorRole)}
                   </span>
                 )}
-                <span style={{ color: "var(--text-muted)" }}> · {dayjs.utc(c.createdAt).format("DD MMM HH:mm")}</span>
+                <span style={{ color: "var(--text-muted)" }}> · {dayjs.utc(c.createdAt).tz(timezone).format(`${dateFormat} HH:mm`)}</span>
                 <p style={{ color: "var(--text-secondary)" }}>{c.body}</p>
               </li>
             ))}

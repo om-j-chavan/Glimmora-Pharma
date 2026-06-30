@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   PauseCircle,
   PlayCircle,
+  RefreshCw,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -242,7 +243,14 @@ export function CustomerDetailPage() {
             <span className="card-title">Plan Details</span>
           </div>
           {plan && (
-            <Badge variant={planExpired ? "red" : "green"}>{planExpired ? "Expired" : "Valid"}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant={planExpired ? "red" : "green"}>{planExpired ? "Expired" : "Valid"}</Badge>
+              {isSuperAdmin && (
+                <Button variant="secondary" size="xs" icon={RefreshCw} onClick={() => ca.openRenew(tenant)}>
+                  Renew
+                </Button>
+              )}
+            </div>
           )}
         </div>
         <div className="card-body">
@@ -362,7 +370,85 @@ export function CustomerDetailPage() {
         initial={ca.getFormData()}
         mode={ca.editingTenant ? "edit" : "create"}
         isSuperAdmin={ca.isSuperAdmin}
+        currentUserCount={ca.editingTenant?.config.users.filter((u) => u.status === "Active").length ?? 0}
+        currentSiteCount={ca.editingTenant?.config.sites.filter((s) => s.status === "Active").length ?? 0}
       />
+
+      {/* Renew subscription — TIME-ONLY. Reuses the editor's assignPlan write
+          path via the shared hook (renewal: true → PLAN_RENEWED audit); tier +
+          caps are untouched. New start = max(current expiry, today); new expiry
+          = resolveExpiry(start, term) — no new date math. */}
+      {ca.renewingTenant && ca.renewDraft && (
+        <Modal
+          open
+          onClose={ca.closeRenew}
+          title="Renew subscription"
+          footer={
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" size="sm" onClick={ca.closeRenew} disabled={ca.renewing}>Cancel</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={RefreshCw}
+                onClick={ca.confirmRenew}
+                loading={ca.renewing}
+                disabled={!Number.isFinite(ca.renewDraft.durationMonths) || ca.renewDraft.durationMonths < 1}
+              >
+                Confirm renewal
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-[12px] mb-4" style={{ color: "var(--text-secondary)" }}>
+            Extends the subscription term only — tier and limits are unchanged (edit those in the plan editor).
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>New term (mo)</label>
+              <input
+                type="number"
+                min={1}
+                value={Number.isFinite(ca.renewDraft.durationMonths) ? ca.renewDraft.durationMonths : ""}
+                disabled={ca.renewDraft.tier !== "TAILORED"}
+                onChange={(e) => ca.setRenewMonths(e.target.valueAsNumber)}
+                aria-label="New term in months"
+                className="input text-[12px]"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
+                New start <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(auto)</span>
+              </label>
+              <input
+                type="text"
+                readOnly
+                disabled
+                value={ca.renewDraft.startDate ? dayjs.utc(ca.renewDraft.startDate).format("DD MMM YYYY") : "—"}
+                aria-label="New start date"
+                className="input text-[12px]"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
+                New expiry <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(auto)</span>
+              </label>
+              <input
+                type="text"
+                readOnly
+                disabled
+                value={ca.renewDraft.expiryDate ? dayjs.utc(ca.renewDraft.expiryDate).format("DD MMM YYYY") : "—"}
+                aria-label="New expiry date"
+                className="input text-[12px]"
+              />
+            </div>
+          </div>
+          {ca.renewDraft.tier !== "TAILORED" && (
+            <p className="text-[10px] mt-3" style={{ color: "var(--text-muted)" }}>
+              Term is fixed for this tier — only Tailored plans can set a custom term.
+            </p>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

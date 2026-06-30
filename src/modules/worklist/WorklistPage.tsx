@@ -12,6 +12,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useToast } from "@/components/ui/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
 import { submitForReview } from "@/actions/capas";
 import { updateEvidenceStatus, initializeEvidenceForCAPA } from "@/actions/evidence";
@@ -68,6 +69,8 @@ export function WorklistPage({
   const router = useRouter();
   const toast = useToast();
   const capaCan = usePermissions("capa");
+  const { org } = useTenantConfig();
+  const dateFormat = org.dateFormat;
   const isViewer = currentUserRole === "viewer";
   const canWrite = !isViewer;
 
@@ -88,7 +91,7 @@ export function WorklistPage({
   const [quickFilter, setQuickFilter] = useState<"" | "open" | "rework" | "dueSoon" | "overdue">("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpand = (capaId: string) =>
-    setExpanded((prev) => { const n = new Set(prev); n.has(capaId) ? n.delete(capaId) : n.add(capaId); return n; });
+    setExpanded((prev) => { const n = new Set(prev); if (n.has(capaId)) n.delete(capaId); else n.add(capaId); return n; });
   const toggleQuick = (q: typeof quickFilter) => setQuickFilter((prev) => (prev === q ? "" : q));
 
   const anyFilter = !!(searchQuery || statusFilter || priorityFilter || dueByFilter || quickFilter);
@@ -293,7 +296,7 @@ export function WorklistPage({
                 <div className="flex-1 min-w-0">
                   <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{item.description}</p>
                   <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                    {group.capa.reference ?? group.capa.id.slice(0, 8)} · due {dayjs.utc(item.dueDate).format("DD MMM")}
+                    {group.capa.reference ?? group.capa.id.slice(0, 8)} · due {dayjs.utc(item.dueDate).format(dateFormat)}
                   </p>
                   {item.reworkReason && (
                     <p className="text-[11px] mt-0.5" style={{ color: "var(--status-blocked)" }}>Returned: {item.reworkReason}</p>
@@ -542,9 +545,10 @@ function SummaryCard({
 
 function Row({ item, onOpen, muted, grid }: { item: WorklistItem; onOpen: () => void; muted?: boolean; grid?: boolean }) {
   const od = overdueDays(item.dueDate, item.status);
+  const dateFormat = useTenantConfig().org.dateFormat;
   const due = (
     <span style={{ color: od !== null ? "var(--status-blocked)" : "var(--text-muted)" }}>
-      Due {dayjs.utc(item.dueDate).format("DD MMM")}{od !== null && ` · Overdue ${od}d`}
+      Due {dayjs.utc(item.dueDate).format(dateFormat)}{od !== null && ` · Overdue ${od}d`}
     </span>
   );
   const pill = <StatusPill token={ACTION_STATUS_TOKEN[item.status] ?? "pending"}>{ITEM_STATUS_LABEL[item.status] ?? item.status}</StatusPill>;

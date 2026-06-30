@@ -19,6 +19,7 @@ import type { DriftAlert, DriftMetric } from "@/types/agi";
 const EMPTY_FINDINGS: Finding[] = [];
 const EMPTY_CAPAS: CAPA[] = [];
 const EMPTY_DEVIATIONS: Deviation[] = [];
+const EMPTY_SYSTEMS: GxPSystem[] = [];
 const EMPTY_EVIDENCE_DOCS: EvidenceDocument[] = [];
 const EMPTY_EVIDENCE_PACKS: EvidencePack[] = [];
 const EMPTY_RAID: RAIDItem[] = [];
@@ -34,6 +35,7 @@ export function useTenantData() {
   const findingsRaw = useAppSelector((s) => s.findings?.items ?? EMPTY_FINDINGS);
   const capasRaw = useAppSelector((s) => s.capa?.items ?? EMPTY_CAPAS);
   const deviationsRaw = useAppSelector((s) => s.deviation?.items ?? EMPTY_DEVIATIONS);
+  const systemsRaw = useAppSelector((s) => s.systems?.items ?? EMPTY_SYSTEMS);
   const evidenceDocsRaw = useAppSelector((s) => s.evidence?.documents ?? EMPTY_EVIDENCE_DOCS);
   const evidencePacksRaw = useAppSelector((s) => s.evidence?.packs ?? EMPTY_EVIDENCE_PACKS);
   const raidItemsRaw = useAppSelector((s) => s.raid?.items ?? EMPTY_RAID);
@@ -76,6 +78,19 @@ export function useTenantData() {
     [deviationsRaw, tenantId, selectedSiteId, accessibleSiteIds],
   );
 
+  // Seeded by the dashboard (and any future server-first consumer); filtered
+  // by tenant + accessible/selected site, mirroring findings/capas/deviations.
+  const systems = useMemo(
+    () =>
+      systemsRaw.filter((s) => {
+        if (s.tenantId && s.tenantId !== tenantId) return false;
+        if (s.siteId && !accessibleSiteIds.includes(s.siteId)) return false;
+        if (selectedSiteId && s.siteId !== selectedSiteId) return false;
+        return true;
+      }),
+    [systemsRaw, tenantId, selectedSiteId, accessibleSiteIds],
+  );
+
   const evidenceDocs = useMemo(
     () =>
       evidenceDocsRaw.filter((d) => {
@@ -108,14 +123,14 @@ export function useTenantData() {
     [raidItemsRaw, tenantId, selectedSiteId, accessibleSiteIds],
   );
 
-  // The systems / roadmap / fda483 / agiDrift slices were deleted in the
-  // server-first migration. /csv-csa, /fda-483, etc. each fetch their own
-  // Prisma data server-side now. We return empty arrays here typed as the
-  // real entity types so consumers (Dashboard, Governance, AGI, Evidence,
-  // useNotificationEngine) type-check correctly even though the data is
-  // empty. Wiring those consumers to server-fetched props is a separate
-  // (deferred) project — until then their UIs render zero values.
-  const systems: GxPSystem[] = [];
+  // The roadmap / fda483 / agiDrift slices were deleted in the server-first
+  // migration. /csv-csa, /fda-483, etc. each fetch their own Prisma data
+  // server-side now. We return empty arrays here typed as the real entity
+  // types so consumers (Dashboard, Governance, AGI, Evidence,
+  // useNotificationEngine) type-check correctly even though the data is empty.
+  // Wiring those consumers to server-fetched props is a separate (deferred)
+  // project — until then their UIs render zero values. (systems is the
+  // exception: it has a slice again and is seeded above.)
   const roadmap: RoadmapActivity[] = [];
   const fda483Events: FDA483Event[] = [];
 

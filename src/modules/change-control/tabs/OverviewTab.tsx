@@ -8,6 +8,7 @@ import {
   Trash2,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { Button } from "@/components/ui/Button";
 import type { ChangeControlStatus } from "@/lib/change-control-constants";
 import type { CCDetail } from "../_shared";
@@ -43,6 +44,8 @@ export function OverviewTab({
   onTransition: (target: ChangeControlStatus) => void;
   onDelete: () => void;
 }) {
+  const { org } = useTenantConfig();
+  const dateFormat = org.dateFormat;
   return (
     <div className="space-y-3">
       {/* CHANGE CONTROL HIDDEN — reciprocal CAPA dependency banner
@@ -81,12 +84,12 @@ export function OverviewTab({
         >
           Target:{" "}
           {cc.targetImplementationDate
-            ? dayjs.utc(cc.targetImplementationDate).format("DD MMM YYYY")
+            ? dayjs.utc(cc.targetImplementationDate).format(dateFormat)
             : "—"}
           {" · "}
           Actual:{" "}
           {cc.actualImplementationDate
-            ? dayjs.utc(cc.actualImplementationDate).format("DD MMM YYYY")
+            ? dayjs.utc(cc.actualImplementationDate).format(dateFormat)
             : "—"}
         </p>
       </div>

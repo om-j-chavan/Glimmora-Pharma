@@ -73,7 +73,7 @@ function adaptPrismaDoc(d: PrismaDocument): EvidenceDocument {
   const status: DocStatus =
     d.status === "approved" ? "Current"
     : d.status === "under_review" ? "Under Review"
-    : d.status === "rejected" ? "Superseded"
+    : d.status === "rejected" ? "Draft"
     : "Draft";
 
   return {
@@ -267,6 +267,20 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
         : "Draft";
     };
 
+    // CAPA EvidenceFiles inherit their review state from the parent
+    // EvidenceItem (PENDING / COMPLETE / REJECTED / NOT_APPLICABLE). Only a
+    // COMPLETE item is inspection-ready; everything else must NOT render as
+    // "Current". Unknown → Draft (safe), same rule as mapStatus.
+    const mapEvidenceItemStatus = (s: string): DocStatus => {
+      switch (s.trim().toUpperCase()) {
+        case "COMPLETE": return "Current";
+        case "PENDING": return "Under Review";
+        case "REJECTED": return "Draft";
+        case "NOT_APPLICABLE": return "Draft";
+        default: return "Draft";
+      }
+    };
+
     const pushUploaded = (
       doc: { id: string; fileName: string; fileType: string; fileSize: string; uploadedBy: string; uploadedAt?: string; version: string; status: string; description?: string; approvedBy?: string; dataUrl?: string },
       opts: { sourcePrefix: string; recordId: string; area: DocArea; complianceTags: string[]; tenantId: string; siteId: string; capaId?: string; eventId?: string; findingId?: string; systemId?: string; recordTitle?: string },
@@ -321,7 +335,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
         area: "QMS",
         capaId: capa.id,
         version: "1.0",
-        status: "Current",
+        status: mapEvidenceItemStatus(ef.evidenceItem.status),
         author: ef.uploadedBy,
         effectiveDate: ef.createdAt.toISOString(),
         tags: [ef.fileType.toUpperCase(), humanCategory],
@@ -530,7 +544,10 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
     defaultValues: {
       type: "SOP",
       area: "QMS",
-      status: "Current",
+      // A newly added document is unverified — default to Draft, not the
+      // inspection-ready "Current" badge (same evidence-integrity rule as #10).
+      // The author can set Current explicitly once it's approved.
+      status: "Draft",
       version: "1.0",
     },
   });

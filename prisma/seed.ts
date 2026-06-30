@@ -72,6 +72,7 @@ async function main() {
       maxUsers: PLAN_TIERS.PROFESSIONAL.maxUsers,
       maxSites: PLAN_TIERS.PROFESSIONAL.maxSites,
       minRetentionYears: PLAN_TIERS.PROFESSIONAL.minRetentionYears,
+      durationMonths: PLAN_TIERS.PROFESSIONAL.durationMonths,
       startDate: new Date("2026-01-01"),
       expiryDate: new Date("2026-12-31"),
     },
@@ -85,7 +86,7 @@ async function main() {
     {
       code: "ESS_001", name: "Wellspring Generics", username: "wellspring", email: "admin@wellspring.test",
       tier: "ESSENTIALS" as const, displayName: null as string | null,
-      caps: { maxUsers: PLAN_TIERS.ESSENTIALS.maxUsers, maxSites: PLAN_TIERS.ESSENTIALS.maxSites, minRetentionYears: PLAN_TIERS.ESSENTIALS.minRetentionYears },
+      caps: { maxUsers: PLAN_TIERS.ESSENTIALS.maxUsers, maxSites: PLAN_TIERS.ESSENTIALS.maxSites, minRetentionYears: PLAN_TIERS.ESSENTIALS.minRetentionYears, durationMonths: PLAN_TIERS.ESSENTIALS.durationMonths },
       sites: [{ name: "Pune Plant", code: "PUN" }],
       users: [
         { name: "Ravi Kumar", email: "ravi@wellspring.test", username: "ravi", role: "qa_head", gxpSignatory: true },
@@ -97,7 +98,7 @@ async function main() {
     {
       code: "ENT_001", name: "Helios Biologics", username: "helios", email: "admin@helios.test",
       tier: "ENTERPRISE" as const, displayName: null as string | null,
-      caps: { maxUsers: PLAN_TIERS.ENTERPRISE.maxUsers, maxSites: PLAN_TIERS.ENTERPRISE.maxSites, minRetentionYears: PLAN_TIERS.ENTERPRISE.minRetentionYears },
+      caps: { maxUsers: PLAN_TIERS.ENTERPRISE.maxUsers, maxSites: PLAN_TIERS.ENTERPRISE.maxSites, minRetentionYears: PLAN_TIERS.ENTERPRISE.minRetentionYears, durationMonths: PLAN_TIERS.ENTERPRISE.durationMonths },
       sites: [{ name: "Vizag Biologics", code: "VTZ" }, { name: "Goa Fill-Finish", code: "GOA" }],
       users: [
         { name: "Meera Nair", email: "meera@helios.test", username: "meera", role: "qa_head", gxpSignatory: true },
@@ -110,7 +111,7 @@ async function main() {
     {
       code: "TLR_001", name: "Custom Pilot Pharma", username: "custompilot", email: "admin@custompilot.test",
       tier: "TAILORED" as const, displayName: "Custom Pilot" as string | null,
-      caps: { maxUsers: 250, maxSites: 20, minRetentionYears: 10 },
+      caps: { maxUsers: 250, maxSites: 20, minRetentionYears: 10, durationMonths: 24 },
       sites: [{ name: "Ahmedabad Plant", code: "AMD" }],
       users: [
         { name: "Sana Shaikh", email: "sana@custompilot.test", username: "sana", role: "qa_head", gxpSignatory: true },
@@ -140,6 +141,7 @@ async function main() {
         maxUsers: t.caps.maxUsers,
         maxSites: t.caps.maxSites,
         minRetentionYears: t.caps.minRetentionYears,
+        durationMonths: t.caps.durationMonths,
         startDate: new Date("2026-01-01"),
         expiryDate: new Date("2026-12-31"),
       },

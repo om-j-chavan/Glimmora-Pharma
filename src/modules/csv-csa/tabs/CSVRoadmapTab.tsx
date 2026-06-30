@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import { GitBranch, Plus, Check } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import type { GxPSystem, RiskLevel, RoadmapActivity } from "@/types/csv-csa";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
@@ -63,6 +64,8 @@ export function CSVRoadmapTab({
   onRmSysFilterChange, onRmTypeFilterChange, onRmStatusFilterChange,
   onClearRoadmapFilters, onAddActivityOpen, onGoToInventory, onCompleteActivity,
 }: CSVRoadmapTabProps) {
+  const { org } = useTenantConfig();
+  const dateFormat = org.dateFormat;
   return (
     <>
       {/* Guidance banner */}
@@ -144,7 +147,7 @@ export function CSVRoadmapTab({
                           <div className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{a.title}</div>
                           <div className="flex items-center gap-2 mt-0.5">
                             <Badge variant="gray">{a.type}</Badge>
-                            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{dayjs.utc(a.startDate).format("DD MMM")} &rarr; {dayjs.utc(a.endDate).format("DD MMM YYYY")}</span>
+                            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{dayjs.utc(a.startDate).format(dateFormat)} &rarr; {dayjs.utc(a.endDate).format(dateFormat)}</span>
                           </div>
                         </div>
                         {actStatusBadge(a.status)}

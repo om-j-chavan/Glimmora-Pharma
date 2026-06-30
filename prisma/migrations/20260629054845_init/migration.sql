@@ -1,12 +1,6 @@
--- CreateSchema
-CREATE SCHEMA IF NOT EXISTS "public";
-
--- CreateEnum
-CREATE TYPE "PlanTier" AS ENUM ('ESSENTIALS', 'PROFESSIONAL', 'ENTERPRISE', 'TAILORED');
-
 -- CreateTable
 CREATE TABLE "Tenant" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "customerCode" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "username" TEXT NOT NULL,
@@ -18,33 +12,31 @@ CREATE TABLE "Tenant" (
     "logoUrl" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "mfaEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "sessionsValidAfter" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Tenant_pkey" PRIMARY KEY ("id")
+    "sessionsValidAfter" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "Plan" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
-    "tier" "PlanTier" NOT NULL,
+    "tier" TEXT NOT NULL,
     "displayName" TEXT,
     "maxUsers" INTEGER NOT NULL,
     "maxSites" INTEGER NOT NULL,
     "minRetentionYears" INTEGER NOT NULL,
-    "startDate" TIMESTAMP(3) NOT NULL,
-    "expiryDate" TIMESTAMP(3) NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Plan_pkey" PRIMARY KEY ("id")
+    "durationMonths" INTEGER NOT NULL DEFAULT 12,
+    "startDate" DATETIME NOT NULL,
+    "expiryDate" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Plan_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Site" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "code" TEXT,
@@ -52,15 +44,14 @@ CREATE TABLE "Site" (
     "gmpScope" TEXT,
     "risk" TEXT NOT NULL DEFAULT 'MEDIUM',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Site_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Site_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "User" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "siteId" TEXT,
     "name" TEXT NOT NULL,
@@ -70,16 +61,16 @@ CREATE TABLE "User" (
     "role" TEXT NOT NULL,
     "gxpSignatory" BOOLEAN NOT NULL DEFAULT false,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "lastLogin" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+    "lastLogin" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "User_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "User_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Finding" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "reference" TEXT,
     "tenantId" TEXT NOT NULL,
     "siteId" TEXT,
@@ -90,7 +81,7 @@ CREATE TABLE "Finding" (
     "severity" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'Open',
     "owner" TEXT NOT NULL,
-    "targetDate" TIMESTAMP(3),
+    "targetDate" DATETIME,
     "rcaMethod" TEXT,
     "rcaDetail" TEXT,
     "rootCause" TEXT,
@@ -99,34 +90,35 @@ CREATE TABLE "Finding" (
     "createdBy" TEXT NOT NULL,
     "previousCAPAId" TEXT,
     "systemId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "deletedAt" TIMESTAMP(3),
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
-
-    CONSTRAINT "Finding_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Finding_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Finding_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Finding_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Finding_previousCAPAId_fkey" FOREIGN KEY ("previousCAPAId") REFERENCES "CAPA" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "FindingEdit" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "findingId" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
     "editedBy" TEXT NOT NULL,
     "editedByName" TEXT NOT NULL,
-    "editedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "editedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "reason" TEXT,
     "changes" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "FindingEdit_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "FindingEdit_findingId_fkey" FOREIGN KEY ("findingId") REFERENCES "Finding" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CAPA" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "reference" TEXT,
     "tenantId" TEXT NOT NULL,
     "siteId" TEXT,
@@ -137,7 +129,7 @@ CREATE TABLE "CAPA" (
     "description" TEXT NOT NULL,
     "risk" TEXT NOT NULL,
     "owner" TEXT NOT NULL,
-    "dueDate" TIMESTAMP(3),
+    "dueDate" DATETIME,
     "status" TEXT NOT NULL DEFAULT 'open',
     "rca" TEXT,
     "rcaMethod" TEXT,
@@ -146,29 +138,29 @@ CREATE TABLE "CAPA" (
     "alignmentStatus" TEXT,
     "alignmentReviewedBy" TEXT,
     "alignmentReviewedById" TEXT,
-    "alignmentReviewedAt" TIMESTAMP(3),
+    "alignmentReviewedAt" DATETIME,
     "alignmentNotes" TEXT,
     "alignmentOverrideBy" TEXT,
     "alignmentOverrideById" TEXT,
-    "alignmentOverrideAt" TIMESTAMP(3),
+    "alignmentOverrideAt" DATETIME,
     "alignmentOverrideReason" TEXT,
     "rcaApproved" BOOLEAN,
     "rcaReviewedBy" TEXT,
     "rcaReviewedById" TEXT,
-    "rcaReviewedAt" TIMESTAMP(3),
+    "rcaReviewedAt" DATETIME,
     "rcaReviewNotes" TEXT,
     "rcaOverrideBy" TEXT,
     "rcaOverrideById" TEXT,
-    "rcaOverrideAt" TIMESTAMP(3),
+    "rcaOverrideAt" DATETIME,
     "rcaOverrideReason" TEXT,
     "verifiedBy" TEXT,
     "verifiedById" TEXT,
-    "verifiedAt" TIMESTAMP(3),
+    "verifiedAt" DATETIME,
     "verificationNotes" TEXT,
     "verificationSignatureId" TEXT,
     "effectivenessCheck" BOOLEAN NOT NULL DEFAULT true,
-    "effectivenessDate" TIMESTAMP(3),
-    "effectivenessReviewedAt" TIMESTAMP(3),
+    "effectivenessDate" DATETIME,
+    "effectivenessReviewedAt" DATETIME,
     "effectivenessVerdict" TEXT,
     "effectivenessReviewedBy" TEXT,
     "effectivenessReviewedById" TEXT,
@@ -178,13 +170,13 @@ CREATE TABLE "CAPA" (
     "diGateStatus" TEXT,
     "diGateNotes" TEXT,
     "diGateReviewedBy" TEXT,
-    "diGateReviewDate" TIMESTAMP(3),
+    "diGateReviewDate" DATETIME,
     "closedBy" TEXT,
-    "closedAt" TIMESTAMP(3),
+    "closedAt" DATETIME,
     "ccBlockOverrideReason" TEXT,
     "ccBlockOverrideById" TEXT,
     "ccBlockOverrideByName" TEXT,
-    "ccBlockOverrideAt" TIMESTAMP(3),
+    "ccBlockOverrideAt" DATETIME,
     "closureSignatureId" TEXT,
     "deviationId" TEXT,
     "createdBy" TEXT NOT NULL,
@@ -192,50 +184,62 @@ CREATE TABLE "CAPA" (
     "ownerId" TEXT,
     "rejectionReason" TEXT,
     "rejectedById" TEXT,
-    "rejectedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "deletedAt" TIMESTAMP(3),
+    "rejectedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
-
-    CONSTRAINT "CAPA_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "CAPA_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_findingId_fkey" FOREIGN KEY ("findingId") REFERENCES "Finding" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_closureSignatureId_fkey" FOREIGN KEY ("closureSignatureId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_verificationSignatureId_fkey" FOREIGN KEY ("verificationSignatureId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_effectivenessSignatureId_fkey" FOREIGN KEY ("effectivenessSignatureId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_deviationId_fkey" FOREIGN KEY ("deviationId") REFERENCES "Deviation" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_rejectedById_fkey" FOREIGN KEY ("rejectedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPA_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CAPAActionItem" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "capaId" TEXT NOT NULL,
     "sequence" INTEGER NOT NULL,
     "description" TEXT NOT NULL,
     "owner" TEXT NOT NULL,
     "ownerId" TEXT,
-    "dueDate" TIMESTAMP(3) NOT NULL,
+    "dueDate" DATETIME NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'pending',
     "reworkReason" TEXT,
     "reworkRequestedById" TEXT,
-    "reworkRequestedAt" TIMESTAMP(3),
+    "reworkRequestedAt" DATETIME,
     "completedBy" TEXT,
     "completedById" TEXT,
-    "completedAt" TIMESTAMP(3),
+    "completedAt" DATETIME,
     "completionNotes" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdBy" TEXT NOT NULL,
     "createdById" TEXT,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "deletedAt" TIMESTAMP(3),
+    "updatedAt" DATETIME NOT NULL,
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
-
-    CONSTRAINT "CAPAActionItem_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "CAPAActionItem_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CAPAActionItem_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CAPAActionItem_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPAActionItem_reworkRequestedById_fkey" FOREIGN KEY ("reworkRequestedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPAActionItem_completedById_fkey" FOREIGN KEY ("completedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CAPADocument" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "capaId" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "fileSize" TEXT,
@@ -244,16 +248,15 @@ CREATE TABLE "CAPADocument" (
     "status" TEXT NOT NULL DEFAULT 'current',
     "uploadedBy" TEXT NOT NULL,
     "approvedBy" TEXT,
-    "approvedAt" TIMESTAMP(3),
+    "approvedAt" DATETIME,
     "description" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "CAPADocument_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CAPADocument_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Deviation" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "reference" TEXT,
     "tenantId" TEXT NOT NULL,
     "siteId" TEXT,
@@ -264,9 +267,9 @@ CREATE TABLE "Deviation" (
     "severity" TEXT NOT NULL,
     "area" TEXT NOT NULL,
     "detectedBy" TEXT NOT NULL,
-    "detectedDate" TIMESTAMP(3) NOT NULL,
+    "detectedDate" DATETIME NOT NULL,
     "owner" TEXT NOT NULL,
-    "dueDate" TIMESTAMP(3),
+    "dueDate" DATETIME,
     "status" TEXT NOT NULL DEFAULT 'open',
     "immediateAction" TEXT,
     "rootCause" TEXT,
@@ -277,61 +280,67 @@ CREATE TABLE "Deviation" (
     "batchesAffected" TEXT,
     "linkedCAPAId" TEXT,
     "closedBy" TEXT,
-    "closedDate" TIMESTAMP(3),
+    "closedDate" DATETIME,
     "closureNotes" TEXT,
     "closureSignatureId" TEXT,
     "createdBy" TEXT NOT NULL,
     "createdById" TEXT,
     "previousCAPAId" TEXT,
     "rcaData" TEXT,
-    "investigationCompletedAt" TIMESTAMP(3),
+    "investigationCompletedAt" DATETIME,
     "investigationCompletedById" TEXT,
     "capaDecisionMade" BOOLEAN NOT NULL DEFAULT false,
     "capaDecisionRequired" BOOLEAN,
     "capaDecisionReason" TEXT,
-    "capaDecisionAt" TIMESTAMP(3),
+    "capaDecisionAt" DATETIME,
     "capaDecisionById" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "deletedAt" TIMESTAMP(3),
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
-
-    CONSTRAINT "Deviation_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Deviation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Deviation_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Deviation_closureSignatureId_fkey" FOREIGN KEY ("closureSignatureId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Deviation_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Deviation_investigationCompletedById_fkey" FOREIGN KEY ("investigationCompletedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Deviation_capaDecisionById_fkey" FOREIGN KEY ("capaDecisionById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "Deviation_previousCAPAId_fkey" FOREIGN KEY ("previousCAPAId") REFERENCES "CAPA" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "FDA483Event" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "referenceNumber" TEXT NOT NULL,
     "eventType" TEXT NOT NULL,
     "agency" TEXT NOT NULL,
     "siteId" TEXT NOT NULL,
-    "inspectionDate" TIMESTAMP(3) NOT NULL,
-    "responseDeadline" TIMESTAMP(3) NOT NULL,
+    "inspectionDate" DATETIME NOT NULL,
+    "responseDeadline" DATETIME NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'Open',
     "responseDraft" TEXT,
     "agiDraft" TEXT,
-    "submittedAt" TIMESTAMP(3),
+    "submittedAt" DATETIME,
     "submittedBy" TEXT,
     "signatureMeaning" TEXT,
-    "closedAt" TIMESTAMP(3),
+    "closedAt" DATETIME,
     "responseSignatureId" TEXT,
-    "inspectionEndDate" TIMESTAMP(3),
+    "inspectionEndDate" DATETIME,
     "leadInvestigator" TEXT,
     "internalOwnerId" TEXT,
     "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "FDA483Event_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "FDA483Event_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "FDA483Event_responseSignatureId_fkey" FOREIGN KEY ("responseSignatureId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "FDA483Event_internalOwnerId_fkey" FOREIGN KEY ("internalOwnerId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "FDA483Document" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "eventId" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "fileUrl" TEXT NOT NULL,
@@ -339,14 +348,13 @@ CREATE TABLE "FDA483Document" (
     "fileSize" TEXT,
     "type" TEXT NOT NULL DEFAULT 'response',
     "uploadedBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "FDA483Document_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "FDA483Document_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "FDA483Event" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "FDA483Observation" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "reference" TEXT,
     "eventId" TEXT NOT NULL,
     "number" INTEGER NOT NULL,
@@ -359,50 +367,52 @@ CREATE TABLE "FDA483Observation" (
     "capaId" TEXT,
     "responseText" TEXT,
     "status" TEXT NOT NULL DEFAULT 'Open',
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "FDA483Observation_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "FDA483Observation_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "FDA483Event" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "FDA483Commitment" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "eventId" TEXT NOT NULL,
     "text" TEXT NOT NULL,
-    "dueDate" TIMESTAMP(3),
+    "dueDate" DATETIME,
     "owner" TEXT,
     "status" TEXT NOT NULL DEFAULT 'Pending',
     "reference" TEXT,
     "observationId" TEXT,
     "capaId" TEXT,
-    "completedAt" TIMESTAMP(3),
+    "completedAt" DATETIME,
     "completedById" TEXT,
     "completionNotes" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdById" TEXT,
-
-    CONSTRAINT "FDA483Commitment_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "FDA483Commitment_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "FDA483Event" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "FDA483Commitment_observationId_fkey" FOREIGN KEY ("observationId") REFERENCES "FDA483Observation" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "FDA483Commitment_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "FDA483Commitment_completedById_fkey" FOREIGN KEY ("completedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "FDA483Commitment_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "FDA483CommitmentDocument" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "commitmentId" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "fileUrl" TEXT NOT NULL,
     "fileType" TEXT,
     "fileSize" TEXT,
-    "uploadedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "uploadedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "uploadedById" TEXT,
-
-    CONSTRAINT "FDA483CommitmentDocument_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "FDA483CommitmentDocument_commitmentId_fkey" FOREIGN KEY ("commitmentId") REFERENCES "FDA483Commitment" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "FDA483CommitmentDocument_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "GxPSystem" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -426,19 +436,19 @@ CREATE TABLE "GxPSystem" (
     "diImpact" TEXT,
     "criticalFunctions" TEXT,
     "riskFactors" TEXT,
-    "lastValidated" TIMESTAMP(3),
-    "nextReview" TIMESTAMP(3),
+    "lastValidated" DATETIME,
+    "nextReview" DATETIME,
     "remediationPlan" TEXT,
     "remediationStatus" TEXT,
-    "deletedAt" TIMESTAMP(3),
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletionReason" TEXT,
     "statusManuallySet" BOOLEAN NOT NULL DEFAULT false,
     "statusManualReason" TEXT,
-    "statusManuallySetAt" TIMESTAMP(3),
+    "statusManuallySetAt" DATETIME,
     "statusManuallySetByName" TEXT,
     "reference" TEXT,
-    "signedOffAt" TIMESTAMP(3),
+    "signedOffAt" DATETIME,
     "signedOffById" TEXT,
     "signedOffByName" TEXT,
     "signedOffReason" TEXT,
@@ -446,41 +456,39 @@ CREATE TABLE "GxPSystem" (
     "signedOffSignatureId" TEXT,
     "signedOffPart11Compliant" BOOLEAN,
     "signedOffAnnex11Compliant" BOOLEAN,
-    "signedOffRtmCoverage" DOUBLE PRECISION,
+    "signedOffRtmCoverage" REAL,
     "signedOffStagesApproved" INTEGER,
     "signedOffStagesTotal" INTEGER,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "GxPSystem_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "GxPSystem_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "ValidationStage" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "systemId" TEXT NOT NULL,
     "stageName" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'not_started',
     "notes" TEXT,
     "submittedBy" TEXT,
-    "submittedDate" TIMESTAMP(3),
+    "submittedDate" DATETIME,
     "approvedBy" TEXT,
-    "approvedDate" TIMESTAMP(3),
+    "approvedDate" DATETIME,
     "rejectedBy" TEXT,
-    "rejectedDate" TIMESTAMP(3),
+    "rejectedDate" DATETIME,
     "rejectionReason" TEXT,
     "submittedById" TEXT,
     "approvedById" TEXT,
     "rejectedById" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ValidationStage_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "ValidationStage_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "StageDocument" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "validationStageId" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
@@ -489,21 +497,20 @@ CREATE TABLE "StageDocument" (
     "fileType" TEXT NOT NULL,
     "fileUrl" TEXT NOT NULL,
     "contentHashSha256" TEXT NOT NULL,
-    "retainUntil" TIMESTAMP(3) NOT NULL,
-    "deletedAt" TIMESTAMP(3),
+    "retainUntil" DATETIME NOT NULL,
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
     "uploadedById" TEXT NOT NULL,
     "uploadedByName" TEXT NOT NULL,
-    "uploadedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "StageDocument_pkey" PRIMARY KEY ("id")
+    "uploadedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "StageDocument_validationStageId_fkey" FOREIGN KEY ("validationStageId") REFERENCES "ValidationStage" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "RTMEntry" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "systemId" TEXT NOT NULL,
     "ursId" TEXT NOT NULL,
     "reference" TEXT,
@@ -526,32 +533,32 @@ CREATE TABLE "RTMEntry" (
     "notes" TEXT,
     "findingId" TEXT,
     "capaId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "RTMEntry_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "RTMEntry_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "RTMEntry_findingId_fkey" FOREIGN KEY ("findingId") REFERENCES "Finding" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "RTMEntry_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "RoadmapActivity" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "systemId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'Planned',
-    "startDate" TIMESTAMP(3),
-    "endDate" TIMESTAMP(3),
+    "startDate" DATETIME,
+    "endDate" DATETIME,
     "owner" TEXT,
     "completionType" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "RoadmapActivity_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "RoadmapActivity_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Document" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "fileType" TEXT,
@@ -563,9 +570,9 @@ CREATE TABLE "Document" (
     "linkedRecordId" TEXT,
     "uploadedBy" TEXT NOT NULL,
     "approvedBy" TEXT,
-    "approvedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "approvedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
     "sourceModule" TEXT,
     "sourceId" TEXT,
     "siteId" TEXT,
@@ -574,67 +581,65 @@ CREATE TABLE "Document" (
     "storageKey" TEXT,
     "originalFileName" TEXT,
     "fileExtension" TEXT,
-    "retainUntil" TIMESTAMP(3),
-    "deletedAt" TIMESTAMP(3),
+    "retainUntil" DATETIME,
+    "deletedAt" DATETIME,
     "deletedBy" TEXT,
     "deletionReason" TEXT,
     "notes" TEXT,
-    "uploadedAt" TIMESTAMP(3),
+    "uploadedAt" DATETIME,
     "approvalSignatureId" TEXT,
-
-    CONSTRAINT "Document_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Document_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Document_approvalSignatureId_fkey" FOREIGN KEY ("approvalSignatureId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "RAIDItem" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "priority" TEXT NOT NULL,
     "owner" TEXT NOT NULL,
-    "dueDate" TIMESTAMP(3),
+    "dueDate" DATETIME,
     "status" TEXT NOT NULL DEFAULT 'Open',
     "impact" TEXT,
     "mitigation" TEXT,
     "closedBy" TEXT,
-    "closedAt" TIMESTAMP(3),
+    "closedAt" DATETIME,
     "reopenedBy" TEXT,
-    "reopenedAt" TIMESTAMP(3),
+    "reopenedAt" DATETIME,
     "reopenReason" TEXT,
     "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "RAIDItem_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "RAIDItem_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Inspection" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "siteName" TEXT NOT NULL,
     "agency" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'planning',
-    "expectedDate" TIMESTAMP(3),
-    "startDate" TIMESTAMP(3),
-    "endDate" TIMESTAMP(3),
+    "expectedDate" DATETIME,
+    "startDate" DATETIME,
+    "endDate" DATETIME,
     "inspectionLead" TEXT,
     "notes" TEXT,
     "linkedFDA483Id" TEXT,
     "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Inspection_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Inspection_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "ReadinessAction" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "inspectionId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "lane" TEXT NOT NULL,
@@ -642,36 +647,34 @@ CREATE TABLE "ReadinessAction" (
     "priority" TEXT NOT NULL DEFAULT 'Medium',
     "status" TEXT NOT NULL DEFAULT 'Not Started',
     "owner" TEXT,
-    "dueDate" TIMESTAMP(3),
+    "dueDate" DATETIME,
     "completedBy" TEXT,
-    "completedAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ReadinessAction_pkey" PRIMARY KEY ("id")
+    "completedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "ReadinessAction_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Simulation" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "inspectionId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "duration" INTEGER,
-    "scheduledAt" TIMESTAMP(3),
+    "scheduledAt" DATETIME,
     "participants" TEXT,
     "status" TEXT NOT NULL DEFAULT 'Scheduled',
     "score" INTEGER,
     "notes" TEXT,
     "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "Simulation_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "Simulation_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "AuditLog" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "userId" TEXT,
     "userName" TEXT NOT NULL,
@@ -683,14 +686,13 @@ CREATE TABLE "AuditLog" (
     "oldValue" TEXT,
     "newValue" TEXT,
     "ipAddress" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "AuditLog_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "ReadinessCard" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "inspectionId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT,
@@ -698,19 +700,18 @@ CREATE TABLE "ReadinessCard" (
     "status" TEXT NOT NULL DEFAULT 'not_started',
     "priority" TEXT NOT NULL DEFAULT 'medium',
     "owner" TEXT,
-    "dueDate" TIMESTAMP(3),
+    "dueDate" DATETIME,
     "completedBy" TEXT,
-    "completedAt" TIMESTAMP(3),
+    "completedAt" DATETIME,
     "notes" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ReadinessCard_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "ReadinessCard_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "Playbook" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -719,15 +720,14 @@ CREATE TABLE "Playbook" (
     "category" TEXT NOT NULL DEFAULT 'general',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Playbook_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Playbook_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "TrainingRecord" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "inspectionId" TEXT,
     "userId" TEXT NOT NULL,
@@ -735,50 +735,48 @@ CREATE TABLE "TrainingRecord" (
     "userRole" TEXT NOT NULL,
     "module" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'pending',
-    "completedAt" TIMESTAMP(3),
+    "completedAt" DATETIME,
     "score" INTEGER,
     "notes" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "TrainingRecord_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TrainingRecord_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "TrainingRecord_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "EvidenceItem" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "capaId" TEXT NOT NULL,
     "category" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "notes" TEXT,
     "naReason" TEXT,
     "reviewedById" TEXT,
-    "reviewedAt" TIMESTAMP(3),
+    "reviewedAt" DATETIME,
     "rejectionReason" TEXT,
-    "lockedAt" TIMESTAMP(3),
+    "lockedAt" DATETIME,
     "lockedBy" TEXT,
     "lockedSignatureId" TEXT,
     "createdBy" TEXT NOT NULL,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "EvidenceItem_pkey" PRIMARY KEY ("id")
+    "updatedAt" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "EvidenceItem_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "EvidenceNoteVersion" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "evidenceItemId" TEXT NOT NULL,
     "notes" TEXT NOT NULL,
     "statusAtTime" TEXT NOT NULL,
     "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "EvidenceNoteVersion_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "EvidenceNoteVersion_evidenceItemId_fkey" FOREIGN KEY ("evidenceItemId") REFERENCES "EvidenceItem" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "EvidenceFile" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "evidenceItemId" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "originalFileName" TEXT NOT NULL,
@@ -787,21 +785,22 @@ CREATE TABLE "EvidenceFile" (
     "fileExtension" TEXT NOT NULL,
     "fileUrl" TEXT NOT NULL,
     "contentHashSha256" TEXT NOT NULL,
-    "retainUntil" TIMESTAMP(3) NOT NULL,
-    "deletedAt" TIMESTAMP(3),
+    "retainUntil" DATETIME NOT NULL,
+    "deletedAt" DATETIME,
     "deletedBy" TEXT,
     "deletionReason" TEXT,
     "uploadedBy" TEXT NOT NULL,
     "uploadedById" TEXT,
     "actionItemId" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "EvidenceFile_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "EvidenceFile_evidenceItemId_fkey" FOREIGN KEY ("evidenceItemId") REFERENCES "EvidenceItem" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "EvidenceFile_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "EvidenceFile_actionItemId_fkey" FOREIGN KEY ("actionItemId") REFERENCES "CAPAActionItem" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CAPAEffectivenessCriterion" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "capaId" TEXT NOT NULL,
     "description" TEXT NOT NULL,
@@ -810,23 +809,22 @@ CREATE TABLE "CAPAEffectivenessCriterion" (
     "targetValue" TEXT NOT NULL,
     "monitoringPeriod" TEXT NOT NULL,
     "createdBy" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedBy" TEXT,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-    "lockedAt" TIMESTAMP(3),
+    "updatedAt" DATETIME NOT NULL,
+    "lockedAt" DATETIME,
     "lockedBy" TEXT,
     "lockedSignatureId" TEXT,
-    "deletedAt" TIMESTAMP(3),
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
-
-    CONSTRAINT "CAPAEffectivenessCriterion_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "CAPAEffectivenessCriterion_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "SignedRecord" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "recordType" TEXT NOT NULL,
     "recordId" TEXT NOT NULL,
@@ -837,60 +835,59 @@ CREATE TABLE "SignedRecord" (
     "signatureMeaning" TEXT NOT NULL,
     "contentHash" TEXT NOT NULL,
     "contentSummary" TEXT NOT NULL,
-    "passwordVerifiedAt" TIMESTAMP(3) NOT NULL,
+    "passwordVerifiedAt" DATETIME NOT NULL,
     "ipAddress" TEXT,
     "userAgent" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "SignedRecord_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- CreateTable
 CREATE TABLE "CAPAApproval" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "capaId" TEXT NOT NULL,
     "approverRole" TEXT NOT NULL,
     "approverName" TEXT NOT NULL,
     "approverId" TEXT NOT NULL,
-    "approvedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "approvedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "comment" TEXT,
     "signatureId" TEXT,
-    "revokedAt" TIMESTAMP(3),
+    "revokedAt" DATETIME,
     "revokedSignatureId" TEXT,
-
-    CONSTRAINT "CAPAApproval_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "CAPAApproval_signatureId_fkey" FOREIGN KEY ("signatureId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPAApproval_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CAPAComment" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "capaId" TEXT NOT NULL,
     "parentId" TEXT,
     "actionItemId" TEXT,
     "body" TEXT NOT NULL,
     "isConcern" BOOLEAN NOT NULL DEFAULT false,
-    "resolvedAt" TIMESTAMP(3),
+    "resolvedAt" DATETIME,
     "resolvedById" TEXT,
     "resolvedByName" TEXT,
     "resolvedComment" TEXT,
-    "deletedAt" TIMESTAMP(3),
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
     "authorId" TEXT NOT NULL,
     "authorName" TEXT NOT NULL,
     "authorRole" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "CAPAComment_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CAPAComment_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CAPAComment_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "CAPAComment" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "CAPAComment_actionItemId_fkey" FOREIGN KEY ("actionItemId") REFERENCES "CAPAActionItem" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "ChangeControl" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "reference" TEXT,
     "title" TEXT NOT NULL,
@@ -903,27 +900,26 @@ CREATE TABLE "ChangeControl" (
     "status" TEXT NOT NULL DEFAULT 'Draft',
     "owner" TEXT NOT NULL,
     "ownerName" TEXT NOT NULL,
-    "targetImplementationDate" TIMESTAMP(3),
-    "actualImplementationDate" TIMESTAMP(3),
-    "closedAt" TIMESTAMP(3),
+    "targetImplementationDate" DATETIME,
+    "actualImplementationDate" DATETIME,
+    "closedAt" DATETIME,
     "closedById" TEXT,
     "closedByName" TEXT,
-    "deletedAt" TIMESTAMP(3),
+    "deletedAt" DATETIME,
     "deletedById" TEXT,
     "deletedByName" TEXT,
     "deletionReason" TEXT,
     "latestSignedTransitionId" TEXT,
     "createdBy" TEXT NOT NULL,
     "createdByName" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ChangeControl_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "ChangeControl_latestSignedTransitionId_fkey" FOREIGN KEY ("latestSignedTransitionId") REFERENCES "SignedRecord" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "CAPAChangeControlLink" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "tenantId" TEXT NOT NULL,
     "capaId" TEXT NOT NULL,
     "changeControlId" TEXT NOT NULL,
@@ -931,23 +927,103 @@ CREATE TABLE "CAPAChangeControlLink" (
     "linkRationale" TEXT,
     "linkedById" TEXT NOT NULL,
     "linkedByName" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "CAPAChangeControlLink_pkey" PRIMARY KEY ("id")
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "CAPAChangeControlLink_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "CAPAChangeControlLink_changeControlId_fkey" FOREIGN KEY ("changeControlId") REFERENCES "ChangeControl" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "EmailOTP" (
-    "id" TEXT NOT NULL,
+    "id" TEXT NOT NULL PRIMARY KEY,
     "identifier" TEXT NOT NULL,
     "tenantId" TEXT,
     "codeHash" TEXT NOT NULL,
-    "expiresAt" TIMESTAMP(3) NOT NULL,
-    "consumedAt" TIMESTAMP(3),
+    "expiresAt" DATETIME NOT NULL,
+    "consumedAt" DATETIME,
     "attempts" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
-    CONSTRAINT "EmailOTP_pkey" PRIMARY KEY ("id")
+-- CreateTable
+CREATE TABLE "Notification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenantId" TEXT NOT NULL,
+    "recipientUserId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "body" TEXT,
+    "linkPath" TEXT,
+    "entityType" TEXT,
+    "entityId" TEXT,
+    "isRead" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "readAt" DATETIME
+);
+
+-- CreateTable
+CREATE TABLE "Ticket" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "reference" TEXT,
+    "tenantId" TEXT NOT NULL,
+    "subject" TEXT NOT NULL,
+    "category" TEXT NOT NULL,
+    "priority" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'New',
+    "description" TEXT NOT NULL,
+    "requesterId" TEXT NOT NULL,
+    "requesterName" TEXT NOT NULL,
+    "requesterRole" TEXT NOT NULL,
+    "assigneeId" TEXT,
+    "assigneeName" TEXT,
+    "relatedModule" TEXT,
+    "relatedRecordId" TEXT,
+    "relatedRecordRef" TEXT,
+    "slaDueAt" DATETIME,
+    "resolutionSummary" TEXT,
+    "resolutionCategory" TEXT,
+    "resolvedAt" DATETIME,
+    "resolvedById" TEXT,
+    "autoCloseAfter" DATETIME,
+    "closedAt" DATETIME,
+    "closedById" TEXT,
+    "reopenReason" TEXT,
+    "cancelledAt" DATETIME,
+    "cancelReason" TEXT,
+    "appVersion" TEXT,
+    "originUrl" TEXT,
+    "userAgent" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "TicketMessage" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "ticketId" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "authorId" TEXT NOT NULL,
+    "authorName" TEXT NOT NULL,
+    "authorRole" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "isInternal" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TicketMessage_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "Ticket" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "TicketActivity" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "ticketId" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "actorId" TEXT,
+    "actorName" TEXT NOT NULL,
+    "actorRole" TEXT,
+    "summary" TEXT NOT NULL,
+    "fromValue" TEXT,
+    "toValue" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TicketActivity_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "Ticket" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateIndex
@@ -1160,234 +1236,32 @@ CREATE INDEX "EmailOTP_identifier_tenantId_idx" ON "EmailOTP"("identifier", "ten
 -- CreateIndex
 CREATE INDEX "EmailOTP_expiresAt_idx" ON "EmailOTP"("expiresAt");
 
--- AddForeignKey
-ALTER TABLE "Plan" ADD CONSTRAINT "Plan_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "Notification_recipientUserId_isRead_createdAt_idx" ON "Notification"("recipientUserId", "isRead", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "Site" ADD CONSTRAINT "Site_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "Notification_tenantId_idx" ON "Notification"("tenantId");
 
--- AddForeignKey
-ALTER TABLE "User" ADD CONSTRAINT "User_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE UNIQUE INDEX "Ticket_reference_key" ON "Ticket"("reference");
 
--- AddForeignKey
-ALTER TABLE "User" ADD CONSTRAINT "User_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "Ticket_tenantId_status_idx" ON "Ticket"("tenantId", "status");
 
--- AddForeignKey
-ALTER TABLE "Finding" ADD CONSTRAINT "Finding_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "Ticket_assigneeId_idx" ON "Ticket"("assigneeId");
 
--- AddForeignKey
-ALTER TABLE "Finding" ADD CONSTRAINT "Finding_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "Ticket_status_idx" ON "Ticket"("status");
 
--- AddForeignKey
-ALTER TABLE "Finding" ADD CONSTRAINT "Finding_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "Ticket_slaDueAt_idx" ON "Ticket"("slaDueAt");
 
--- AddForeignKey
-ALTER TABLE "Finding" ADD CONSTRAINT "Finding_previousCAPAId_fkey" FOREIGN KEY ("previousCAPAId") REFERENCES "CAPA"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "Ticket_tenantId_createdAt_idx" ON "Ticket"("tenantId", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "FindingEdit" ADD CONSTRAINT "FindingEdit_findingId_fkey" FOREIGN KEY ("findingId") REFERENCES "Finding"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- CreateIndex
+CREATE INDEX "TicketMessage_ticketId_createdAt_idx" ON "TicketMessage"("ticketId", "createdAt");
 
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_findingId_fkey" FOREIGN KEY ("findingId") REFERENCES "Finding"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_closureSignatureId_fkey" FOREIGN KEY ("closureSignatureId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_verificationSignatureId_fkey" FOREIGN KEY ("verificationSignatureId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_effectivenessSignatureId_fkey" FOREIGN KEY ("effectivenessSignatureId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_deviationId_fkey" FOREIGN KEY ("deviationId") REFERENCES "Deviation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_rejectedById_fkey" FOREIGN KEY ("rejectedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPA" ADD CONSTRAINT "CAPA_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAActionItem" ADD CONSTRAINT "CAPAActionItem_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAActionItem" ADD CONSTRAINT "CAPAActionItem_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAActionItem" ADD CONSTRAINT "CAPAActionItem_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAActionItem" ADD CONSTRAINT "CAPAActionItem_reworkRequestedById_fkey" FOREIGN KEY ("reworkRequestedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAActionItem" ADD CONSTRAINT "CAPAActionItem_completedById_fkey" FOREIGN KEY ("completedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPADocument" ADD CONSTRAINT "CAPADocument_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Deviation" ADD CONSTRAINT "Deviation_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Deviation" ADD CONSTRAINT "Deviation_siteId_fkey" FOREIGN KEY ("siteId") REFERENCES "Site"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Deviation" ADD CONSTRAINT "Deviation_closureSignatureId_fkey" FOREIGN KEY ("closureSignatureId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Deviation" ADD CONSTRAINT "Deviation_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Deviation" ADD CONSTRAINT "Deviation_investigationCompletedById_fkey" FOREIGN KEY ("investigationCompletedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Deviation" ADD CONSTRAINT "Deviation_capaDecisionById_fkey" FOREIGN KEY ("capaDecisionById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Deviation" ADD CONSTRAINT "Deviation_previousCAPAId_fkey" FOREIGN KEY ("previousCAPAId") REFERENCES "CAPA"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Event" ADD CONSTRAINT "FDA483Event_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Event" ADD CONSTRAINT "FDA483Event_responseSignatureId_fkey" FOREIGN KEY ("responseSignatureId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Event" ADD CONSTRAINT "FDA483Event_internalOwnerId_fkey" FOREIGN KEY ("internalOwnerId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Document" ADD CONSTRAINT "FDA483Document_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "FDA483Event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Observation" ADD CONSTRAINT "FDA483Observation_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "FDA483Event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Commitment" ADD CONSTRAINT "FDA483Commitment_eventId_fkey" FOREIGN KEY ("eventId") REFERENCES "FDA483Event"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Commitment" ADD CONSTRAINT "FDA483Commitment_observationId_fkey" FOREIGN KEY ("observationId") REFERENCES "FDA483Observation"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Commitment" ADD CONSTRAINT "FDA483Commitment_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Commitment" ADD CONSTRAINT "FDA483Commitment_completedById_fkey" FOREIGN KEY ("completedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483Commitment" ADD CONSTRAINT "FDA483Commitment_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483CommitmentDocument" ADD CONSTRAINT "FDA483CommitmentDocument_commitmentId_fkey" FOREIGN KEY ("commitmentId") REFERENCES "FDA483Commitment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "FDA483CommitmentDocument" ADD CONSTRAINT "FDA483CommitmentDocument_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "GxPSystem" ADD CONSTRAINT "GxPSystem_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ValidationStage" ADD CONSTRAINT "ValidationStage_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "StageDocument" ADD CONSTRAINT "StageDocument_validationStageId_fkey" FOREIGN KEY ("validationStageId") REFERENCES "ValidationStage"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RTMEntry" ADD CONSTRAINT "RTMEntry_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RTMEntry" ADD CONSTRAINT "RTMEntry_findingId_fkey" FOREIGN KEY ("findingId") REFERENCES "Finding"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RTMEntry" ADD CONSTRAINT "RTMEntry_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RoadmapActivity" ADD CONSTRAINT "RoadmapActivity_systemId_fkey" FOREIGN KEY ("systemId") REFERENCES "GxPSystem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Document" ADD CONSTRAINT "Document_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Document" ADD CONSTRAINT "Document_approvalSignatureId_fkey" FOREIGN KEY ("approvalSignatureId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "RAIDItem" ADD CONSTRAINT "RAIDItem_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Inspection" ADD CONSTRAINT "Inspection_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ReadinessAction" ADD CONSTRAINT "ReadinessAction_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Simulation" ADD CONSTRAINT "Simulation_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ReadinessCard" ADD CONSTRAINT "ReadinessCard_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Playbook" ADD CONSTRAINT "Playbook_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "TrainingRecord" ADD CONSTRAINT "TrainingRecord_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "TrainingRecord" ADD CONSTRAINT "TrainingRecord_inspectionId_fkey" FOREIGN KEY ("inspectionId") REFERENCES "Inspection"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "EvidenceItem" ADD CONSTRAINT "EvidenceItem_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "EvidenceNoteVersion" ADD CONSTRAINT "EvidenceNoteVersion_evidenceItemId_fkey" FOREIGN KEY ("evidenceItemId") REFERENCES "EvidenceItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "EvidenceFile" ADD CONSTRAINT "EvidenceFile_evidenceItemId_fkey" FOREIGN KEY ("evidenceItemId") REFERENCES "EvidenceItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "EvidenceFile" ADD CONSTRAINT "EvidenceFile_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "EvidenceFile" ADD CONSTRAINT "EvidenceFile_actionItemId_fkey" FOREIGN KEY ("actionItemId") REFERENCES "CAPAActionItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAEffectivenessCriterion" ADD CONSTRAINT "CAPAEffectivenessCriterion_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAApproval" ADD CONSTRAINT "CAPAApproval_signatureId_fkey" FOREIGN KEY ("signatureId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAApproval" ADD CONSTRAINT "CAPAApproval_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAComment" ADD CONSTRAINT "CAPAComment_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAComment" ADD CONSTRAINT "CAPAComment_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "CAPAComment"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAComment" ADD CONSTRAINT "CAPAComment_actionItemId_fkey" FOREIGN KEY ("actionItemId") REFERENCES "CAPAActionItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ChangeControl" ADD CONSTRAINT "ChangeControl_latestSignedTransitionId_fkey" FOREIGN KEY ("latestSignedTransitionId") REFERENCES "SignedRecord"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAChangeControlLink" ADD CONSTRAINT "CAPAChangeControlLink_capaId_fkey" FOREIGN KEY ("capaId") REFERENCES "CAPA"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CAPAChangeControlLink" ADD CONSTRAINT "CAPAChangeControlLink_changeControlId_fkey" FOREIGN KEY ("changeControlId") REFERENCES "ChangeControl"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
+-- CreateIndex
+CREATE INDEX "TicketActivity_ticketId_createdAt_idx" ON "TicketActivity"("ticketId", "createdAt");

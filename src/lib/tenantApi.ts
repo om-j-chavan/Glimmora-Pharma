@@ -16,10 +16,15 @@ import {
  */
 export class TenantApiError extends Error {
   fieldErrors?: Record<string, string[]>;
-  constructor(message: string, fieldErrors?: Record<string, string[]>) {
+  /** True when the tenant row was created/updated but its plan assignment
+   *  failed — lets the caller surface a plan-specific message (and still show
+   *  the tenant, which exists) instead of reporting a creation failure. */
+  planAssignmentFailed?: boolean;
+  constructor(message: string, fieldErrors?: Record<string, string[]>, planAssignmentFailed?: boolean) {
     super(message);
     this.name = "TenantApiError";
     this.fieldErrors = fieldErrors;
+    this.planAssignmentFailed = planAssignmentFailed;
   }
 }
 
@@ -127,11 +132,17 @@ export async function createTenantApi(tenant: Tenant): Promise<void> {
         maxUsers: plan.maxUsers,
         maxSites: plan.maxSites,
         minRetentionYears: plan.minRetentionYears,
+        durationMonths: plan.durationMonths,
         startDate: plan.startDate,
-        expiryDate: plan.expiryDate,
       });
       if (!planRes.success) {
-        console.warn("[tenantApi] assignPlan failed:", planRes.error);
+        // Surface the failure instead of swallowing it; planAssignmentFailed
+        // lets the caller show a plan-specific message. NOTE: the tenant row
+        // already exists at this point, so this makes the "Active tenant with
+        // no plan" state VISIBLE but does not prevent it — an atomic
+        // create+assign (or a rollback delete) server-side would. Flagged here,
+        // not done in this change.
+        throw new TenantApiError(planRes.error, planRes.fieldErrors, true);
       }
     }
   });

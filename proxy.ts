@@ -2,60 +2,82 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 /**
- * Centralized auth gating.
+ * Centralized edge auth gating (Next 16 `proxy` convention).
  *
- * Runs ahead of every protected route (see `matcher` below) and:
- *   1. Reads the NextAuth JWT via getToken (works in Edge — getServerSession does not).
- *   2. Redirects unauthenticated requests to /login with a callbackUrl.
- *   3. For /admin routes, requires role === super_admin or customer_admin (E1=B).
+ * Runs ahead of every matched route and:
+ *   1. Reads the NextAuth JWT via getToken (Edge-safe; getServerSession is not).
+ *   2. Unauthenticated → page requests redirect to /login?callbackUrl=…; /api/*
+ *      requests get a 401 (defense-in-depth — each route also checks auth()).
+ *   3. /admin pages require role super_admin OR customer_admin (E1=B).
+ *   4. super_admin's world is the admin console ONLY — it is bounced off every
+ *      non-/admin page to /admin (the (app) layout enforces the same server-side).
  *
- * Pages can still call `requireAuth()` for the session object — proxy
- * coverage is defense-in-depth, not a replacement for the per-page session
- * lookup that supplies tenantId for Prisma queries.
+ * Pages still call `requireAuth()` for the session object (tenantId for Prisma);
+ * this proxy is defense-in-depth, not a replacement for the per-page lookup.
+ *
+ * Missing-secret guard: without NEXTAUTH_SECRET we cannot verify ANY token, so
+ * every request is effectively unauthenticated. Production mandates the secret
+ * via assertProductionSecret in the NextAuth route; this is the edge-layer
+ * backstop and it FAILS CLOSED — a prod request without the secret is refused
+ * (401/500 for APIs, /login redirect for pages) rather than waved through.
+ * Development still allows the request through (so a missing local secret can't
+ * desync from the cookie NextAuth signed and cause a false redirect loop) but
+ * logs a loud warning. MFA session invalidation is enforced in the JWT callback
+ * (an invalidated token decodes empty → getToken returns null → the standard
+ * /login redirect below).
  */
 export async function proxy(req: NextRequest) {
-  // Local dev only: when NEXTAUTH_SECRET is unset, getToken() can't decrypt the
-  // cookie and would bounce every request to /login in a loop. Skip the guard so
-  // it can't desync from the secret NextAuth used to sign the cookie. Production
-  // mandates the secret via assertProductionSecret, so this never fires there.
+  const { pathname } = req.nextUrl;
+  const isApi = pathname.startsWith("/api/");
+
   const secret = process.env.NEXTAUTH_SECRET;
-  if (!secret) return NextResponse.next();
+  if (!secret) {
+    // Fail closed in production — refuse rather than serve protected content.
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[proxy] NEXTAUTH_SECRET is not set in production — refusing all requests. " +
+          "Set NEXTAUTH_SECRET (32+ bytes) to restore service.",
+      );
+      if (isApi) {
+        return NextResponse.json({ error: "Server misconfiguration" }, { status: 500 });
+      }
+      return NextResponse.redirect(new URL("/login", req.url));
+    }
+    // Development only — allow through, but make the disabled gate impossible to miss.
+    console.warn(
+      "[proxy] NEXTAUTH_SECRET is unset — edge auth gate DISABLED (development only). " +
+        "Production refuses all requests without it.",
+    );
+    return NextResponse.next();
+  }
 
   const token = await getToken({ req, secret });
 
-  // 1. No session → bounce to login, preserving the original destination.
+  // 1. No session → 401 for APIs, /login redirect for pages.
   if (!token) {
-    const callbackUrl = req.nextUrl.pathname + req.nextUrl.search;
+    if (isApi) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const callbackUrl = pathname + req.nextUrl.search;
     return NextResponse.redirect(
-      new URL(
-        `/login?callbackUrl=${encodeURIComponent(callbackUrl)}`,
-        req.url,
-      ),
+      new URL(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`, req.url),
     );
   }
 
-  const role = token.role as string | undefined;
+  // 2. Role routing applies to PAGES only — never rewrite an API response.
+  if (!isApi) {
+    const role = token.role as string | undefined;
 
-  // 2. Admin route role gate — allow super_admin OR customer_admin (per E1=B).
-  if (req.nextUrl.pathname.startsWith("/admin")) {
-    if (role !== "super_admin" && role !== "customer_admin") {
+    // Admin route role gate — allow super_admin OR customer_admin (E1=B).
+    if (pathname.startsWith("/admin") && role !== "super_admin" && role !== "customer_admin") {
       return NextResponse.redirect(new URL("/", req.url));
     }
-  }
 
-  // 3. Bright-line inverse gate — super_admin's world is the admin console
-  //    ONLY. Bounce it off every non-/admin route (the customer/compliance
-  //    modules: /, /capa, /deviation, /gap-assessment, /csv-csa, /fda-483,
-  //    /evidence, /readiness, /governance, /settings, …) to /admin. The
-  //    customer-app (app) layout enforces the same server-side.
-  if (role === "super_admin" && !req.nextUrl.pathname.startsWith("/admin")) {
-    return NextResponse.redirect(new URL("/admin", req.url));
+    // Bright-line inverse gate — super_admin lives in the admin console only.
+    if (role === "super_admin" && !pathname.startsWith("/admin")) {
+      return NextResponse.redirect(new URL("/admin", req.url));
+    }
   }
-
-  // MFA session invalidation is enforced in the JWT callback
-  // (pages/api/auth/[...nextauth].ts). When tenant.sessionsValidAfter > token.iat,
-  // the JWT callback returns an empty token, which causes getToken() above to
-  // return null and triggers the standard /login redirect.
 
   return NextResponse.next();
 }
@@ -63,20 +85,18 @@ export async function proxy(req: NextRequest) {
 /**
  * Matcher excludes:
  *   - /login                                      (public sign-in)
- *   - /api/*                                      (each route handles its own auth; NextAuth must be reachable)
+ *   - /api/auth/*                                 (NextAuth must be reachable
+ *                                                  unauthenticated). Other /api/*
+ *                                                  IS matched so the 401 above
+ *                                                  applies as defense-in-depth.
  *   - /_next/static, /_next/image, favicon.ico
- *   - manifest.json, robots.txt, sitemap.xml      (well-known static metadata; browsers fetch these unauthenticated)
- *   - any static asset by extension               (images, css, js, sourcemaps, json/txt/xml as defense-in-depth)
+ *   - manifest.json, robots.txt, sitemap.xml      (browsers fetch unauthenticated)
+ *   - any static asset by extension
  *
- * Everything else — including /site-picker (E2), /(app)/*, and /(admin)/* —
- * passes through this proxy.
- *
- * Without the manifest.json carve-out, the browser's PWA-manifest fetch
- * round-trips through the auth gate and shows up in dev logs as
- * "GET /login?callbackUrl=%2Fmanifest.json 200" on every page load.
+ * Everything else — /(app)/*, /(admin)/*, and non-auth /api/* — passes through.
  */
 export const config = {
   matcher: [
-    "/((?!login|api|_next/static|_next/image|favicon.ico|manifest.json|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|map|json|txt|xml)$).*)",
+    "/((?!login|api/auth|_next/static|_next/image|favicon.ico|manifest.json|robots.txt|sitemap.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|map|json|txt|xml)$).*)",
   ],
 };

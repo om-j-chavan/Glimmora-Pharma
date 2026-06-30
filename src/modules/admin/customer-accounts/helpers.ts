@@ -1,5 +1,5 @@
 import { type PlanConfig, type Tenant } from "@/store/auth.slice";
-import { resolvePlanCaps, type PlanTier } from "@/lib/plans";
+import { resolvePlanCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
 import { TenantApiError } from "@/lib/tenantApi";
 import { friendlyAiError } from "@/lib/friendlyError";
 import { planState } from "@/lib/tenantStatus";
@@ -123,21 +123,24 @@ export interface PlanDraft {
   maxUsers: number;
   maxSites: number;
   minRetentionYears: number;
+  durationMonths: number;
   startDate: string; // YYYY-MM-DD
-  expiryDate: string;
+  expiryDate: string; // YYYY-MM-DD — DERIVED (start + durationMonths); read-only in the UI
 }
 
 /** A fresh plan draft for the given tier, caps resolved from the tier defaults. */
 export function makePlanDraft(tier: PlanTier = "PROFESSIONAL"): PlanDraft {
   const caps = resolvePlanCaps(tier);
+  const startDate = dayjs().format("YYYY-MM-DD");
   return {
     tier,
     displayName: "",
     maxUsers: caps.maxUsers,
     maxSites: caps.maxSites,
     minRetentionYears: caps.minRetentionYears,
-    startDate: dayjs().format("YYYY-MM-DD"),
-    expiryDate: dayjs().add(1, "year").format("YYYY-MM-DD"),
+    durationMonths: caps.durationMonths,
+    startDate,
+    expiryDate: dayjs.utc(resolveExpiry(startDate, caps.durationMonths)).format("YYYY-MM-DD"),
   };
 }
 
@@ -149,14 +152,16 @@ export function planConfigToDraft(pc: PlanConfig): PlanDraft {
     maxUsers: pc.maxUsers,
     maxSites: pc.maxSites,
     minRetentionYears: pc.minRetentionYears,
+    durationMonths: pc.durationMonths,
     startDate: dayjs.utc(pc.startDate).format("YYYY-MM-DD"),
+    // Stored expiry is already start + durationMonths; surface it for display.
     expiryDate: dayjs.utc(pc.expiryDate).format("YYYY-MM-DD"),
   };
 }
 
 /** Map an editable draft to a Redux PlanConfig; caps are frozen via resolvePlanCaps. */
 export function draftToPlanConfig(d: PlanDraft, id: string): PlanConfig {
-  const caps = resolvePlanCaps(d.tier, { maxUsers: d.maxUsers, maxSites: d.maxSites, minRetentionYears: d.minRetentionYears });
+  const caps = resolvePlanCaps(d.tier, { maxUsers: d.maxUsers, maxSites: d.maxSites, minRetentionYears: d.minRetentionYears, durationMonths: d.durationMonths });
   return {
     id,
     tier: d.tier,
@@ -164,8 +169,10 @@ export function draftToPlanConfig(d: PlanDraft, id: string): PlanConfig {
     maxUsers: caps.maxUsers,
     maxSites: caps.maxSites,
     minRetentionYears: caps.minRetentionYears,
+    durationMonths: caps.durationMonths,
     startDate: dayjs.utc(d.startDate).toISOString(),
-    expiryDate: dayjs.utc(d.expiryDate).toISOString(),
+    // Expiry is DERIVED from start + the (clamped) duration — never hand-entered.
+    expiryDate: resolveExpiry(d.startDate, caps.durationMonths),
   };
 }
 

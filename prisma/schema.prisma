@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  // LOCAL-DEV ONLY: switched to sqlite to run offline without Postgres.
-  // DO NOT COMMIT — CI/prod use provider = "postgresql".
+  // SQLite is the database for all environments (dev + deployed). Local dev
+  // syncs via `prisma db push`; deploys run `prisma migrate deploy` against the
+  // SQLite baseline in prisma/migrations/ (migration_lock.toml = sqlite).
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
@@ -46,9 +47,10 @@ model Tenant {
   capaActionItems CAPAActionItem[]
 }
 
-// LOCAL-DEV ONLY: SQLite has no enums. Original Postgres schema uses
-// `enum PlanTier { ESSENTIALS PROFESSIONAL ENTERPRISE TAILORED }`.
-// DO NOT COMMIT — restore the enum + `tier PlanTier` for CI/prod.
+// Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
+// native enum type. The four valid values (ESSENTIALS / PROFESSIONAL /
+// ENTERPRISE / TAILORED) are validated at the app layer with Zod — see
+// PlanTier + the AssignPlan schema in src/lib/plans.ts and src/actions/tenants.ts.
 
 // Subscription Phase A — exactly one Plan per Tenant (optional until assigned).
 // Caps are FROZEN onto the row at assignment time (copied from the tier
@@ -60,11 +62,17 @@ model Plan {
   id                String   @id @default(cuid())
   tenantId          String   @unique
   tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tier              String   // LOCAL-DEV ONLY: PlanTier enum in Postgres
+  tier              String   // PlanTier values; validated at app layer (SQLite has no enums)
   displayName       String?  // TAILORED only; null => UI shows "TAILORED"
   maxUsers          Int      // frozen at assignment
   maxSites          Int      // frozen at assignment
   minRetentionYears Int      // promise only; NO purge logic in Phase 1
+  // Subscription term in months (tier preset; TAILORED custom). expiryDate is
+  // DERIVED = startDate + durationMonths and frozen below. Separate from
+  // minRetentionYears (retention is a compliance floor, NOT the term).
+  // @default(12) backfills existing rows (≈ their 1-yr seeded term); real
+  // writes always set it explicitly.
+  durationMonths    Int      @default(12)
   startDate         DateTime
   expiryDate        DateTime
   createdAt         DateTime @default(now())

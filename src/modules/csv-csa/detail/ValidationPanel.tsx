@@ -300,7 +300,7 @@ export function ValidationPanel({
   // submit is a documented SoD relaxation; the audit log still records the
   // actor on every action. Read-only viewers are blocked here and server-side.
   const canSubmitStages = role === "csv_val_lead" || role === "it_cdo" || role === "customer_admin" || role === "super_admin" || isQAHead;
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
   const [editingActions, setEditingActions] = useState(false);
   const [actionsText, setActionsText] = useState(system.plannedActions ?? "");
@@ -957,7 +957,7 @@ export function ValidationPanel({
       <div className="card"><div className="card-header"><span className="card-title">Roadmap activities</span></div><div className="card-body">
         {roadmapActivities.length === 0 ? <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No roadmap activities planned.</p> : (
           <table className="data-table" aria-label={`Roadmap for ${system.name}`}><thead><tr><th scope="col">Activity</th><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Start</th><th scope="col">End</th><th scope="col">Owner</th></tr></thead><tbody>
-            {roadmapActivities.map((a) => (<tr key={a.id}><th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{a.title}</th><td><Badge variant="gray">{a.type}</Badge></td><td>{actStatusBadge(a.status)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.startDate).format("DD MMM YY")}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.endDate).format("DD MMM YY")}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(a.owner, users)}</td></tr>))}
+            {roadmapActivities.map((a) => (<tr key={a.id}><th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{a.title}</th><td><Badge variant="gray">{a.type}</Badge></td><td>{actStatusBadge(a.status)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.startDate).format(dateFormat)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.endDate).format(dateFormat)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(a.owner, users)}</td></tr>))}
           </tbody></table>
         )}
       </div></div>

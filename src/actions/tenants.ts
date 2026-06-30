@@ -9,7 +9,7 @@ import { BCRYPT_COST } from "@/lib/passwords";
 import { getTenants } from "@/lib/queries/tenants";
 import type { Tenant as ReduxTenant } from "@/store/auth.slice";
 import { sanitizeServerError } from "@/lib/errors";
-import { resolvePlanCaps, validateTailoredCaps, type PlanTier } from "@/lib/plans";
+import { resolvePlanCaps, validateTailoredCaps, resolveExpiry, MIN_TAILORED_RETENTION_YEARS, type PlanTier } from "@/lib/plans";
 
 export async function listTenants(): Promise<ReduxTenant[]> {
   const session = await requireAuth();
@@ -46,8 +46,16 @@ const AssignPlanSchema = z.object({
   maxUsers: z.number().int().positive().optional(),
   maxSites: z.number().int().positive().optional(),
   minRetentionYears: z.number().int().positive().optional(),
+  // Subscription term (>= 1 month). expiryDate is DERIVED server-side
+  // (start + durationMonths) and is no longer accepted from the client, so the
+  // old "expiry >= start" order refine is gone — a positive term is always
+  // ordered (replaces Bug 8's manual-date check).
+  durationMonths: z.number().int().positive().optional(),
+  // Time-only renewal: when true the write is audited as PLAN_RENEWED instead
+  // of PLAN_ASSIGNED. Tier/caps still flow through the same fields unchanged —
+  // this is the SAME write path, only the audit action differs.
+  renewal: z.boolean().optional(),
   startDate: z.string().min(1),
-  expiryDate: z.string().min(1),
 });
 
 export async function createTenant(
@@ -291,7 +299,39 @@ export async function assignPlan(
     maxUsers: parsed.data.maxUsers,
     maxSites: parsed.data.maxSites,
     minRetentionYears: parsed.data.minRetentionYears,
+    durationMonths: parsed.data.durationMonths,
   });
+
+  // Bug 2 — a usable plan must grant at least one user account and one site,
+  // regardless of tier. validateTailoredCaps above only guards TAILORED; assert
+  // the resolved caps here so a 0/empty account cap can never persist as a plan.
+  if (caps.maxUsers < 1 || caps.maxSites < 1) {
+    return { success: false, error: "A plan must allow at least one user account and one site." };
+  }
+
+  // TAILORED only — a custom cap must NOT be set BELOW the tenant's CURRENT
+  // active usage (equal is allowed). Fixed tiers use preset caps the admin
+  // can't edit, so they're out of scope. Counts mirror planCaps.ts: ACTIVE
+  // rows are occupied seats (a deactivated user/site frees its seat).
+  if (tier === "TAILORED") {
+    const [userCount, siteCount] = await Promise.all([
+      prisma.user.count({ where: { tenantId: parsed.data.tenantId, isActive: true } }),
+      prisma.site.count({ where: { tenantId: parsed.data.tenantId, isActive: true } }),
+    ]);
+    if (caps.maxUsers < userCount) {
+      return { success: false, error: `Cannot set Max users below current usage: ${userCount} user${userCount === 1 ? "" : "s"} active` };
+    }
+    if (caps.maxSites < siteCount) {
+      return { success: false, error: `Cannot set Max sites below current usage: ${siteCount} site${siteCount === 1 ? "" : "s"} active` };
+    }
+    // Retention is a COMPLIANCE FLOOR (not a usage count): a TAILORED plan must
+    // not promise less than the 7-year Part 11 retention the data layer keeps.
+    // Equal allowed (strict <). Independent of duration and usage.
+    if (caps.minRetentionYears < MIN_TAILORED_RETENTION_YEARS) {
+      return { success: false, error: `Retention must be at least ${MIN_TAILORED_RETENTION_YEARS} years (Part 11 compliance floor)` };
+    }
+  }
+
   const displayName = tier === "TAILORED" ? (parsed.data.displayName?.trim() || null) : null;
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -302,8 +342,10 @@ export async function assignPlan(
       maxUsers: caps.maxUsers,
       maxSites: caps.maxSites,
       minRetentionYears: caps.minRetentionYears,
+      durationMonths: caps.durationMonths,
       startDate: new Date(parsed.data.startDate),
-      expiryDate: new Date(parsed.data.expiryDate),
+      // DERIVED, never hand-entered: expiry = start + the frozen duration.
+      expiryDate: new Date(resolveExpiry(parsed.data.startDate, caps.durationMonths)),
     };
     const plan = await prisma.plan.upsert({
       where: { tenantId: parsed.data.tenantId },
@@ -317,9 +359,9 @@ export async function assignPlan(
         userName: actor.displayName,
         userRole: actor.role,
         module: "Admin",
-        action: "PLAN_ASSIGNED",
+        action: parsed.data.renewal ? "PLAN_RENEWED" : "PLAN_ASSIGNED",
         recordId: parsed.data.tenantId,
-        newValue: JSON.stringify({ tier, maxUsers: caps.maxUsers, maxSites: caps.maxSites, minRetentionYears: caps.minRetentionYears }),
+        newValue: JSON.stringify({ tier, maxUsers: caps.maxUsers, maxSites: caps.maxSites, minRetentionYears: caps.minRetentionYears, durationMonths: caps.durationMonths, startDate: frozen.startDate, expiryDate: frozen.expiryDate }),
       },
     });
     revalidatePath("/admin");

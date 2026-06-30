@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES } from "@/lib/auth";
+import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
+import { createDocument } from "@/actions/documents";
 import {
   canonicalizeDeviationClosureContent,
   computeContentHash,
@@ -28,6 +29,63 @@ import { sanitizeServerError } from "@/lib/errors";
 type ActionResult<T = unknown> =
   | { success: true; data: T }
   | { success: false; error: string; fieldErrors?: Record<string, string[]> };
+
+/**
+ * Attach an evidence document to a deviation. Persists via the SHARED document
+ * pipeline (createDocument → fileStorage → Document row + DOCUMENT_UPLOADED
+ * audit) — no parallel storage. This wrapper adds the deviation-specific guards:
+ *  - parent-tenant verification: the deviation must exist in the actor's tenant
+ *    (tenant from the session, NEVER the client) — else FORBIDDEN, no write/audit;
+ *  - role gate COMPLIANCE_AUTHOR_ROLES (same author set createDocument enforces;
+ *    excludes viewer — closes the requireAuth-only gap);
+ *  - linkedModule/linkedRecordId are SET server-side (any client value ignored)
+ *    so a document can't be linked to a spoofed/foreign deviation;
+ *  - a DEVIATION_EVIDENCE_ATTACHED audit row (module "Deviation").
+ */
+export async function attachDeviationDocument(
+  deviationId: string,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+
+  // Parent-tenant verification — load the deviation in the actor's tenant.
+  const deviation = await prisma.deviation.findFirst({
+    where: { id: deviationId, tenantId: session.user.tenantId },
+    select: { id: true, reference: true },
+  });
+  if (!deviation) return { success: false, error: "FORBIDDEN" };
+
+  // Role gate — same author set createDocument enforces (viewer excluded).
+  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Your role does not permit attaching evidence." };
+  }
+
+  // Link server-side (ignore any client-supplied linkage), then delegate to the
+  // shared pipeline (file storage + Document row + its DOCUMENT_UPLOADED audit).
+  formData.set("linkedModule", "Deviation Management");
+  formData.set("linkedRecordId", deviationId);
+  const created = await createDocument(formData);
+  if (!created.success) return created;
+
+  // Deviation-module attach audit (scoped to the actor's tenant).
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  await prisma.auditLog.create({
+    data: {
+      tenantId: session.user.tenantId,
+      userId: actor.userId,
+      userName: actor.displayName,
+      userRole: actor.role,
+      module: "Deviation",
+      action: "DEVIATION_EVIDENCE_ATTACHED",
+      recordId: deviationId,
+      recordTitle: deviation.reference,
+      newValue: JSON.stringify({ documentId: (created.data as { id?: string } | null)?.id ?? null }),
+    },
+  });
+
+  revalidatePath("/deviation");
+  return created;
+}
 
 const CloseDeviationSchema = z.object({
   password: z.string().min(1, "Password is required to sign"),

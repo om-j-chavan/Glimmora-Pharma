@@ -17,7 +17,7 @@ import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
 
 const editSchema = z.object({
   title: z.string().min(1, "Title required").max(120, "Title must be 120 characters or fewer"),
-  description: z.string().min(5, "Description required"),
+  description: z.string().min(10, "Description must be at least 10 characters"),
   owner: z.string().min(1, "Assigned-to is required"),
   dueDate: z.string().min(1, "Due date required"),
   risk: z.enum(["Critical", "High", "Medium", "Low"]),

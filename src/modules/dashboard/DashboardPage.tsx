@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
@@ -13,9 +13,18 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import dayjs from "@/lib/dayjs";
 import { chartDefaults } from "@/lib/chartColors";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { setFindings } from "@/store/findings.slice";
+import { setCAPAs } from "@/store/capa.slice";
+import { setDeviations } from "@/store/deviation.slice";
+import { setSystems } from "@/store/systems.slice";
+import { adaptFinding, type FindingWithEdits } from "@/modules/gap-assessment/GapPage.adapter";
+import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
+import { adaptDeviation, type PrismaDeviationWithCapa } from "@/modules/deviation/DeviationPage.adapter";
+import { adaptPrismaSystem } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
@@ -61,10 +70,40 @@ export interface DashboardPageProps {
    * the slice-shaped data.
    */
   stats?: DashboardServerStats;
+  /**
+   * Raw server rows used to SEED the Redux slices the dashboard reads (findings
+   * / capas / deviations / systems), so KPIs and the heatmap render on first
+   * paint instead of waiting for another module's mount to hydrate the store.
+   * Same per-module hydration pattern as CAPAPage / DeviationPage / GapPage.
+   * (roadmap / fda483Events still have no slices post server-first migration —
+   * useTenantData returns [] for them — so they can't be seeded here; that's a
+   * separate deferred migration, not the first-paint bug.)
+   */
+  findings?: FindingWithEdits[];
+  capas?: Parameters<typeof mapCAPAFromPrisma>[0][];
+  deviations?: PrismaDeviationWithCapa[];
+  systems?: Parameters<typeof adaptPrismaSystem>[0][];
 }
 
-export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardPageProps = {}) {
+export function DashboardPage({
+  readinessScore: readinessScoreProp,
+  findings: serverFindings,
+  capas: serverCAPAs,
+  deviations: serverDeviations,
+  systems: serverSystems,
+}: DashboardPageProps = {}) {
   const router = useRouter();
+  const dispatch = useAppDispatch();
+  // Seed Redux from the server-fetched rows on mount / when props change. The
+  // tenant/site filtering happens on READ in useTenantData (by currentTenant,
+  // seeded by AppShell), so this dispatch is unconditional — identical to how
+  // every module page hydrates its own slice.
+  useEffect(() => {
+    if (serverFindings) dispatch(setFindings(serverFindings.map(adaptFinding)));
+    if (serverCAPAs) dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
+    if (serverDeviations) dispatch(setDeviations(serverDeviations.map(adaptDeviation)));
+    if (serverSystems) dispatch(setSystems(serverSystems.map(adaptPrismaSystem)));
+  }, [serverFindings, serverCAPAs, serverDeviations, serverSystems, dispatch]);
   const { findings, capas, deviations, systems, roadmap, fda483Events, tenantId } = useTenantData();
   const { org, sites, users } = useTenantConfig();
   const agiSettings = useAppSelector((s) => s.settings.agi);
@@ -145,15 +184,25 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
 
   /* ── Heatmap — factors in findings, CAPAs, and systems ── */
   const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
+  // Area a CAPA belongs to: its linked Finding's area, or — for an unlinked
+  // CAPA (no findingId, e.g. sourced from a Deviation or 483) — a source-based
+  // fallback, the SAME mapping the Action Plan uses below. Without this, a site
+  // whose only records are unlinked CAPAs never registers on the heatmap and
+  // shows "—" despite having real records (Bug 17). Site stays exact (CAPA
+  // carries its own siteId); only the area is inferred.
+  function capaArea(c: typeof capas[number]): string {
+    const lf = findings.find((f) => f.id === c.findingId);
+    return lf ? lf.area : c.source === "483" ? "Regulatory" : c.source === "Deviation" ? "Manufacturing" : "QMS";
+  }
   function getAreaScore(area: string, siteId?: string) {
     const af = filteredFindings.filter((f) => f.area === area && (!siteId || f.siteId === siteId) && f.status !== "Closed");
     const cr = af.filter((f) => f.severity === "Critical").length;
     const mj = af.filter((f) => f.severity === "High").length;
-    // Overdue CAPAs linked to findings in this area+site
+    // Overdue CAPAs in this area+site — attributed by linked Finding's area,
+    // or the source-based fallback for unlinked CAPAs (see capaArea).
     const areaCapaOverdue = overdueCAPAs.filter((c) => {
       if (siteId && c.siteId !== siteId) return false;
-      const lf = findings.find((f) => f.id === c.findingId);
-      return lf ? lf.area === area : false;
+      return capaArea(c) === area;
     }).length;
     // High-risk systems in this site (for CSV/IT area)
     const sysRisk = area === "CSV/IT" ? filteredSystems.filter((s) => (!siteId || s.siteId === siteId) && (s.riskLevel === "HIGH" && s.validationStatus !== "Validated")).length : 0;
@@ -163,8 +212,7 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
     const totalFindingsForArea = findings.filter((f) => f.area === area && (!siteId || f.siteId === siteId)).length;
     const totalCapasForArea = capas.filter((c) => {
       if (siteId && c.siteId !== siteId) return false;
-      const lf = findings.find((f) => f.id === c.findingId);
-      return lf ? lf.area === area : false;
+      return capaArea(c) === area;
     }).length;
     const totalSystemsForArea = area === "CSV/IT" ? systems.filter((s) => !siteId || s.siteId === siteId).length : 0;
     const hasData = totalFindingsForArea + totalCapasForArea + totalSystemsForArea > 0;

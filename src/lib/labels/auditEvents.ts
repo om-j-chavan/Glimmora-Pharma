@@ -21,6 +21,7 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   TENANT_REACTIVATED: "Account reactivated",
   TENANT_DELETED: "Account deleted",
   PLAN_ASSIGNED: "Plan assigned",
+  PLAN_RENEWED: "Plan renewed",
   PLAN_SWITCHED: "Plan changed",
   PLAN_CHANGED: "Plan changed",
   PLAN_UPDATED: "Plan updated",

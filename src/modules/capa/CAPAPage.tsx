@@ -259,7 +259,11 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
         rcaDetail: data.rcaDetail,
       });
       if (!res.success) {
-        setErrorMsg(res.error || "Failed to create CAPA. Please try again.");
+        // Surface which field failed (createCAPA returns fieldErrors) instead of
+        // a bare "Validation failed".
+        const firstField = res.fieldErrors ? Object.entries(res.fieldErrors)[0] : undefined;
+        const hint = firstField?.[1]?.[0] ? ` (${firstField[0]}: ${firstField[1][0]})` : "";
+        setErrorMsg((res.error || "Failed to create CAPA. Please try again.") + hint);
         setErrorPopup(true);
         return;
       }

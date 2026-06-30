@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import { addResponseDocument, removeResponseDocument } from "@/actions/fda483";
 import { DocumentUpload } from "@/components/shared";
 import type { FDA483Event, EventStatus } from "@/types/fda483";
@@ -77,7 +78,7 @@ export function ResponseTab({
   onSignSubmit,
 }: ResponseTabProps) {
   const router = useRouter();
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
   // Local UI state for modals
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [agiModalOpen, setAgiModalOpen] = useState(false);

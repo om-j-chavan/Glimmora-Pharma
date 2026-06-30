@@ -6,6 +6,7 @@ import dayjs from "@/lib/dayjs";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { useRole } from "@/hooks/useRole";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { CC_STATUS_VARIANT, getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 import {
   loadChangeControlById,
@@ -50,6 +51,8 @@ type Tab = "overview" | "links" | "history";
 
 export function ChangeControlDetailModal({ ccId, onClose, onChanged }: Props) {
   const { role } = useRole();
+  const { org } = useTenantConfig();
+  const dateFormat = org.dateFormat;
   const isApproverRole =
     role === "qa_head" || role === "customer_admin" || role === "super_admin";
 
@@ -326,7 +329,7 @@ export function ChangeControlDetailModal({ ccId, onClose, onChanged }: Props) {
         Type: {cc.changeType} <span aria-hidden="true">·</span> Owner:{" "}
         {cc.ownerName} <span aria-hidden="true">·</span> Target:{" "}
         {cc.targetImplementationDate
-          ? dayjs.utc(cc.targetImplementationDate).format("DD MMM YYYY")
+          ? dayjs.utc(cc.targetImplementationDate).format(dateFormat)
           : "—"}
       </p>
     </div>
