@@ -796,17 +796,34 @@ export function GapRegisterTab({
                         <p className="text-[11px] mt-0.5 mb-1.5" style={{ color: "var(--text-secondary)" }}>
                           Low-severity gaps are worked as a lightweight assigned task (assign → submit → QA review), or raise a CAPA if systematic correction is needed.
                         </p>
-                        {isQAHead ? (
-                          <>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <Dropdown placeholder="Assign to…" value={assignTo} onChange={setAssignTo} width="w-56" size="sm" options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))} />
-                              <Button variant="primary" size="sm" icon={Plus} disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign person</Button>
-                              {capaCan.canCreate && <Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>}
-                            </div>
-                            {assignError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{assignError}</p>}
-                          </>
+                        {selectedFinding.status === "Open" ? (
+                          // Not yet assigned — QA picks who works it (or raises a CAPA).
+                          isQAHead ? (
+                            <>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Dropdown placeholder="Assign to…" value={assignTo} onChange={setAssignTo} width="w-56" size="sm" options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))} />
+                                <Button variant="primary" size="sm" icon={Plus} disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign person</Button>
+                                {capaCan.canCreate && <Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>}
+                              </div>
+                              {assignError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{assignError}</p>}
+                            </>
+                          ) : (
+                            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Awaiting QA to assign an owner.</p>
+                          )
                         ) : (
-                          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Awaiting QA to assign an owner.</p>
+                          // Already assigned (in the work loop) — show the assignee
+                          // read-only and hide the dropdown so it doesn't look
+                          // re-assignable (mirrors the deviation "Assigned to X" task
+                          // display). Raise CAPA stays available to escalate.
+                          <>
+                            <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                              Assigned to <strong style={{ color: "var(--text-primary)" }}>{ownerName(selectedFinding.owner)}</strong>
+                              {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` · ${roleLabel(u.role)}` : ""; })()}
+                            </p>
+                            {capaCan.canCreate && (
+                              <div className="mt-2"><Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button></div>
+                            )}
+                          </>
                         )}
                       </>
                     ) : (

@@ -373,7 +373,12 @@ export async function assignFinding(
   try {
     const updated = await prisma.finding.update({
       where: { id: findingId, tenantId: session.user.tenantId },
-      data: { owner: assignee.id },
+      // Assigning a still-Open finding moves it into the work loop (In Progress) —
+      // the disposition uses this as the "assigned" signal to show the assignee
+      // read-only + hide the dropdown (mirrors a deviation gaining an activeTask).
+      // A finding already past Open (In Progress/Submitted/Rework) keeps its status
+      // on reassignment.
+      data: { owner: assignee.id, ...(finding.status === "Open" ? { status: "In Progress" } : {}) },
     });
 
     // Append-only edit trail (same as updateFinding tracks an owner change) so
@@ -684,6 +689,62 @@ export async function uploadFindingEvidence(
   } catch (err) {
     console.error("[action] uploadFindingEvidence failed:", err);
     return { success: false, error: "Failed to upload evidence file" };
+  }
+}
+
+/** Soft-delete a finding's evidence document before it's submitted to QA — lets
+ *  the assignee remove a wrong upload (mirrors removeDeviationTaskDocument). Auth:
+ *  an author role OR the finding's assignee (owner), same as the upload. Only a
+ *  Gap Assessment doc linked to THIS finding can be removed (never a doc from
+ *  elsewhere). Soft-delete preserves the Part 11 trail. */
+export async function removeFindingEvidence(
+  findingId: string,
+  documentId: string,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, owner: true, status: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: finding.owner });
+  if (!isAuthorRole && !isAssignee) {
+    return { success: false, error: "Your role does not permit this action." };
+  }
+  if (finding.status === "Closed") {
+    return { success: false, error: "This finding is closed; its documents can no longer be changed." };
+  }
+  const doc = await prisma.document.findFirst({
+    where: {
+      id: documentId, tenantId: session.user.tenantId, deletedAt: null,
+      linkedModule: "Gap Assessment", linkedRecordId: findingId,
+    },
+    select: { id: true, fileName: true },
+  });
+  if (!doc) return { success: false, error: "Document not found on this finding." };
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    await prisma.document.update({
+      where: { id: documentId, tenantId: session.user.tenantId },
+      data: { deletedAt: new Date(), deletedBy: session.user.name, deletionReason: "Removed from gap finding" },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+        module: "Gap Assessment", action: "FINDING_EVIDENCE_REMOVED",
+        recordId: findingId, recordTitle: doc.fileName,
+        newValue: JSON.stringify({ findingId, documentId }),
+      },
+    });
+    revalidatePath("/gap-assessment");
+    revalidatePath("/worklist");
+    revalidatePath("/evidence");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] removeFindingEvidence failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to remove document") };
   }
 }
 
