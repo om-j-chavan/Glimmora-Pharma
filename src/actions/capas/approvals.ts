@@ -298,9 +298,9 @@ export async function approveCAPA(
           data: { signatureId: sig.id },
         });
         // SME Section 1, Stage 5 (FULL) â€” auto-transition to
-        // pending_verification when this approval satisfies the tier
-        // requirement (and no unresolved concerns block). Done inside
-        // the same tx so the approval row, the SignedRecord, and the
+        // [verification retired] this no longer flips status; the CAPA
+        // stays in pending_qa_review and is directly closeable once the
+        // tier requirement is satisfied. We still compute that below to
         // status flip all commit atomically â€” no window where another
         // process sees an "approved CAPA still in pending_qa_review".
         const allApprovals = await tx.cAPAApproval.findMany({
@@ -316,15 +316,12 @@ export async function approveCAPA(
           allApprovals,
           allComments,
         );
-        let didTransition = false;
-        if (newProgress.satisfied) {
-          await tx.cAPA.update({
-            where: { id: capaId, tenantId: session.user.tenantId },
-            data: { status: "pending_verification" },
-          });
-          didTransition = true;
-        }
-        return { approval: linked, signedRecord: sig, transitioned: didTransition };
+        // Verification step retired: do NOT flip status here. The CAPA
+        // stays in pending_qa_review and is directly closeable once its
+        // approvals are satisfied (closure re-checks the same gate).
+        // readyForClosure only drives the notify + audit below.
+        const readyForClosure = newProgress.satisfied;
+        return { approval: linked, signedRecord: sig, transitioned: readyForClosure };
       },
     );
 
@@ -371,9 +368,9 @@ export async function approveCAPA(
     });
 
     // SME Section 1, Stage 5 (FULL) â€” paired audit row when this
-    // approval was the last one needed and the CAPA auto-transitioned
-    // to pending_verification. Separate row so analytics queries can
-    // count "approvals collected" vs "verification gates opened"
+    // approval was the one that completed the tier requirement, so the
+    // CAPA is now fully approved and directly closeable. Separate row so
+    // analytics can count "approvals collected" vs "ready for closure"
     // distinctly.
     if (transitioned) {
       await prisma.auditLog.create({
@@ -383,7 +380,7 @@ export async function approveCAPA(
           userName: actor.displayName,
           userRole: actor.role,
           module: APPROVAL_AUDIT_MODULE,
-          action: "CAPA_AWAITING_VERIFICATION",
+          action: "CAPA_READY_FOR_CLOSURE",
           recordId: capaId,
           recordTitle: existing.description.slice(0, 80),
           newValue: JSON.stringify({
@@ -402,7 +399,7 @@ export async function approveCAPA(
       actorUserId: actor.userId,
       type: "CAPA_APPROVED",
       title: `CAPA ${existing.reference ?? capaId} was approved`,
-      body: transitioned ? "All approvals collected — now awaiting verification." : null,
+      body: transitioned ? "All approvals collected — ready to sign & close." : null,
       linkPath: `/capa/${capaId}`,
       entityType: "CAPA",
       entityId: capaId,
