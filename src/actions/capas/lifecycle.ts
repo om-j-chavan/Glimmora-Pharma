@@ -160,6 +160,42 @@ async function resolveOwnerUserId(
   return byName.length === 1 ? byName[0].id : null;
 }
 
+/** Deviation→CAPA carryover (req 2) — a contextual CAPA description built from
+ *  the originating deviation (richer than "<title> (from <id>)"). Plain text
+ *  only; the structured RCA method/JSON is intentionally not carried. */
+function buildDeviationCarryDescription(dev: {
+  id: string; reference: string | null; title: string; description: string;
+  severity: string; area: string; immediateAction: string | null;
+}): string {
+  const parts = [
+    `Raised from deviation ${dev.reference ?? dev.id} — ${dev.title}.`,
+    `\n\nDeviation summary: ${dev.description}`,
+    `\n\nSeverity: ${dev.severity} · Area: ${dev.area}`,
+  ];
+  if (dev.immediateAction) parts.push(`\nImmediate action taken: ${dev.immediateAction}`);
+  return parts.join("").slice(0, 4000);
+}
+
+/** Deviation→CAPA carryover (req 3) — the seeded action item's description,
+ *  preserving the worker's completion notes + QA↔worker conversation so their
+ *  in-progress work isn't lost when the task is superseded by the CAPA. */
+function buildCarryActionItemDescription(task: {
+  assignee: string; completionNotes: string | null;
+  messages: { authorName: string; authorRole: string; body: string }[];
+}): string {
+  const lines = [
+    `Continue the work started on the low-priority deviation task (worker: ${task.assignee}).`,
+    task.completionNotes
+      ? `\n\nWork done so far: ${task.completionNotes}`
+      : `\n\nNo completion notes were recorded before escalation.`,
+  ];
+  if (task.messages.length > 0) {
+    const convo = task.messages.map((m) => `• ${m.authorName} (${m.authorRole}): ${m.body}`).join("\n");
+    lines.push(`\n\nPrior QA↔worker conversation:\n${convo}`);
+  }
+  return lines.join("").slice(0, 4000);
+}
+
 export async function createCAPA(
   input: z.input<typeof CreateCAPASchema>,
 ): Promise<ActionResult> {
@@ -203,7 +239,10 @@ export async function createCAPA(
 
     // Phase 3 — capture the driver userId FK alongside the legacy owner string.
     // Resolved once before the (retryable) transaction since it only reads User.
-    const ownerId = await resolveOwnerUserId(session.user.tenantId, rest.owner);
+    // Deviation→CAPA carryover (req 1): when raised FROM a deviation, the CAPA is
+    // owned by the QA who raised it — override the input owner with the actor.
+    const ownerId = linkedDeviationId ? actor.userId : await resolveOwnerUserId(session.user.tenantId, rest.owner);
+    const ownerName = linkedDeviationId ? actor.displayName : (rest.owner ?? "");
 
     // Race-safe sequence allocation. Two server actions creating CAPAs at
     // the same instant can both read count=N inside their respective
@@ -211,11 +250,38 @@ export async function createCAPA(
     // hits CAPA_reference_key uniqueness. Retry on that specific
     // collision; bubble any other error.
     const MAX_RETRIES = 5;
-    let capa: Awaited<ReturnType<typeof prisma.cAPA.create>> | null = null;
+    type CapaTxResult = {
+      created: Awaited<ReturnType<typeof prisma.cAPA.create>>;
+      activeTaskId: string | null;
+      rcaCarried: boolean;
+      actionItemInfo: { id: string; assignee: string } | null;
+    };
+    let capa: CapaTxResult | null = null;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        capa = await prisma.$transaction(async (tx) => {
+        capa = await prisma.$transaction(async (tx): Promise<CapaTxResult> => {
+          // Deviation→CAPA carryover — read the originating deviation + its active
+          // worker task UP FRONT (server-authoritative; not trusting client copies)
+          // so we can carry the root-cause text, build a contextual description,
+          // and seed an action item from the in-flight task.
+          const sourceDev = linkedDeviationId
+            ? await tx.deviation.findFirst({
+                where: { id: linkedDeviationId, tenantId: session.user.tenantId },
+                select: { id: true, reference: true, title: true, description: true, severity: true, area: true, rootCause: true, immediateAction: true },
+              })
+            : null;
+          const activeTask = linkedDeviationId
+            ? await tx.deviationTask.findFirst({
+                where: { deviationId: linkedDeviationId, tenantId: session.user.tenantId, deletedAt: null, status: { in: ["pending", "in_progress", "submitted", "rework"] } },
+                orderBy: { createdAt: "desc" },
+                select: {
+                  id: true, assignee: true, assigneeId: true, completionNotes: true, dueDate: true,
+                  messages: { orderBy: { createdAt: "asc" }, select: { authorName: true, authorRole: true, body: true } },
+                },
+              })
+            : null;
+
           // SME Section 1 (last rung) â€” site-scoped reference prefix.
           // Format is now "CAPA-{siteCode}-{year}-{NNN}". Site code is
           // resolved per call; the startsWith filter the helper feeds
@@ -258,11 +324,17 @@ export async function createCAPA(
           const created = await tx.cAPA.create({
             data: {
               ...rest,
-              // owner is now zod-optional; the Prisma column is still
-              // non-null, so default an empty string when not supplied.
-              owner: rest.owner ?? "",
+              // owner is now zod-optional; the Prisma column is still non-null.
+              // For a deviation-raised CAPA this is the QA actor (req 1).
+              owner: ownerName,
               // Phase 3 — authoritative driver FK (null when unresolvable).
               ownerId,
+              // Deviation→CAPA carryover (req 2): carry the deviation's root-cause
+              // TEXT into rca + a contextual description. Structured RCA method/
+              // detail are NOT copied (deviation rcaData JSON ≠ CAPA rcaDetail).
+              ...(sourceDev
+                ? { rca: sourceDev.rootCause ?? rest.rca ?? null, description: buildDeviationCarryDescription(sourceDev) }
+                : {}),
               reference,
               tenantId: session.user.tenantId,
               status: "open",
@@ -312,7 +384,34 @@ export async function createCAPA(
               data: { status: "cancelled" },
             });
           }
-          return created;
+          // Deviation→CAPA carryover (req 3): ONLY if there was an ACTIVE task,
+          // seed ONE action item in the CAPA's Actions tab assigned to that
+          // worker, carrying their notes + conversation so work isn't lost. No
+          // task → no auto action item (Actions tab stays empty).
+          let actionItemInfo: { id: string; assignee: string } | null = null;
+          if (activeTask?.assigneeId) {
+            const item = await tx.cAPAActionItem.create({
+              data: {
+                tenantId: session.user.tenantId,
+                capaId: created.id,
+                sequence: 1,
+                description: buildCarryActionItemDescription(activeTask),
+                owner: activeTask.assignee,
+                ownerId: activeTask.assigneeId,
+                dueDate: activeTask.dueDate ?? new Date(dueDate),
+                status: "pending",
+                createdBy: session.user.name,
+                createdById: actor.userId,
+              },
+            });
+            actionItemInfo = { id: item.id, assignee: activeTask.assignee };
+          }
+          return {
+            created,
+            activeTaskId: activeTask?.id ?? null,
+            rcaCarried: !!sourceDev?.rootCause,
+            actionItemInfo,
+          };
         });
         break;
       } catch (err) {
@@ -333,9 +432,9 @@ export async function createCAPA(
         userRole: actor.role,
         module: "CAPA",
         action: "CAPA_CREATED",
-        recordId: capa.id,
-        recordTitle: capa.reference
-          ? `${capa.reference} â€” ${parsed.data.description.slice(0, 60)}`
+        recordId: capa.created.id,
+        recordTitle: capa.created.reference
+          ? `${capa.created.reference} — ${parsed.data.description.slice(0, 60)}`
           : parsed.data.description.slice(0, 80),
         newValue: parsed.data.risk,
       },
@@ -344,7 +443,37 @@ export async function createCAPA(
     revalidatePath("/capa");
     revalidatePath("/gap-assessment");
     revalidatePath("/deviation");
-    return { success: true, data: capa };
+
+    // Deviation→CAPA carryover (req 4 + 5): the deviation's docs and the worker
+    // task's docs are NOT copied into evidence categories — they stay Documents
+    // linked to their originating records (the CAPA links via CAPA.deviationId,
+    // and the cancelled task keeps its docs). Count them so the next step (a
+    // confirmation modal + the CAPA "raised from deviation X" reference block)
+    // can surface them as links. NOTE: surfacing in the CAPA detail needs a
+    // small NEW display element — flagged for the UI step.
+    if (linkedDeviationId) {
+      const [deviationDocCount, taskDocCount] = await Promise.all([
+        prisma.document.count({ where: { tenantId: session.user.tenantId, linkedModule: "Deviation Management", linkedRecordId: linkedDeviationId, deletedAt: null } }),
+        capa.activeTaskId
+          ? prisma.document.count({ where: { tenantId: session.user.tenantId, linkedModule: "Deviation Task", linkedRecordId: capa.activeTaskId, deletedAt: null } })
+          : Promise.resolve(0),
+      ]);
+      return {
+        success: true,
+        data: {
+          ...capa.created,
+          deviationCarryover: {
+            fromDeviationId: linkedDeviationId,
+            fromTaskId: capa.activeTaskId,
+            rcaCarried: capa.rcaCarried,
+            actionItem: capa.actionItemInfo,
+            deviationDocCount,
+            taskDocCount,
+          },
+        },
+      };
+    }
+    return { success: true, data: capa.created };
   } catch (err) {
     console.error("[action] createCAPA failed:", err);
     return { success: false, error: sanitizeServerError(err, "Failed to create CAPA") };

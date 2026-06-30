@@ -330,12 +330,14 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
   async function handleRaiseCAPAFromDetail() {
     if (!selected || !user) return;
+    // Carryover (owner=QA, RCA text, contextual description, worker→action item)
+    // is handled SERVER-SIDE in createCAPA for the deviation path. The handler
+    // passes a basic description (the server enriches it) and no owner.
     const result = await createCAPAAction({
       title: selected.title.slice(0, 120),
-      description: `${selected.title} (from ${selected.id})`,
+      description: `Raised from deviation ${selected.reference ?? selected.id}`,
       source: "Deviation",
       risk: severityToRisk(selected.severity),
-      owner: selected.owner,
       dueDate: selected.dueDate,
       siteId: selected.siteId || undefined,
       linkedDeviationId: selected.id,
@@ -345,8 +347,15 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       setErrorPopup(true);
       return;
     }
-    const capaData = result.data as { id: string; reference?: string | null };
-    setSuccessMsg(`CAPA ${capaData.reference ?? capaData.id.slice(0, 8)} raised from ${selected.reference ?? selected.id.slice(0, 8)}`);
+    // Returned carryover (req 5) feeds the next step (a confirmation modal); for
+    // now it just enriches the success message.
+    const capaData = result.data as {
+      id: string; reference?: string | null;
+      deviationCarryover?: { actionItem?: { assignee: string } | null };
+    };
+    const assignedTo = capaData.deviationCarryover?.actionItem?.assignee;
+    const extra = assignedTo ? ` · ${assignedTo}'s task carried over as an action item` : "";
+    setSuccessMsg(`CAPA ${capaData.reference ?? capaData.id.slice(0, 8)} raised from ${selected.reference ?? selected.id.slice(0, 8)}${extra}`);
     setSuccessPopup(true);
     router.refresh();
   }
