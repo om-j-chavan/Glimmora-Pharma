@@ -673,12 +673,19 @@ export async function createCAPA(
     }
     return { success: true, data: capa.created };
   } catch (err) {
-    // Surface the Prisma code + meta (WHICH field/relation) so a constraint
-    // failure is diagnosable from the server log — e.g. P2003 + meta naming the
-    // FK relation. The UI still gets the sanitized message (no internals leaked).
+    // Surface the Prisma code + meta (WHICH field/relation) so a DB-constraint
+    // failure is diagnosable from BOTH the server log AND the UI — e.g.
+    // P2003 + the FK relation that was violated — instead of the opaque
+    // "This action conflicts with related records".
     const code = (err as { code?: string })?.code;
-    const meta = (err as { meta?: unknown })?.meta;
+    const meta = (err as { meta?: { field_name?: string; target?: string[]; modelName?: string } })?.meta;
     console.error(`[action] createCAPA failed${code ? ` (${code} ${JSON.stringify(meta)})` : ""}:`, err);
+    // For the known constraint codes, append the code + offending field/relation
+    // to the user-facing error so a future failure names the exact constraint.
+    if (code === "P2002" || code === "P2003" || code === "P2014" || code === "P2025") {
+      const where = meta?.field_name ?? meta?.target?.join(", ") ?? meta?.modelName ?? "";
+      return { success: false, error: `${sanitizeServerError(err, "Failed to create CAPA")} [${code}${where ? ` · ${where}` : ""}]` };
+    }
     return { success: false, error: sanitizeServerError(err, "Failed to create CAPA") };
   }
 }
