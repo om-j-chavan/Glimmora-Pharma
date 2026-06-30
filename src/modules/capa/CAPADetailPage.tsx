@@ -168,10 +168,10 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
     setOkMsg("Returned for rework."); router.refresh();
   }
 
-  async function handleSignClose(data: { meaning: string; password: string }) {
+  async function handleSignClose(data: { meaning: string; password: string; effectivenessConfirmed: boolean }) {
     clearFilter();
     setSignBusy(true); setSignError(null);
-    const res = await signAndCloseCAPAServer(capa.id, { password: data.password, signatureMeaning: data.meaning });
+    const res = await signAndCloseCAPAServer(capa.id, { password: data.password, signatureMeaning: data.meaning, effectivenessConfirmed: data.effectivenessConfirmed });
     setSignBusy(false);
     if (!res.success) { setSignError(res.error || "Sign & close failed."); return; }
     setSignOpen(false); setOkMsg("CAPA signed and closed."); router.refresh();

@@ -40,7 +40,7 @@ const obsSchema = z.object({
   text: z.string().min(5, "Observation text required"),
   area: z.string().optional(),
   regulation: z.string().optional(),
-  severity: z.enum(["Critical", "High", "Low"]),
+  severity: z.enum(["Critical", "High", "Medium", "Low"]),
   status: z.enum(["Open", "In Progress", "CAPA Linked", "Response Drafted", "Closed"]),
 });
 
@@ -154,6 +154,7 @@ export function AddObservationModal({
                   options={[
                     { value: "Critical", label: "Critical" },
                     { value: "High", label: "High" },
+                    { value: "Medium", label: "Medium" },
                     { value: "Low", label: "Low" },
                   ]}
                 />

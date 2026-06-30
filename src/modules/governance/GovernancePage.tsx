@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { BarChart3, AlertTriangle, Download, BarChart2 } from "lucide-react";
 import type { RAIDItem as PrismaRAIDItem } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
+import { escapeHtml } from "@/lib/escapeHtml";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
@@ -29,7 +30,6 @@ import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { displayUserName } from "@/lib/identity-display";
-import { escapeHtml } from "@/lib/escapeHtml";
 
 /* ── Adapt Prisma RAIDItem → slice RAIDItem shape ── */
 function adaptRAID(p: PrismaRAIDItem): RAIDItem {

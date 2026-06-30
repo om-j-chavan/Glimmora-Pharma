@@ -140,8 +140,8 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
   const rl = getReadinessLabel(readinessScore, overdueCAPAs.length);
 
   /* ── Chart data — uses filtered findings so site/severity/date filters apply ── */
-  const trendData = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mf = filteredFindings.filter((f) => f.createdAt && dayjs.utc(f.createdAt).format("MMM YYYY") === mo.format("MMM YYYY")); m.push({ month: mo.format("MMM"), Critical: mf.filter((f) => f.severity === "Critical").length, High: mf.filter((f) => f.severity === "High").length, Low: mf.filter((f) => f.severity === "Low").length }); } return m; })();
-  const trendEmpty = trendData.every((d) => d.Critical + d.High + d.Low === 0);
+  const trendData = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mf = filteredFindings.filter((f) => f.createdAt && dayjs.utc(f.createdAt).format("MMM YYYY") === mo.format("MMM YYYY")); m.push({ month: mo.format("MMM"), Critical: mf.filter((f) => f.severity === "Critical").length, High: mf.filter((f) => f.severity === "High").length, Medium: mf.filter((f) => f.severity === "Medium").length, Low: mf.filter((f) => f.severity === "Low").length }); } return m; })();
+  const trendEmpty = trendData.every((d) => d.Critical + d.High + d.Medium + d.Low === 0);
 
   /* ── Heatmap — factors in findings, CAPAs, and systems ── */
   const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
@@ -188,8 +188,8 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
       const sys = systems.find((s) => s.id === a.systemId);
       items.push({ id: a.id, priority: "High", area: "CSV/IT", action: `${a.title}${sys ? ` \u2014 ${sys.name}` : ""}`, owner: a.owner, dueDate: a.endDate, status: a.status, module: "csv-csa", refId: a.systemId ?? a.id, agiRisk: "High" });
     });
-    const p: Record<string, number> = { Critical: 0, High: 1, Low: 2 };
-    return items.sort((a, b) => (p[a.priority] ?? 2) - (p[b.priority] ?? 2) || (!a.dueDate ? 1 : !b.dueDate ? -1 : dayjs(a.dueDate).diff(dayjs(b.dueDate))));
+    const p: Record<string, number> = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+    return items.sort((a, b) => (p[a.priority] ?? 4) - (p[b.priority] ?? 4) || (!a.dueDate ? 1 : !b.dueDate ? -1 : dayjs(a.dueDate).diff(dayjs(b.dueDate))));
   })();
 
   /* ── AGI insights — all use filtered data ── */
@@ -261,7 +261,7 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
         <div className="flex items-center gap-2 flex-wrap">
           <Dropdown value={timeFilter} onChange={setTimeFilter} width="w-36" options={[{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "60", label: "Last 60 days" }, { value: "90", label: "Last 90 days" }, { value: "all", label: "All time" }]} />
           {isAdmin && <Dropdown placeholder="All sites" value={siteFilter} onChange={setSiteFilter} width="w-36" options={[{ value: "", label: "All sites" }, ...visibleSites.map((s) => ({ value: s.id, label: s.name }))]} />}
-          <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-32" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Low", label: "Low" }]} />
+          <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-32" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} />
           {(siteFilter || sevFilter) && <Button variant="ghost" size="sm" onClick={() => { setSiteFilter(""); setSevFilter(""); }}>Clear filters</Button>}
         </div>
       </header>
@@ -339,7 +339,7 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
               <div className="flex flex-col items-center py-5"><BarChart3 className="w-8 h-8 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No findings logged yet</p></div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={trendData} barSize={14} barGap={2}><CartesianGrid {...chartDefaults.cartesianGrid} /><XAxis dataKey="month" {...chartDefaults.xAxis} /><YAxis {...chartDefaults.yAxis} allowDecimals={false} /><Tooltip {...chartDefaults.tooltip} /><Legend iconType="circle" iconSize={8} formatter={(v: string) => <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{v}</span>} /><Bar dataKey="Critical" name="Critical" fill="#ef4444" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="High" name="High" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Low" name="Low" fill="#10b981" stackId="a" radius={[3, 3, 0, 0]} /></BarChart>
+                <BarChart data={trendData} barSize={14} barGap={2}><CartesianGrid {...chartDefaults.cartesianGrid} /><XAxis dataKey="month" {...chartDefaults.xAxis} /><YAxis {...chartDefaults.yAxis} allowDecimals={false} /><Tooltip {...chartDefaults.tooltip} /><Legend iconType="circle" iconSize={8} formatter={(v: string) => <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{v}</span>} /><Bar dataKey="Critical" name="Critical" fill="#ef4444" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="High" name="High" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Medium" name="Medium" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Low" name="Low" fill="#10b981" stackId="a" radius={[3, 3, 0, 0]} /></BarChart>
               </ResponsiveContainer>
             )}
           </CardSection>
@@ -384,7 +384,7 @@ export function DashboardPage({ readinessScore: readinessScoreProp }: DashboardP
           {/* ⑤ Risk signals */}
           <CardSection icon={Activity} iconColor="#ef4444" title="Risk signals">
             {/* By severity */}
-            {(["Critical", "High", "Low"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "High" ? "#f59e0b" : "#10b981"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
+            {(["Critical", "High", "Medium", "Low"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "High" || sev === "Medium" ? "#f59e0b" : "#10b981"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
               <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ background: dot }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{sev}</span></div>
                 <span className="text-[14px] font-bold" style={{ color: valCol }}>{cnt}</span>

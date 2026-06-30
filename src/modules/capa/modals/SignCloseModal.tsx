@@ -16,7 +16,7 @@ import { STATUS_LABEL } from "@/types/capa";
 interface SignCloseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSign: (data: { meaning: string; password: string }) => void;
+  onSign: (data: { meaning: string; password: string; effectivenessConfirmed: boolean }) => void;
   capa: CAPA | null;
   /** Substage 6.4 — display-only echo of the CC dependency override the
    *  operator captured upstream in ActionsPanel. The reason itself rides
@@ -59,8 +59,15 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
 
   if (!capa) return null;
 
+  // A signature credential of only whitespace is not a signature. Reject it
+  // (the button is also disabled below; this is the defensive belt).
+  const passwordBlank = signPassword.length > 0 && signPassword.trim().length === 0;
+
   function handleSign() {
-    onSign({ meaning: signMeaning, password: signPassword });
+    if (!signMeaning || signPassword.trim().length === 0) return;
+    // Send the password exactly as typed (never trim a credential — a real
+    // password may contain spaces); only the non-empty check is trimmed.
+    onSign({ meaning: signMeaning, password: signPassword, effectivenessConfirmed });
   }
 
   return (
@@ -108,7 +115,7 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
         </div>
         <div className="space-y-4">
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Signature meaning <span className="text-(--danger)">*</span></p><Dropdown value={signMeaning} onChange={setSignMeaning} placeholder="Select meaning..." width="w-full" options={[{ value: "approve", label: "I approve the corrective actions as complete and effective" }, { value: "verify", label: "I verify the root cause analysis is adequate" }, { value: "confirm", label: "I confirm evidence is sufficient for closure" }]} /></div>
-          <div><label htmlFor="sign-password" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Confirm your password <span className="text-(--danger)">*</span></label><input id="sign-password" type="password" className="input text-[12px]" value={signPassword} onChange={(e) => setSignPassword(e.target.value)} placeholder="Re-enter your password" /><p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Required for identity verification under 21 CFR Part 11</p></div>
+          <div><label htmlFor="sign-password" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Confirm your password <span className="text-(--danger)">*</span></label><input id="sign-password" type="password" className="input text-[12px]" value={signPassword} onChange={(e) => setSignPassword(e.target.value)} placeholder="Re-enter your password" aria-invalid={passwordBlank} aria-describedby={passwordBlank ? "sign-password-error" : undefined} />{passwordBlank ? <p id="sign-password-error" role="alert" className="text-[10px] mt-1" style={{ color: "var(--danger)" }}>Signature password cannot be blank or only spaces.</p> : <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Required for identity verification under 21 CFR Part 11</p>}</div>
           {capa.effectivenessCheck && (
             <div className={clsx("flex items-center justify-between p-3 rounded-lg border", "bg-(--bg-surface) border-(--bg-border)")}>
               <Toggle id="eff-confirm" checked={effectivenessConfirmed} onChange={setEffectivenessConfirmed} label="Effectiveness check confirmed" description="90-day monitoring will be scheduled" />
@@ -132,7 +139,7 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
             <Button
               variant="primary"
               icon={ShieldCheck}
-              disabled={busy || !signMeaning || !signPassword || (capa.effectivenessCheck && !effectivenessConfirmed)}
+              disabled={busy || !signMeaning || signPassword.trim().length === 0 || (capa.effectivenessCheck && !effectivenessConfirmed)}
               loading={busy}
               onClick={handleSign}
             >

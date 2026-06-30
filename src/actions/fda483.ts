@@ -711,7 +711,7 @@ const UpdateObservationSchema = z.object({
   text: z.string().optional(),
   area: z.string().optional(),
   regulation: z.string().optional(),
-  severity: z.enum(["Critical", "High", "Low"]).optional(),
+  severity: z.enum(GENERIC_SEVERITY).optional(),
   rcaMethod: z.string().optional(),
   rootCause: z.string().optional(),
   responseText: z.string().optional(),

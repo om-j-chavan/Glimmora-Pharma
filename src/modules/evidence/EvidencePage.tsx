@@ -11,8 +11,8 @@ import type { Document as PrismaDocument } from "@prisma/client";
 // files. Phase 4 of the document-store unification removes this.
 import type { getCAPAEvidenceFiles } from "@/lib/queries/governance";
 import dayjs from "@/lib/dayjs";
-import { displayUserName } from "@/lib/identity-display";
 import { escapeHtml } from "@/lib/escapeHtml";
+import { displayUserName } from "@/lib/identity-display";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
@@ -256,11 +256,16 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
     });
 
     /* \u2500\u2500 Aggregate uploaded files (LinkedDocument) from CAPA / Deviation / FDA-483 \u2500\u2500 */
-    const mapStatus = (s: string): DocStatus =>
-      s === "approved" || s === "current" ? "Current"
-      : s === "under_review" ? "Under Review"
-      : s === "superseded" ? "Superseded"
-      : "Current";
+    const mapStatus = (s: string): DocStatus => {
+      const v = s.trim().toLowerCase();
+      return v === "approved" || v === "current" ? "Current"
+        : v === "under_review" ? "Under Review"
+        : v === "superseded" ? "Superseded"
+        // GxP integrity: draft / rejected / pending / empty / unrecognised —
+        // anything we cannot positively confirm as approved must NOT render as
+        // inspection-ready "Current". Safe non-current default.
+        : "Draft";
+    };
 
     const pushUploaded = (
       doc: { id: string; fileName: string; fileType: string; fileSize: string; uploadedBy: string; uploadedAt?: string; version: string; status: string; description?: string; approvedBy?: string; dataUrl?: string },

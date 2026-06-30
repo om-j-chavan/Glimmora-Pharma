@@ -8,6 +8,8 @@
  * `@/components/ui/ExportMenu`.
  */
 
+import { escapeHtml } from "@/lib/escapeHtml";
+
 export type Cell = string | number | null | undefined;
 
 function triggerDownload(blob: Blob, filename: string): void {
@@ -27,13 +29,6 @@ function toText(value: Cell): string {
 
 function escapeCsv(value: Cell): string {
   return `"${toText(value).replace(/"/g, '""')}"`;
-}
-
-function escapeHtml(value: Cell): string {
-  return toText(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 export function downloadCSV(filename: string, headers: string[], rows: Cell[][]): void {

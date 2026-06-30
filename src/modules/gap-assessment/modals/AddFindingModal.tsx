@@ -30,7 +30,7 @@ const findingSchema = z.object({
   requirement: z.string().min(10, "Add the requirement (at least 10 characters)"),
   purpose: z.string().optional(),
   framework: z.string().min(1, "Framework required"),
-  severity: z.enum(["Critical", "High", "Low"]),
+  severity: z.enum(["Critical", "High", "Medium", "Low"]),
   targetDate: z.string().min(1, "Target date required"),
   evidenceLink: z.string().optional(),
   rootCause: z.string().optional(),
@@ -294,6 +294,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               options={[
                 { value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const },
                 { value: "High", label: "High", badge: "H", badgeVariant: "amber" as const },
+                { value: "Medium", label: "Medium", badge: "M", badgeVariant: "amber" as const },
                 { value: "Low", label: "Low", badge: "L", badgeVariant: "green" as const },
               ]} />
           </div>
