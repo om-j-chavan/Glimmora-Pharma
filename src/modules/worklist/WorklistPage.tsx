@@ -161,11 +161,18 @@ export function WorklistPage({
   // findings section too (not an island). The PRIORITY dropdown filters findings
   // by SEVERITY (same Critical/High/Medium/Low value set); the STATUS dropdown
   // maps pending→Open, in_progress→In Progress (findings have no rework yet).
-  const findingActionStatus = (f: WorklistFinding) => (f.status === "In Progress" ? "in_progress" : "pending");
+  const findingActionStatus = (f: WorklistFinding): string => {
+    switch (f.status) {
+      case "In Progress": return "in_progress";
+      case "Submitted": return "submitted"; // awaiting QA — not actionable/open
+      case "Rework": return "rework";
+      default: return "pending"; // Open
+    }
+  };
   const findingMatchesQuick = (f: WorklistFinding): boolean => {
     switch (quickFilter) {
-      case "open": return true; // every returned finding is active/open
-      case "rework": return false; // findings have no rework status yet
+      case "open": return f.status === "Open" || f.status === "In Progress";
+      case "rework": return f.status === "Rework";
       case "dueSoon": return isDueSoonEntry(findingActionStatus(f), f.targetDate);
       case "overdue": return isOverdueEntry(findingActionStatus(f), f.targetDate);
       default: return true;
@@ -174,7 +181,7 @@ export function WorklistPage({
   const findingMatches = (f: WorklistFinding): boolean => {
     if (priorityFilter && f.severity !== priorityFilter) return false;
     if (statusFilter) {
-      const wanted = statusFilter === "in_progress" ? "In Progress" : statusFilter === "pending" ? "Open" : null;
+      const wanted = statusFilter === "in_progress" ? "In Progress" : statusFilter === "pending" ? "Open" : statusFilter === "rework" ? "Rework" : null;
       if (wanted === null || f.status !== wanted) return false;
     }
     if (dueByFilter && f.targetDate && dayjs.utc(f.targetDate).isAfter(dayjs.utc(dueByFilter).endOf("day"))) return false;
@@ -579,7 +586,7 @@ export function WorklistPage({
                   </p>
                 </div>
                 <Badge variant={getSeverityVariant(f.severity, "generic")}>{f.severity}</Badge>
-                <Badge variant={f.status === "In Progress" ? "amber" : "blue"}>{f.status}</Badge>
+                <Badge variant={f.status === "Submitted" ? "purple" : f.status === "Rework" ? "red" : f.status === "In Progress" ? "amber" : "blue"}>{f.status}</Badge>
               </button>
             ))}
           </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import {
-  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, History, Paperclip,
+  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, History, Paperclip, Send, Wrench, CheckCircle2,
 } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
@@ -13,7 +13,16 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { formatReference } from "@/lib/reference";
 import { ExportMenu } from "@/components/ui/ExportMenu";
 import type { Finding, FindingSeverity, FindingStatus } from "@/store/findings.slice";
-import { updateFinding as updateFindingAction, assignFinding as assignFindingAction } from "@/actions/findings";
+import {
+  updateFinding as updateFindingAction,
+  assignFinding as assignFindingAction,
+  reviewFinding as reviewFindingAction,
+  reworkFinding as reworkFindingAction,
+  postFindingMessage as postFindingMessageAction,
+  loadFindingReview as loadFindingReviewAction,
+} from "@/actions/findings";
+import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
+import type { WorklistTaskMessage } from "@/lib/queries/worklist";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import type { UserConfig } from "@/store/settings.slice";
@@ -136,6 +145,55 @@ export function GapRegisterTab({
     if (!res.success) { setAssignError(res.error || "Failed to assign finding."); return; }
     setAssignTo("");
     router.refresh();
+  }
+
+  // Gap Step 4 — QA review (accept / rework) + the conversation thread. Loaded
+  // separately (the store Finding doesn't carry notes/messages).
+  type FindingReview = { status: string; completionNotes: string | null; reworkReason: string | null; messages: WorklistTaskMessage[] };
+  const [review, setReview] = useState<FindingReview | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reworkOpen, setReworkOpen] = useState(false);
+  const [reworkReasonInput, setReworkReasonInput] = useState("");
+  const [reviewMsg, setReviewMsg] = useState("");
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = selectedFinding?.id;
+    if (!id) { setReview(null); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await loadFindingReviewAction(id);
+      if (!cancelled) setReview(res.success ? (res.data as FindingReview) : null);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedFinding?.id]);
+
+  async function refreshReview() {
+    if (!selectedFinding) return;
+    const res = await loadFindingReviewAction(selectedFinding.id);
+    if (res.success) setReview(res.data as FindingReview);
+  }
+  async function handleReviewAccept() {
+    if (!selectedFinding) return;
+    setReviewBusy(true); setReviewError(null);
+    const res = await reviewFindingAction(selectedFinding.id);
+    setReviewBusy(false);
+    if (!res.success) { setReviewError(res.error || "Failed to accept."); return; }
+    router.refresh();
+  }
+  async function handleReworkSubmit() {
+    if (!selectedFinding || reworkReasonInput.trim().length < 5) { setReviewError("Add a rework reason (at least 5 characters)."); return; }
+    setReviewBusy(true); setReviewError(null);
+    const res = await reworkFindingAction(selectedFinding.id, { reason: reworkReasonInput.trim() });
+    setReviewBusy(false);
+    if (!res.success) { setReviewError(res.error || "Failed to send for rework."); return; }
+    setReworkOpen(false); setReworkReasonInput(""); router.refresh();
+  }
+  async function handlePostReviewMsg() {
+    if (!selectedFinding || reviewMsg.trim().length === 0) return;
+    const res = await postFindingMessageAction(selectedFinding.id, { body: reviewMsg.trim() });
+    if (!res.success) { setReviewError(res.error || "Failed to post message."); return; }
+    setReviewMsg(""); await refreshReview();
   }
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { sites: accessibleSites } = useTenantConfig();
@@ -572,6 +630,52 @@ export function GapRegisterTab({
                 )}
               </div>
             </div>
+
+            {/* Gap Step 4 — QA review (accept / rework) + the conversation thread.
+                Shown once the finding has entered the submit/rework loop. */}
+            {review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0) && (
+              <div className="rounded-lg border p-3 mt-3" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className={LABEL} style={{ margin: 0 }}>QA review</h3>
+                  <Badge variant={review.status === "Submitted" ? "purple" : review.status === "Rework" ? "red" : review.status === "Closed" ? "green" : "amber"}>{review.status}</Badge>
+                </div>
+                {review.completionNotes && (
+                  <p className="text-[12px] mt-1.5" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {review.completionNotes}</p>
+                )}
+                {review.status === "Rework" && review.reworkReason && (
+                  <p className="text-[11px] mt-1" style={{ color: "var(--danger)" }}><span className="font-semibold">Returned:</span> {review.reworkReason}</p>
+                )}
+                {isQAHead && review.status === "Submitted" && (
+                  <div className="flex gap-2 mt-2">
+                    <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>
+                    <Button variant="secondary" size="sm" icon={Wrench} disabled={reviewBusy} onClick={() => { setReviewError(null); setReworkReasonInput(""); setReworkOpen(true); }}>Send for rework</Button>
+                  </div>
+                )}
+                <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
+                  <TaskThread messages={review.messages} currentUserId={user?.id} fmt={(iso) => dayjs.utc(iso).tz(timezone).format(`${dateFormat} HH:mm`)} />
+                  {review.status !== "Closed" && (
+                    <div className="flex items-end gap-2 mt-2">
+                      <textarea className="input text-[12px] w-full min-h-14" placeholder="Message the assignee…" value={reviewMsg} onChange={(e) => setReviewMsg(e.target.value)} maxLength={2000} />
+                      <Button variant="secondary" size="sm" icon={Send} disabled={reviewMsg.trim().length === 0} onClick={() => void handlePostReviewMsg()}>Send</Button>
+                    </div>
+                  )}
+                </div>
+                {reviewError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{reviewError}</p>}
+              </div>
+            )}
+
+            {reworkOpen && (
+              <Modal open onClose={() => { if (!reviewBusy) setReworkOpen(false); }} title="Send finding for rework">
+                <p className="text-[12px] mb-2" style={{ color: "var(--text-secondary)" }}>Return this finding to the assignee with a reason. It reappears in their worklist and is recorded in the conversation.</p>
+                <textarea className="input text-[12px] w-full min-h-20" value={reworkReasonInput} onChange={(e) => setReworkReasonInput(e.target.value)} maxLength={2000} placeholder="What needs to change? (≥ 5 characters)" />
+                {reviewError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{reviewError}</p>}
+                <div className="flex justify-end gap-2 mt-3">
+                  <Button variant="secondary" size="sm" disabled={reviewBusy} onClick={() => setReworkOpen(false)}>Cancel</Button>
+                  <Button variant="danger" size="sm" disabled={reviewBusy || reworkReasonInput.trim().length < 5} loading={reviewBusy} onClick={() => void handleReworkSubmit()}>Send for rework</Button>
+                </div>
+              </Modal>
+            )}
 
             {/* ── Evidence link ── */}
             {isEditing ? (

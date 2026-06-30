@@ -119,6 +119,10 @@ export interface WorklistFinding {
   /** Gap Step 3 — the finding's evidence docs (Document, linkedModule
    *  "Gap Assessment"), grouped by GxP category in the panel. */
   docs: WorklistDoc[];
+  /** Gap Step 4 — QA's current rework "ask" (banner); history is in messages. */
+  reworkReason: string | null;
+  /** Gap Step 4 — the flat QA↔assignee conversation. */
+  messages: WorklistTaskMessage[];
 }
 
 export interface Worklist {
@@ -136,8 +140,9 @@ const ACTIVE_STATUSES = ["open", "in_progress", "pending_qa_review", "pending_ve
 const OPEN_ITEM_STATUSES = new Set(["pending", "in_progress", "rework"]);
 // Stage 4 — DeviationTask statuses that still need worklist attention.
 const DEV_TASK_ACTIVE_STATUSES = ["pending", "in_progress", "submitted", "rework"];
-// Gap Step 2 — Finding statuses that still need worklist attention.
-const FINDING_ACTIVE_STATUSES = ["Open", "In Progress"];
+// Gap Step 2/4 — Finding statuses that still need worklist attention (includes
+// the Step-4 loop states; "Submitted" stays visible while it awaits QA review).
+const FINDING_ACTIVE_STATUSES = ["Open", "In Progress", "Submitted", "Rework"];
 
 export const getWorklist = cache(async (userId: string, tenantId: string): Promise<Worklist> => {
   const [items, drivenCapas, devTasks, assignedFindingRows] = await Promise.all([
@@ -184,7 +189,11 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     prisma.finding.findMany({
       where: { owner: userId, tenantId, deletedAt: null, status: { in: FINDING_ACTIVE_STATUSES } },
       orderBy: { targetDate: "asc" },
-      select: { id: true, reference: true, requirement: true, framework: true, area: true, severity: true, status: true, targetDate: true, completionNotes: true },
+      select: {
+        id: true, reference: true, requirement: true, framework: true, area: true, severity: true,
+        status: true, targetDate: true, completionNotes: true, reworkReason: true,
+        messages: { orderBy: { createdAt: "asc" }, select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true } },
+      },
     }),
   ]);
 
@@ -384,22 +393,30 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     targetDate: f.targetDate ? f.targetDate.toISOString() : null,
     completionNotes: f.completionNotes,
     docs: findingDocsByFinding.get(f.id) ?? [],
+    reworkReason: f.reworkReason,
+    messages: f.messages.map((m) => ({
+      id: m.id, authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole,
+      body: m.body, createdAt: m.createdAt.toISOString(),
+    })),
   }));
 
   const openItems = items.filter((i) => OPEN_ITEM_STATUSES.has(i.status));
   // Open deviation tasks count toward the worklist totals (submitted ones are
   // awaiting QA, so they're excluded from "open" like complete CAPA items).
   const openDevTasks = deviationTasks.filter((t) => OPEN_ITEM_STATUSES.has(t.status));
+  // Gap Step 4 — open finding work = Open / In Progress / Rework. "Submitted" is
+  // awaiting QA (excluded from "open", like a submitted deviation task).
+  const openFindings = assignedFindings.filter((f) => f.status !== "Submitted" && f.status !== "Closed");
   const reworkCount =
     items.filter((i) => i.status === "rework").length +
-    deviationTasks.filter((t) => t.status === "rework").length;
+    deviationTasks.filter((t) => t.status === "rework").length +
+    assignedFindings.filter((f) => f.status === "Rework").length;
 
   return {
     groups,
     deviationTasks,
     assignedFindings,
-    // Findings are all active → all count as open work (no rework status yet).
-    openCount: openItems.length + openDevTasks.length + assignedFindings.length,
+    openCount: openItems.length + openDevTasks.length + openFindings.length,
     reworkCount,
   };
 });

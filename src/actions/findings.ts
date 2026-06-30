@@ -746,3 +746,266 @@ export async function saveFindingWorkNotes(
     return { success: false, error: sanitizeServerError(err, "Failed to save notes") };
   }
 }
+
+// ── Gap Step 4 — submit → QA review → rework loop (clones the deviation task) ──
+
+const SubmitFindingSchema = z.object({
+  completionNotes: z.string().min(5, "Completion notes are required (min 5 chars)"),
+});
+const ReworkFindingSchema = z.object({
+  reason: z.string().min(5, "Rework reason is required (min 5 chars)"),
+});
+const FindingMessageSchema = z.object({
+  body: z.string().min(1, "Message cannot be empty").max(2000, "Message too long (2000 char max)"),
+});
+
+/** SUBMIT — the assignee (owner) submits the finding for QA review. */
+export async function submitFinding(
+  findingId: string,
+  input: z.input<typeof SubmitFindingSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = SubmitFindingSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, reference: true, owner: true, status: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  if (!isAssignedToTask(session, { ownerId: finding.owner })) {
+    return { success: false, error: "Only the assigned user can submit this finding." };
+  }
+  if (finding.status !== "Open" && finding.status !== "In Progress" && finding.status !== "Rework") {
+    return { success: false, error: "This finding can no longer be submitted." };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    const updated = await prisma.finding.update({
+      where: { id: findingId, tenantId: session.user.tenantId },
+      data: {
+        status: "Submitted",
+        completionNotes: parsed.data.completionNotes,
+        submittedAt: new Date(),
+        submittedById: actor.userId,
+      },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+        module: "Gap Assessment", action: "FINDING_SUBMITTED",
+        recordId: findingId, recordTitle: finding.reference ?? undefined,
+      },
+    });
+    revalidatePath("/gap-assessment");
+    revalidatePath("/worklist");
+    return { success: true, data: updated };
+  } catch (err) {
+    console.error("[action] submitFinding failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to submit finding") };
+  }
+}
+
+/** REVIEW → COMPLETE — QA accepts a submitted finding (→ Closed). QA-gated + SoD
+ *  (the reviewer must NOT be the assignee/owner). */
+export async function reviewFinding(findingId: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can review findings." };
+  }
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, reference: true, owner: true, status: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  if (finding.status !== "Submitted") {
+    return { success: false, error: "Only a submitted finding can be reviewed." };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  if (finding.owner && finding.owner === actor.userId) {
+    return { success: false, error: "Separation of duties: you cannot review a finding assigned to you. A different QA Head must review it." };
+  }
+  try {
+    const updated = await prisma.finding.update({
+      where: { id: findingId, tenantId: session.user.tenantId },
+      data: { status: "Closed" },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+        module: "Gap Assessment", action: "FINDING_REVIEW_CLOSED",
+        recordId: findingId, recordTitle: finding.reference ?? undefined,
+      },
+    });
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: finding.owner,
+      actorUserId: actor.userId,
+      type: "ACTION_ASSIGNED",
+      title: `Your gap finding was accepted and closed (${finding.reference ?? findingId.slice(0, 8)})`,
+      body: "Accepted and closed by QA.",
+      linkPath: "/gap-assessment",
+      entityType: "Finding",
+      entityId: findingId,
+    });
+    revalidatePath("/gap-assessment");
+    revalidatePath("/worklist");
+    return { success: true, data: updated };
+  } catch (err) {
+    console.error("[action] reviewFinding failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to review finding") };
+  }
+}
+
+/** REVIEW → REWORK — QA returns a submitted finding to the assignee. QA-gated +
+ *  SoD. Auto-posts the rework reason as a FindingMessage (durable history), so
+ *  it survives the assignee's resubmit — exactly like reworkDeviationTask. */
+export async function reworkFinding(
+  findingId: string,
+  input: z.input<typeof ReworkFindingSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = ReworkFindingSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can review findings." };
+  }
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, reference: true, owner: true, status: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  if (finding.status !== "Submitted") {
+    return { success: false, error: "Only a submitted finding can be sent back for rework." };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  if (finding.owner && finding.owner === actor.userId) {
+    return { success: false, error: "Separation of duties: you cannot review a finding assigned to you. A different QA Head must review it." };
+  }
+  try {
+    const updated = await prisma.finding.update({
+      where: { id: findingId, tenantId: session.user.tenantId },
+      data: {
+        status: "Rework",
+        reworkReason: parsed.data.reason,
+        reworkAt: new Date(),
+        reworkById: actor.userId,
+      },
+    });
+    await prisma.findingMessage.create({
+      data: {
+        tenantId: session.user.tenantId,
+        findingId,
+        authorId: actor.userId,
+        authorName: actor.displayName,
+        authorRole: actor.role,
+        body: parsed.data.reason,
+      },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+        module: "Gap Assessment", action: "FINDING_REWORK",
+        recordId: findingId, recordTitle: finding.reference ?? undefined,
+        newValue: JSON.stringify({ reason: parsed.data.reason.slice(0, 200) }),
+      },
+    });
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: finding.owner,
+      actorUserId: actor.userId,
+      type: "REWORK_ASSIGNED",
+      title: `Gap finding returned for rework (${finding.reference ?? findingId.slice(0, 8)})`,
+      body: parsed.data.reason.slice(0, 200),
+      linkPath: "/worklist",
+      entityType: "Finding",
+      entityId: findingId,
+    });
+    revalidatePath("/gap-assessment");
+    revalidatePath("/worklist");
+    return { success: true, data: updated };
+  } catch (err) {
+    console.error("[action] reworkFinding failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to send finding for rework") };
+  }
+}
+
+/** POST MESSAGE — the flat QA↔assignee conversation (append-only). QA OR the
+ *  assignee (owner). Read-only once the finding is Closed. */
+export async function postFindingMessage(
+  findingId: string,
+  input: z.input<typeof FindingMessageSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = FindingMessageSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, owner: true, status: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: finding.owner });
+  if (!isQA && !isAssignee) {
+    return { success: false, error: "Only QA or the assigned user can post on this finding." };
+  }
+  if (finding.status === "Closed") {
+    return { success: false, error: "This finding is closed; the conversation is read-only." };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    const created = await prisma.findingMessage.create({
+      data: {
+        tenantId: session.user.tenantId,
+        findingId,
+        authorId: actor.userId,
+        authorName: actor.displayName,
+        authorRole: actor.role,
+        body: parsed.data.body.trim(),
+      },
+    });
+    revalidatePath("/gap-assessment");
+    revalidatePath("/worklist");
+    return { success: true, data: created };
+  } catch (err) {
+    console.error("[action] postFindingMessage failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to post message") };
+  }
+}
+
+/** Read a finding's review payload (for the QA-side gap view, which doesn't get
+ *  it from the worklist payload): the assignee's completion notes, QA's current
+ *  rework ask, and the conversation. Tenant-scoped; messages oldest first. */
+export async function loadFindingReview(findingId: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId },
+    select: { id: true, status: true, completionNotes: true, reworkReason: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  const messages = await prisma.findingMessage.findMany({
+    where: { findingId, tenantId: session.user.tenantId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true },
+  });
+  return {
+    success: true,
+    data: {
+      status: finding.status,
+      completionNotes: finding.completionNotes,
+      reworkReason: finding.reworkReason,
+      messages: messages.map((m) => ({
+        id: m.id, authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole,
+        body: m.body, createdAt: m.createdAt.toISOString(),
+      })),
+    },
+  };
+}

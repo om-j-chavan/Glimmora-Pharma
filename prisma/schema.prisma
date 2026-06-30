@@ -201,6 +201,14 @@ model Finding {
   // Gap Step 3 — the assignee's work/completion notes (mirrors
   // DeviationTask.completionNotes). Distinct from rootCause (RCA); nullable.
   completionNotes String?
+  // Gap Step 4 — submit → QA review → rework loop (mirrors DeviationTask).
+  // submittedAt/By: set when the assignee submits. reworkReason is the "current
+  // ask" banner; the durable history lives in FindingMessage.
+  submittedAt   DateTime?
+  submittedById String?
+  reworkReason  String?
+  reworkAt      DateTime?
+  reworkById    String?
   linkedCAPAId String?
   createdBy    String
   // SME Section 1, Stage 6 (FULL) — recurrence linkage. Same shape as
@@ -226,6 +234,7 @@ model Finding {
   // recurrence this Finding represents.
   previousCAPA CAPA? @relation("FindingRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
   edits  FindingEdit[]
+  messages FindingMessage[]
 
   @@index([deletedAt])
 }
@@ -247,6 +256,24 @@ model FindingEdit {
   finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
 
   @@index([findingId])
+}
+
+// Gap Step 4 — the flat, append-only QA↔assignee conversation on a finding
+// (clone of DeviationTaskMessage; no threading/concern/resolve). Tenant-delete
+// cascades via Finding (findingId onDelete Cascade), so no direct tenant relation
+// is needed — tenantId is kept for scoping/indexing only.
+model FindingMessage {
+  id         String   @id @default(cuid())
+  tenantId   String
+  findingId  String
+  finding    Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  authorId   String?
+  authorName String
+  authorRole String
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, findingId])
 }
 
 // ── CAPA ──
