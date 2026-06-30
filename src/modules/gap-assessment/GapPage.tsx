@@ -147,6 +147,8 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
   const [addedPopup, setAddedPopup] = useState(false);
   const [capaRaisedPopup, setCapaRaisedPopup] = useState(false);
   const [raisedCapaId, setRaisedCapaId] = useState("");
+  // Step 5 — carryover summary (converted evidence count) for the confirmation.
+  const [raisedNote, setRaisedNote] = useState("");
   const [expandedAreas, setExpandedAreas] = useState<Set<string>>(() => new Set(AREAS));
   const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
   const [evidenceFindingId, setEvidenceFindingId] = useState("");
@@ -290,9 +292,12 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
       console.error("[gap] handleRaiseCapa failed:", result.error);
       return;
     }
-    const capaData = result.data as { id: string; reference?: string };
+    const capaData = result.data as { id: string; reference?: string; findingCarryover?: { convertedEvidenceCount?: number } };
     // FIX 1a — show the human reference (CAPA-…), not the raw cuid.
     setRaisedCapaId(capaData.reference ?? capaData.id);
+    // Step 5 — the finding's categorized docs become real CAPA evidence on raise.
+    const conv = capaData.findingCarryover?.convertedEvidenceCount ?? 0;
+    setRaisedNote(conv > 0 ? ` ${conv} document${conv === 1 ? "" : "s"} carried over as evidence.` : "");
     // FIX 1b — the detail modal renders from the selectedFinding snapshot; flip
     // its "Raise CAPA" button to "linked" instantly by stamping capaId. Redux
     // also refreshes via router.refresh()'s effect (kept), but the open snapshot
@@ -467,7 +472,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
       {/* Popups */}
       <Popup isOpen={addedPopup} variant="success" title="Finding logged" description="Added to the register. Raise a CAPA if corrective action is needed." onDismiss={() => setAddedPopup(false)} />
       <Popup isOpen={capaRaisedPopup} variant="success" title="CAPA raised"
-        description={`${raisedCapaId} created and linked. Go to CAPA Tracker to add RCA.`}
+        description={`${raisedCapaId} created and linked.${raisedNote} Go to CAPA Tracker to add RCA.`}
         onDismiss={() => setCapaRaisedPopup(false)}
         actions={[{ label: "Go to CAPA Tracker", style: "primary", onClick: () => { setCapaRaisedPopup(false); router.push("/capa"); } }]} />
       <Popup isOpen={evidenceLinkedPopup} variant="success" title="Evidence saved" description="Evidence document saved. Close the finding to mark evidence as Complete." onDismiss={() => setEvidenceLinkedPopup(false)} />
