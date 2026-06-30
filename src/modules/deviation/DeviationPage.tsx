@@ -247,7 +247,13 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     // field misses surface inline before submit, and isValid can gate the
     // submit button.
     mode: "onTouched",
-    defaultValues: { type: "unplanned", severity: "Major", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium" },
+    // Initialize EVERY string field so its <Input>/<textarea> is controlled from
+    // the first render (RHF's field.value is undefined for any omitted field,
+    // which makes the input uncontrolled until first edit → React's
+    // "changing an uncontrolled input to be controlled" warning). The enum
+    // dropdowns keep their seeded defaults; category stays unset (its placeholder
+    // shows for "" all the same, and "" isn't a valid enum value).
+    defaultValues: { title: "", description: "", type: "unplanned", severity: "Major", area: "", immediateAction: "", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium", dueDate: "", batchesAffected: "" },
   });
 
   function severityToRisk(s: DeviationSeverity): "Critical" | "High" | "Medium" | "Low" {
