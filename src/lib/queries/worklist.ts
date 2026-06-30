@@ -118,7 +118,6 @@ export interface Worklist {
   deviationTasks: WorklistDeviationTask[];
   openCount: number;
   reworkCount: number;
-  nextDue: string | null;
 }
 
 const ACTIVE_STATUSES = ["open", "in_progress", "pending_qa_review", "pending_verification"];
@@ -333,17 +332,11 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
   const reworkCount =
     items.filter((i) => i.status === "rework").length +
     deviationTasks.filter((t) => t.status === "rework").length;
-  const dueCandidates = [
-    ...openItems.map((i) => i.dueDate.toISOString()),
-    ...openDevTasks.map((t) => t.dueDate).filter((d): d is string => d !== null),
-  ].sort((a, b) => a.localeCompare(b));
-  const nextDue = dueCandidates.length > 0 ? dueCandidates[0] : null;
 
   return {
     groups,
     deviationTasks,
     openCount: openItems.length + openDevTasks.length,
     reworkCount,
-    nextDue,
   };
 });

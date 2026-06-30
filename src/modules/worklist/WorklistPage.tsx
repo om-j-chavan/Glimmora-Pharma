@@ -16,7 +16,7 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
 import { submitForReview } from "@/actions/capas";
 import { updateEvidenceStatus, initializeEvidenceForCAPA } from "@/actions/evidence";
-import type { Worklist, WorklistGroup, WorklistItem } from "@/lib/queries/worklist";
+import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask } from "@/lib/queries/worklist";
 import { TaskPanel } from "./TaskPanel";
 import { DeviationTaskPanel } from "./DeviationTaskPanel";
 import { StatusPill, ACTION_STATUS_TOKEN } from "@/modules/capa/lib/statusTokens";
@@ -58,6 +58,20 @@ function overdueDays(dueIso: string, status: string): number | null {
   const d = dayjs.utc(dueIso);
   if (d.isAfter(dayjs())) return null;
   return dayjs().diff(d, "day");
+}
+
+// Statuses that still need the assignee's attention — shared by CAPA action
+// items and deviation tasks ("submitted"/"complete"/"skipped" are done-by-worker,
+// so they don't count as open / due-soon / overdue).
+const ACTIONABLE_STATUSES = new Set(["pending", "in_progress", "rework"]);
+function isOverdueEntry(status: string, dueIso: string | null): boolean {
+  if (!ACTIONABLE_STATUSES.has(status) || !dueIso) return false;
+  return dayjs.utc(dueIso).isBefore(dayjs());
+}
+function isDueSoonEntry(status: string, dueIso: string | null): boolean {
+  if (!ACTIONABLE_STATUSES.has(status) || !dueIso) return false;
+  const d = dayjs.utc(dueIso);
+  return d.isAfter(dayjs()) && d.isBefore(dayjs().add(7, "day"));
 }
 
 export function WorklistPage({
@@ -127,21 +141,59 @@ export function WorklistPage({
     }
     return true;
   };
+  // Deviation-task filter — mirrors matchesFilters/itemMatchesQuick so the
+  // search box, the status/priority/dueBy dropdowns, and the quick-filters all
+  // reach the deviation-tasks section too (it's no longer an unfiltered island).
+  const devTaskMatchesQuick = (t: WorklistDeviationTask): boolean => {
+    switch (quickFilter) {
+      case "open": return t.status === "pending" || t.status === "in_progress";
+      case "rework": return t.status === "rework";
+      case "dueSoon": return isDueSoonEntry(t.status, t.dueDate);
+      case "overdue": return isOverdueEntry(t.status, t.dueDate);
+      default: return true;
+    }
+  };
+  const devTaskMatches = (t: WorklistDeviationTask): boolean => {
+    // Deviation tasks are always Low priority; the priority dropdown filters on that.
+    if (priorityFilter && (t.context.priority ?? "") !== priorityFilter) return false;
+    if (statusFilter && t.status !== statusFilter) return false;
+    if (dueByFilter && t.dueDate && dayjs.utc(t.dueDate).isAfter(dayjs.utc(dueByFilter).endOf("day"))) return false;
+    if (!devTaskMatchesQuick(t)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const hit = t.message.toLowerCase().includes(q)
+        || t.deviationTitle.toLowerCase().includes(q)
+        || (t.deviationReference ?? "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  };
 
-  // Summary counts (computed from the full worklist, pre-filter).
+  // Summary counts — SINGLE SOURCE OF TRUTH: all four derive from ONE combined
+  // set (CAPA action items + deviation tasks), over the full worklist (pre-
+  // filter), so the cards always agree and include deviation tasks.
   const allItems = worklist.groups.flatMap((g) => g.items);
-  const overdueCount = allItems.filter((i) => overdueDays(i.dueDate, i.status) !== null).length;
-  const dueSoonCount = allItems.filter((i) => {
-    if (!(i.status === "pending" || i.status === "in_progress" || i.status === "rework")) return false;
-    const d = dayjs.utc(i.dueDate);
-    return d.isAfter(dayjs()) && d.isBefore(dayjs().add(7, "day"));
-  }).length;
+  const countEntries: { status: string; dueDate: string | null }[] = [
+    ...allItems.map((i) => ({ status: i.status, dueDate: i.dueDate })),
+    ...worklist.deviationTasks.map((t) => ({ status: t.status, dueDate: t.dueDate })),
+  ];
+  const openCount = countEntries.filter((e) => ACTIONABLE_STATUSES.has(e.status)).length;
+  const reworkCount = countEntries.filter((e) => e.status === "rework").length;
+  const dueSoonCount = countEntries.filter((e) => isDueSoonEntry(e.status, e.dueDate)).length;
+  const overdueCount = countEntries.filter((e) => isOverdueEntry(e.status, e.dueDate)).length;
 
+  // Rework + visible deviation tasks (filter-aware, mirroring the CAPA side).
   const reworkItems: { item: WorklistItem; group: WorklistGroup }[] = worklist.groups.flatMap((g) =>
     (priorityFilter && g.capa.risk !== priorityFilter ? [] : g.items)
       .filter((i) => i.status === "rework" && matchesFilters(i, g))
       .map((item) => ({ item, group: g })),
   );
+  // Deviation rework tasks join the "Needs rework" section (CAPA rework already
+  // shows in both that section AND its group, so this mirrors that).
+  const reworkDevTasks = worklist.deviationTasks.filter((t) => t.status === "rework" && devTaskMatches(t));
+  const reworkTotal = reworkItems.length + reworkDevTasks.length;
+  // Deviation-tasks section respects the active search + filters.
+  const visibleDevTasks = worklist.deviationTasks.filter(devTaskMatches);
 
   async function handleSubmit(capaId: string) {
     setBusyCapa(capaId);
@@ -181,10 +233,10 @@ export function WorklistPage({
         <p className="text-[12px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
           {currentUserName} · {ROLE_LABEL[currentUserRole] ?? currentUserRole}
           {isViewer && " · read-only"}
-          {(worklist.openCount > 0 || worklist.reworkCount > 0) && (
+          {(openCount > 0 || reworkCount > 0) && (
             <span style={{ color: "var(--text-muted)" }}>
-              {" "}· {worklist.openCount} open
-              {worklist.reworkCount > 0 && <> · <span style={{ color: "var(--status-blocked)" }}>{worklist.reworkCount} need rework</span></>}
+              {" "}· {openCount} open
+              {reworkCount > 0 && <> · <span style={{ color: "var(--status-blocked)" }}>{reworkCount} need rework</span></>}
             </span>
           )}
         </p>
@@ -192,8 +244,8 @@ export function WorklistPage({
 
       {/* ── Status summary cards — clickable filters (toggle) ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <SummaryCard label="Open tasks" value={worklist.openCount} tone="active" icon={ListChecks} active={quickFilter === "open"} onClick={() => toggleQuick("open")} />
-        <SummaryCard label="Needs rework" value={worklist.reworkCount} tone="waiting" icon={Wrench} active={quickFilter === "rework"} onClick={() => toggleQuick("rework")} />
+        <SummaryCard label="Open tasks" value={openCount} tone="active" icon={ListChecks} active={quickFilter === "open"} onClick={() => toggleQuick("open")} />
+        <SummaryCard label="Needs rework" value={reworkCount} tone="waiting" icon={Wrench} active={quickFilter === "rework"} onClick={() => toggleQuick("rework")} />
         <SummaryCard label="Due soon (7d)" value={dueSoonCount} tone="info" icon={CalendarClock} active={quickFilter === "dueSoon"} onClick={() => toggleQuick("dueSoon")} />
         <SummaryCard label="Overdue" value={overdueCount} tone="blocked" icon={Clock} active={quickFilter === "overdue"} onClick={() => toggleQuick("overdue")} />
       </div>
@@ -277,18 +329,18 @@ export function WorklistPage({
         </div>
       )}
 
-      {worklist.groups.length === 0 && (
+      {worklist.groups.length === 0 && worklist.deviationTasks.length === 0 && (
         <div className="card p-8 text-center">
           <CheckCircle2 className="w-10 h-10 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
           <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>Nothing assigned to you right now.</p>
         </div>
       )}
 
-      {/* ── NEEDS REWORK (across all CAPAs) ── */}
-      {reworkItems.length > 0 && (
+      {/* ── NEEDS REWORK (across all CAPAs + deviation tasks) ── */}
+      {reworkTotal > 0 && (
         <section className="mb-6" aria-labelledby="rework-heading">
           <h2 id="rework-heading" className="text-[12px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "var(--status-blocked)" }}>
-            <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" /> Needs rework ({reworkItems.length})
+            <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" /> Needs rework ({reworkTotal})
           </h2>
           <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--status-blocked)" }}>
             {reworkItems.map(({ item, group }) => (
@@ -307,6 +359,28 @@ export function WorklistPage({
                   </p>
                   {item.reworkReason && (
                     <p className="text-[11px] mt-0.5" style={{ color: "var(--status-blocked)" }}>Returned: {item.reworkReason}</p>
+                  )}
+                </div>
+                <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              </button>
+            ))}
+            {/* Deviation tasks returned for rework — open the deviation-task panel. */}
+            {reworkDevTasks.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setSelectedDevTaskId(t.id)}
+                className="w-full text-left flex items-start gap-3 p-3 border-none cursor-pointer"
+                style={{ background: "var(--status-blocked-bg)", borderBottom: "1px solid var(--bg-border)" }}
+              >
+                <Wrench className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--status-blocked)" }} aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{t.deviationTitle}</p>
+                  <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                    {t.deviationReference ?? t.deviationId.slice(0, 8)} · deviation task{t.dueDate ? ` · due ${dayjs.utc(t.dueDate).format(dateFormat)}` : ""}
+                  </p>
+                  {t.reworkReason && (
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--status-blocked)" }}>Returned: {t.reworkReason}</p>
                   )}
                 </div>
                 <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -472,15 +546,16 @@ export function WorklistPage({
       })}
 
       {/* Stage 4 (deviation redesign) — low-priority deviation tasks assigned
-          to the user (UNION source alongside the CAPA groups above). */}
-      {worklist.deviationTasks.length > 0 && (
+          to the user (UNION source alongside the CAPA groups above). Now
+          filter-aware: hidden when the active search/filters exclude them all. */}
+      {visibleDevTasks.length > 0 && (
         <section className="mb-3 rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
           <div className="px-4 py-2.5 flex items-center gap-1.5" style={{ borderBottom: "1px solid var(--card-border)" }}>
             <ListChecks className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-            <h2 className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Deviation tasks ({worklist.deviationTasks.length})</h2>
+            <h2 className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Deviation tasks ({visibleDevTasks.length})</h2>
           </div>
           <div>
-            {worklist.deviationTasks.map((t) => (
+            {visibleDevTasks.map((t) => (
               <button key={t.id} type="button" onClick={() => setSelectedDevTaskId(t.id)} className="w-full text-left flex items-center gap-3 p-3 border-none cursor-pointer bg-transparent hover:bg-(--bg-hover)" style={{ borderBottom: "1px solid var(--bg-border)" }}>
                 <div className="flex-1 min-w-0">
                   <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{t.deviationReference ?? t.deviationId.slice(0, 8)} · {t.deviationTitle}</p>
