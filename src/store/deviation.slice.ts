@@ -40,6 +40,8 @@ export interface DeviationActiveTask {
   reworkReason: string | null;
   /** Stage 5 — flat QA↔worker conversation. */
   messages: DeviationTaskMessageView[];
+  /** Count of the task's own documents (for the raise-CAPA confirm preview). */
+  docCount: number;
 }
 
 export interface Deviation {

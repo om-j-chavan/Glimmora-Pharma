@@ -39,6 +39,7 @@ import { DatePicker } from "@/components/ui/DatePicker";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
+import { useToast } from "@/components/ui/Toast";
 import { DocumentUpload, type LinkedDocument } from "@/components/shared/DocumentUpload";
 import { PageHeader, StatCard, StatusGuide } from "@/components/shared";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
@@ -97,6 +98,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { role: currentRole } = useRole(); // ensure permissions matrix is loaded
   const { isViewer, isQAHead } = usePermissions();
+  const toast = useToast();
   // Capability mirror for "Report Deviation" (create). The QA-authority actions
   // in the detail modal — Start Investigation, Raise CAPA, attach evidence — are
   // gated by isQAHead (Part A access-control fix): the old capaCan/canAttachDocs
@@ -195,6 +197,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [closeBusy, setCloseBusy] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   // Stage 4 (deviation redesign) — low-priority "Assign task" modal state.
+  // Raise-CAPA confirm/preview modal (req 1).
+  const [raiseConfirmOpen, setRaiseConfirmOpen] = useState(false);
+  const [raiseBusy, setRaiseBusy] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignAssigneeId, setAssignAssigneeId] = useState("");
   const [assignMessage, setAssignMessage] = useState("");
@@ -328,8 +333,16 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   }
 
 
-  async function handleRaiseCAPAFromDetail() {
+  // Every "Raise CAPA" affordance opens the confirm-preview modal first; the
+  // actual raise runs only on confirm (handleConfirmRaiseCAPA).
+  function handleRaiseCAPAFromDetail() {
     if (!selected || !user) return;
+    setRaiseConfirmOpen(true);
+  }
+
+  async function handleConfirmRaiseCAPA() {
+    if (!selected || !user) return;
+    setRaiseBusy(true);
     // Carryover (owner=QA, RCA text, contextual description, worker→action item)
     // is handled SERVER-SIDE in createCAPA for the deviation path. The handler
     // passes a basic description (the server enriches it) and no owner.
@@ -342,21 +355,27 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       siteId: selected.siteId || undefined,
       linkedDeviationId: selected.id,
     });
+    setRaiseBusy(false);
     if (!result.success) {
-      setErrorMsg(result.error || "Failed to raise CAPA. Please try again.");
-      setErrorPopup(true);
+      toast.error(result.error || "Failed to raise CAPA. Please try again.");
       return;
     }
-    // Returned carryover (req 5) feeds the next step (a confirmation modal); for
-    // now it just enriches the success message.
+    setRaiseConfirmOpen(false);
+    // Enriched success toast from the returned carryover (req 2 + 5).
     const capaData = result.data as {
       id: string; reference?: string | null;
-      deviationCarryover?: { actionItem?: { assignee: string } | null };
+      deviationCarryover?: {
+        actionItem?: { assignee: string } | null;
+        deviationDocCount?: number; taskDocCount?: number;
+      };
     };
-    const assignedTo = capaData.deviationCarryover?.actionItem?.assignee;
-    const extra = assignedTo ? ` · ${assignedTo}'s task carried over as an action item` : "";
-    setSuccessMsg(`CAPA ${capaData.reference ?? capaData.id.slice(0, 8)} raised from ${selected.reference ?? selected.id.slice(0, 8)}${extra}`);
-    setSuccessPopup(true);
+    const c = capaData.deviationCarryover;
+    const ref = capaData.reference ?? capaData.id.slice(0, 8);
+    const linkedDocs = (c?.deviationDocCount ?? 0) + (c?.taskDocCount ?? 0);
+    const parts = [`CAPA ${ref} raised`];
+    if (c?.actionItem?.assignee) parts.push(`${c.actionItem.assignee}'s task carried over as an action item`);
+    if (linkedDocs > 0) parts.push(`${linkedDocs} document${linkedDocs === 1 ? "" : "s"} linked`);
+    toast.success(parts.join(" · "));
     router.refresh();
   }
 
@@ -853,10 +872,16 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             )}
 
             {/* Stage 3 — CAPA Pending: the deviation waits on its linked CAPA.
-                Closing the CAPA unblocks it to QA review for a signed close. */}
+                Closing the CAPA unblocks it to QA review for a signed close.
+                Req 3 — the raised state shows the CAPA reference as a link. */}
             {selected.status === "capa_pending" && (
               <div className="p-3 rounded-lg border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
-                <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>CAPA Pending</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>CAPA Pending</p>
+                  {selected.linkedCAPAId && (
+                    <button type="button" onClick={() => router.push(`/capa/${selected.linkedCAPAId}`)} className="text-[12px] font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPARef ?? selected.linkedCAPAId.slice(0, 8)} →</button>
+                  )}
+                </div>
                 <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>A CAPA is raised and linked. This deviation stays open until the CAPA closes — that moves it back to QA review for a Part 11 signed close. No auto-close.</p>
               </div>
             )}
@@ -1057,6 +1082,35 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
             <Button variant="secondary" onClick={() => setRejectModal(false)}>Cancel</Button>
             <Button variant="primary" disabled={!rejectReason.trim()} onClick={handleReject}>Reject</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Req 1 — Raise-CAPA confirm/preview modal. Previews what carries over
+          (computed from the deviation's CURRENT state); raises only on confirm. */}
+      <Modal open={raiseConfirmOpen} onClose={raiseBusy ? () => undefined : () => setRaiseConfirmOpen(false)} title="Raise CAPA from deviation">
+        <div className="space-y-3">
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            Raise a CAPA from <strong>{selected?.reference ?? selected?.id}</strong> — {selected?.title}. This will carry the following into the new CAPA:
+          </p>
+          <ul className="space-y-1.5 text-[12px]">
+            <li className="flex items-start gap-2" style={{ color: "var(--text-primary)" }}><CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#10b981" }} aria-hidden="true" /> You{user?.name ? ` (${user.name})` : ""} become the CAPA owner.</li>
+            {selected?.rootCause ? (
+              <li className="flex items-start gap-2" style={{ color: "var(--text-primary)" }}><CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#10b981" }} aria-hidden="true" /> The deviation's root-cause analysis text carries into the CAPA.</li>
+            ) : (
+              <li className="flex items-start gap-2" style={{ color: "var(--text-muted)" }}><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" /> No root-cause text recorded yet — nothing to carry.</li>
+            )}
+            {selected?.activeTask ? (
+              <li className="flex items-start gap-2" style={{ color: "var(--text-primary)" }}><CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#10b981" }} aria-hidden="true" /> The active task (worker <strong>{selected.activeTask.assignee}</strong>) becomes a CAPA action item, preserving their work — and the task is cancelled.</li>
+            ) : (
+              <li className="flex items-start gap-2" style={{ color: "var(--text-muted)" }}><Info className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" /> No active worker task — no action item is created.</li>
+            )}
+            <li className="flex items-start gap-2" style={{ color: "var(--text-primary)" }}><CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "#10b981" }} aria-hidden="true" /> {(selected?.documents?.length ?? 0)} deviation document{(selected?.documents?.length ?? 0) === 1 ? "" : "s"}{selected?.activeTask ? ` + ${selected.activeTask.docCount} task document${selected.activeTask.docCount === 1 ? "" : "s"}` : ""} will be linked as read-only references (not copied into evidence).</li>
+          </ul>
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>The deviation moves to “CAPA Pending” and stays open until the CAPA closes; you then sign-close it. No auto-close.</p>
+          <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
+            <Button variant="secondary" onClick={() => setRaiseConfirmOpen(false)} disabled={raiseBusy}>Cancel</Button>
+            <Button variant="primary" icon={Plus} onClick={handleConfirmRaiseCAPA} disabled={raiseBusy} loading={raiseBusy}>Confirm: Raise CAPA</Button>
           </div>
         </div>
       </Modal>

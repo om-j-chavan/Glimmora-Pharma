@@ -433,9 +433,11 @@ export async function createCAPA(
         module: "CAPA",
         action: "CAPA_CREATED",
         recordId: capa.created.id,
+        // Use the STORED description (enriched on the deviation path) so the
+        // audit trail matches the CAPA record, not the basic client input.
         recordTitle: capa.created.reference
-          ? `${capa.created.reference} — ${parsed.data.description.slice(0, 60)}`
-          : parsed.data.description.slice(0, 80),
+          ? `${capa.created.reference} — ${capa.created.description.slice(0, 60)}`
+          : capa.created.description.slice(0, 80),
         newValue: parsed.data.risk,
       },
     });

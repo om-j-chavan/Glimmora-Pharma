@@ -37,6 +37,8 @@ export type PrismaDeviationWithCapa = PrismaDeviation & {
     reworkReason: string | null;
     // Stage 5 — flat QA↔worker conversation.
     messages: { id: string; authorId: string | null; authorName: string; authorRole: string; body: string; createdAt: Date }[];
+    // Count of the task's own documents (for the raise-CAPA confirm preview).
+    docCount: number;
   } | null;
 };
 
@@ -97,6 +99,7 @@ export function adaptDeviation(p: PrismaDeviationWithCapa): Deviation {
             id: m.id, authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole,
             body: m.body, createdAt: m.createdAt.toISOString(),
           })),
+          docCount: p.activeTask.docCount,
         }
       : null,
     area: p.area,

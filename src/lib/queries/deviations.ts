@@ -58,7 +58,29 @@ export const getDeviations = cache(async (tenantId: string) => {
     if (!taskByDev.has(t.deviationId)) taskByDev.set(t.deviationId, t); // newest active wins
   }
 
-  return rows.map((r) => ({ ...r, documents: byDev.get(r.id) ?? [], activeTask: taskByDev.get(r.id) ?? null }));
+  // Count each active task's own documents (linkedModule="Deviation Task") so the
+  // raise-CAPA confirm preview can show how many task docs will be linked.
+  const activeTaskIds = [...taskByDev.values()].map((t) => t.id);
+  const taskDocCounts = new Map<string, number>();
+  if (activeTaskIds.length > 0) {
+    const taskDocs = await prisma.document.findMany({
+      where: { tenantId, linkedModule: "Deviation Task", linkedRecordId: { in: activeTaskIds }, deletedAt: null },
+      select: { linkedRecordId: true },
+    });
+    for (const d of taskDocs) {
+      if (!d.linkedRecordId) continue;
+      taskDocCounts.set(d.linkedRecordId, (taskDocCounts.get(d.linkedRecordId) ?? 0) + 1);
+    }
+  }
+
+  return rows.map((r) => {
+    const at = taskByDev.get(r.id);
+    return {
+      ...r,
+      documents: byDev.get(r.id) ?? [],
+      activeTask: at ? { ...at, docCount: taskDocCounts.get(at.id) ?? 0 } : null,
+    };
+  });
 });
 
 export const getDeviation = cache(async (id: string, tenantId: string) => {

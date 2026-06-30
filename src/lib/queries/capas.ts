@@ -91,6 +91,45 @@ export const getCAPA = cache(async (id: string, tenantId: string) => {
   });
 });
 
+/** A read-only document reference surfaced in the CAPA detail for a CAPA raised
+ *  FROM a deviation — the deviation's own docs + the (cancelled) worker task's
+ *  docs. They are NOT copied into the CAPA's evidence categories; they stay
+ *  Documents on their originating records and are linked here for context. */
+export interface CAPAOriginDoc {
+  id: string;
+  fileName: string;
+  uploadedBy: string;
+  source: "deviation" | "task";
+}
+
+/** Deviation→CAPA carryover (req 4) — fetch the originating deviation's docs and
+ *  the worker task's docs for the "raised from deviation X" reference block. One
+ *  tenant-scoped query (mirrors the batch pattern in queries/deviations.ts). */
+export const getCAPADeviationDocs = cache(async (deviationId: string, tenantId: string): Promise<CAPAOriginDoc[]> => {
+  const tasks = await prisma.deviationTask.findMany({
+    where: { deviationId, tenantId },
+    select: { id: true },
+  });
+  const taskIds = tasks.map((t) => t.id);
+  const docs = await prisma.document.findMany({
+    where: {
+      tenantId, deletedAt: null,
+      OR: [
+        { linkedModule: "Deviation Management", linkedRecordId: deviationId },
+        ...(taskIds.length ? [{ linkedModule: "Deviation Task", linkedRecordId: { in: taskIds } }] : []),
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, fileName: true, originalFileName: true, uploadedBy: true, linkedModule: true },
+  });
+  return docs.map((d) => ({
+    id: d.id,
+    fileName: d.originalFileName ?? d.fileName,
+    uploadedBy: d.uploadedBy,
+    source: d.linkedModule === "Deviation Task" ? "task" : "deviation",
+  }));
+});
+
 /**
  * SME Section 1, Stage 6 (FULL) — suggested-recurrence query.
  *

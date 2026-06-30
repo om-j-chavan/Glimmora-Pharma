@@ -47,7 +47,7 @@ import { CapaAuditTrailBar } from "./components/CapaAuditTrailBar";
 import { SignCloseModal } from "./modals/SignCloseModal";
 import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
 import { getNextStep, type DetailSubTab } from "./modals/helpers/getNextStep";
-import type { CapaAuditEntry } from "@/lib/queries/capas";
+import type { CapaAuditEntry, CAPAOriginDoc } from "@/lib/queries/capas";
 
 const SOURCE_LABEL: Record<string, string> = {
   "483": "FDA 483 Observation", "Gap Assessment": "Gap Assessment Finding", Deviation: "Deviation Report",
@@ -62,9 +62,11 @@ export interface CAPADetailPageProps {
   criteriaCount: number;
   /** Phase B — Zone 6 audit trail for this CAPA (newest first). */
   auditTrail: CapaAuditEntry[];
+  /** Req 4 — read-only deviation+task doc references when raised from a deviation. */
+  originDocs?: CAPAOriginDoc[];
 }
 
-export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail }: CAPADetailPageProps) {
+export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail, originDocs = [] }: CAPADetailPageProps) {
   const router = useRouter();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
   const capaCan = usePermissions("capa", { capaRisk: capa.risk });
@@ -469,7 +471,7 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
           <OverviewBody capa={capa} isDark={isDark} users={users} timezone={timezone} dateFormat={dateFormat}
             showMigrationNotice={false} onDismissNotice={() => undefined}
             onNavigateGap={(fid) => router.push(`/gap-assessment?openFindingId=${encodeURIComponent(fid)}`)}
-            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} />
+            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} originDocs={originDocs} />
           {/* Phase D — wrap the relocated (protected) sections in a card; internals untouched. */}
           <section id="capa-discussion" className="capa-card"><DiscussionSection capa={capa} onCommentsChange={() => setDiscussionVersion((v) => v + 1)} /></section>
           {/* Batch 3a #2 — Approvals + Independent Verification combined into ONE
