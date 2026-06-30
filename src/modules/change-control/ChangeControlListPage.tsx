@@ -273,7 +273,7 @@ export function ChangeControlListPage({ initial }: Props) {
                         className="w-3.5 h-3.5"
                         aria-hidden="true"
                       />
-                      {cc._count.capaLinks}
+                      {cc._count?.capaLinks ?? 0}
                     </span>
                   </td>
                 </tr>

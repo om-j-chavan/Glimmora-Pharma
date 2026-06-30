@@ -21,7 +21,35 @@ load_dotenv()
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
-SECRET_KEY = os.getenv("SECRET_KEY", "pharma_secret_key_2026")
+import logging
+
+logger = logging.getLogger("uvicorn.error")
+
+# SECRET_KEY signs every JWT. A source-visible hardcoded fallback lets anyone
+# forge tokens for any user/tenant, so we never ship one to production: require
+# the env var when running in a production environment, and otherwise fall back
+# to a clearly-insecure dev default with a loud warning.
+def _load_secret_key() -> str:
+    key = os.getenv("SECRET_KEY")
+    if key:
+        return key
+    is_production = (
+        os.getenv("ENV", os.getenv("ENVIRONMENT", "development")).lower() == "production"
+        or os.getenv("RENDER") is not None
+    )
+    if is_production:
+        raise RuntimeError(
+            "SECRET_KEY environment variable must be set in production "
+            "(no hardcoded fallback is permitted)."
+        )
+    logger.warning(
+        "SECRET_KEY is not set — using an INSECURE development default. "
+        "Set SECRET_KEY before deploying to any shared/production environment."
+    )
+    return "dev-insecure-secret-do-not-use-in-production"
+
+
+SECRET_KEY = _load_secret_key()
 ALGORITHM  = "HS256"
 
 
@@ -78,33 +106,87 @@ def create_token(username: str, customer_id: str) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-# ── Permissive auth dependencies ─────────────────────────────
-# Token enforcement was removed app-wide on 2026-05-15. The /auth/login
-# endpoint still issues a JWT (so the existing frontend flow keeps working),
-# but every other endpoint now treats the `auth` header as optional: if a
-# valid token is supplied we surface the embedded identity; otherwise we
-# return a sentinel value so the endpoint can keep functioning unblocked.
+# ── Auth dependencies ────────────────────────────────────────
+# A protected endpoint requires a valid, unexpired JWT. A missing, malformed,
+# or expired token must NEVER silently degrade to a shared "anonymous" identity
+# in production — that disables both authentication and tenant isolation across
+# the whole API.
+#
+# Enforcement is environment-gated:
+#   • Production (auto-detected on Render, or ENV/ENVIRONMENT=production, or an
+#     explicit AI_AUTH_STRICT=1) → a bad/missing token is a hard 401.
+#   • Local development → the legacy "anonymous" fallback is preserved so the
+#     app runs without a fully-provisioned AI-backend user, but every fallback
+#     is logged so it can't pass unnoticed.
 ANON_USERNAME    = "anonymous"
 ANON_CUSTOMER_ID = "anonymous"
 
-def _decode_safe(auth: str | None) -> dict | None:
-    """Best-effort JWT decode — returns None instead of raising."""
+
+def _auth_strict() -> bool:
+    if os.getenv("AI_AUTH_STRICT", "").lower() in ("1", "true", "yes"):
+        return True
+    if os.getenv("RENDER") is not None:
+        return True
+    return os.getenv("ENV", os.getenv("ENVIRONMENT", "development")).lower() == "production"
+
+
+def _normalize(auth: str | None) -> str | None:
     if not auth:
         return None
+    # Accept either a bare token or an "Authorization: Bearer <token>" form.
+    return auth.split(" ", 1)[1].strip() if auth.lower().startswith("bearer ") else auth.strip()
+
+
+def _decode_token(auth: str | None) -> dict:
+    """Decode and validate a JWT. Raises HTTP 401 on any failure."""
+    token = _normalize(auth)
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required.")
     try:
-        return jwt.decode(auth, SECRET_KEY, algorithms=[ALGORITHM])
+        # PyJWT verifies the signature AND the `exp` claim by default, so an
+        # expired token raises ExpiredSignatureError here.
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired. Please sign in again.")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
+
+
+def _decode_safe(auth: str | None) -> dict | None:
+    """Best-effort decode for the dev-only anonymous fallback — never raises."""
+    token = _normalize(auth)
+    if not token:
+        return None
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except Exception:
         return None
 
 
-def verify_token(auth: str | None = Header(default=None)) -> str:
+def _payload(auth: str | None) -> dict:
+    """Resolve the request identity. Enforces 401 in strict environments;
+    otherwise returns the anonymous sentinel payload (and logs why)."""
+    if _auth_strict():
+        payload = _decode_token(auth)
+        if not payload.get("sub") or not payload.get("customer_id"):
+            raise HTTPException(status_code=401, detail="Invalid authentication token.")
+        return payload
     payload = _decode_safe(auth)
-    return (payload or {}).get("sub") or ANON_USERNAME
+    if payload and payload.get("sub") and payload.get("customer_id"):
+        return payload
+    logger.warning(
+        "AI request accepted as anonymous — no valid token (dev fallback). "
+        "This path is rejected with 401 in production (AI_AUTH_STRICT / RENDER / ENV=production)."
+    )
+    return {"sub": ANON_USERNAME, "customer_id": ANON_CUSTOMER_ID}
+
+
+def verify_token(auth: str | None = Header(default=None)) -> str:
+    return _payload(auth)["sub"]
 
 
 def get_current_customer_id(auth: str | None = Header(default=None)) -> str:
-    payload = _decode_safe(auth)
-    return (payload or {}).get("customer_id") or ANON_CUSTOMER_ID
+    return _payload(auth)["customer_id"]
 
 
 class CurrentUser(BaseModel):
@@ -112,11 +194,8 @@ class CurrentUser(BaseModel):
     customer_id: str
 
 def get_current_user(auth: str | None = Header(default=None)) -> CurrentUser:
-    payload = _decode_safe(auth) or {}
-    return CurrentUser(
-        username    = payload.get("sub") or ANON_USERNAME,
-        customer_id = payload.get("customer_id") or ANON_CUSTOMER_ID,
-    )
+    payload = _payload(auth)
+    return CurrentUser(username=payload["sub"], customer_id=payload["customer_id"])
 
 
 # ── POST /api/v1/auth/signup ─────────────────────────────────

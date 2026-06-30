@@ -32,8 +32,10 @@ export function PermissionsTab() {
   const dispatch = useAppDispatch();
   const matrix = useAppSelector((s) => s.permissions?.matrix);  const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
-  // Editing the role-permission matrix is a platform-admin action only.
-  // customer_admin must be read-only here (privilege-escalation fix).
+  // Only super_admin may edit the role-permission matrix. customer_admin is a
+  // tenant-scoped admin and must NOT be able to rewrite the permission model
+  // (privilege escalation) — the UI copy already states "only Super Admin can
+  // edit". This gate is presentational; server actions enforce the same rule.
   const isSuperAdmin = role === "super_admin";
 
   const [savedPopup, setSavedPopup] = useState(false);

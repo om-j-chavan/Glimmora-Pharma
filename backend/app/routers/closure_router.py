@@ -214,8 +214,14 @@ def initiate_closure(
     ai_approved   = ai.get("ai_closure_approved", False)
     closed_at     = datetime.now()
 
-    # HITL Gate — Human must approve even if AI approves
-    if ai_approved and request.electronic_signature:
+    # HITL Gate — a human e-signature is required to close, even when the AI
+    # pre-check approves (21 CFR Part 11). The signature must be a real,
+    # non-blank value: a whitespace-only string is truthy in Python but is NOT
+    # a valid signature, so we test the stripped value. Without this, " " (or
+    # any non-empty string) silently auto-closed the CAPA and the "Pending
+    # Human Approval" branch was unreachable.
+    has_signature = bool((request.electronic_signature or "").strip())
+    if ai_approved and has_signature:
         final_status = "Closed"
     elif not ai_approved:
         final_status = "Closure Rejected — AI Pre-Check Failed"
