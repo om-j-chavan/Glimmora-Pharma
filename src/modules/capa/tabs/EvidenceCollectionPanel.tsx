@@ -56,8 +56,12 @@ interface EvidenceCollectionPanelProps {
   /** Parent CAPA status — the QA reject control only shows at pending_qa_review. */
   capaStatus?: string;
   /** Viewer may disposition (reject) evidence — qa_head (CAPA_REJECT_ROLES). SoD:
-   *  not the driver/author. Combined with capaStatus === "pending_qa_review". */
+   *  not the assignee/author. Combined with capaStatus === "pending_qa_review". */
   canRejectEvidence?: boolean;
+  /** Worklist surface for the single assigned worker: enables upload +
+   *  propose-N/A; hides QA/author-only controls (mark COMPLETE/IN_PROGRESS,
+   *  edit notes, remove files). The server enforces the same — this is UX. */
+  assigneeMode?: boolean;
 }
 
 const CATEGORY_LABEL: Record<EvidenceCategory, string> = {
@@ -118,7 +122,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChange, capaStatus, canRejectEvidence = false }: EvidenceCollectionPanelProps) {
+export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChange, capaStatus, canRejectEvidence = false, assigneeMode = false }: EvidenceCollectionPanelProps) {
   const [items, setItems] = useState<EvidenceItemSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -314,6 +318,7 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
           isExpanded={isExpanded(item.category)}
           onToggleExpanded={() => toggleExpanded(item.category)}
           canReject={canReject}
+          assigneeMode={assigneeMode}
           onReject={() => { setRejectItem(item); setRejectReason(""); setRejectError(null); }}
         />
       ))}
@@ -416,10 +421,13 @@ interface CardProps {
   onToggleExpanded: () => void;
   /** QA reviewer may reject this evidence item (qa_head @ pending_qa_review). */
   canReject?: boolean;
+  /** Assignee surface — restrict the status dropdown to propose-N/A, lock notes,
+   *  hide file-remove. Upload stays enabled (server allows the assignee). */
+  assigneeMode?: boolean;
   onReject?: () => void;
 }
 
-function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, canReject = false, onReject }: CardProps) {
+function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, canReject = false, assigneeMode = false, onReject }: CardProps) {
   const toast = useToast();
   const Icon = CATEGORY_ICON[item.category];
   const locked = item.isLocked;
@@ -657,7 +665,7 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
       {/* Phase B G2 — teaching empty state for a pending category. */}
       {status === "PENDING" && !locked && (
         <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
-          Needs files or N/A + reason. Assigned fixers answer theirs; the driver sweeps the rest.
+          Needs files or N/A + reason. The assigned worker uploads evidence; QA reviews and marks it complete.
         </p>
       )}
 
@@ -666,9 +674,15 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
         <Dropdown
           value={status}
           onChange={(v) => void handleStatusChange(v as EvidenceStatus)}
-          disabled={disabled || savingStatus}
+          // Assignee may only PROPOSE N/A (server allows assignee → NOT_APPLICABLE
+          // only); COMPLETE/IN_PROGRESS stay QA/author. Once N/A, exiting is
+          // author-only, so the control locks.
+          disabled={disabled || savingStatus || (assigneeMode && status === "NOT_APPLICABLE")}
           width="w-full"
-          options={(["PENDING", "IN_PROGRESS", "COMPLETE", "NOT_APPLICABLE"] as EvidenceStatus[]).map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+          options={(assigneeMode
+            ? Array.from(new Set<EvidenceStatus>([status, "NOT_APPLICABLE"]))
+            : (["PENDING", "IN_PROGRESS", "COMPLETE", "NOT_APPLICABLE"] as EvidenceStatus[])
+          ).map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
         />
         <div>
           <textarea
@@ -676,7 +690,7 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Notes — what evidence is being collected, by whom, why…"
-            disabled={disabled}
+            disabled={disabled || assigneeMode}
             aria-label={`Notes for ${CATEGORY_LABEL[item.category]}`}
             maxLength={10_000}
           />
@@ -693,7 +707,7 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
       )}
 
       {/* Files */}
-      <FileList item={item} disabled={disabled} onChange={onChange} />
+      <FileList item={item} disabled={disabled} assigneeMode={assigneeMode} onChange={onChange} />
 
       {/* Note history modal */}
       {historyOpen && (
@@ -728,10 +742,12 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
 interface FileListProps {
   item: EvidenceItemSummary;
   disabled: boolean;
+  /** Assignee surface — keep upload, hide the author-only file-remove control. */
+  assigneeMode?: boolean;
   onChange: () => void;
 }
 
-function FileList({ item, disabled, onChange }: FileListProps) {
+function FileList({ item, disabled, assigneeMode = false, onChange }: FileListProps) {
   // CAPA Evidence batch — resolve the uploader's role for file provenance.
   const { users } = useTenantConfig();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -804,7 +820,7 @@ function FileList({ item, disabled, onChange }: FileListProps) {
           >
             <Download className="w-3.5 h-3.5" aria-hidden="true" />
           </a>
-          {!disabled && (
+          {!disabled && !assigneeMode && (
             <button
               type="button"
               onClick={() => setRemoveFor(f.id)}

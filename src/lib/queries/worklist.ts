@@ -25,14 +25,6 @@ export interface WorklistItem {
   reworkRequestedAt: string | null;
 }
 
-export interface WorklistEvidenceCategory {
-  id: string;
-  category: string;
-  status: string;
-  /** QA rejection reason (when status === "REJECTED"). */
-  rejectionReason: string | null;
-}
-
 export interface WorklistGroup {
   capa: {
     id: string;
@@ -41,15 +33,11 @@ export interface WorklistGroup {
     status: string;
     dueDate: string | null;
     risk: string;
-    isDriver: boolean;
+    isAssignee: boolean;
   };
   items: WorklistItem[];
-  /** Driver-only: readiness summary (consumes the shared getCAPAReadiness). */
+  /** Assignee-only: readiness summary (consumes the shared getCAPAReadiness). */
   readiness: { metCount: number; total: number; allMet: boolean; conditions: ReadinessCondition[] } | null;
-  /** Driver-only: unanswered evidence categories (PENDING / IN_PROGRESS). */
-  unansweredEvidence: WorklistEvidenceCategory[] | null;
-  /** Driver-only: true when no evidence rows exist yet (needs init). */
-  evidenceNeedsInit: boolean;
 }
 
 /** Stage 5 — a serialised document row for the worker's task panel (deviation
@@ -167,7 +155,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
   ]);
 
   // Build the group set: every CAPA the user has items in, plus every CAPA the
-  // user drives (even with zero assigned items).
+  // user is assigned to own (even with zero assigned action items).
   const groupCapas = new Map<string, (typeof items)[number]["capa"]>();
   for (const it of items) groupCapas.set(it.capa.id, it.capa);
   for (const c of drivenCapas) if (!groupCapas.has(c.id)) groupCapas.set(c.id, c);
@@ -181,7 +169,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
 
   const groups: WorklistGroup[] = [];
   for (const [capaId, capa] of groupCapas) {
-    const isDriver = capa.ownerId === userId;
+    const isAssignee = capa.ownerId === userId;
     const groupItems: WorklistItem[] = (itemsByCapa.get(capaId) ?? []).map((it) => ({
       id: it.id,
       capaId: it.capaId,
@@ -197,10 +185,8 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     }));
 
     let readiness: WorklistGroup["readiness"] = null;
-    let unansweredEvidence: WorklistEvidenceCategory[] | null = null;
-    let evidenceNeedsInit = false;
 
-    if (isDriver) {
+    if (isAssignee) {
       const [allActions, evidence, criteria, capaRow] = await Promise.all([
         prisma.cAPAActionItem.findMany({ where: { capaId, tenantId, deletedAt: null }, select: { status: true } }),
         prisma.evidenceItem.findMany({ where: { capaId }, select: { id: true, category: true, status: true, rejectionReason: true } }),
@@ -217,12 +203,6 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         allMet: r.allMet,
         conditions: r.conditions,
       };
-      evidenceNeedsInit = evidence.length === 0;
-      // Surface categories that still need the driver's attention: not-yet-
-      // answered (PENDING/IN_PROGRESS) PLUS QA-rejected ones (need re-work).
-      unansweredEvidence = evidence
-        .filter((e) => e.status === "PENDING" || e.status === "IN_PROGRESS" || e.status === "REJECTED")
-        .map((e) => ({ id: e.id, category: e.category, status: e.status, rejectionReason: e.rejectionReason }));
     }
 
     groups.push({
@@ -233,18 +213,16 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         status: capa.status,
         dueDate: capa.dueDate ? capa.dueDate.toISOString() : null,
         risk: capa.risk,
-        isDriver,
+        isAssignee,
       },
       items: groupItems,
       readiness,
-      unansweredEvidence,
-      evidenceNeedsInit,
     });
   }
 
-  // Driver groups first, then groups with the soonest item due date.
+  // Assignee groups first, then groups with the soonest item due date.
   groups.sort((a, b) => {
-    if (a.capa.isDriver !== b.capa.isDriver) return a.capa.isDriver ? -1 : 1;
+    if (a.capa.isAssignee !== b.capa.isAssignee) return a.capa.isAssignee ? -1 : 1;
     const ad = a.items[0]?.dueDate ?? a.capa.dueDate ?? "";
     const bd = b.items[0]?.dueDate ?? b.capa.dueDate ?? "";
     return ad.localeCompare(bd);

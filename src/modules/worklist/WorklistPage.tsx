@@ -7,16 +7,14 @@ import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Modal } from "@/components/ui/Modal";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { useToast } from "@/components/ui/Toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
 import { submitForReview } from "@/actions/capas";
-import { updateEvidenceStatus, initializeEvidenceForCAPA } from "@/actions/evidence";
 import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask } from "@/lib/queries/worklist";
+import { EvidenceCollectionPanel } from "@/modules/capa/tabs/EvidenceCollectionPanel";
 import { TaskPanel } from "./TaskPanel";
 import { DeviationTaskPanel } from "./DeviationTaskPanel";
 import { StatusPill, ACTION_STATUS_TOKEN } from "@/modules/capa/lib/statusTokens";
@@ -32,16 +30,6 @@ const ITEM_STATUS_LABEL: Record<string, string> = {
 const DEV_TASK_ROW_LABEL: Record<string, string> = {
   pending: "Pending", in_progress: "In Progress", submitted: "Submitted", rework: "Rework",
 };
-const EVIDENCE_LABEL: Record<string, string> = {
-  BATCH_RECORDS: "Batch records",
-  TRAINING_RECORDS: "Training records",
-  EQUIPMENT_LOGS: "Equipment logs",
-  ENVIRONMENTAL_DATA: "Environmental data",
-  DEVIATION_HISTORY: "Deviation history",
-  WITNESS_INTERVIEWS: "Witness interviews",
-  SUPPLIER_DATA: "Supplier data",
-};
-
 const ROLE_LABEL: Record<string, string> = {
   qa_head: "QA Head",
   qc_lab_director: "QC Lab Director",
@@ -86,7 +74,6 @@ export function WorklistPage({
   currentUserRole: string;
 }) {
   const router = useRouter();
-  const toast = useToast();
   const capaCan = usePermissions("capa");
   const { org } = useTenantConfig();
   const dateFormat = org.dateFormat;
@@ -97,9 +84,6 @@ export function WorklistPage({
   // Stage 4 (deviation redesign) — open low-priority deviation-task panel.
   const [selectedDevTaskId, setSelectedDevTaskId] = useState<string | null>(null);
   const [busyCapa, setBusyCapa] = useState<string | null>(null);
-  const [naModal, setNaModal] = useState<{ evidenceItemId: string; category: string } | null>(null);
-  const [naReason, setNaReason] = useState("");
-  const [naError, setNaError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
   // View + filters (component state only — not persisted).
@@ -204,25 +188,6 @@ export function WorklistPage({
     router.refresh();
   }
 
-  async function handleInitEvidence(capaId: string) {
-    setBusyCapa(capaId);
-    const res = await initializeEvidenceForCAPA(capaId);
-    setBusyCapa(null);
-    if (!res.success) { setBanner(res.error || "Could not set up evidence"); return; }
-    router.refresh();
-  }
-
-  async function handleMarkNA() {
-    if (!naModal) return;
-    if (naReason.trim().length < 10) { setNaError("Add a brief reason (at least 10 characters)."); return; }
-    const res = await updateEvidenceStatus(naModal.evidenceItemId, { status: "NOT_APPLICABLE", naReason: naReason.trim() });
-    if (!res.success) { setNaError(res.error || "Failed"); toast.error(res.error || "Could not update evidence."); return; }
-    setNaModal(null);
-    setNaReason("");
-    setNaError(null);
-    toast.success("Evidence updated.");
-    router.refresh();
-  }
 
   return (
     <div className="capa-shell min-h-full">
@@ -400,7 +365,7 @@ export function WorklistPage({
         if (priorityFilter && group.capa.risk !== priorityFilter) return null;
         // When filtering, hide groups with no matching items unless the viewer
         // drives the CAPA (keep the driver cockpit visible).
-        if (anyFilter && !group.capa.isDriver && !hasMatches) return null;
+        if (anyFilter && !group.capa.isAssignee && !hasMatches) return null;
         const r = group.readiness;
         const taskCount = openItems.length + reworkInGroup.length;
         // Collapsed by default; auto-open while a filter is active so matches show.
@@ -426,13 +391,13 @@ export function WorklistPage({
                       {group.capa.reference ?? group.capa.id.slice(0, 8)}
                     </span>
                     <Badge variant={getSeverityVariant(group.capa.risk, "generic")}>{group.capa.risk}</Badge>
-                    {group.capa.isDriver && <Badge variant="blue">You drive this</Badge>}
+                    {group.capa.isAssignee && <Badge variant="blue">Assigned to you</Badge>}
                     {taskCount > 0 && <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{taskCount} open task{taskCount === 1 ? "" : "s"}</span>}
                   </div>
                   <p className="text-[13px] font-semibold mt-1 truncate" style={{ color: "var(--text-primary)" }}>{group.capa.title}</p>
                 </button>
                 <div className="flex items-center gap-2 shrink-0">
-                  {group.capa.isDriver && canWrite && (
+                  {group.capa.isAssignee && canWrite && (
                     <Button
                       variant="primary"
                       size="xs"
@@ -458,7 +423,7 @@ export function WorklistPage({
               </div>
 
               {/* Readiness progress bar (driver) — bar on the card; conditions on expand */}
-              {group.capa.isDriver && r && (
+              {group.capa.isAssignee && r && (
                 <div className="mt-2.5">
                   <div className="flex items-center justify-between text-[11px] mb-1">
                     <span style={{ color: "var(--text-muted)" }}>Readiness</span>
@@ -472,11 +437,14 @@ export function WorklistPage({
             {/* Expanded body */}
             {isOpen && (
               <div className="px-3 pb-3" style={{ borderTop: "1px solid var(--bg-border)" }}>
-                {/* Driver: readiness conditions detail + evidence quick-actions */}
-                {group.capa.isDriver && r && (
-                  <div className="mt-3">
-                    {!r.allMet && (
-                      <ul className="list-none p-0 m-0 space-y-1 mb-2">
+                {/* Assignee: readiness conditions + the evidence panel in
+                    assignee mode (upload-with-category + propose-N/A; QA reviews
+                    and marks complete / rejects per category over on /capa). The
+                    panel self-loads and auto-seeds the 7 categories. */}
+                {group.capa.isAssignee && (
+                  <div className="mt-3 space-y-3">
+                    {r && !r.allMet && (
+                      <ul className="list-none p-0 m-0 space-y-1">
                         {r.conditions.map((c) => (
                           <li key={c.key} className="flex items-start gap-1.5 text-[11px]">
                             {c.met
@@ -489,29 +457,8 @@ export function WorklistPage({
                         ))}
                       </ul>
                     )}
-                    {group.evidenceNeedsInit && canWrite && (
-                      <Button variant="secondary" size="xs" disabled={busyCapa === group.capa.id} onClick={() => void handleInitEvidence(group.capa.id)}>
-                        Set up evidence categories
-                      </Button>
-                    )}
-                    {(group.unansweredEvidence ?? []).length > 0 && (
-                      <ul className="list-none p-0 m-0 mt-1 space-y-1">
-                        {group.unansweredEvidence!.map((ev) => (
-                          <li key={ev.id} className="flex items-start justify-between gap-2 text-[11px]">
-                            <span style={{ color: ev.status === "REJECTED" ? "var(--status-blocked)" : "var(--text-secondary)" }}>
-                              {EVIDENCE_LABEL[ev.category] ?? ev.category} · {ev.status === "REJECTED" ? "Rejected by QA" : ev.status}
-                              {ev.status === "REJECTED" && ev.rejectionReason && (
-                                <span className="block" style={{ color: "var(--status-blocked)" }}>↳ {ev.rejectionReason}</span>
-                              )}
-                            </span>
-                            {canWrite && (
-                              <button type="button" className="text-[11px] underline bg-transparent border-none cursor-pointer shrink-0" style={{ color: "var(--brand)" }} onClick={() => { setNaModal({ evidenceItemId: ev.id, category: ev.category }); setNaReason(""); setNaError(null); }}>
-                                Mark N/A &rsaquo;
-                              </button>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
+                    {canWrite && (
+                      <EvidenceCollectionPanel capaId={group.capa.id} capaStatus={group.capa.status} assigneeMode />
                     )}
                   </div>
                 )}
@@ -589,25 +536,6 @@ export function WorklistPage({
         ) : null;
       })()}
 
-      {/* N/A reason modal */}
-      {naModal && (
-        <Modal open onClose={() => { setNaModal(null); setNaError(null); }} title={`Mark "${EVIDENCE_LABEL[naModal.category] ?? naModal.category}" Not Applicable`}>
-          <p className="text-[12px] mb-2" style={{ color: "var(--text-secondary)" }}>
-            Record why this evidence category does not apply (≥ 10 characters).
-          </p>
-          <textarea
-            className="input text-[12px] w-full min-h-20"
-            value={naReason}
-            onChange={(e) => setNaReason(e.target.value)}
-            maxLength={2000}
-          />
-          {naError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{naError}</p>}
-          <div className="flex justify-end gap-2 mt-3">
-            <Button variant="secondary" size="sm" onClick={() => { setNaModal(null); setNaError(null); }}>Cancel</Button>
-            <Button variant="primary" size="sm" onClick={() => void handleMarkNA()} disabled={naReason.trim().length < 10}>Mark N/A</Button>
-          </div>
-        </Modal>
-      )}
     </div>
     </div>
   );

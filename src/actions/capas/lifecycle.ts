@@ -176,26 +176,6 @@ function buildDeviationCarryDescription(dev: {
   return parts.join("").slice(0, 4000);
 }
 
-/** Deviation→CAPA carryover (req 3) — the seeded action item's description,
- *  preserving the worker's completion notes + QA↔worker conversation so their
- *  in-progress work isn't lost when the task is superseded by the CAPA. */
-function buildCarryActionItemDescription(task: {
-  assignee: string; completionNotes: string | null;
-  messages: { authorName: string; authorRole: string; body: string }[];
-}): string {
-  const lines = [
-    `Continue the work started on the low-priority deviation task (worker: ${task.assignee}).`,
-    task.completionNotes
-      ? `\n\nWork done so far: ${task.completionNotes}`
-      : `\n\nNo completion notes were recorded before escalation.`,
-  ];
-  if (task.messages.length > 0) {
-    const convo = task.messages.map((m) => `• ${m.authorName} (${m.authorRole}): ${m.body}`).join("\n");
-    lines.push(`\n\nPrior QA↔worker conversation:\n${convo}`);
-  }
-  return lines.join("").slice(0, 4000);
-}
-
 export async function createCAPA(
   input: z.input<typeof CreateCAPASchema>,
 ): Promise<ActionResult> {
@@ -237,12 +217,13 @@ export async function createCAPA(
       ...rest
     } = parsed.data;
 
-    // Phase 3 — capture the driver userId FK alongside the legacy owner string.
-    // Resolved once before the (retryable) transaction since it only reads User.
-    // Deviation→CAPA carryover (req 1): when raised FROM a deviation, the CAPA is
-    // owned by the QA who raised it — override the input owner with the actor.
-    const ownerId = linkedDeviationId ? actor.userId : await resolveOwnerUserId(session.user.tenantId, rest.owner);
-    const ownerName = linkedDeviationId ? actor.displayName : (rest.owner ?? "");
+    // Step 3 — ONE assigned worker in CAPA.ownerId (the "driver" concept is
+    // gone). Manual CAPA: the QA-picked owner. Deviation-raised: the deviation
+    // WORKER (activeTask.assigneeId) when an active task existed, else the
+    // raising QA. The worker-vs-QA branch needs activeTask, which is read inside
+    // the tx — so the final ownerId/ownerName are computed there (below). This
+    // resolves only the manual-owner input (a User read; safe before the tx).
+    const ownerIdInput = await resolveOwnerUserId(session.user.tenantId, rest.owner);
 
     // Race-safe sequence allocation. Two server actions creating CAPAs at
     // the same instant can both read count=N inside their respective
@@ -275,12 +256,21 @@ export async function createCAPA(
             ? await tx.deviationTask.findFirst({
                 where: { deviationId: linkedDeviationId, tenantId: session.user.tenantId, deletedAt: null, status: { in: ["pending", "in_progress", "submitted", "rework"] } },
                 orderBy: { createdAt: "desc" },
-                select: {
-                  id: true, assignee: true, assigneeId: true, completionNotes: true, dueDate: true,
-                  messages: { orderBy: { createdAt: "asc" }, select: { authorName: true, authorRole: true, body: true } },
-                },
+                // Step 3 — only the worker identity is needed now (the carryover
+                // action item that consumed notes/messages/dueDate is dropped).
+                select: { id: true, assignee: true, assigneeId: true },
               })
             : null;
+
+          // Step 3 — the single assigned worker for CAPA.ownerId. Deviation-
+          // raised: the deviation WORKER (activeTask.assigneeId) when an active
+          // task existed, else the raising QA. Manual: the QA-picked owner input.
+          const ownerId = linkedDeviationId
+            ? (activeTask?.assigneeId ?? actor.userId)
+            : ownerIdInput;
+          const ownerName = linkedDeviationId
+            ? (activeTask?.assignee ?? actor.displayName)
+            : (rest.owner ?? "");
 
           // SME Section 1 (last rung) â€” site-scoped reference prefix.
           // Format is now "CAPA-{siteCode}-{year}-{NNN}". Site code is
@@ -325,9 +315,9 @@ export async function createCAPA(
             data: {
               ...rest,
               // owner is now zod-optional; the Prisma column is still non-null.
-              // For a deviation-raised CAPA this is the QA actor (req 1).
+              // Step 3 — the single assigned worker (resolved as ownerName above).
               owner: ownerName,
-              // Phase 3 — authoritative driver FK (null when unresolvable).
+              // Authoritative assignee FK (null when unresolvable).
               ownerId,
               // Deviation→CAPA carryover (req 2): carry the deviation's root-cause
               // TEXT into rca + a contextual description. Structured RCA method/
@@ -384,28 +374,13 @@ export async function createCAPA(
               data: { status: "cancelled" },
             });
           }
-          // Deviation→CAPA carryover (req 3): ONLY if there was an ACTIVE task,
-          // seed ONE action item in the CAPA's Actions tab assigned to that
-          // worker, carrying their notes + conversation so work isn't lost. No
-          // task → no auto action item (Actions tab stays empty).
-          let actionItemInfo: { id: string; assignee: string } | null = null;
-          if (activeTask?.assigneeId) {
-            const item = await tx.cAPAActionItem.create({
-              data: {
-                tenantId: session.user.tenantId,
-                capaId: created.id,
-                sequence: 1,
-                description: buildCarryActionItemDescription(activeTask),
-                owner: activeTask.assignee,
-                ownerId: activeTask.assigneeId,
-                dueDate: activeTask.dueDate ?? new Date(dueDate),
-                status: "pending",
-                createdBy: session.user.name,
-                createdById: actor.userId,
-              },
-            });
-            actionItemInfo = { id: item.id, assignee: activeTask.assignee };
-          }
+          // Step 3 — the deviation worker is now the CAPA's single assignee
+          // (CAPA.ownerId, set above), so the old evidence-carrier action item
+          // is no longer created: the worker reaches this CAPA via the worklist
+          // and does the evidence there. The originating deviation (linked via
+          // CAPA.deviationId) retains the task's notes + conversation; corrective
+          // action items, when needed, are added manually by QA.
+          const actionItemInfo: { id: string; assignee: string } | null = null;
           return {
             created,
             activeTaskId: activeTask?.id ?? null,
@@ -703,15 +678,15 @@ export async function updateCAPA(
       },
     });
 
-    // Phase 2 — notify the NEW driver when ownership actually changed
-    // (fault-isolated; notify() skips the actor + null FKs).
+    // Notify the NEW assignee when ownership actually changed (fault-isolated;
+    // notify() skips the actor + null FKs).
     if (parsed.data.owner !== undefined && ownerIdUpdate && ownerIdUpdate !== before.ownerId) {
       await notify({
         tenantId: session.user.tenantId,
         recipientUserId: ownerIdUpdate,
         actorUserId: actor.userId,
         type: "CAPA_ASSIGNED",
-        title: `You are now the driver of CAPA ${before.reference ?? id}`,
+        title: `You are now assigned to CAPA ${before.reference ?? id}`,
         body: capa.description?.slice(0, 200) ?? null,
         linkPath: `/capa/${id}`,
         entityType: "CAPA",
