@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ChevronRight, ChevronDown, Send, Wrench, LayoutGrid, List, X, Search, Clock, ListChecks, CalendarClock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, ChevronDown, Send, Wrench, LayoutGrid, List, X, Search, Clock, ListChecks, CalendarClock, ClipboardList } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Badge } from "@/components/ui/Badge";
@@ -13,7 +13,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
 import { submitForReview } from "@/actions/capas";
-import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask } from "@/lib/queries/worklist";
+import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask, WorklistFinding } from "@/lib/queries/worklist";
 import { EvidenceCollectionPanel } from "@/modules/capa/tabs/EvidenceCollectionPanel";
 import { TaskPanel } from "./TaskPanel";
 import { DeviationTaskPanel } from "./DeviationTaskPanel";
@@ -153,13 +153,49 @@ export function WorklistPage({
     return true;
   };
 
+  // Gap finding filter — mirrors devTaskMatches so the search box, the
+  // status/priority/dueBy dropdowns, and the quick-filters all reach the gap
+  // findings section too (not an island). The PRIORITY dropdown filters findings
+  // by SEVERITY (same Critical/High/Medium/Low value set); the STATUS dropdown
+  // maps pending→Open, in_progress→In Progress (findings have no rework yet).
+  const findingActionStatus = (f: WorklistFinding) => (f.status === "In Progress" ? "in_progress" : "pending");
+  const findingMatchesQuick = (f: WorklistFinding): boolean => {
+    switch (quickFilter) {
+      case "open": return true; // every returned finding is active/open
+      case "rework": return false; // findings have no rework status yet
+      case "dueSoon": return isDueSoonEntry(findingActionStatus(f), f.targetDate);
+      case "overdue": return isOverdueEntry(findingActionStatus(f), f.targetDate);
+      default: return true;
+    }
+  };
+  const findingMatches = (f: WorklistFinding): boolean => {
+    if (priorityFilter && f.severity !== priorityFilter) return false;
+    if (statusFilter) {
+      const wanted = statusFilter === "in_progress" ? "In Progress" : statusFilter === "pending" ? "Open" : null;
+      if (wanted === null || f.status !== wanted) return false;
+    }
+    if (dueByFilter && f.targetDate && dayjs.utc(f.targetDate).isAfter(dayjs.utc(dueByFilter).endOf("day"))) return false;
+    if (!findingMatchesQuick(f)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const hit = f.requirement.toLowerCase().includes(q)
+        || (f.reference ?? "").toLowerCase().includes(q)
+        || (f.framework ?? "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  };
+
   // Summary counts — SINGLE SOURCE OF TRUTH: all four derive from ONE combined
-  // set (CAPA action items + deviation tasks), over the full worklist (pre-
-  // filter), so the cards always agree and include deviation tasks.
+  // set (CAPA action items + deviation tasks + gap findings), over the full
+  // worklist (pre-filter), so the cards always agree and include every source.
   const allItems = worklist.groups.flatMap((g) => g.items);
   const countEntries: { status: string; dueDate: string | null }[] = [
     ...allItems.map((i) => ({ status: i.status, dueDate: i.dueDate })),
     ...worklist.deviationTasks.map((t) => ({ status: t.status, dueDate: t.dueDate })),
+    // Findings map to the action-status vocabulary so they count as open +
+    // due-soon/overdue (by targetDate), and never as rework.
+    ...worklist.assignedFindings.map((f) => ({ status: findingActionStatus(f), dueDate: f.targetDate })),
   ];
   const openCount = countEntries.filter((e) => ACTIONABLE_STATUSES.has(e.status)).length;
   const reworkCount = countEntries.filter((e) => e.status === "rework").length;
@@ -178,6 +214,8 @@ export function WorklistPage({
   const reworkTotal = reworkItems.length + reworkDevTasks.length;
   // Deviation-tasks section respects the active search + filters.
   const visibleDevTasks = worklist.deviationTasks.filter(devTaskMatches);
+  // Gap-findings section respects the active search + filters too.
+  const visibleFindings = worklist.assignedFindings.filter(findingMatches);
 
   async function handleSubmit(capaId: string) {
     setBusyCapa(capaId);
@@ -294,7 +332,7 @@ export function WorklistPage({
         </div>
       )}
 
-      {worklist.groups.length === 0 && worklist.deviationTasks.length === 0 && (
+      {worklist.groups.length === 0 && worklist.deviationTasks.length === 0 && worklist.assignedFindings.length === 0 && (
         <div className="card p-8 text-center">
           <CheckCircle2 className="w-10 h-10 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
           <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>Nothing assigned to you right now.</p>
@@ -511,6 +549,35 @@ export function WorklistPage({
                 {t.dueDate && <span className="text-[11px] shrink-0" style={{ color: "var(--text-muted)" }}>{dayjs.utc(t.dueDate).format("DD MMM")}</span>}
                 <Badge variant={t.status === "submitted" ? "purple" : t.status === "rework" ? "red" : "amber"}>{DEV_TASK_ROW_LABEL[t.status] ?? t.status}</Badge>
               </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Gap Step 2 — gap-assessment findings assigned to the user (UNION source).
+          Read-only surface for now; the worker panel (docs, rework thread) comes
+          in later steps. Filter-aware, mirroring the deviation-tasks section. */}
+      {visibleFindings.length > 0 && (
+        <section className="mb-3 rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
+          <div className="px-4 py-2.5 flex items-center gap-1.5" style={{ borderBottom: "1px solid var(--card-border)" }}>
+            <ClipboardList className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+            <h2 className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Gap findings ({visibleFindings.length})</h2>
+          </div>
+          <div>
+            {visibleFindings.map((f) => (
+              <div key={f.id} className="flex items-center gap-3 p-3" style={{ borderBottom: "1px solid var(--bg-border)" }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
+                    {f.reference ?? f.id.slice(0, 8)} · {f.requirement}
+                  </p>
+                  <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>
+                    {[f.framework, f.area].filter(Boolean).join(" · ")}
+                    {f.targetDate ? ` · target ${dayjs.utc(f.targetDate).format(dateFormat)}` : ""}
+                  </p>
+                </div>
+                <Badge variant={getSeverityVariant(f.severity, "generic")}>{f.severity}</Badge>
+                <Badge variant={f.status === "In Progress" ? "amber" : "blue"}>{f.status}</Badge>
+              </div>
             ))}
           </div>
         </section>

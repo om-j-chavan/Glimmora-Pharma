@@ -102,11 +102,27 @@ export interface WorklistDeviationTask {
   messages: WorklistTaskMessage[];
 }
 
+/** Gap Step 2 — a gap-assessment Finding assigned to the user (Finding.owner ==
+ *  userId). UNION source alongside the CAPA groups + deviation tasks. Basic
+ *  surface for now; the worker panel (docs, rework thread) comes in later steps. */
+export interface WorklistFinding {
+  id: string;
+  reference: string | null;
+  requirement: string;
+  framework: string | null;
+  area: string;
+  severity: string;
+  status: string;
+  targetDate: string | null;
+}
+
 export interface Worklist {
   groups: WorklistGroup[];
   /** Stage 4 — low-priority deviation tasks assigned to the user (UNION source
    *  alongside the CAPA groups above). */
   deviationTasks: WorklistDeviationTask[];
+  /** Gap Step 2 — gap-assessment findings assigned to the user (owner == userId). */
+  assignedFindings: WorklistFinding[];
   openCount: number;
   reworkCount: number;
 }
@@ -115,9 +131,11 @@ const ACTIVE_STATUSES = ["open", "in_progress", "pending_qa_review", "pending_ve
 const OPEN_ITEM_STATUSES = new Set(["pending", "in_progress", "rework"]);
 // Stage 4 — DeviationTask statuses that still need worklist attention.
 const DEV_TASK_ACTIVE_STATUSES = ["pending", "in_progress", "submitted", "rework"];
+// Gap Step 2 — Finding statuses that still need worklist attention.
+const FINDING_ACTIVE_STATUSES = ["Open", "In Progress"];
 
 export const getWorklist = cache(async (userId: string, tenantId: string): Promise<Worklist> => {
-  const [items, drivenCapas, devTasks] = await Promise.all([
+  const [items, drivenCapas, devTasks, assignedFindingRows] = await Promise.all([
     prisma.cAPAActionItem.findMany({
       // Exclude soft-deleted items and items whose parent CAPA was soft-deleted.
       where: { ownerId: userId, tenantId, deletedAt: null, capa: { deletedAt: null } },
@@ -154,6 +172,14 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         // Stage 5 — flat append-only QA↔worker conversation (oldest first).
         messages: { orderBy: { createdAt: "asc" }, select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true } },
       },
+    }),
+    // Gap Step 2 — gap-assessment findings assigned to this user (Finding.owner
+    // holds a userId). UNION source; mirrors the deviation-task block above.
+    // Active statuses only ("Open" / "In Progress"); "Closed" drops off.
+    prisma.finding.findMany({
+      where: { owner: userId, tenantId, deletedAt: null, status: { in: FINDING_ACTIVE_STATUSES } },
+      orderBy: { targetDate: "asc" },
+      select: { id: true, reference: true, requirement: true, framework: true, area: true, severity: true, status: true, targetDate: true },
     }),
   ]);
 
@@ -308,6 +334,19 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     })),
   }));
 
+  // Gap Step 2 — serialise the findings union (Dates → ISO). Every returned
+  // finding is active ("Open" / "In Progress"), so all of them are open work.
+  const assignedFindings: WorklistFinding[] = assignedFindingRows.map((f) => ({
+    id: f.id,
+    reference: f.reference,
+    requirement: f.requirement,
+    framework: f.framework,
+    area: f.area,
+    severity: f.severity,
+    status: f.status,
+    targetDate: f.targetDate ? f.targetDate.toISOString() : null,
+  }));
+
   const openItems = items.filter((i) => OPEN_ITEM_STATUSES.has(i.status));
   // Open deviation tasks count toward the worklist totals (submitted ones are
   // awaiting QA, so they're excluded from "open" like complete CAPA items).
@@ -319,7 +358,9 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
   return {
     groups,
     deviationTasks,
-    openCount: openItems.length + openDevTasks.length,
+    assignedFindings,
+    // Findings are all active → all count as open work (no rework status yet).
+    openCount: openItems.length + openDevTasks.length + assignedFindings.length,
     reworkCount,
   };
 });
