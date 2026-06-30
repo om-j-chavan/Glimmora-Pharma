@@ -30,12 +30,13 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { roleLabel } from "@/lib/labels/roles";
 import {
   addEvidenceFile,
+  addEvidenceFileToCategory,
+  rejectEvidenceCategory,
   loadEvidenceForCAPA,
   loadEvidenceNoteHistory,
   removeEvidenceFile,
   updateEvidenceStatus,
 } from "@/actions/evidence";
-import { rejectCAPA } from "@/actions/capas";
 import {
   EVIDENCE_CATEGORIES,
   type EvidenceCategory,
@@ -191,20 +192,20 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
     refresh();
   }, [refresh]);
 
-  // QA rejects a specific evidence item — routes through the existing
-  // rejectCAPA bounce (pending_qa_review → in_progress), so the category
-  // un-resolves and evidence unlocks for re-work. Reason required (≥ 5).
+  // QA rejects ONE evidence category in place — sets it REJECTED and re-opens
+  // just that category for the assignee. The CAPA stays in pending_qa_review
+  // (no whole-CAPA bounce). Reason required (≥ 5).
   async function handleRejectEvidence() {
     if (!rejectItem) return;
     if (rejectReason.trim().length < 5) { setRejectError("Add a brief reason (at least 5 characters)."); return; }
     setRejecting(true);
     setRejectError(null);
-    const res = await rejectCAPA(capaId, { reason: rejectReason.trim(), rejectedEvidenceItems: [rejectItem.id] });
+    const res = await rejectEvidenceCategory(rejectItem.id, { reason: rejectReason.trim() });
     setRejecting(false);
     if (!res.success) { setRejectError(res.error || "Could not reject evidence."); panelToast.error(res.error || "Could not reject evidence."); return; }
     setRejectItem(null);
     setRejectReason("");
-    panelToast.success("Evidence rejected — CAPA returned to in progress for rework.");
+    panelToast.success("Evidence rejected — returned to the assignee for rework (CAPA stays in QA review).");
     await refresh();
   }
 
@@ -299,6 +300,11 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
         </div>
       </div>
 
+      {/* STEP 2 — single uploader with a category dropdown; files auto-file into
+          the chosen GxP category. Hidden when read-only or while the CAPA is
+          locked for QA review (a re-opened category uses its own card upload). */}
+      {!readOnly && !isLocked && <CategoryUpload capaId={capaId} onChange={refresh} />}
+
       {(items ?? []).map((item) => (
         <EvidenceCard
           key={item.id}
@@ -316,7 +322,7 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
       {rejectItem && (
         <Modal open onClose={() => { if (!rejecting) { setRejectItem(null); setRejectError(null); } }} title={`Reject "${CATEGORY_LABEL[rejectItem.category]}" evidence`}>
           <p className="text-[12px] mb-2" style={{ color: "var(--text-secondary)" }}>
-            Rejecting bounces the CAPA back to <strong>in progress</strong> so the team can re-work this category. Record why it&rsquo;s inadequate (≥ 5 characters).
+            Rejecting re-opens <strong>just this category</strong> for the assignee to re-work; the CAPA stays in <strong>QA review</strong>. Record why it&rsquo;s inadequate (≥ 5 characters).
           </p>
           <textarea
             className="input text-[12px] w-full min-h-20"
@@ -332,6 +338,66 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+/* ── Single uploader with a category dropdown (STEP 2) ── */
+
+function CategoryUpload({ capaId, onChange }: { capaId: string; onChange: () => void }) {
+  const [category, setCategory] = useState<EvidenceCategory>(EVIDENCE_CATEGORIES[0]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const onPick = useCallback(
+    async (file: File | null | undefined) => {
+      if (!file) return;
+      setErr(null);
+      if (file.size > MAX_MB * 1024 * 1024) { setErr(`File exceeds ${MAX_MB} MB limit`); return; }
+      if (!ALLOWED_MIME_PREFIXES.some((m) => file.type === m)) { setErr("File type not allowed"); return; }
+      const fd = new FormData();
+      fd.append("file", file);
+      setBusy(true);
+      const res = await addEvidenceFileToCategory(capaId, category, fd);
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+      if (!res.success) { setErr(res.error); return; }
+      onChange();
+    },
+    [capaId, category, onChange],
+  );
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+      <p className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--text-primary)" }}>Add evidence</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          className="input text-[12px]"
+          value={category}
+          onChange={(e) => setCategory(e.target.value as EvidenceCategory)}
+          disabled={busy}
+          aria-label="Evidence category"
+        >
+          {EVIDENCE_CATEGORIES.map((c) => (
+            <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>
+          ))}
+        </select>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => void onPick(e.target.files?.[0])}
+        />
+        <Button variant="secondary" size="sm" icon={Upload} disabled={busy} loading={busy} onClick={() => inputRef.current?.click()}>
+          Upload to category
+        </Button>
+      </div>
+      <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+        Picks the GxP category and files your document there. Max {MAX_MB} MB.
+      </p>
+      {err && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{err}</p>}
     </div>
   );
 }

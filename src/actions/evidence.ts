@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
-import { isAssignedToTask } from "@/lib/permissions/roleSets";
+import { isAssignedToTask, CAPA_REJECT_ROLES } from "@/lib/permissions/roleSets";
+import { notifyMany } from "@/lib/notify";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
 import {
@@ -68,7 +69,7 @@ async function loadEvidenceItemScoped(evidenceItemId: string) {
   const session = await requireAuth();
   const item = await prisma.evidenceItem.findUnique({
     where: { id: evidenceItemId },
-    include: { capa: { select: { id: true, tenantId: true, description: true, ownerId: true } } },
+    include: { capa: { select: { id: true, tenantId: true, description: true, ownerId: true, status: true, reference: true } } },
   });
   if (!item) return { session, item: null as null };
   if (
@@ -366,12 +367,13 @@ export async function addEvidenceFile(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  // Phase 3 — authorization: author-role OR the assigned-owner path. The owner
-  // path is allowed ONLY for an action-scoped upload (actionItemId provided AND
-  // the session user owns that action item) — "their proof, on their action".
-  // Category-level uploads (no actionItemId) stay author-only. requireGxPAuthor
-  // (above) and the viewer hard-stop in isAssignedToTask precede this.
+  // Authorization: author-role OR the CAPA's single assignee (ownerId) — who may
+  // upload to ANY category, picking it in the UI — OR the action-scoped owner
+  // path (actionItemId provided AND the session user owns that action item) —
+  // "their proof, on their action". requireGxPAuthor (above) already permits a
+  // non-QA assignee; the viewer hard-stop is in isAssignedToTask.
   const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: item.capa.ownerId });
   let ownerOfAction = false;
   if (actionItemId) {
     // Action item must belong to the same CAPA + tenant.
@@ -384,10 +386,11 @@ export async function addEvidenceFile(
     }
     ownerOfAction = isAssignedToTask(session, ai);
   }
-  if (!isAuthorRole && !(actionItemId && ownerOfAction)) {
+  if (!isAuthorRole && !isAssignee && !(actionItemId && ownerOfAction)) {
     return { success: false, error: "Your role does not permit this action." };
   }
-  const accessBasis: "authorRole" | "assignedOwner" = isAuthorRole ? "authorRole" : "assignedOwner";
+  const accessBasis: "authorRole" | "capaAssignee" | "assignedOwner" =
+    isAuthorRole ? "authorRole" : isAssignee ? "capaAssignee" : "assignedOwner";
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
     const contentHashSha256 = createHash("sha256").update(buffer).digest("hex");
@@ -448,6 +451,164 @@ export async function addEvidenceFile(
   } catch (err) {
     console.error("[action] addEvidenceFile failed:", err);
     return { success: false, error: "Failed to upload file" };
+  }
+}
+
+// ── STEP 2: category-routed upload — one control, a category dropdown ──
+//
+// The single assignee (or an author) picks one of the 7 GxP categories and the
+// file auto-files there. We find-or-create the EvidenceItem for that category
+// (same idempotent (capaId, category) key initializeEvidenceForCAPA uses) and
+// hand off to the canonical addEvidenceFile path — the Part 11 backbone (hash,
+// audit, lock-check, soft-delete) is untouched; the dropdown only chooses WHICH
+// item the file attaches to.
+
+export async function addEvidenceFileToCategory(
+  capaId: string,
+  category: string,
+  formData: FormData,
+): Promise<ActionResult<{ id: string; fileName: string }>> {
+  if (!(EVIDENCE_CATEGORIES as readonly string[]).includes(category)) {
+    return { success: false, error: "Unknown evidence category." };
+  }
+  const session = await requireAuth();
+  const capa = await prisma.cAPA.findFirst({
+    where:
+      session.user.role === "super_admin"
+        ? { id: capaId }
+        : { id: capaId, tenantId: session.user.tenantId },
+    select: { id: true, ownerId: true },
+  });
+  if (!capa) return { success: false, error: "CAPA not found" };
+
+  // Gate BEFORE the upsert so an unauthorized caller can't seed an EvidenceItem
+  // row. Mirrors addEvidenceFile's category-level gate (author OR the CAPA's
+  // assignee); addEvidenceFile re-checks it below (defense in depth).
+  const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: capa.ownerId });
+  if (!isAuthorRole && !isAssignee) {
+    return { success: false, error: "Your role does not permit this action." };
+  }
+
+  // Normally the 7 rows already exist (seeded at creation), so this resolves to
+  // the existing id; create is the fallback for an unseeded category.
+  const item = await prisma.evidenceItem.upsert({
+    where: { capaId_category: { capaId, category } },
+    update: {},
+    create: { capaId, category, status: "PENDING", createdBy: session.user.name },
+    select: { id: true },
+  });
+
+  return addEvidenceFile(item.id, formData);
+}
+
+// ── STEP 1: standalone per-category QA reject (no whole-CAPA bounce) ──
+//
+// Unlike rejectCAPA (which bounces the whole CAPA pending_qa_review → in_progress
+// and may tag evidence), this rejects ONE category in place: the CAPA stays in
+// pending_qa_review and only this category re-opens for the assignee. Reuses the
+// exact per-evidence fields + EVIDENCE_REJECTED audit/notify rejectCAPA already
+// uses. The clear-on-rework path in updateEvidenceStatus un-rejects it when the
+// category is next updated (e.g. QA marking it COMPLETE on re-review).
+
+const RejectEvidenceCategorySchema = z.object({
+  reason: z.string().min(5, "A reason of at least 5 characters is required").max(2000),
+});
+
+export async function rejectEvidenceCategory(
+  evidenceItemId: string,
+  input: z.input<typeof RejectEvidenceCategorySchema>,
+): Promise<ActionResult> {
+  const parsed = RejectEvidenceCategorySchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const { session, item } = await loadEvidenceItemScoped(evidenceItemId);
+  if (!item) return { success: false, error: "Evidence item not found" };
+
+  // QA-only disposition — same role set as the whole-CAPA reject.
+  if (!CAPA_REJECT_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can reject evidence." };
+  }
+  if (item.capa.status !== "pending_qa_review") {
+    return { success: false, error: "Only evidence on a CAPA awaiting QA review can be rejected." };
+  }
+  if (item.status === "REJECTED") {
+    return { success: false, error: "This evidence category is already rejected." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  const now = new Date();
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.evidenceItem.update({
+        where: { id: evidenceItemId },
+        data: {
+          status: "REJECTED",
+          rejectionReason: parsed.data.reason,
+          reviewedById: actor.userId,
+          reviewedAt: now,
+          // Re-open JUST this category for rework while the CAPA stays in QA
+          // review and every other category stays locked. Without clearing the
+          // lock the assignee couldn't re-upload (lockedAt blocks all
+          // mutations). Mirrors unlockEvidenceForCAPA's field-clear, scoped to
+          // this one item.
+          lockedAt: null,
+          lockedBy: null,
+          lockedSignatureId: null,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: item.capa.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: AUDIT_MODULE,
+          action: "EVIDENCE_REJECTED",
+          recordId: evidenceItemId,
+          recordTitle: item.capa.description.slice(0, 80),
+          newValue: JSON.stringify({ capaId: item.capa.id, reason: parsed.data.reason.slice(0, 200) }),
+        },
+      });
+    });
+
+    // Notify the assignee (CAPA owner) + anyone who uploaded a file to this
+    // category. Fault-isolated (notifyMany never throws; skips the actor + null
+    // FKs). Mirrors rejectCAPA's EVIDENCE_REJECTED notify.
+    const uploaders = await prisma.evidenceFile.findMany({
+      where: { evidenceItemId, deletedAt: null },
+      select: { uploadedById: true },
+    });
+    const recipientIds = Array.from(
+      new Set(
+        [item.capa.ownerId, ...uploaders.map((f) => f.uploadedById)].filter(
+          (v): v is string => !!v,
+        ),
+      ),
+    );
+    const capaRef = item.capa.reference ?? item.capa.id;
+    await notifyMany(
+      recipientIds.map((uid) => ({
+        tenantId: item.capa.tenantId,
+        recipientUserId: uid,
+        actorUserId: actor.userId,
+        type: "EVIDENCE_REJECTED" as const,
+        title: `Evidence rejected (CAPA ${capaRef})`,
+        body: parsed.data.reason.slice(0, 200),
+        linkPath: `/capa/${item.capa.id}`,
+        entityType: "CAPA",
+        entityId: item.capa.id,
+      })),
+    );
+
+    revalidatePath(`/capa/${item.capa.id}`);
+    revalidatePath("/capa");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] rejectEvidenceCategory failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to reject evidence") };
   }
 }
 
