@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
+import type { WorklistDoc } from "@/lib/queries/worklist";
 
 export const getDeviations = cache(async (tenantId: string) => {
   const rows = await prisma.deviation.findMany({
@@ -58,27 +59,48 @@ export const getDeviations = cache(async (tenantId: string) => {
     if (!taskByDev.has(t.deviationId)) taskByDev.set(t.deviationId, t); // newest active wins
   }
 
-  // Count each active task's own documents (linkedModule="Deviation Task") so the
-  // raise-CAPA confirm preview can show how many task docs will be linked.
+  // Stage 4/5 — the active task's OWN documents (linkedModule="Deviation Task"),
+  // grouped per task. Previously only COUNTED, which is why QA saw a doc count
+  // but never the worker's uploaded files in the deviation modal. Now serialised
+  // to the WorklistDoc shape so the modal reuses GroupedTaskDocs/DocList (grouped
+  // by the GxP category the worker tagged at upload). docCount is kept for the
+  // raise-CAPA confirm preview, derived from the same set.
   const activeTaskIds = [...taskByDev.values()].map((t) => t.id);
-  const taskDocCounts = new Map<string, number>();
+  const taskDocsByTask = new Map<string, WorklistDoc[]>();
   if (activeTaskIds.length > 0) {
     const taskDocs = await prisma.document.findMany({
       where: { tenantId, linkedModule: "Deviation Task", linkedRecordId: { in: activeTaskIds }, deletedAt: null },
-      select: { linkedRecordId: true },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true, fileName: true, originalFileName: true, fileType: true, fileExtension: true,
+        fileSize: true, uploadedBy: true, uploadedAt: true, createdAt: true, category: true, linkedRecordId: true,
+      },
     });
     for (const d of taskDocs) {
       if (!d.linkedRecordId) continue;
-      taskDocCounts.set(d.linkedRecordId, (taskDocCounts.get(d.linkedRecordId) ?? 0) + 1);
+      const row: WorklistDoc = {
+        id: d.id,
+        fileName: d.originalFileName ?? d.fileName,
+        fileType: d.fileType,
+        fileExtension: d.fileExtension,
+        fileSize: d.fileSize,
+        uploadedBy: d.uploadedBy,
+        uploadedAt: (d.uploadedAt ?? d.createdAt).toISOString(),
+        category: d.category,
+      };
+      const arr = taskDocsByTask.get(d.linkedRecordId);
+      if (arr) arr.push(row);
+      else taskDocsByTask.set(d.linkedRecordId, [row]);
     }
   }
 
   return rows.map((r) => {
     const at = taskByDev.get(r.id);
+    const taskDocs = at ? (taskDocsByTask.get(at.id) ?? []) : [];
     return {
       ...r,
       documents: byDev.get(r.id) ?? [],
-      activeTask: at ? { ...at, docCount: taskDocCounts.get(at.id) ?? 0 } : null,
+      activeTask: at ? { ...at, docCount: taskDocs.length, taskDocs } : null,
     };
   });
 });

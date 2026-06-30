@@ -6,6 +6,7 @@ import dayjs from "@/lib/dayjs";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Toast";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -43,7 +44,7 @@ function groupTaskDocsByCategory(docs: WorklistDoc[]): { category: EvidenceCateg
 
 /** Task docs rendered grouped by category — a labeled DocList per group. DocList
  *  stays category-agnostic; the grouping lives here. */
-function GroupedTaskDocs({ docs, emptyText, onRemove, busyId }: {
+export function GroupedTaskDocs({ docs, emptyText, onRemove, busyId }: {
   docs: WorklistDoc[];
   emptyText: string;
   onRemove?: (id: string) => void;
@@ -262,18 +263,15 @@ export function DeviationTaskPanel({
             {/* Piece 1 — pick a GxP category, then upload. The category is stored
                 on the doc and groups it above (and maps to CAPA evidence on carryover). */}
             <div className="flex items-center gap-2 flex-wrap">
-              <select
-                className="input text-[12px]"
+              <Dropdown
                 value={uploadCategory}
-                onChange={(e) => setUploadCategory(e.target.value)}
+                onChange={setUploadCategory}
+                options={EVIDENCE_CATEGORIES.map((c) => ({ value: c, label: EVIDENCE_CATEGORY_LABEL[c] }))}
+                placeholder="Select category…"
                 disabled={busy}
-                aria-label="Evidence category"
-              >
-                <option value="">Select category…</option>
-                {EVIDENCE_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{EVIDENCE_CATEGORY_LABEL[c]}</option>
-                ))}
-              </select>
+                size="sm"
+                width="w-48"
+              />
               <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", opacity: (busy || !uploadCategory) ? 0.6 : 1 }}>
                 <Paperclip className="w-3.5 h-3.5" /> Upload file
                 <input type="file" className="hidden" disabled={busy || !uploadCategory} onChange={onPickFile} />

@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { LinkedDocument } from "@/components/shared/DocumentUpload";
+import type { WorklistDoc } from "@/lib/queries/worklist";
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
 
 export type DeviationType = "planned" | "unplanned";
@@ -42,6 +43,8 @@ export interface DeviationActiveTask {
   messages: DeviationTaskMessageView[];
   /** Count of the task's own documents (for the raise-CAPA confirm preview). */
   docCount: number;
+  /** The task's own uploaded documents (grouped by GxP category in the QA modal). */
+  taskDocs: WorklistDoc[];
 }
 
 export interface Deviation {

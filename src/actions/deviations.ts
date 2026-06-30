@@ -130,7 +130,15 @@ const CreateDeviationSchema = z.object({
   // Triage priority instead; optional here, defaulted from severity via
   // severityToPriority when the caller omits it.
   priority: z.enum(["Low", "Medium", "High"]).optional(),
-  dueDate: z.string().min(1),
+  dueDate: z.string().min(1).refine((d) => {
+    // Defense-in-depth behind the DatePicker's client min — reject obviously-past
+    // due dates even if the client is bypassed. Floored at yesterday (server-local)
+    // to absorb client/server timezone skew.
+    const f = new Date();
+    f.setDate(f.getDate() - 1);
+    const floor = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+    return d >= floor;
+  }, "Due date cannot be in the past"),
   detectedDate: z.string().optional(),
   siteId: z.string().optional(),
   batchesAffected: z.string().optional(),

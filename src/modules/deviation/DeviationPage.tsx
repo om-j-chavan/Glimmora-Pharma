@@ -30,7 +30,7 @@ import {
 } from "@/actions/deviations";
 import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { assignDeviationTask, reworkDeviationTask, postDeviationTaskMessage } from "@/actions/deviation-tasks";
-import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
+import { TaskThread, GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
 import { deleteDocument } from "@/actions/documents";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
@@ -207,6 +207,8 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [assignAssigneeId, setAssignAssigneeId] = useState("");
   const [assignMessage, setAssignMessage] = useState("");
   const [assignDueDate, setAssignDueDate] = useState("");
+  // Due dates can't be in the past — today is the floor for every due-date picker.
+  const minDueDate = dayjs().format("YYYY-MM-DD");
   const [assignError, setAssignError] = useState<string | null>(null);
   const [assignBusy, setAssignBusy] = useState(false);
   // Stage 4 — QA "send for rework" modal state (the close outcome reuses the
@@ -840,6 +842,14 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 {selected.activeTask.completionNotes && (
                   <p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {selected.activeTask.completionNotes}</p>
                 )}
+                {/* The worker's uploaded task documents (grouped by GxP category) —
+                    now surfaced to QA (previously only a count was loaded). */}
+                {selected.activeTask.taskDocs.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Task documents</p>
+                    <GroupedTaskDocs docs={selected.activeTask.taskDocs} emptyText="" />
+                  </div>
+                )}
                 {/* QA review — a SUBMITTED task can be signed-closed (the Part 11
                     closeDeviation, which also completes the task + enforces
                     SoD) or sent back for rework. At any open stage QA may
@@ -976,7 +986,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Triage</p>
             <div className="grid grid-cols-2 gap-3">
               <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Priority * <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(from severity, editable)</span></p><Controller name="priority" control={control} render={({ field }) => <Dropdown options={[{ value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select..." className={errors.priority ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.priority && <p className="text-[11px] text-[#ef4444] mt-1">{errors.priority.message}</p>}</div>
-              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date *</p><Controller name="dueDate" control={control} render={({ field }) => <DatePicker id="dev-due" value={field.value ?? ""} onChange={field.onChange} error={errors.dueDate?.message} />} /></div>
+              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date *</p><Controller name="dueDate" control={control} render={({ field }) => <DatePicker id="dev-due" value={field.value ?? ""} onChange={field.onChange} min={minDueDate} error={errors.dueDate?.message} />} /></div>
             </div>
             <div className="mt-2"><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Batches affected (optional, comma-separated)</p><Controller name="batchesAffected" control={control} render={({ field }) => <Input id="dev-batches" {...field} placeholder="e.g. STB-2026-042, STB-2026-043" />} /></div>
           </div>
@@ -1144,7 +1154,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           </div>
           <div>
             <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date (optional)</p>
-            <DatePicker id="assign-due" value={assignDueDate} onChange={setAssignDueDate} disabled={assignBusy} placeholder="Select a date" />
+            <DatePicker id="assign-due" value={assignDueDate} onChange={setAssignDueDate} min={minDueDate} disabled={assignBusy} placeholder="Select a date" />
           </div>
           {assignError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{assignError}</p>}
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>

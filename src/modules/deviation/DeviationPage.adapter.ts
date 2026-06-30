@@ -1,6 +1,7 @@
 import type { Deviation as PrismaDeviation } from "@prisma/client";
 import type { Deviation, DeviationStatus, DeviationSeverity, ImpactLevel } from "@/store/deviation.slice";
 import type { LinkedDocument, DocFileType, DocStatus } from "@/components/shared/DocumentUpload";
+import type { WorklistDoc } from "@/lib/queries/worklist";
 
 /** Selected Document fields hydrated by getDeviations for each deviation
  *  (persisted evidence, linked via linkedModule="Deviation Management"). */
@@ -39,6 +40,9 @@ export type PrismaDeviationWithCapa = PrismaDeviation & {
     messages: { id: string; authorId: string | null; authorName: string; authorRole: string; body: string; createdAt: Date }[];
     // Count of the task's own documents (for the raise-CAPA confirm preview).
     docCount: number;
+    // The active task's own documents (serialised to WorklistDoc by getDeviations)
+    // so the QA modal can show them grouped by category.
+    taskDocs: WorklistDoc[];
   } | null;
 };
 
@@ -100,6 +104,7 @@ export function adaptDeviation(p: PrismaDeviationWithCapa): Deviation {
             body: m.body, createdAt: m.createdAt.toISOString(),
           })),
           docCount: p.activeTask.docCount,
+          taskDocs: p.activeTask.taskDocs,
         }
       : null,
     area: p.area,

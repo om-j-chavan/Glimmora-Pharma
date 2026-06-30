@@ -32,10 +32,20 @@ import type { ActionResult } from "@/actions/capas/_types";
 
 const TASK_OPEN_STATUSES = ["pending", "in_progress", "submitted", "rework"];
 
+/** Reject a "YYYY-MM-DD" due date that's in the past. Defense-in-depth behind the
+ *  DatePicker's client-side min — floored at YESTERDAY (server-local) so a
+ *  client/server timezone skew never false-rejects a legitimate "today" pick. */
+function notPastDate(d: string): boolean {
+  const f = new Date();
+  f.setDate(f.getDate() - 1);
+  const floor = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+  return d >= floor;
+}
+
 const AssignSchema = z.object({
   assigneeId: z.string().min(1, "Assignee is required"),
   message: z.string().min(5, "Instruction is required (min 5 chars)"),
-  dueDate: z.string().optional(),
+  dueDate: z.string().refine(notPastDate, "Due date cannot be in the past").optional(),
 });
 
 /**
