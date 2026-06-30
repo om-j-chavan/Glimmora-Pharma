@@ -588,22 +588,9 @@ export function GapRegisterTab({
                   {ownerName(selectedFinding.owner)}
                   {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` (${roleLabel(u.role)})` : ""; })()}
                 </p>
-                {/* Gap Step 1 — QA reassigns the finding to whoever will work it
-                    (mirrors the deviation task assign). Active staff only. */}
-                {isQAHead && selectedFinding.status !== "Closed" && (
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <Dropdown
-                      placeholder="Assign to…"
-                      value={assignTo}
-                      onChange={setAssignTo}
-                      width="w-56"
-                      size="sm"
-                      options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))}
-                    />
-                    <Button variant="secondary" size="sm" disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign</Button>
-                  </div>
-                )}
-                {assignError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{assignError}</p>}
+                {/* Assign moved to the severity-gated Disposition block below (LOW →
+                    assign a person; HIGH/MEDIUM/CRITICAL → Raise CAPA), mirroring the
+                    deviation priority disposition. */}
               </div>
 
               {/* ── Target date ── */}
@@ -786,8 +773,39 @@ export function GapRegisterTab({
                   {linkedCapa?.status === "closed" && <p className="text-[11px] mt-2 p-2 rounded-lg" style={{ background: "var(--success-bg)", color: "var(--success)" }}>CAPA closed. This finding has been automatically closed.</p>}
                 </div>
               ) : (
-                !isViewOnly && selectedFinding.status !== "Closed" && capaCan.canCreate && (
-                  <Button variant="secondary" icon={Plus} fullWidth onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>
+                // Disposition by SEVERITY (mirrors the deviation priority disposition):
+                // LOW → assign a person who works it in the worklist (assign → submit
+                // → QA review), with Raise CAPA as a secondary option; HIGH / MEDIUM /
+                // CRITICAL → Raise CAPA. Shown on a non-closed finding that isn't yet
+                // linked to a CAPA (findings have no investigation gate, so this is the
+                // initial disposition moment).
+                !isViewOnly && selectedFinding.status !== "Closed" && (
+                  <div>
+                    <h3 className={LABEL}>Disposition</h3>
+                    {selectedFinding.severity === "Low" ? (
+                      <>
+                        <p className="text-[11px] mt-0.5 mb-1.5" style={{ color: "var(--text-secondary)" }}>
+                          Low-severity gaps are worked as a lightweight assigned task (assign → submit → QA review), or raise a CAPA if systematic correction is needed.
+                        </p>
+                        {isQAHead ? (
+                          <>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Dropdown placeholder="Assign to…" value={assignTo} onChange={setAssignTo} width="w-56" size="sm" options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))} />
+                              <Button variant="primary" size="sm" icon={Plus} disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign person</Button>
+                              {capaCan.canCreate && <Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>}
+                            </div>
+                            {assignError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{assignError}</p>}
+                          </>
+                        ) : (
+                          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Awaiting QA to assign an owner.</p>
+                        )}
+                      </>
+                    ) : (
+                      capaCan.canCreate ? (
+                        <Button variant="secondary" icon={Plus} fullWidth onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>
+                      ) : null
+                    )}
+                  </div>
                 )
               );
             })()}
