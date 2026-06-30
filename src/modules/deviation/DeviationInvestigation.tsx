@@ -153,17 +153,21 @@ function SavedDeviationRcaDisplay({ method, rootCause }: { method?: DeviationRCA
   if (method === "5 Why") {
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
     if (lines.length === 0) return null;
-    const structured = lines.some((l) => /^Why\s*\d+\s*:/i.test(l));
-    if (!structured) {
+    // Only "Why N:" lines are numbered whys. A 5-Why has exactly N whys and the
+    // LAST why IS the root cause — so we drop any trailing "Root cause: …" line
+    // (some formats append one) rather than mislabelling it "Why N+1". Fixes the
+    // off-by-one where the root cause rendered as "Why 6 — Root cause".
+    const whyLines = lines.filter((l) => /^Why\s*\d+\s*:/i.test(l));
+    if (whyLines.length === 0) {
       return <div className="space-y-3"><RcaBlock label="Root cause" answer={text.trim()} root /></div>;
     }
     return (
       <div className="space-y-3">
-        {lines.map((line, i) => {
+        {whyLines.map((line, i) => {
           const m = line.match(/^Why\s*(\d+)\s*:\s*(.*)$/i);
           const label = m ? `Why ${m[1]}` : `Why ${i + 1}`;
           const answer = m ? m[2] : line;
-          const isLast = i === lines.length - 1;
+          const isLast = i === whyLines.length - 1;
           return <RcaBlock key={i} label={isLast ? `${label} — Root cause` : label} answer={answer} root={isLast} />;
         })}
       </div>

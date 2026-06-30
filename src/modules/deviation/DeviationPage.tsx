@@ -32,6 +32,7 @@ import { assignDeviationTask, reworkDeviationTask, postDeviationTaskMessage } fr
 import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
 import { deleteDocument } from "@/actions/documents";
 import { displayName, displayUserName, displaySiteName } from "@/lib/identity-display";
+import { roleLabel } from "@/lib/labels/roles";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Input } from "@/components/ui/Input";
@@ -1007,7 +1008,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             hash will be recorded and cannot be altered.
           </p>
           <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-            Deviation <strong>{selected?.id}</strong> will be marked Closed.
+            Deviation <strong>{selected?.reference ?? selected?.id}</strong> will be marked Closed.
           </p>
           <div>
             <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
@@ -1077,7 +1078,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       {/* ═══ REJECT MODAL ═══ */}
       <Modal open={rejectModal} onClose={() => setRejectModal(false)} title="Reject Deviation">
         <div className="space-y-4">
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Deviation <strong>{selected?.id}</strong> will be rejected and returned to investigation.</p>
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Deviation <strong>{selected?.reference ?? selected?.id}</strong> will be rejected and returned to investigation.</p>
           <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason for rejection *</p><textarea rows={3} className="input w-full resize-none" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Why is this being rejected?" /></div>
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
             <Button variant="secondary" onClick={() => setRejectModal(false)}>Cancel</Button>
@@ -1125,7 +1126,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           <div>
             <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Assignee *</p>
             <Dropdown
-              options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${u.role}` }))}
+              options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))}
               value={assignAssigneeId}
               onChange={setAssignAssigneeId}
               width="w-full"
