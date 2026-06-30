@@ -7,9 +7,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, X, Info, FileText, Wrench, Send,
+  ClipboardList, X, Info, Wrench, Send,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { DocList } from "@/components/shared/DocList";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
@@ -108,6 +109,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // worklist (DeviationTaskPanel), gated server-side by isAssignedToTask.
   const devCan = usePermissions("deviation");
   const [docBusy, setDocBusy] = useState(false);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
   // Attach evidence via the shared document pipeline (persists server-side, so
   // it survives router.refresh()/reload). Tenant + role are enforced in the
@@ -127,9 +129,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // Soft-delete via the shared deleteDocument action (tenant-scoped server-side;
   // can't remove a document off another tenant's deviation).
   async function handleDeleteDoc(docId: string) {
-    setDocBusy(true);
+    setDocBusy(true); setDeletingDocId(docId);
     const res = await deleteDocument(docId);
-    setDocBusy(false);
+    setDocBusy(false); setDeletingDocId(null);
     if (!res.success) { setErrorMsg(res.error || "Failed to delete document."); setErrorPopup(true); return; }
     router.refresh();
   }
@@ -719,21 +721,18 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               return (
                 <div className="space-y-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Documents</p>
-                  {(selected.documents ?? []).length === 0 ? (
-                    <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No documents attached.</p>
-                  ) : (
-                    <ul className="space-y-1">
-                      {(selected.documents ?? []).map((d) => (
-                        <li key={d.id} className="flex items-center gap-2 text-[12px]">
-                          <FileText className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-                          <a href={d.dataUrl} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate underline" style={{ color: "var(--brand)" }}>{d.fileName}</a>
-                          {canManageDocs && (
-                            <button type="button" onClick={() => handleDeleteDoc(d.id)} disabled={docBusy} aria-label={`Delete ${d.fileName}`} className="border-none bg-transparent cursor-pointer shrink-0" style={{ color: "var(--text-muted)" }}><X className="w-3.5 h-3.5" aria-hidden="true" /></button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  <DocList
+                    docs={(selected.documents ?? []).map((d) => ({
+                      id: d.id,
+                      fileName: d.fileName,
+                      downloadHref: d.dataUrl ?? `/api/documents/${d.id}`,
+                      uploadedBy: d.uploadedBy,
+                      uploadedAt: d.uploadedAt,
+                    }))}
+                    emptyText="No documents attached."
+                    onRemove={canManageDocs ? (id) => void handleDeleteDoc(id) : undefined}
+                    busyId={deletingDocId}
+                  />
                   {canManageDocs && (
                     <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer underline" style={{ color: "var(--brand)" }}>
                       <Plus className="w-3.5 h-3.5" aria-hidden="true" /> {docBusy ? "Uploading…" : "Attach document"}

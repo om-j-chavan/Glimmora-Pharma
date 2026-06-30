@@ -5,8 +5,9 @@
 // delete server-side; the UI mirrors that lock with a chip + hidden buttons.
 import { useState, useRef } from "react";
 import clsx from "clsx";
-import { ClipboardList, Download, Lock, Pencil, X, Save, FileText, Trash2, Upload, CheckCircle2, AlertCircle, SkipForward, Info, ShieldCheck, Sparkles, ChevronDown, ChevronRight, RefreshCw, Loader2 } from "lucide-react";
+import { ClipboardList, Lock, Pencil, X, Save, Trash2, Upload, CheckCircle2, AlertCircle, SkipForward, Info, ShieldCheck, Sparkles, ChevronDown, ChevronRight, RefreshCw, Loader2 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { DocList } from "@/components/shared/DocList";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import type {
@@ -681,57 +682,24 @@ export function ValidationPanel({
                   <ul role="list" className="space-y-1.5 list-none p-0 m-0">
                     {docs.map((d) => (
                       <li key={d.id} className="text-[11px]">
-                        <div className="flex items-center gap-2 flex-wrap">
-                        <FileText className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-                        <a
-                          href={`/api/stage-documents/${d.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="truncate hover:underline"
-                          style={{ color: "var(--text-primary)" }}
-                          title={d.originalFileName}
-                        >
-                          {d.originalFileName}
-                        </a>
-                        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                          {formatFileSize(d.fileSize)}
-                        </span>
-                        <span
-                          className="font-mono text-[10px]"
-                          style={{ color: "var(--text-muted)" }}
-                          title={`SHA-256: ${d.contentHashSha256}`}
-                        >
-                          {d.contentHashSha256.slice(0, 8)}
-                        </span>
-                        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                          {d.uploadedByName} · {dayjs.utc(d.uploadedAt).fromNow()}
-                        </span>
-                        <a
-                          href={`/api/stage-documents/${d.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`Download ${d.originalFileName}`}
-                          className="p-1 rounded hover:bg-(--bg-hover)"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          <Download className="w-3 h-3" aria-hidden="true" />
-                        </a>
-                        {canDeleteDoc(d) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDeletingDoc({ id: d.id, fileName: d.originalFileName });
-                              setDeleteReason("");
-                              setDeleteError(null);
-                            }}
-                            aria-label={`Remove ${d.originalFileName}`}
-                            className="p-1 rounded border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
-                            style={{ color: "var(--danger)" }}
-                          >
-                            <Trash2 className="w-3 h-3" aria-hidden="true" />
-                          </button>
-                        )}
-                        </div>
+                        {/* File line via the shared DocList (one doc per row); the
+                            per-doc AI DocReviewBlock stays below it. Remove still
+                            opens the soft-delete reason modal, gated by canDeleteDoc. */}
+                        <DocList
+                          docs={[{
+                            id: d.id,
+                            fileName: d.originalFileName,
+                            downloadHref: `/api/stage-documents/${d.id}`,
+                            uploadedBy: d.uploadedByName,
+                            size: formatFileSize(d.fileSize),
+                            meta: `SHA ${d.contentHashSha256.slice(0, 8)} · ${dayjs.utc(d.uploadedAt).fromNow()}`,
+                          }]}
+                          onRemove={canDeleteDoc(d) ? (id) => {
+                            setDeletingDoc({ id, fileName: d.originalFileName });
+                            setDeleteReason("");
+                            setDeleteError(null);
+                          } : undefined}
+                        />
                         <DocReviewBlock
                           result={reviews[d.id]}
                           busy={reviewingDocs.has(d.id)}

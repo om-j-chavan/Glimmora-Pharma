@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
-  Download,
   FileText,
   GraduationCap,
   History,
@@ -21,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { DocList } from "@/components/shared/DocList";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -777,55 +777,28 @@ function FileList({ item, disabled, assigneeMode = false, onChange }: FileListPr
 
   return (
     <div className="space-y-1.5">
-      {item.files.length === 0 && (
-        <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>
-          No files uploaded yet.
-        </p>
-      )}
-      {item.files.map((f) => {
-        // Full provenance: resolve the uploader's role for name + role display.
-        const uploaderUser = f.uploadedById ? users.find((x) => x.id === f.uploadedById) : undefined;
-        const uploaderLabel = uploaderUser ? `${f.uploadedBy} (${roleLabel(uploaderUser.role)})` : f.uploadedBy;
-        return (
-        <div
-          key={f.id}
-          className="flex items-center gap-2 rounded-md p-2 text-[11px]"
-          style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
-        >
-          <FileText className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium truncate" style={{ color: "var(--text-primary)" }}>{f.fileName}</p>
-            <p style={{ color: "var(--text-muted)" }}>
-              {CATEGORY_LABEL[item.category]} · {formatSize(f.fileSize)} · {uploaderLabel} · {dayjs(f.createdAt).fromNow()} ·{" "}
-              <span title={`SHA-256: ${f.contentHashSha256}`} className="font-mono">
-                SHA {f.contentHashSha256.slice(0, 8)}
-              </span>
-            </p>
-          </div>
-          <a
-            href={`/api/evidence/files/${f.id}`}
-            className="p-1 rounded border-none cursor-pointer"
-            style={{ color: "var(--brand)" }}
-            aria-label={`Download ${f.fileName}`}
-            title="Download"
-          >
-            <Download className="w-3.5 h-3.5" aria-hidden="true" />
-          </a>
-          {!disabled && !assigneeMode && (
-            <button
-              type="button"
-              onClick={() => setRemoveFor(f.id)}
-              className="p-1 rounded border-none bg-transparent cursor-pointer"
-              style={{ color: "var(--danger)" }}
-              aria-label={`Remove ${f.fileName}`}
-              title="Remove (requires reason)"
-            >
-              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        );
-      })}
+      {/* Rows via the shared DocList. Remove still opens the Part 11
+          RemoveFileModal (reason ≥10) — onRemove only triggers setRemoveFor. */}
+      <DocList
+        docs={item.files.map((f) => {
+          // Full provenance: resolve the uploader's role for name + role display.
+          const uploaderUser = f.uploadedById ? users.find((x) => x.id === f.uploadedById) : undefined;
+          const uploaderLabel = uploaderUser ? `${f.uploadedBy} (${roleLabel(uploaderUser.role)})` : f.uploadedBy;
+          return {
+            id: f.id,
+            fileName: f.fileName,
+            downloadHref: `/api/evidence/files/${f.id}`,
+            uploadedBy: uploaderLabel,
+            badge: { label: CATEGORY_LABEL[item.category] },
+            size: formatSize(f.fileSize),
+            meta: `${dayjs(f.createdAt).fromNow()} · SHA ${f.contentHashSha256.slice(0, 8)}`,
+          };
+        })}
+        emptyText="No files uploaded yet."
+        showView={false}
+        readOnly={disabled}
+        onRemove={assigneeMode ? undefined : (id) => setRemoveFor(id)}
+      />
 
       {!disabled && (
         <div
