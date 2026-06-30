@@ -179,7 +179,11 @@ export function GapRegisterTab({
     const res = await reviewFindingAction(selectedFinding.id);
     setReviewBusy(false);
     if (!res.success) { setReviewError(res.error || "Failed to accept."); return; }
+    // Refresh the SEPARATE review state too (not just the store via router.refresh)
+    // so the block reflects the new status (Closed) immediately — the Accept/rework
+    // buttons are gated on review.status === "Submitted", so they clear at once.
     router.refresh();
+    await refreshReview();
   }
   async function handleReworkSubmit() {
     if (!selectedFinding || reworkReasonInput.trim().length < 5) { setReviewError("Add a rework reason (at least 5 characters)."); return; }
@@ -187,7 +191,11 @@ export function GapRegisterTab({
     const res = await reworkFindingAction(selectedFinding.id, { reason: reworkReasonInput.trim() });
     setReviewBusy(false);
     if (!res.success) { setReviewError(res.error || "Failed to send for rework."); return; }
-    setReworkOpen(false); setReworkReasonInput(""); router.refresh();
+    setReworkOpen(false); setReworkReasonInput("");
+    // Refresh the review state (status → Rework) so the Accept/rework buttons clear
+    // and the auto-posted rework message appears in the thread without a reopen.
+    router.refresh();
+    await refreshReview();
   }
   async function handlePostReviewMsg() {
     if (!selectedFinding || reviewMsg.trim().length === 0) return;
