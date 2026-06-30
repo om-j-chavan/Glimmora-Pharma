@@ -1,11 +1,15 @@
 ﻿"use server";
 
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { getCAPAReadiness } from "@/lib/capa-readiness";
+import { fileStorage } from "@/lib/fileStorage";
+import { sanitizeFilename } from "@/lib/sanitize";
+import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import {
   lockCAPAArtifacts,
   unlockCAPAArtifacts,
@@ -174,6 +178,126 @@ function buildDeviationCarryDescription(dev: {
   ];
   if (dev.immediateAction) parts.push(`\nImmediate action taken: ${dev.immediateAction}`);
   return parts.join("").slice(0, 4000);
+}
+
+/** Piece 2 — convert a deviation's CATEGORIZED task documents into real CAPA
+ *  EvidenceFiles under the matching GxP category, on raise-CAPA. POST-tx + fully
+ *  fault-isolated: a failure for one doc (or the whole pass) logs and is swallowed
+ *  so it can NEVER fail CAPA creation. Reuses addEvidenceFileToCategory's
+ *  idempotent (capaId, category) upsert + the addEvidenceFile create shape.
+ *  Guards: only task docs with a storageKey AND a category in EVIDENCE_CATEGORIES;
+ *  uncategorized / null-storage docs stay as reference links (getCAPADeviationDocs). */
+async function convertCategorizedTaskDocsToEvidence(
+  capaId: string,
+  tenantId: string,
+  deviationId: string,
+  createdByName: string,
+  audit: { userId: string | null; userName: string; userRole: string },
+): Promise<number> {
+  let converted = 0;
+  try {
+    const tasks = await prisma.deviationTask.findMany({
+      where: { deviationId, tenantId },
+      select: { id: true },
+    });
+    const taskIds = tasks.map((t) => t.id);
+    if (taskIds.length === 0) return 0;
+
+    const docs = await prisma.document.findMany({
+      where: {
+        tenantId,
+        linkedModule: "Deviation Task",
+        linkedRecordId: { in: taskIds },
+        deletedAt: null,
+        storageKey: { not: null },
+        category: { in: [...EVIDENCE_CATEGORIES] },
+      },
+      select: {
+        id: true, fileName: true, originalFileName: true, fileType: true,
+        fileExtension: true, fileSize: true, storageKey: true, category: true, uploadedBy: true,
+      },
+    });
+
+    for (const doc of docs) {
+      // Fault-isolate EACH doc — one bad read/save/create logs + continues; it
+      // must never block the other docs or the (already-committed) CAPA.
+      try {
+        if (!doc.storageKey || !doc.category) continue;
+        const category = doc.category;
+
+        // Reuse the idempotent (capaId, category) upsert (addEvidenceFileToCategory).
+        const item = await prisma.evidenceItem.upsert({
+          where: { capaId_category: { capaId, category } },
+          update: {},
+          create: { capaId, category, status: "PENDING", createdBy: createdByName },
+          select: { id: true },
+        });
+
+        // Re-read the stored bytes and RECOMPUTE the hash (verifies the copy —
+        // don't trust the stored Document.sha256 blindly).
+        const buffer = await fileStorage.read(doc.storageKey);
+        const contentHashSha256 = createHash("sha256").update(buffer).digest("hex");
+        const sanitized = sanitizeFilename(doc.originalFileName ?? doc.fileName);
+        const ext = doc.fileExtension ?? (() => {
+          const i = sanitized.lastIndexOf(".");
+          return i > 0 ? sanitized.slice(i).toLowerCase() : "";
+        })();
+        const fileType = doc.fileType ?? "application/octet-stream";
+
+        // Fresh evidence key (mirrors addEvidenceFile) — bytes re-copied so the
+        // EvidenceFile is self-contained, independent of the Document's lifecycle.
+        const storageKey = `evidence/${capaId}/${item.id}/${contentHashSha256}-${sanitized}`;
+        const { url } = await fileStorage.save(storageKey, buffer, fileType);
+
+        const retainUntil = new Date();
+        retainUntil.setFullYear(retainUntil.getFullYear() + 7);
+
+        const created = await prisma.evidenceFile.create({
+          data: {
+            evidenceItemId: item.id,
+            fileName: sanitized,
+            originalFileName: doc.originalFileName ?? doc.fileName,
+            fileSize: Number.parseInt(doc.fileSize ?? "0", 10) || 0,
+            fileType,
+            fileExtension: ext,
+            fileUrl: url,
+            contentHashSha256,
+            retainUntil,
+            uploadedBy: doc.uploadedBy,
+            uploadedById: null,
+            actionItemId: null,
+          },
+        });
+
+        await prisma.auditLog.create({
+          data: {
+            tenantId,
+            userId: audit.userId,
+            userName: audit.userName,
+            userRole: audit.userRole,
+            module: "CAPA / Evidence",
+            action: "EVIDENCE_FILE_UPLOADED",
+            recordId: created.id,
+            newValue: JSON.stringify({
+              fileName: sanitized,
+              fileSize: created.fileSize,
+              contentHashSha256,
+              category,
+              source: "deviation_task_carryover",
+              sourceDocumentId: doc.id,
+              deviationId,
+            }),
+          },
+        });
+        converted += 1;
+      } catch (err) {
+        console.error(`[carryover] failed to convert task doc ${doc.id} -> evidence:`, err);
+      }
+    }
+  } catch (err) {
+    console.error("[carryover] convertCategorizedTaskDocsToEvidence failed:", err);
+  }
+  return converted;
 }
 
 export async function createCAPA(
@@ -429,12 +553,28 @@ export async function createCAPA(
     // can surface them as links. NOTE: surfacing in the CAPA detail needs a
     // small NEW display element — flagged for the UI step.
     if (linkedDeviationId) {
+      // Piece 2 — convert the deviation's CATEGORIZED task docs into real CAPA
+      // EvidenceFiles under their matching category. POST-tx + fault-isolated:
+      // the helper never throws, so a copy failure can't fail the CAPA. The
+      // converted docs are then excluded from the reference block by
+      // getCAPADeviationDocs (no double-listing).
+      const convertedEvidenceCount = await convertCategorizedTaskDocsToEvidence(
+        capa.created.id,
+        session.user.tenantId,
+        linkedDeviationId,
+        session.user.name,
+        { userId: actor.userId, userName: actor.displayName, userRole: actor.role },
+      );
+
       const [deviationDocCount, taskDocCount] = await Promise.all([
         prisma.document.count({ where: { tenantId: session.user.tenantId, linkedModule: "Deviation Management", linkedRecordId: linkedDeviationId, deletedAt: null } }),
         capa.activeTaskId
           ? prisma.document.count({ where: { tenantId: session.user.tenantId, linkedModule: "Deviation Task", linkedRecordId: capa.activeTaskId, deletedAt: null } })
           : Promise.resolve(0),
       ]);
+      if (convertedEvidenceCount > 0) {
+        revalidatePath(`/capa/${capa.created.id}`);
+      }
       return {
         success: true,
         data: {
@@ -446,6 +586,7 @@ export async function createCAPA(
             actionItem: capa.actionItemInfo,
             deviationDocCount,
             taskDocCount,
+            convertedEvidenceCount,
           },
         },
       };

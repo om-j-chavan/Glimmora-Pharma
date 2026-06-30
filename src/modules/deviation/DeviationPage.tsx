@@ -367,14 +367,18 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       id: string; reference?: string | null;
       deviationCarryover?: {
         actionItem?: { assignee: string } | null;
-        deviationDocCount?: number; taskDocCount?: number;
+        deviationDocCount?: number; taskDocCount?: number; convertedEvidenceCount?: number;
       };
     };
     const c = capaData.deviationCarryover;
     const ref = capaData.reference ?? capaData.id.slice(0, 8);
-    const linkedDocs = (c?.deviationDocCount ?? 0) + (c?.taskDocCount ?? 0);
+    // Piece 2 — categorized task docs became real evidence; the remainder stay
+    // as linked references. Don't count the converted ones as "linked".
+    const convertedEv = c?.convertedEvidenceCount ?? 0;
+    const linkedDocs = Math.max(0, (c?.deviationDocCount ?? 0) + (c?.taskDocCount ?? 0) - convertedEv);
     const parts = [`CAPA ${ref} raised`];
     if (c?.actionItem?.assignee) parts.push(`${c.actionItem.assignee}'s task carried over as an action item`);
+    if (convertedEv > 0) parts.push(`${convertedEv} document${convertedEv === 1 ? "" : "s"} filed as evidence`);
     if (linkedDocs > 0) parts.push(`${linkedDocs} document${linkedDocs === 1 ? "" : "s"} linked`);
     toast.success(parts.join(" · "));
     router.refresh();

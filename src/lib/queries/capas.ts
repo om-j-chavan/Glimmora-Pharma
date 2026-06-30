@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
+import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 
 // SME Section 1, Stage 2 (FULL) — include shape for the bidirectional
 // CAPA↔Deviation link. Reused by both list and detail queries so the
@@ -120,14 +121,26 @@ export const getCAPADeviationDocs = cache(async (deviationId: string, tenantId: 
       ],
     },
     orderBy: { createdAt: "asc" },
-    select: { id: true, fileName: true, originalFileName: true, uploadedBy: true, linkedModule: true },
+    select: { id: true, fileName: true, originalFileName: true, uploadedBy: true, linkedModule: true, category: true, storageKey: true },
   });
-  return docs.map((d) => ({
-    id: d.id,
-    fileName: d.originalFileName ?? d.fileName,
-    uploadedBy: d.uploadedBy,
-    source: d.linkedModule === "Deviation Task" ? "task" : "deviation",
-  }));
+  // Piece 2 — a categorized task doc with a stored file was converted into a real
+  // CAPA EvidenceFile on raise (it shows in the evidence panel under its category),
+  // so exclude it here to avoid double-listing. The exclusion criteria mirror the
+  // conversion criteria exactly. Parent deviation docs + uncategorized / null-storage
+  // task docs stay as read-only reference links.
+  const wasConvertedToEvidence = (d: { linkedModule: string | null; category: string | null; storageKey: string | null }) =>
+    d.linkedModule === "Deviation Task" &&
+    d.category != null &&
+    (EVIDENCE_CATEGORIES as readonly string[]).includes(d.category) &&
+    d.storageKey != null;
+  return docs
+    .filter((d) => !wasConvertedToEvidence(d))
+    .map((d) => ({
+      id: d.id,
+      fileName: d.originalFileName ?? d.fileName,
+      uploadedBy: d.uploadedBy,
+      source: d.linkedModule === "Deviation Task" ? "task" : "deviation",
+    }));
 });
 
 /**
