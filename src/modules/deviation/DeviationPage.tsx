@@ -700,17 +700,8 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </div>
             )}
 
-            {/* Linked CAPA */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Linked CAPA</p>
-              {selected.linkedCAPAId ? (
-                <button type="button" onClick={() => router.push(`/capa/${selected.linkedCAPAId}`)} className="text-[12px] font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPARef ?? selected.linkedCAPAId.slice(0, 8)}</button>
-              ) : selected.status !== "closed" && selected.status !== "rejected" && isQAHead ? (
-                <Button variant="secondary" size="sm" icon={Plus} onClick={handleRaiseCAPAFromDetail}>Raise CAPA</Button>
-              ) : (
-                <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No CAPA raised</p>
-              )}
-            </div>
+            {/* Linked-CAPA section removed (req 1) — redundant with the disposition
+                banner's Raise CAPA and the CAPA-Pending banner's CAPA link below. */}
 
             {/* Documents — persisted via the shared document pipeline (#11), so
                 they survive router.refresh()/reload. Part A: attach/delete of
@@ -899,8 +890,12 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 {/* INVESTIGATION-FIRST — the former "Submit for QA Review" step is
                     gone: completeInvestigation now advances under_investigation →
                     pending_qa_review directly. During under_investigation the RCA
-                    lives in the InvestigationSection above ("Complete Investigation"). */}
-                {selected.status === "pending_qa_review" && isQAHead && (
+                    lives in the InvestigationSection above ("Complete Investigation").
+                    Req 3 — when a low-priority TASK is in flight, the disposition is
+                    the task: its own panel owns Sign & Close (only once submitted),
+                    so don't show the generic close here (it appeared prematurely
+                    right after assigning). Only the no-task path closes here. */}
+                {selected.status === "pending_qa_review" && isQAHead && !selected.activeTask && (
                   <>
                     <Button
                       variant="primary"
@@ -1153,7 +1148,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           rework (the CLOSE outcome reuses the signed-close modal above). */}
       <Modal open={reworkTaskOpen} onClose={reworkTaskBusy ? () => undefined : () => { setReworkTaskOpen(false); setReworkTaskError(null); }} title="Send Task for Rework">
         <div className="space-y-4">
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Return this task to <strong>{selected?.activeTask?.assignee}</strong> with a reason. It reappears in their worklist.</p>
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Return this task to <strong>{selected?.activeTask?.assignee}{(() => { const r = users.find((u) => u.id === selected?.activeTask?.assigneeId)?.role; return r ? ` · ${roleLabel(r)}` : ""; })()}</strong> with a reason. It reappears in their worklist.</p>
           <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason for rework *</p><textarea rows={3} className="input w-full resize-none" value={reworkTaskReason} onChange={(e) => setReworkTaskReason(e.target.value)} placeholder="What needs to be corrected? (≥ 5 characters)" disabled={reworkTaskBusy} /></div>
           {reworkTaskError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{reworkTaskError}</p>}
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
