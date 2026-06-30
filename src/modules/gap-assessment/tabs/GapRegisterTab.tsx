@@ -629,9 +629,10 @@ export function GapRegisterTab({
                 {review.completionNotes && (
                   <p className="text-[12px] mt-1.5" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {review.completionNotes}</p>
                 )}
-                {review.status === "Rework" && review.reworkReason && (
-                  <p className="text-[11px] mt-1" style={{ color: "var(--danger)" }}><span className="font-semibold">Returned:</span> {review.reworkReason}</p>
-                )}
+                {/* The rework reason renders ONCE — in the Conversation thread
+                    below, where reworkFinding auto-posts it as a durable, attributed
+                    FindingMessage. A separate "Returned:" banner here repeated the
+                    exact same text (the duplicate-Rework render). */}
                 {isQAHead && review.status === "Submitted" && (
                   <div className="flex gap-2 mt-2">
                     <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>

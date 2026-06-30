@@ -298,13 +298,14 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
     // Step 5 — the finding's categorized docs become real CAPA evidence on raise.
     const conv = capaData.findingCarryover?.convertedEvidenceCount ?? 0;
     setRaisedNote(conv > 0 ? ` ${conv} document${conv === 1 ? "" : "s"} carried over as evidence.` : "");
-    // FIX 1b — the detail modal renders from the selectedFinding snapshot; flip
-    // its "Raise CAPA" button to "linked" instantly by stamping capaId. Redux
-    // also refreshes via router.refresh()'s effect (kept), but the open snapshot
-    // needs this direct update so it doesn't require close+reopen.
-    setSelectedFinding((prev) =>
-      prev && prev.id === finding.id ? { ...prev, capaId: capaData.id } : prev,
-    );
+    // On a successful raise, CLOSE the finding detail. The previous in-place
+    // capaId stamp left the open snapshot inconsistent — status still "Open", and
+    // the just-created CAPA not yet in the Redux store (router.refresh() is async)
+    // so the Linked-CAPA lookup fell back to the raw cuid — which rendered as
+    // stale/invalid data until close+reopen. Closing is clean: the "CAPA raised"
+    // popup confirms (and links to the Tracker), and router.refresh() repopulates
+    // the register so the finding shows In Progress + linked.
+    setSelectedFinding(null);
     setCapaRaisedPopup(true);
     router.refresh();
   }
