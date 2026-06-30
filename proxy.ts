@@ -14,10 +14,14 @@ import { getToken } from "next-auth/jwt";
  * lookup that supplies tenantId for Prisma queries.
  */
 export async function proxy(req: NextRequest) {
-  const token = await getToken({
-    req,
-    secret: process.env.NEXTAUTH_SECRET,
-  });
+  // Local dev only: when NEXTAUTH_SECRET is unset, getToken() can't decrypt the
+  // cookie and would bounce every request to /login in a loop. Skip the guard so
+  // it can't desync from the secret NextAuth used to sign the cookie. Production
+  // mandates the secret via assertProductionSecret, so this never fires there.
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) return NextResponse.next();
+
+  const token = await getToken({ req, secret });
 
   // 1. No session → bounce to login, preserving the original destination.
   if (!token) {
