@@ -102,9 +102,8 @@ export interface WorklistDeviationTask {
   messages: WorklistTaskMessage[];
 }
 
-/** Gap Step 2 — a gap-assessment Finding assigned to the user (Finding.owner ==
- *  userId). UNION source alongside the CAPA groups + deviation tasks. Basic
- *  surface for now; the worker panel (docs, rework thread) comes in later steps. */
+/** A gap-assessment Finding assigned to the user (Finding.owner == userId). UNION
+ *  source alongside the CAPA groups + deviation tasks. */
 export interface WorklistFinding {
   id: string;
   reference: string | null;
@@ -183,9 +182,9 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         messages: { orderBy: { createdAt: "asc" }, select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true } },
       },
     }),
-    // Gap Step 2 — gap-assessment findings assigned to this user (Finding.owner
-    // holds a userId). UNION source; mirrors the deviation-task block above.
-    // Active statuses only ("Open" / "In Progress"); "Closed" drops off.
+    // Gap findings assigned to this user (Finding.owner holds a userId). UNION
+    // source; mirrors the deviation-task block above. Active statuses only
+    // (FINDING_ACTIVE_STATUSES); "Closed" drops off.
     prisma.finding.findMany({
       where: { owner: userId, tenantId, deletedAt: null, status: { in: FINDING_ACTIVE_STATUSES } },
       orderBy: { targetDate: "asc" },

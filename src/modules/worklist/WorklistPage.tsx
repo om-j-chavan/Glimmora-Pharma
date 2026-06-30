@@ -221,7 +221,10 @@ export function WorklistPage({
   // Deviation rework tasks join the "Needs rework" section (CAPA rework already
   // shows in both that section AND its group, so this mirrors that).
   const reworkDevTasks = worklist.deviationTasks.filter((t) => t.status === "rework" && devTaskMatches(t));
-  const reworkTotal = reworkItems.length + reworkDevTasks.length;
+  // Rework findings join the same section (mirrors the deviation rework tasks) so
+  // the "Needs rework" card count and this list agree.
+  const reworkFindings = worklist.assignedFindings.filter((f) => f.status === "Rework" && findingMatches(f));
+  const reworkTotal = reworkItems.length + reworkDevTasks.length + reworkFindings.length;
   // Deviation-tasks section respects the active search + filters.
   const visibleDevTasks = worklist.deviationTasks.filter(devTaskMatches);
   // Gap-findings section respects the active search + filters too.
@@ -349,7 +352,7 @@ export function WorklistPage({
         </div>
       )}
 
-      {/* ── NEEDS REWORK (across all CAPAs + deviation tasks) ── */}
+      {/* ── NEEDS REWORK (across CAPAs + deviation tasks + gap findings) ── */}
       {reworkTotal > 0 && (
         <section className="mb-6" aria-labelledby="rework-heading">
           <h2 id="rework-heading" className="text-[12px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "var(--status-blocked)" }}>
@@ -394,6 +397,28 @@ export function WorklistPage({
                   </p>
                   {t.reworkReason && (
                     <p className="text-[11px] mt-0.5" style={{ color: "var(--status-blocked)" }}>Returned: {t.reworkReason}</p>
+                  )}
+                </div>
+                <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              </button>
+            ))}
+            {/* Findings returned for rework — open the finding work panel. */}
+            {reworkFindings.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setSelectedFindingId(f.id)}
+                className="w-full text-left flex items-start gap-3 p-3 border-none cursor-pointer"
+                style={{ background: "var(--status-blocked-bg)", borderBottom: "1px solid var(--bg-border)" }}
+              >
+                <Wrench className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--status-blocked)" }} aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{f.requirement}</p>
+                  <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                    {f.reference ?? f.id.slice(0, 8)} · gap finding{f.targetDate ? ` · target ${dayjs.utc(f.targetDate).format(dateFormat)}` : ""}
+                  </p>
+                  {f.reworkReason && (
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--status-blocked)" }}>Returned: {f.reworkReason}</p>
                   )}
                 </div>
                 <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -564,9 +589,8 @@ export function WorklistPage({
         </section>
       )}
 
-      {/* Gap Step 2 — gap-assessment findings assigned to the user (UNION source).
-          Read-only surface for now; the worker panel (docs, rework thread) comes
-          in later steps. Filter-aware, mirroring the deviation-tasks section. */}
+      {/* Gap-assessment findings assigned to the user (UNION source). Click a row
+          to open FindingWorkPanel. Filter-aware, mirroring the deviation-tasks section. */}
       {visibleFindings.length > 0 && (
         <section className="mb-3 rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
           <div className="px-4 py-2.5 flex items-center gap-1.5" style={{ borderBottom: "1px solid var(--card-border)" }}>
