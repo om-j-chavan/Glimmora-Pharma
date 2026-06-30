@@ -31,7 +31,7 @@ import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { assignDeviationTask, reworkDeviationTask, postDeviationTaskMessage } from "@/actions/deviation-tasks";
 import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
 import { deleteDocument } from "@/actions/documents";
-import { displayName, displayUserName, displaySiteName } from "@/lib/identity-display";
+import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -640,7 +640,8 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               <div><p style={{ color: "var(--text-muted)" }}>Type</p><p className="capitalize font-medium" style={{ color: "var(--text-primary)" }}>{selected.type}</p></div>
               <div><p style={{ color: "var(--text-muted)" }}>Area</p><p className="font-medium" style={{ color: "var(--text-primary)" }}>{selected.area}</p></div>
               <div><p style={{ color: "var(--text-muted)" }}>Site</p><p className="font-medium" style={{ color: "var(--text-primary)" }}>{siteName(selected.siteId)}</p></div>
-              <div><p style={{ color: "var(--text-muted)" }}>Detected by</p><p className="font-medium" style={{ color: "var(--text-primary)" }}>{displayName({ name: selected.detectedBy })}</p></div>
+              {/* "Detected by" removed — it duplicated Owner (owner = creator). Owner
+                  stays in the body row; "Detected date" kept (distinct timestamp). */}
               <div><p style={{ color: "var(--text-muted)" }}>Detected date</p><p className="font-medium" style={{ color: "var(--text-primary)" }}>{dayjs.utc(selected.detectedDate).tz(timezone).format(dateFormat)}</p></div>
             </div>
 
