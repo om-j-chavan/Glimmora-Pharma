@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
+import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 
 // SME Section 1, Stage 2 (FULL) — include shape for the bidirectional
 // CAPA↔Deviation link. Reused by both list and detail queries so the
@@ -89,6 +90,57 @@ export const getCAPA = cache(async (id: string, tenantId: string) => {
       actionItems: ACTION_ITEMS_INCLUDE,
     },
   });
+});
+
+/** A read-only document reference surfaced in the CAPA detail for a CAPA raised
+ *  FROM a deviation — the deviation's own docs + the (cancelled) worker task's
+ *  docs. They are NOT copied into the CAPA's evidence categories; they stay
+ *  Documents on their originating records and are linked here for context. */
+export interface CAPAOriginDoc {
+  id: string;
+  fileName: string;
+  uploadedBy: string;
+  source: "deviation" | "task";
+}
+
+/** Deviation→CAPA carryover (req 4) — fetch the originating deviation's docs and
+ *  the worker task's docs for the "raised from deviation X" reference block. One
+ *  tenant-scoped query (mirrors the batch pattern in queries/deviations.ts). */
+export const getCAPADeviationDocs = cache(async (deviationId: string, tenantId: string): Promise<CAPAOriginDoc[]> => {
+  const tasks = await prisma.deviationTask.findMany({
+    where: { deviationId, tenantId },
+    select: { id: true },
+  });
+  const taskIds = tasks.map((t) => t.id);
+  const docs = await prisma.document.findMany({
+    where: {
+      tenantId, deletedAt: null,
+      OR: [
+        { linkedModule: "Deviation Management", linkedRecordId: deviationId },
+        ...(taskIds.length ? [{ linkedModule: "Deviation Task", linkedRecordId: { in: taskIds } }] : []),
+      ],
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, fileName: true, originalFileName: true, uploadedBy: true, linkedModule: true, category: true, storageKey: true },
+  });
+  // Piece 2 — a categorized task doc with a stored file was converted into a real
+  // CAPA EvidenceFile on raise (it shows in the evidence panel under its category),
+  // so exclude it here to avoid double-listing. The exclusion criteria mirror the
+  // conversion criteria exactly. Parent deviation docs + uncategorized / null-storage
+  // task docs stay as read-only reference links.
+  const wasConvertedToEvidence = (d: { linkedModule: string | null; category: string | null; storageKey: string | null }) =>
+    d.linkedModule === "Deviation Task" &&
+    d.category != null &&
+    (EVIDENCE_CATEGORIES as readonly string[]).includes(d.category) &&
+    d.storageKey != null;
+  return docs
+    .filter((d) => !wasConvertedToEvidence(d))
+    .map((d) => ({
+      id: d.id,
+      fileName: d.originalFileName ?? d.fileName,
+      uploadedBy: d.uploadedBy,
+      source: d.linkedModule === "Deviation Task" ? "task" : "deviation",
+    }));
 });
 
 /**

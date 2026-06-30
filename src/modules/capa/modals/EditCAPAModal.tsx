@@ -139,7 +139,7 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users }: EditCAPA
           </div>
           <div>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Assigned to <span className="text-(--danger)">*</span></p>
-            <Controller name="owner" control={form.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select driver" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} />
+            <Controller name="owner" control={form.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select assignee" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} />
             {form.formState.errors.owner && <p role="alert" className="text-[11px] text-(--danger) mt-1">{form.formState.errors.owner.message}</p>}
           </div>
           <div>

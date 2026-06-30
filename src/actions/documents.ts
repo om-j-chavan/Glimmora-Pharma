@@ -60,7 +60,10 @@ function nowPlusYears(years: number): Date {
  *
  * FormData fields: fileName, description, linkedModule, linkedRecordId, file?.
  */
-export async function createDocument(formData: FormData): Promise<ActionResult> {
+export async function createDocument(
+  formData: FormData,
+  opts?: { bypassAuthorGate?: boolean },
+): Promise<ActionResult> {
   const session = await requireAuth();
   const get = (k: string) => {
     const v = formData.get(k);
@@ -79,8 +82,17 @@ export async function createDocument(formData: FormData): Promise<ActionResult> 
   // authenticated user, incl. viewer, could create). Gate on the documents/
   // evidence author set the UI already assumes (usePermissions("evidence")
   // .canCreate = has(COMPLIANCE_AUTHOR_ROLES)). Viewer is excluded.
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
+  // Stage 4 (deviation redesign) — trusted server callers (e.g.
+  // attachDeviationTaskDocument) that have ALREADY authorized the actor via a
+  // task-assignment predicate (isAssignedToTask) may pass bypassAuthorGate so a
+  // non-author ASSIGNEE (e.g. operations_head) can upload task evidence. The
+  // super_admin bright-line (requireGxPAuthor) and the viewer stop below still
+  // apply. Server-only — no client passes this option.
+  if (!opts?.bypassAuthorGate && !COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
     return { success: false, error: "Your role does not permit creating documents." };
+  }
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot create documents." };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   // super_admin bright line — platform admin never authors GxP records.

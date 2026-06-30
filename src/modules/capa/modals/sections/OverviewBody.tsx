@@ -17,6 +17,8 @@ import { displayUserName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
 import type { CAPA } from "@/store/capa.slice";
 import type { UserConfig } from "@/store/settings.slice";
+import type { CAPAOriginDoc } from "@/lib/queries/capas";
+import { DocList } from "@/components/shared/DocList";
 
 const SOURCE_LABEL: Record<string, string> = {
   "483": "FDA 483 Observation",
@@ -48,6 +50,8 @@ interface OverviewBodyProps {
   onNavigateGap: (findingId: string) => void;
   onEditOpen: () => void;
   editAllowed: boolean;
+  /** Req 4 — read-only deviation+task doc references (when raised from a deviation). */
+  originDocs?: CAPAOriginDoc[];
 }
 
 export function OverviewBody({
@@ -61,6 +65,7 @@ export function OverviewBody({
   onNavigateGap,
   onEditOpen,
   editAllowed,
+  originDocs = [],
 }: OverviewBodyProps) {
   const router = useRouter();
   const baseVariant = getSeverityVariant(capa.risk, "generic");
@@ -180,6 +185,28 @@ export function OverviewBody({
         <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>·</span>
         <Badge variant={baseVariant}>{normalizeSeverityForDisplay(capa.risk, "generic") ?? capa.risk}</Badge>
       </div>
+
+      {/* Req 4 — "Raised from deviation X" linked-document references. The
+          deviation's docs + the (cancelled) worker task's docs, read-only
+          (download via /api/documents/[id]); NOT copied into evidence categories
+          and not attachable here — they live on their originating records. */}
+      {capa.deviation && originDocs.length > 0 && (
+        <div className="capa-card">
+          <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
+            Raised from deviation {capa.deviation.reference ?? "—"} — {originDocs.length} linked document{originDocs.length === 1 ? "" : "s"}
+          </p>
+          <p className="text-[11px] mt-0.5 mb-2" style={{ color: "var(--text-muted)" }}>Read-only references to the originating records (not copied into evidence).</p>
+          <DocList
+            docs={originDocs.map((d) => ({
+              id: d.id,
+              fileName: d.fileName,
+              downloadHref: `/api/documents/${d.id}`,
+              uploadedBy: d.uploadedBy,
+              badge: { label: d.source === "task" ? "Task" : "Deviation", tone: d.source === "task" ? "amber" : "gray" },
+            }))}
+          />
+        </div>
+      )}
 
       {/* CAPA-module batch #4 — provenance vs ownership, shown distinctly:
           the SOURCE record's owner (read-only, from the linked gap) and the

@@ -102,17 +102,17 @@ export async function signAndCloseCAPA(
       description: true,
       status: true,
       ownerId: true,
-      verifiedAt: true,
     },
   });
   if (!existing) return { success: false, error: "CAPA not found" };
 
-  // SME Section 1, Stage 5 (FULL) — closure requires an independent
-  // verification to have happened first. The CAPA must be in
-  // pending_verification AND verifiedAt must be populated. Audit any
-  // attempted closure that bypasses this so an inspector can see who
-  // tried to short-circuit the SoD invariant.
-  if (existing.status !== "pending_verification" || existing.verifiedAt === null) {
+  // Verification step retired. Closure no longer requires an independent
+  // verification: a CAPA is closeable directly from pending_qa_review once
+  // its approvals are satisfied (the approval-progress gate below still
+  // enforces that). Legacy CAPAs parked in pending_verification stay
+  // closeable so in-flight records aren't stranded; the one-time backfill
+  // normalizes them to pending_qa_review.
+  if (existing.status !== "pending_qa_review" && existing.status !== "pending_verification") {
     try {
       await prisma.auditLog.create({
         data: {
@@ -120,23 +120,20 @@ export async function signAndCloseCAPA(
           userId: actor.userId,
           userName: actor.displayName,
           userRole: actor.role,
-          module: "CAPA / Verification",
-          action: "CAPA_CLOSE_BLOCKED_NOT_VERIFIED",
+          module: "CAPA",
+          action: "CAPA_CLOSE_BLOCKED_NOT_APPROVED",
           recordId: id,
           recordTitle: existing.description.slice(0, 80),
-          newValue: JSON.stringify({
-            currentStatus: existing.status,
-            verifiedAt: existing.verifiedAt,
-          }),
+          newValue: JSON.stringify({ currentStatus: existing.status }),
         },
       });
     } catch (err) {
-      console.error("[action] failed to write CAPA_CLOSE_BLOCKED_NOT_VERIFIED audit:", err);
+      console.error("[action] failed to write CAPA_CLOSE_BLOCKED_NOT_APPROVED audit:", err);
     }
     return {
       success: false,
       error:
-        "Cannot close CAPA — independent verification is required first. An eligible verifier (distinct from creator and from every approver) must sign the verification step.",
+        "Cannot close CAPA - it must be approved (still in QA review) before it can be signed and closed.",
     };
   }
   // CHANGE CONTROL HIDDEN — ccLinks query removed from the Promise.all
@@ -416,6 +413,20 @@ export async function signAndCloseCAPA(
       await prisma.finding.update({
         where: { id: capa.findingId, tenantId: session.user.tenantId },
         data: { status: "closed" },
+      });
+    }
+
+    // Stage 3 (deviation redesign) — CAPA-close UNBLOCKS a linked deviation but
+    // does NOT close it: NO auto-close. A deviation parked in "capa_pending"
+    // (set when the CAPA was raised) moves to "pending_qa_review" so QA can
+    // perform the Part 11 SIGNED close via closeDeviation (the only close path).
+    // Status-guarded via updateMany so a deviation in any other state is never
+    // disturbed (no-op if not capa_pending). Mirrors the Finding cascade above
+    // (post-tx, best-effort).
+    if (capa.deviationId) {
+      await prisma.deviation.updateMany({
+        where: { id: capa.deviationId, tenantId: session.user.tenantId, status: "capa_pending" },
+        data: { status: "pending_qa_review" },
       });
     }
 

@@ -1,6 +1,7 @@
 import type { Deviation as PrismaDeviation } from "@prisma/client";
 import type { Deviation, DeviationStatus, DeviationSeverity, ImpactLevel } from "@/store/deviation.slice";
 import type { LinkedDocument, DocFileType, DocStatus } from "@/components/shared/DocumentUpload";
+import type { WorklistDoc } from "@/lib/queries/worklist";
 
 /** Selected Document fields hydrated by getDeviations for each deviation
  *  (persisted evidence, linked via linkedModule="Deviation Management"). */
@@ -23,6 +24,26 @@ export interface DeviationDocRow {
 export type PrismaDeviationWithCapa = PrismaDeviation & {
   sourcedCAPA?: { id: string; reference: string | null } | null;
   documents?: DeviationDocRow[];
+  // Stage 4 (deviation redesign) — the current active low-priority task row
+  // (selected/serialised by getDeviations). Null when none is open.
+  activeTask?: {
+    id: string;
+    assignee: string;
+    assigneeId: string | null;
+    message: string;
+    dueDate: Date | null;
+    status: string;
+    completionNotes: string | null;
+    submittedAt: Date | null;
+    reworkReason: string | null;
+    // Stage 5 — flat QA↔worker conversation.
+    messages: { id: string; authorId: string | null; authorName: string; authorRole: string; body: string; createdAt: Date }[];
+    // Count of the task's own documents (for the raise-CAPA confirm preview).
+    docCount: number;
+    // The active task's own documents (serialised to WorklistDoc by getDeviations)
+    // so the QA modal can show them grouped by category.
+    taskDocs: WorklistDoc[];
+  } | null;
 };
 
 function toDocFileType(ext: string | null, mime: string | null): DocFileType {
@@ -64,6 +85,28 @@ export function adaptDeviation(p: PrismaDeviationWithCapa): Deviation {
     type: p.type as Deviation["type"],
     category: p.category as Deviation["category"],
     severity: p.severity as DeviationSeverity,
+    // Stage 2/3 (deviation redesign) — QA triage priority drives the split.
+    priority: p.priority ?? undefined,
+    // Stage 4 — current active low-priority task (Dates → ISO).
+    activeTask: p.activeTask
+      ? {
+          id: p.activeTask.id,
+          assignee: p.activeTask.assignee,
+          assigneeId: p.activeTask.assigneeId,
+          message: p.activeTask.message,
+          dueDate: p.activeTask.dueDate ? p.activeTask.dueDate.toISOString() : null,
+          status: p.activeTask.status,
+          completionNotes: p.activeTask.completionNotes,
+          submittedAt: p.activeTask.submittedAt ? p.activeTask.submittedAt.toISOString() : null,
+          reworkReason: p.activeTask.reworkReason,
+          messages: p.activeTask.messages.map((m) => ({
+            id: m.id, authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole,
+            body: m.body, createdAt: m.createdAt.toISOString(),
+          })),
+          docCount: p.activeTask.docCount,
+          taskDocs: p.activeTask.taskDocs,
+        }
+      : null,
     area: p.area,
     detectedBy: p.detectedBy,
     detectedDate: p.detectedDate.toISOString(),

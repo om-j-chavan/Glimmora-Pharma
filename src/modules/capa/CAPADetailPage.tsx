@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Pencil, Send, ShieldCheck, AlertTriangle, Lock, Clock, Link2, Users, Check, History, TrendingUp,
@@ -27,7 +27,10 @@ import {
   signAndCloseCAPA as signAndCloseCAPAServer,
   updateCAPA as updateCAPAServer,
   startCAPAProgress as startCAPAProgressServer,
+  loadApprovalsForCAPA,
 } from "@/actions/capas";
+import { loadCommentsForCAPA } from "@/actions/capa-comments";
+import { evaluateApprovalProgress, type ApprovalTier } from "@/lib/capa-approvals";
 import { OverviewBody } from "./modals/sections/OverviewBody";
 import { RcaBody } from "./modals/sections/RcaBody";
 // Phase B — sections relocated out of the old ActionsPanel into their zones:
@@ -37,7 +40,6 @@ import { ActionItemsSection } from "./tabs/sections/ActionItemsSection";
 import { AlignmentReviewSection } from "./tabs/sections/AlignmentReviewSection";
 import { DiscussionSection } from "./tabs/sections/DiscussionSection";
 import { ApprovalsSection } from "./tabs/sections/ApprovalsSection";
-import { VerificationSection } from "./tabs/sections/VerificationSection";
 import { EffectivenessSection } from "./tabs/sections/EffectivenessSection";
 import { EvidenceCollectionPanel } from "./tabs/EvidenceCollectionPanel";
 import { EffectivenessCriteriaPanel } from "./tabs/EffectivenessCriteriaPanel";
@@ -48,7 +50,7 @@ import { CapaAuditTrailBar } from "./components/CapaAuditTrailBar";
 import { SignCloseModal } from "./modals/SignCloseModal";
 import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
 import { getNextStep, type DetailSubTab } from "./modals/helpers/getNextStep";
-import type { CapaAuditEntry } from "@/lib/queries/capas";
+import type { CapaAuditEntry, CAPAOriginDoc } from "@/lib/queries/capas";
 
 const SOURCE_LABEL: Record<string, string> = {
   "483": "FDA 483 Observation", "Gap Assessment": "Gap Assessment Finding", Deviation: "Deviation Report",
@@ -63,9 +65,11 @@ export interface CAPADetailPageProps {
   criteriaCount: number;
   /** Phase B — Zone 6 audit trail for this CAPA (newest first). */
   auditTrail: CapaAuditEntry[];
+  /** Req 4 — read-only deviation+task doc references when raised from a deviation. */
+  originDocs?: CAPAOriginDoc[];
 }
 
-export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail }: CAPADetailPageProps) {
+export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail, originDocs = [] }: CAPADetailPageProps) {
   const router = useRouter();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
   const capaCan = usePermissions("capa", { capaRisk: capa.risk });
@@ -122,6 +126,36 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
   const isAuthor = capaCan.canEdit; // COMPLIANCE_AUTHOR_ROLES mirror
   const isDriver = !isViewOnly && !!capa.owner && capa.owner === currentUser?.id;
   const editAllowed = !isViewOnly && capa.status !== "closed" && capaCan.canEdit;
+
+  // Verification retired — gate the header "Sign & Close" on real approval
+  // progress (not just role). Mirrors the server close-gate: approvals plus
+  // unresolved-concern comments. The server still enforces; this only stops a
+  // premature click. Re-runs when the discussion thread changes (a new/cleared
+  // concern flips the gate).
+  const [approvalsSatisfied, setApprovalsSatisfied] = useState(false);
+  useEffect(() => {
+    if (capa.status !== "pending_qa_review" && capa.status !== "pending_verification") {
+      setApprovalsSatisfied(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const [aRes, cRes] = await Promise.all([
+        loadApprovalsForCAPA(capa.id),
+        loadCommentsForCAPA(capa.id),
+      ]);
+      if (cancelled) return;
+      const approvals = aRes.success ? (aRes.data as { approverRole: string; approverId: string }[]) : [];
+      const comments = cRes.success ? (cRes.data as { isConcern: boolean; resolvedAt: Date | null; deletedAt: Date | null }[]) : [];
+      const progress = evaluateApprovalProgress(
+        capa.risk as ApprovalTier,
+        approvals.map((a) => ({ approverRole: a.approverRole, approverId: a.approverId })),
+        comments.map((c) => ({ isConcern: c.isConcern, resolvedAt: c.resolvedAt, deletedAt: c.deletedAt })),
+      );
+      setApprovalsSatisfied(progress.satisfied);
+    })();
+    return () => { cancelled = true; };
+  }, [capa.id, capa.status, capa.risk, discussionVersion]);
 
   // People pills — distinct contributors (driver + action owners).
   const contributors = useMemo(() => {
@@ -267,7 +301,7 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
             {isQAHead && (
               <Button variant="danger" size="sm" icon={AlertTriangle} onClick={() => { clearFilter(); setRejectOpen(true); }}>Reject</Button>
             )}
-            {canSign && canCloseCapa && (
+            {canSign && canCloseCapa && approvalsSatisfied && (
               <Button variant="primary" size="sm" icon={ShieldCheck} onClick={() => { clearFilter(); setSignError(null); setSignOpen(true); }}>Sign &amp; Close</Button>
             )}
           </div>
@@ -275,18 +309,17 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
       );
     }
     if (capa.status === "pending_verification") {
-      const verifiedTint = capa.verifiedAt;
+      // Verification retired — this state is legacy-only (in-flight CAPAs from
+      // before the change). No Verify step; closure is allowed once approvals
+      // are satisfied, exactly like pending_qa_review.
       return (
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-[13px] font-semibold flex items-center gap-1.5" style={{ color: verifiedTint ? "var(--status-done)" : "var(--status-active)" }}>
+          <p className="text-[13px] font-semibold flex items-center gap-1.5" style={{ color: "var(--status-done)" }}>
             <ShieldCheck className="w-4 h-4" aria-hidden="true" />
-            {capa.verifiedAt ? "Verified — ready for sign & close." : "Awaiting independent QA verification."}
+            Approved — ready for sign &amp; close.
           </p>
           <div className="flex gap-2">
-            {capaCan.canApprove && !capa.verifiedAt && (
-              <Button variant="secondary" size="sm" icon={ShieldCheck} onClick={() => goToSection("capa-verification")}>Verify</Button>
-            )}
-            {canSign && canCloseCapa && (
+            {canSign && canCloseCapa && approvalsSatisfied && (
               <Button variant="primary" size="sm" icon={ShieldCheck} onClick={() => { clearFilter(); setSignError(null); setSignOpen(true); }}>Sign &amp; Close</Button>
             )}
           </div>
@@ -477,17 +510,13 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
           <OverviewBody capa={capa} isDark={isDark} users={users} timezone={timezone} dateFormat={dateFormat}
             showMigrationNotice={false} onDismissNotice={() => undefined}
             onNavigateGap={(fid) => router.push(`/gap-assessment?openFindingId=${encodeURIComponent(fid)}`)}
-            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} />
+            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} originDocs={originDocs} />
           {/* Phase D — wrap the relocated (protected) sections in a card; internals untouched. */}
           <section id="capa-discussion" className="capa-card"><DiscussionSection capa={capa} onCommentsChange={() => setDiscussionVersion((v) => v + 1)} /></section>
-          {/* Batch 3a #2 — Approvals + Independent Verification combined into ONE
-              card, two sub-sections. Anchor ids kept on the inner divs so the
-              banner CTAs still scroll here; section components unchanged. */}
+          {/* Verification retired — Approvals stands alone (full width). Anchor
+              id kept so the banner CTA still scrolls here; component unchanged. */}
           <section className="capa-card">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div id="capa-approvals" className="min-w-0"><ApprovalsSection capa={capa} discussionVersion={discussionVersion} /></div>
-              <div id="capa-verification" className="min-w-0 lg:pl-4 lg:border-l" style={{ borderColor: "var(--card-border, var(--bg-border))" }}><VerificationSection capa={capa} /></div>
-            </div>
+            <div id="capa-approvals" className="min-w-0"><ApprovalsSection capa={capa} discussionVersion={discussionVersion} /></div>
           </section>
         </div>
       )}

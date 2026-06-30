@@ -33,7 +33,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
-import { Search, Save, CheckCircle2, Pencil, Plus, AlertTriangle, ExternalLink } from "lucide-react";
+import { Search, Save, CheckCircle2, Pencil, AlertTriangle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -153,17 +153,21 @@ function SavedDeviationRcaDisplay({ method, rootCause }: { method?: DeviationRCA
   if (method === "5 Why") {
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
     if (lines.length === 0) return null;
-    const structured = lines.some((l) => /^Why\s*\d+\s*:/i.test(l));
-    if (!structured) {
+    // Only "Why N:" lines are numbered whys. A 5-Why has exactly N whys and the
+    // LAST why IS the root cause — so we drop any trailing "Root cause: …" line
+    // (some formats append one) rather than mislabelling it "Why N+1". Fixes the
+    // off-by-one where the root cause rendered as "Why 6 — Root cause".
+    const whyLines = lines.filter((l) => /^Why\s*\d+\s*:/i.test(l));
+    if (whyLines.length === 0) {
       return <div className="space-y-3"><RcaBlock label="Root cause" answer={text.trim()} root /></div>;
     }
     return (
       <div className="space-y-3">
-        {lines.map((line, i) => {
+        {whyLines.map((line, i) => {
           const m = line.match(/^Why\s*(\d+)\s*:\s*(.*)$/i);
           const label = m ? `Why ${m[1]}` : `Why ${i + 1}`;
           const answer = m ? m[2] : line;
-          const isLast = i === lines.length - 1;
+          const isLast = i === whyLines.length - 1;
           return <RcaBlock key={i} label={isLast ? `${label} — Root cause` : label} answer={answer} root={isLast} />;
         })}
       </div>
@@ -534,8 +538,6 @@ export function InvestigationSection({
  * ══════════════════════════════════════════════════════════════════ */
 
 interface CapaDecisionProps extends WorkflowProps {
-  /** Opens the existing Raise-CAPA flow (parent owns it). */
-  onRaiseCAPA: () => void;
   /** Navigate to the linked CAPA in the CAPA module. */
   linkedCapaId?: string;
   linkedCapaRef?: string;
@@ -549,7 +551,6 @@ export function CapaDecisionSection({
   resolveUser,
   onChanged,
   onError,
-  onRaiseCAPA,
   linkedCapaId,
   linkedCapaRef,
 }: CapaDecisionProps) {
@@ -557,9 +558,8 @@ export function CapaDecisionSection({
   const completed = !!deviation.investigationCompletedAt;
   const decided = !!deviation.capaDecisionMade;
 
-  // Capability mirrors of the server (exclude super_admin from authoring).
+  // Capability mirror of the server (excludes super_admin from authoring).
   const devCan = usePermissions("deviation");
-  const capaCan = usePermissions("capa");
   const isReporter = !!deviation.createdById && deviation.createdById === currentUserId;
   const isInvestigator = !!deviation.investigationCompletedById && deviation.investigationCompletedById === currentUserId;
   // QA-role, not the reporter, not the investigator.
@@ -703,15 +703,16 @@ export function CapaDecisionSection({
     );
   }
 
-  /* ── STATE C — CAPA required, not yet raised ── */
+  /* ── STATE C — CAPA required, not yet raised. CONSOLIDATION: the Raise-CAPA
+   *  action now lives ONLY on the priority-disposition banner (DeviationPage),
+   *  the single high/med raise surface. This section keeps the decision record
+   *  + justification and points to that banner. ── */
   return (
     <div>
       <SectionHeader title="CAPA Decision" status="CAPA required" />
       <div className="space-y-2">
         {justification}
-        {writable && capaCan.canCreate && (
-          <Button variant="primary" size="sm" icon={Plus} onClick={onRaiseCAPA}>Raise CAPA</Button>
-        )}
+        <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Raise the CAPA from the priority disposition below.</p>
       </div>
     </div>
   );

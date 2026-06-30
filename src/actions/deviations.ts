@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
+import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
 import { createDocument } from "@/actions/documents";
 import {
@@ -36,8 +36,8 @@ type ActionResult<T = unknown> =
  * audit) — no parallel storage. This wrapper adds the deviation-specific guards:
  *  - parent-tenant verification: the deviation must exist in the actor's tenant
  *    (tenant from the session, NEVER the client) — else FORBIDDEN, no write/audit;
- *  - role gate COMPLIANCE_AUTHOR_ROLES (same author set createDocument enforces;
- *    excludes viewer — closes the requireAuth-only gap);
+ *  - role gate DEVIATION_QA_ROLES (Part A — deviation-level evidence attach is a
+ *    QA action; the task assignee uses attachDeviationTaskDocument instead);
  *  - linkedModule/linkedRecordId are SET server-side (any client value ignored)
  *    so a document can't be linked to a spoofed/foreign deviation;
  *  - a DEVIATION_EVIDENCE_ATTACHED audit row (module "Deviation").
@@ -51,24 +51,32 @@ export async function attachDeviationDocument(
   // Parent-tenant verification — load the deviation in the actor's tenant.
   const deviation = await prisma.deviation.findFirst({
     where: { id: deviationId, tenantId: session.user.tenantId },
-    select: { id: true, reference: true },
+    select: { id: true, reference: true, createdById: true },
   });
   if (!deviation) return { success: false, error: "FORBIDDEN" };
 
-  // Role gate — same author set createDocument enforces (viewer excluded).
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Your role does not permit attaching evidence." };
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  // Access gate — QA may attach to ANY deviation (Part A). ADDITIONALLY the
+  // deviation's own REPORTER may attach to THEIR deviation: this is what the
+  // create-modal optional upload uses (the reporter supplies supporting evidence
+  // while reporting it). Every other non-QA role is still blocked, and the
+  // detail-modal attach UI stays QA-only. A non-author reporter (e.g.
+  // operations_head) bypasses createDocument's author gate exactly like the task
+  // assignee does — the super_admin/viewer stops inside createDocument still apply.
+  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
+  const isReporter = !!deviation.createdById && deviation.createdById === actor.userId;
+  if (!isQA && !isReporter) {
+    return { success: false, error: "Only QA Head or the deviation's reporter can attach evidence to it." };
   }
 
   // Link server-side (ignore any client-supplied linkage), then delegate to the
   // shared pipeline (file storage + Document row + its DOCUMENT_UPLOADED audit).
   formData.set("linkedModule", "Deviation Management");
   formData.set("linkedRecordId", deviationId);
-  const created = await createDocument(formData);
+  const created = await createDocument(formData, { bypassAuthorGate: isReporter });
   if (!created.success) return created;
 
   // Deviation-module attach audit (scoped to the actor's tenant).
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   await prisma.auditLog.create({
     data: {
       tenantId: session.user.tenantId,
@@ -92,6 +100,16 @@ const CloseDeviationSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
+// Stage 2 (deviation redesign) — default triage priority from FDA severity.
+// Critical → High, Major → Medium, Minor → Low. The reporter/QA can override
+// in the UI; this is only the fallback when a caller omits priority.
+function severityToPriority(severity: string): "Low" | "Medium" | "High" {
+  const canon = normalizeSeverityForDisplay(severity, "fda");
+  if (canon === "Critical") return "High";
+  if (canon === "Major") return "Medium";
+  return "Low";
+}
+
 const CreateDeviationSchema = z.object({
   title: z.string().min(5),
   description: z.string().min(10),
@@ -108,8 +126,19 @@ const CreateDeviationSchema = z.object({
   patientSafetyImpact: z.enum(["high", "medium", "low", "none"]),
   productQualityImpact: z.enum(["high", "medium", "low", "none"]),
   regulatoryImpact: z.enum(["high", "medium", "low", "none"]),
-  owner: z.string().min(1),
-  dueDate: z.string().min(1),
+  // Stage 2 (deviation redesign) — `owner` is no longer collected at creation.
+  // Triage priority instead; optional here, defaulted from severity via
+  // severityToPriority when the caller omits it.
+  priority: z.enum(["Low", "Medium", "High"]).optional(),
+  dueDate: z.string().min(1).refine((d) => {
+    // Defense-in-depth behind the DatePicker's client min — reject obviously-past
+    // due dates even if the client is bypassed. Floored at yesterday (server-local)
+    // to absorb client/server timezone skew.
+    const f = new Date();
+    f.setDate(f.getDate() - 1);
+    const floor = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-${String(f.getDate()).padStart(2, "0")}`;
+    return d >= floor;
+  }, "Due date cannot be in the past"),
   detectedDate: z.string().optional(),
   siteId: z.string().optional(),
   batchesAffected: z.string().optional(),
@@ -219,7 +248,13 @@ export async function createDeviation(
             patientSafetyImpact: parsed.data.patientSafetyImpact,
             productQualityImpact: parsed.data.productQualityImpact,
             regulatoryImpact: parsed.data.regulatoryImpact,
-            owner: parsed.data.owner,
+            // Owner = creator. The reporter is recorded as the deviation owner
+            // (the session identity, which equals their User.id for site users —
+            // the same value ownerName() resolves and any owner-gate compares).
+            // Replaces the Stage-2 empty-string placeholder that rendered as
+            // "Unknown user" and left selected.owner blank.
+            owner: session.user.id,
+            priority: parsed.data.priority ?? severityToPriority(parsed.data.severity),
             siteId: parsed.data.siteId ?? null,
             batchesAffected: parsed.data.batchesAffected ?? null,
             tenantId: session.user.tenantId,
@@ -384,6 +419,18 @@ export async function closeDeviation(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
+  // Stage 4 (deviation redesign) — low-priority task path: if this deviation
+  // was worked as a DeviationTask, the SIGNED close also completes the task,
+  // and SoD requires the closer (reviewer) ≠ the task assignee (ID-based FK
+  // compare, REUSABLES.md). No-op for deviations with no task.
+  const activeTask = await prisma.deviationTask.findFirst({
+    where: { deviationId: id, tenantId: session.user.tenantId, deletedAt: null, status: { notIn: ["closed", "cancelled"] } },
+    select: { id: true, assigneeId: true },
+  });
+  if (activeTask?.assigneeId && activeTask.assigneeId === actor.userId) {
+    return { success: false, error: "Separation of duties: the task assignee cannot also sign its closure. A different QA Head must close it." };
+  }
+
   // SME Section 1, Stage 1 â€” CAPA Decision Gate.
   // A Critical deviation cannot be closed until a CAPA exists and is linked.
   // The linked CAPA must also still exist in this tenant (an orphan
@@ -538,6 +585,15 @@ export async function closeDeviation(
             closureSignatureId: sig.id,
           },
         });
+        // Stage 4 (deviation redesign) — complete the linked low-priority task
+        // on the signed close (the deviation IS the regulated record; the task
+        // work was lightweight). SoD was enforced above. Atomic with the close.
+        if (activeTask) {
+          await tx.deviationTask.update({
+            where: { id: activeTask.id, tenantId: session.user.tenantId },
+            data: { status: "closed", reviewedAt: closedAt, reviewedById: actor.userId },
+          });
+        }
         return { deviation: updated, signedRecord: sig };
       },
     );
@@ -758,6 +814,18 @@ export async function completeInvestigation(
         investigationCompletedById: actor.userId,
       },
     });
+    // INVESTIGATION-FIRST model — completing the investigation hands the
+    // deviation off to QA review (pending_qa_review), where QA dispositions it
+    // by priority (low → task, high/med → CAPA) and performs the signed close.
+    // (Replaces the former separate submitDeviationForReview step.) Guarded to
+    // advance ONLY from under_investigation, so re-editing a completed RCA at a
+    // later status never resets capa_pending / pending_qa_review back.
+    if (existing.status === "under_investigation") {
+      await prisma.deviation.updateMany({
+        where: { id, tenantId: session.user.tenantId, status: "under_investigation" },
+        data: { status: "pending_qa_review" },
+      });
+    }
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,
@@ -788,8 +856,11 @@ export async function completeInvestigation(
  */
 export async function startInvestigation(id: string): Promise<ActionResult> {
   const session = await requireAuth();
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot start an investigation." };
+  // Part A access-control fix — starting an investigation is a QA action
+  // (mirrors closeDeviation/rejectDeviation). Was only viewer-blocked, which
+  // leaked to every non-viewer author (e.g. regulatory_affairs).
+  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can start an investigation." };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {

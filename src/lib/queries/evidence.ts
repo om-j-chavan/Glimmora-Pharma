@@ -17,6 +17,18 @@ export const EVIDENCE_CATEGORIES = [
 ] as const;
 export type EvidenceCategory = (typeof EVIDENCE_CATEGORIES)[number];
 
+/** Human labels for the 7 GxP categories — single source of truth shared by the
+ *  CAPA evidence panel and the deviation task-doc grouping. */
+export const EVIDENCE_CATEGORY_LABEL: Record<EvidenceCategory, string> = {
+  BATCH_RECORDS: "Batch Records",
+  TRAINING_RECORDS: "Training Records",
+  EQUIPMENT_LOGS: "Equipment Logs",
+  ENVIRONMENTAL_DATA: "Environmental Data",
+  DEVIATION_HISTORY: "Deviation History",
+  WITNESS_INTERVIEWS: "Witness Interviews",
+  SUPPLIER_DATA: "Supplier Data",
+};
+
 export const EVIDENCE_STATUSES = [
   "PENDING",
   "IN_PROGRESS",

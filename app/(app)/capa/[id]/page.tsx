@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { ErrorBoundary } from "@/components/errors";
 import { CAPADetailPage } from "@/modules/capa/CAPADetailPage";
 import { requireAuth } from "@/lib/auth";
-import { getCAPA, getCapaAuditTrail } from "@/lib/queries/capas";
+import { getCAPA, getCapaAuditTrail, getCAPADeviationDocs } from "@/lib/queries/capas";
 import { prisma } from "@/lib/prisma";
 import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
 import { getCAPAReadiness, EVIDENCE_CATEGORY_COUNT } from "@/lib/capa-readiness";
@@ -30,6 +30,8 @@ export default async function CAPADetailRoute({ params }: PageProps) {
   const actionItems = (row.actionItems ?? []).map((a) => ({ status: a.status }));
   const readiness = getCAPAReadiness(row, actionItems, evidenceItems, criteria);
   const resolved = evidenceItems.filter((e) => e.status === "COMPLETE" || e.status === "NOT_APPLICABLE").length;
+  // Req 4 — linked deviation + task docs for the "raised from deviation" block.
+  const originDocs = row.deviationId ? await getCAPADeviationDocs(row.deviationId, session.user.tenantId) : [];
 
   return (
     <ErrorBoundary moduleName="CAPA">
@@ -39,6 +41,7 @@ export default async function CAPADetailRoute({ params }: PageProps) {
         evidence={{ resolved, total: EVIDENCE_CATEGORY_COUNT }}
         criteriaCount={criteria.length}
         auditTrail={auditTrail}
+        originDocs={originDocs}
       />
     </ErrorBoundary>
   );

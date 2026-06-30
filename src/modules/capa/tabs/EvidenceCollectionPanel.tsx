@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
-  Download,
   FileText,
   GraduationCap,
   History,
@@ -21,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
+import { DocList } from "@/components/shared/DocList";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -30,14 +30,16 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { roleLabel } from "@/lib/labels/roles";
 import {
   addEvidenceFile,
+  addEvidenceFileToCategory,
+  rejectEvidenceCategory,
   loadEvidenceForCAPA,
   loadEvidenceNoteHistory,
   removeEvidenceFile,
   updateEvidenceStatus,
 } from "@/actions/evidence";
-import { rejectCAPA } from "@/actions/capas";
 import {
   EVIDENCE_CATEGORIES,
+  EVIDENCE_CATEGORY_LABEL as CATEGORY_LABEL,
   type EvidenceCategory,
   type EvidenceItemSummary,
   type EvidenceStatus,
@@ -55,19 +57,13 @@ interface EvidenceCollectionPanelProps {
   /** Parent CAPA status — the QA reject control only shows at pending_qa_review. */
   capaStatus?: string;
   /** Viewer may disposition (reject) evidence — qa_head (CAPA_REJECT_ROLES). SoD:
-   *  not the driver/author. Combined with capaStatus === "pending_qa_review". */
+   *  not the assignee/author. Combined with capaStatus === "pending_qa_review". */
   canRejectEvidence?: boolean;
+  /** Worklist surface for the single assigned worker: enables upload +
+   *  propose-N/A; hides QA/author-only controls (mark COMPLETE/IN_PROGRESS,
+   *  edit notes, remove files). The server enforces the same — this is UX. */
+  assigneeMode?: boolean;
 }
-
-const CATEGORY_LABEL: Record<EvidenceCategory, string> = {
-  BATCH_RECORDS: "Batch Records",
-  TRAINING_RECORDS: "Training Records",
-  EQUIPMENT_LOGS: "Equipment Logs",
-  ENVIRONMENTAL_DATA: "Environmental Data",
-  DEVIATION_HISTORY: "Deviation History",
-  WITNESS_INTERVIEWS: "Witness Interviews",
-  SUPPLIER_DATA: "Supplier Data",
-};
 
 const CATEGORY_ICON: Record<EvidenceCategory, typeof FileText> = {
   BATCH_RECORDS: FileText,
@@ -117,7 +113,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChange, capaStatus, canRejectEvidence = false }: EvidenceCollectionPanelProps) {
+export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChange, capaStatus, canRejectEvidence = false, assigneeMode = false }: EvidenceCollectionPanelProps) {
   const [items, setItems] = useState<EvidenceItemSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -191,20 +187,20 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
     refresh();
   }, [refresh]);
 
-  // QA rejects a specific evidence item — routes through the existing
-  // rejectCAPA bounce (pending_qa_review → in_progress), so the category
-  // un-resolves and evidence unlocks for re-work. Reason required (≥ 5).
+  // QA rejects ONE evidence category in place — sets it REJECTED and re-opens
+  // just that category for the assignee. The CAPA stays in pending_qa_review
+  // (no whole-CAPA bounce). Reason required (≥ 5).
   async function handleRejectEvidence() {
     if (!rejectItem) return;
     if (rejectReason.trim().length < 5) { setRejectError("Add a brief reason (at least 5 characters)."); return; }
     setRejecting(true);
     setRejectError(null);
-    const res = await rejectCAPA(capaId, { reason: rejectReason.trim(), rejectedEvidenceItems: [rejectItem.id] });
+    const res = await rejectEvidenceCategory(rejectItem.id, { reason: rejectReason.trim() });
     setRejecting(false);
     if (!res.success) { setRejectError(res.error || "Could not reject evidence."); panelToast.error(res.error || "Could not reject evidence."); return; }
     setRejectItem(null);
     setRejectReason("");
-    panelToast.success("Evidence rejected — CAPA returned to in progress for rework.");
+    panelToast.success("Evidence rejected — returned to the assignee for rework (CAPA stays in QA review).");
     await refresh();
   }
 
@@ -299,6 +295,11 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
         </div>
       </div>
 
+      {/* STEP 2 — single uploader with a category dropdown; files auto-file into
+          the chosen GxP category. Hidden when read-only or while the CAPA is
+          locked for QA review (a re-opened category uses its own card upload). */}
+      {!readOnly && !isLocked && <CategoryUpload capaId={capaId} onChange={refresh} />}
+
       {(items ?? []).map((item) => (
         <EvidenceCard
           key={item.id}
@@ -308,6 +309,7 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
           isExpanded={isExpanded(item.category)}
           onToggleExpanded={() => toggleExpanded(item.category)}
           canReject={canReject}
+          assigneeMode={assigneeMode}
           onReject={() => { setRejectItem(item); setRejectReason(""); setRejectError(null); }}
         />
       ))}
@@ -316,7 +318,7 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
       {rejectItem && (
         <Modal open onClose={() => { if (!rejecting) { setRejectItem(null); setRejectError(null); } }} title={`Reject "${CATEGORY_LABEL[rejectItem.category]}" evidence`}>
           <p className="text-[12px] mb-2" style={{ color: "var(--text-secondary)" }}>
-            Rejecting bounces the CAPA back to <strong>in progress</strong> so the team can re-work this category. Record why it&rsquo;s inadequate (≥ 5 characters).
+            Rejecting re-opens <strong>just this category</strong> for the assignee to re-work; the CAPA stays in <strong>QA review</strong>. Record why it&rsquo;s inadequate (≥ 5 characters).
           </p>
           <textarea
             className="input text-[12px] w-full min-h-20"
@@ -336,6 +338,66 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
   );
 }
 
+/* ── Single uploader with a category dropdown (STEP 2) ── */
+
+function CategoryUpload({ capaId, onChange }: { capaId: string; onChange: () => void }) {
+  const [category, setCategory] = useState<EvidenceCategory>(EVIDENCE_CATEGORIES[0]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const onPick = useCallback(
+    async (file: File | null | undefined) => {
+      if (!file) return;
+      setErr(null);
+      if (file.size > MAX_MB * 1024 * 1024) { setErr(`File exceeds ${MAX_MB} MB limit`); return; }
+      if (!ALLOWED_MIME_PREFIXES.some((m) => file.type === m)) { setErr("File type not allowed"); return; }
+      const fd = new FormData();
+      fd.append("file", file);
+      setBusy(true);
+      const res = await addEvidenceFileToCategory(capaId, category, fd);
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+      if (!res.success) { setErr(res.error); return; }
+      onChange();
+    },
+    [capaId, category, onChange],
+  );
+
+  return (
+    <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+      <p className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--text-primary)" }}>Add evidence</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          className="input text-[12px]"
+          value={category}
+          onChange={(e) => setCategory(e.target.value as EvidenceCategory)}
+          disabled={busy}
+          aria-label="Evidence category"
+        >
+          {EVIDENCE_CATEGORIES.map((c) => (
+            <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>
+          ))}
+        </select>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => void onPick(e.target.files?.[0])}
+        />
+        <Button variant="secondary" size="sm" icon={Upload} disabled={busy} loading={busy} onClick={() => inputRef.current?.click()}>
+          Upload to category
+        </Button>
+      </div>
+      <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+        Picks the GxP category and files your document there. Max {MAX_MB} MB.
+      </p>
+      {err && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{err}</p>}
+    </div>
+  );
+}
+
 /* ── Per-category card ── */
 
 interface CardProps {
@@ -350,10 +412,13 @@ interface CardProps {
   onToggleExpanded: () => void;
   /** QA reviewer may reject this evidence item (qa_head @ pending_qa_review). */
   canReject?: boolean;
+  /** Assignee surface — restrict the status dropdown to propose-N/A, lock notes,
+   *  hide file-remove. Upload stays enabled (server allows the assignee). */
+  assigneeMode?: boolean;
   onReject?: () => void;
 }
 
-function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, canReject = false, onReject }: CardProps) {
+function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, canReject = false, assigneeMode = false, onReject }: CardProps) {
   const toast = useToast();
   const Icon = CATEGORY_ICON[item.category];
   const locked = item.isLocked;
@@ -591,7 +656,7 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
       {/* Phase B G2 — teaching empty state for a pending category. */}
       {status === "PENDING" && !locked && (
         <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
-          Needs files or N/A + reason. Assigned fixers answer theirs; the driver sweeps the rest.
+          Needs files or N/A + reason. The assigned worker uploads evidence; QA reviews and marks it complete.
         </p>
       )}
 
@@ -600,9 +665,15 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
         <Dropdown
           value={status}
           onChange={(v) => void handleStatusChange(v as EvidenceStatus)}
-          disabled={disabled || savingStatus}
+          // Assignee may only PROPOSE N/A (server allows assignee → NOT_APPLICABLE
+          // only); COMPLETE/IN_PROGRESS stay QA/author. Once N/A, exiting is
+          // author-only, so the control locks.
+          disabled={disabled || savingStatus || (assigneeMode && status === "NOT_APPLICABLE")}
           width="w-full"
-          options={(["PENDING", "IN_PROGRESS", "COMPLETE", "NOT_APPLICABLE"] as EvidenceStatus[]).map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
+          options={(assigneeMode
+            ? Array.from(new Set<EvidenceStatus>([status, "NOT_APPLICABLE"]))
+            : (["PENDING", "IN_PROGRESS", "COMPLETE", "NOT_APPLICABLE"] as EvidenceStatus[])
+          ).map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
         />
         <div>
           <textarea
@@ -610,7 +681,7 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Notes — what evidence is being collected, by whom, why…"
-            disabled={disabled}
+            disabled={disabled || assigneeMode}
             aria-label={`Notes for ${CATEGORY_LABEL[item.category]}`}
             maxLength={10_000}
           />
@@ -627,7 +698,7 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
       )}
 
       {/* Files */}
-      <FileList item={item} disabled={disabled} onChange={onChange} />
+      <FileList item={item} disabled={disabled} assigneeMode={assigneeMode} onChange={onChange} />
 
       {/* Note history modal */}
       {historyOpen && (
@@ -662,10 +733,12 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
 interface FileListProps {
   item: EvidenceItemSummary;
   disabled: boolean;
+  /** Assignee surface — keep upload, hide the author-only file-remove control. */
+  assigneeMode?: boolean;
   onChange: () => void;
 }
 
-function FileList({ item, disabled, onChange }: FileListProps) {
+function FileList({ item, disabled, assigneeMode = false, onChange }: FileListProps) {
   // CAPA Evidence batch — resolve the uploader's role for file provenance.
   const { users } = useTenantConfig();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -704,55 +777,28 @@ function FileList({ item, disabled, onChange }: FileListProps) {
 
   return (
     <div className="space-y-1.5">
-      {item.files.length === 0 && (
-        <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>
-          No files uploaded yet.
-        </p>
-      )}
-      {item.files.map((f) => {
-        // Full provenance: resolve the uploader's role for name + role display.
-        const uploaderUser = f.uploadedById ? users.find((x) => x.id === f.uploadedById) : undefined;
-        const uploaderLabel = uploaderUser ? `${f.uploadedBy} (${roleLabel(uploaderUser.role)})` : f.uploadedBy;
-        return (
-        <div
-          key={f.id}
-          className="flex items-center gap-2 rounded-md p-2 text-[11px]"
-          style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
-        >
-          <FileText className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium truncate" style={{ color: "var(--text-primary)" }}>{f.fileName}</p>
-            <p style={{ color: "var(--text-muted)" }}>
-              {CATEGORY_LABEL[item.category]} · {formatSize(f.fileSize)} · {uploaderLabel} · {dayjs(f.createdAt).fromNow()} ·{" "}
-              <span title={`SHA-256: ${f.contentHashSha256}`} className="font-mono">
-                SHA {f.contentHashSha256.slice(0, 8)}
-              </span>
-            </p>
-          </div>
-          <a
-            href={`/api/evidence/files/${f.id}`}
-            className="p-1 rounded border-none cursor-pointer"
-            style={{ color: "var(--brand)" }}
-            aria-label={`Download ${f.fileName}`}
-            title="Download"
-          >
-            <Download className="w-3.5 h-3.5" aria-hidden="true" />
-          </a>
-          {!disabled && (
-            <button
-              type="button"
-              onClick={() => setRemoveFor(f.id)}
-              className="p-1 rounded border-none bg-transparent cursor-pointer"
-              style={{ color: "var(--danger)" }}
-              aria-label={`Remove ${f.fileName}`}
-              title="Remove (requires reason)"
-            >
-              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        );
-      })}
+      {/* Rows via the shared DocList. Remove still opens the Part 11
+          RemoveFileModal (reason ≥10) — onRemove only triggers setRemoveFor. */}
+      <DocList
+        docs={item.files.map((f) => {
+          // Full provenance: resolve the uploader's role for name + role display.
+          const uploaderUser = f.uploadedById ? users.find((x) => x.id === f.uploadedById) : undefined;
+          const uploaderLabel = uploaderUser ? `${f.uploadedBy} (${roleLabel(uploaderUser.role)})` : f.uploadedBy;
+          return {
+            id: f.id,
+            fileName: f.fileName,
+            downloadHref: `/api/evidence/files/${f.id}`,
+            uploadedBy: uploaderLabel,
+            badge: { label: CATEGORY_LABEL[item.category] },
+            size: formatSize(f.fileSize),
+            meta: `${dayjs(f.createdAt).fromNow()} · SHA ${f.contentHashSha256.slice(0, 8)}`,
+          };
+        })}
+        emptyText="No files uploaded yet."
+        showView={false}
+        readOnly={disabled}
+        onRemove={assigneeMode ? undefined : (id) => setRemoveFor(id)}
+      />
 
       {!disabled && (
         <div

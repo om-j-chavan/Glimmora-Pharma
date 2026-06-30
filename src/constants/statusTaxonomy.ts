@@ -88,6 +88,7 @@ export const DEVIATION_STATUSES: Record<string, StatusDef> = {
   open: { value: "open", label: "Open", color: "#1D4ED8", bg: "#EFF6FF", description: "Deviation reported, investigation not started", nextActions: ["Start investigation"] },
   under_investigation: { value: "under_investigation", label: "Under Investigation", color: "#B45309", bg: "#FEF9EC", description: "RCA in progress, impact being assessed", nextActions: ["Complete RCA", "Submit for QA review"] },
   pending_qa_review: { value: "pending_qa_review", label: "Pending QA Review", color: "#6D28D9", bg: "#F5F3FF", description: "Investigation complete, QA Head reviewing", nextActions: ["QA Head to close or reject"] },
+  capa_pending: { value: "capa_pending", label: "CAPA Pending", color: "#0E7490", bg: "#ECFEFF", description: "CAPA raised; deviation stays open and linked until the CAPA closes", nextActions: ["Close the linked CAPA", "QA Head to sign-close the deviation"] },
   closed: { value: "closed", label: "Closed", color: "#0F6E56", bg: "#E8F5F1", description: "QA Head satisfied. CAPA raised if required.", nextActions: [] },
   rejected: { value: "rejected", label: "Rejected", color: "#A32D2D", bg: "#FEF2F2", description: "QA Head rejected. Additional investigation needed.", nextActions: ["Rework investigation"] },
 };

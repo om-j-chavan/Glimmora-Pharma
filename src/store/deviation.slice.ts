@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { LinkedDocument } from "@/components/shared/DocumentUpload";
+import type { WorklistDoc } from "@/lib/queries/worklist";
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
 
 export type DeviationType = "planned" | "unplanned";
@@ -10,10 +11,41 @@ export type DeviationCategory = "process" | "equipment" | "material" | "environm
 // matching the FDA-regulatory canonical form). Display code normalises
 // via src/lib/severity.ts; comparisons must do the same.
 export type DeviationSeverity = "critical" | "major" | "minor" | "Critical" | "Major" | "Minor";
-export type DeviationStatus = "open" | "under_investigation" | "pending_qa_review" | "closed" | "rejected";
+// "capa_pending" (Stage 1, deviation redesign): a CAPA was raised for a high/med
+// deviation; it stays OPEN + linked until the CAPA closes, then QA sign-closes.
+export type DeviationStatus = "open" | "under_investigation" | "pending_qa_review" | "capa_pending" | "closed" | "rejected";
 export type ImpactLevel = "high" | "medium" | "low" | "none";
 // Phase 1.5 — unified to canonical spaced values via the shared constant.
 export type DeviationRCAMethod = InvestigationRCAMethod;
+
+/** Stage 4 (deviation redesign) — the current active low-priority task on a
+ *  deviation (serialised; Dates → ISO). Null when none is open. */
+export interface DeviationTaskMessageView {
+  id: string;
+  authorId: string | null;
+  authorName: string;
+  authorRole: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface DeviationActiveTask {
+  id: string;
+  assignee: string;
+  assigneeId: string | null;
+  message: string;
+  dueDate: string | null;
+  status: string;
+  completionNotes: string | null;
+  submittedAt: string | null;
+  reworkReason: string | null;
+  /** Stage 5 — flat QA↔worker conversation. */
+  messages: DeviationTaskMessageView[];
+  /** Count of the task's own documents (for the raise-CAPA confirm preview). */
+  docCount: number;
+  /** The task's own uploaded documents (grouped by GxP category in the QA modal). */
+  taskDocs: WorklistDoc[];
+}
 
 export interface Deviation {
   id: string;
@@ -28,6 +60,12 @@ export interface Deviation {
   type: DeviationType;
   category: DeviationCategory;
   severity: DeviationSeverity;
+  /** Stage 2/3 (deviation redesign) — QA triage priority ("Low"|"Medium"|"High");
+   *  drives the priority split (high/med → CAPA, low → task). Optional: legacy
+   *  rows predate it. */
+  priority?: string;
+  /** Stage 4 — the current active low-priority task (assign → submit → review). */
+  activeTask?: DeviationActiveTask | null;
   siteId: string;
   area: string;
   detectedBy: string;

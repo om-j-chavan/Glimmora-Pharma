@@ -117,11 +117,9 @@ export function CAPATrackerTab({
   // submit / allMet" sub-bullet is computed on the detail page where the
   // readiness inputs are loaded — not duplicated here.)
   const waitingPendingReview = canApprove ? capas.filter((c) => c.status === "pending_qa_review") : [];
-  const waitingVerification = canApprove ? capas.filter((c) => c.status === "pending_verification") : [];
   const waitingRework = capas.filter((c) => c.status === "in_progress" && hasReworkItem(c) && (c.owner === myId || capaCan.canEdit));
   const waitingOnYou = [
     ...waitingPendingReview.map((c) => ({ c, why: "Awaiting your QA review" })),
-    ...waitingVerification.map((c) => ({ c, why: "Awaiting independent verification" })),
     ...waitingRework.map((c) => ({ c, why: "Has items in rework" })),
   ];
   // OVERDUE: CAPA past due, or any of its action items overdue.
