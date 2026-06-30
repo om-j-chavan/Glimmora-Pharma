@@ -42,7 +42,7 @@ API routes (`app/api/`):
 One folder per feature (`dashboard`, `capa`, `deviation`, `gap-assessment`, `fda-483`, `csv-csa`, `change-control`, `evidence`, `readiness`, `inspection`, `governance`, `worklist`, `settings`, `support`, `admin`, AI surfaces). Convention: a `XxxPage.tsx` orchestrator + sub-components, often a `.adapter.ts` (Prisma row → Redux/slice shape), `.schemas.ts` (Zod form schemas), `.constants.ts` (status/label maps). These are **client** components driven by Redux + props from the server page.
 
 ### `src/actions/` — Server Actions (the WRITE path)
-`"use server"` files; one per domain (`tenants.ts`, `deviations.ts`, `findings.ts`, `change-control.ts`, `systems.ts`, `rtm.ts`, `inspections.ts`, `raid.ts`, `evidence.ts`, `documents.ts`, `fda483.ts`, `worklist.ts`, `settings.ts`, `agiConsole.ts`). CAPA is split into a sub-folder `src/actions/capas/` (`lifecycle.ts`, `closure.ts`, `approvals.ts`, `verification.ts`, `rca-review.ts`, `alignment.ts`, `action-items.ts`, `effectiveness.ts`) re-exported by `src/actions/capas.ts`.
+`"use server"` files; one per domain (`tenants.ts`, `deviations.ts`, **`deviation-tasks.ts`** (the low-priority DeviationTask loop), `findings.ts` (also hosts the gap-finding work loop: `assignFinding`/`submitFinding`/`reviewFinding`/`reworkFinding`/`postFindingMessage`/`loadFindingReview`/`uploadFindingEvidence`/`removeFindingEvidence`/`loadFindingDocuments`), `change-control.ts`, `systems.ts`, `rtm.ts`, `inspections.ts`, `raid.ts`, `evidence.ts` (incl. `rejectEvidenceCategory`), `documents.ts`, `fda483.ts`, `worklist.ts`, `settings.ts`, `agiConsole.ts`). CAPA is split into a sub-folder `src/actions/capas/` (`lifecycle.ts`, `closure.ts`, `approvals.ts`, `verification.ts` *(legacy — verification retired)*, `rca-review.ts`, `alignment.ts`, `action-items.ts`, `effectiveness.ts`) re-exported by `src/actions/capas.ts`.
 
 **The `ActionResult` convention** (every mutation returns this — see e.g. `src/actions/tenants.ts`):
 ```ts
@@ -53,7 +53,7 @@ type ActionResult<T = unknown> =
 **Every compliance mutation:** `requireAuth()` → resolve actor FK (`resolveUserFk`) → role/GxP guard (`requireGxPAuthor`, role-sets) → Zod-validate input → Prisma write (often in `$transaction`) → **`prisma.auditLog.create(...)`** → `revalidatePath(...)` → return `ActionResult`. See [FLOWS.md](./FLOWS.md#write-path).
 
 ### `src/lib/queries/` — cached reads (the READ path)
-React `cache()`-wrapped Prisma reads, one file per domain (`tenants.ts`, `deviations.ts`, `findings.ts`, `capas.ts`, `capa-criteria.ts`, `change-control.ts`, `systems.ts`, `inspections.ts`, `governance.ts`, `evidence.ts`, `fda483.ts`, `support.ts`, `worklist.ts`, `dashboard.ts`, `settings.ts`). Barrel: `src/lib/queries/index.ts`. Server Components import from here. Reads filter `deletedAt: null` and scope by `tenantId`. **Worklist is a computed aggregation here** (no Worklist table) — it unions `CAPAActionItem`/`CAPA` rows keyed on `ownerId`.
+React `cache()`-wrapped Prisma reads, one file per domain (`tenants.ts`, `deviations.ts`, `findings.ts`, `capas.ts`, `capa-criteria.ts`, `change-control.ts`, `systems.ts`, `inspections.ts`, `governance.ts`, `evidence.ts` (also `EVIDENCE_CATEGORIES`/`EVIDENCE_CATEGORY_LABEL`), `fda483.ts`, `support.ts`, `worklist.ts`, `dashboard.ts`, `settings.ts`). Barrel: `src/lib/queries/index.ts`. Server Components import from here. Reads filter `deletedAt: null` and scope by `tenantId`. **Worklist is a computed aggregation here** (no Worklist table) — `getWorklist` now unions **four** sources: `CAPAActionItem` (ownerId), `CAPA` (assignee ownerId), `DeviationTask` (assigneeId), and `Finding` (owner) — see [MODULES.md](./MODULES.md#worklist--complete-now-unions-4-sources).
 
 ### `src/lib/` — shared libraries
 - **`auth.ts`** — `requireAuth()`, `auth()`, `resolveUserFk()`, `requireGxPAuthor()`.
@@ -81,10 +81,10 @@ Slices: `auth.slice.ts` (session, tenants, plan config), `capa.slice.ts`, `devia
 `ui/` (Button, Modal, Dropdown, DatePicker, Badge, Toast, Toggle…), `layout/` (AppShell, Sidebar), `auth/LoginPage.tsx`, `errors/ErrorBoundary.tsx`, `shared/`, `search/`, `chatbot/AIChatbot.tsx`.
 
 ## `prisma/`
-`schema.prisma` (43 models, SQLite), `migrations/20260629054845_init/` (the regenerated SQLite baseline), `migration_lock.toml` (=sqlite), `seed.ts` (tenants + demo users + plans + sample records), `dev.db` (gitignored).
+`schema.prisma` (**46 models**, SQLite — +`DeviationTask`/`DeviationTaskMessage`/`FindingMessage` since the baseline), `migrations/20260629054845_init/` (the regenerated SQLite baseline — predates the 3 new models; local uses `db push`), `migration_lock.toml` (=sqlite), `seed.ts` (tenants + demo users + plans + sample records), `dev.db` (gitignored).
 
 ## `scripts/`
-`dev-api.mjs` (launches the FastAPI backend in `npm run dev`), backfills (`backfill-capa-deviation.ts`, `backfill-deviation-created-by.ts`, `backfill-*-status-case.ts`), `test-mailer.ts`.
+`dev-api.mjs` (launches the FastAPI backend in `npm run dev`), backfills (`backfill-capa-deviation.ts`, `backfill-deviation-created-by.ts`, `backfill-finding-status-case.ts`, `backfill-*-status-case.ts`, and ⚠️ **`backfill-capa-retire-verification.ts`** — must be run per-environment to retire legacy `pending_verification` CAPAs), `test-mailer.ts`.
 
 ## `backend/` (separate service — context only)
 FastAPI app: `app/main.py` (routers), `app/routers/*` (auth, ai, capa, rca, action_plan, monitoring, effectiveness, closure, audit, user, voice), `app/ai_service.py` + `app/rag/rag_service.py` (OpenAI + Pinecone), `app/database/db.py` (own SQLAlchemy DB), `requirements.txt`. See [FLOWS.md](./FLOWS.md#ai-request-path). **No code changes here in this handover.**
