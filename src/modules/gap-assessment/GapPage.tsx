@@ -170,6 +170,17 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ── Keep the open detail in sync with the store ──
+     selectedFinding is a local snapshot. When the Redux findings list updates
+     (e.g. after the router.refresh() that follows accept / rework / assign), re-
+     sync it from the fresh record by id so the header status badge and other
+     fields stay current — no reopen needed. If the finding is gone from the store,
+     close cleanly (null) instead of showing a stale ghost; a null selection (e.g.
+     after close-on-raise) is a no-op, so this never resurrects a closed modal. */
+  useEffect(() => {
+    setSelectedFinding((prev) => (prev ? findings.find((f) => f.id === prev.id) ?? null : prev));
+  }, [findings]);
+
   /* ── Filtered ── */
   const baseFindings = useMemo(() =>
     findings.filter((f) => {
