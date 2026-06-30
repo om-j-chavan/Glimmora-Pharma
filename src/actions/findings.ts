@@ -21,6 +21,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
+import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
+import { notify } from "@/lib/notify";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
 import { buildReferencePrefix, generateReference, isReferenceConflict } from "@/lib/reference";
@@ -316,6 +318,107 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
   } catch (err) {
     console.error("[action] updateFinding failed:", err);
     return { success: false, error: "Failed to update finding" };
+  }
+}
+
+// Gap Step 1 — ASSIGN a finding to ONE person who will work it. Mirrors
+// assignDeviationTask (deviation-tasks.ts): QA-gated dispatch, active-staff-only
+// assignee, owner kept as a String userId (no FK migration), audit + edit-trail
+// + notify. Worklist/docs/rework/CAPA-carryover are later steps.
+const AssignFindingSchema = z.object({
+  assigneeId: z.string().min(1, "Assignee is required"),
+});
+
+export async function assignFinding(
+  findingId: string,
+  input: z.input<typeof AssignFindingSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = AssignFindingSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  // Assignment is a QA dispatch — the same role set deviations use to assign
+  // (qa_head + super_admin). Not a GxP authorship event, so no requireGxPAuthor.
+  if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can assign findings." };
+  }
+
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, reference: true, requirement: true, owner: true, status: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  if (finding.status === "Closed") {
+    return { success: false, error: "This finding is closed and can no longer be reassigned." };
+  }
+
+  // Assignee pool = any active tenant user, operational staff only (exclude
+  // platform/admin + viewer). Mirrors assignDeviationTask + the useComplianceUsers
+  // UI pool.
+  const assignee = await prisma.user.findFirst({
+    where: { id: parsed.data.assigneeId, tenantId: session.user.tenantId, isActive: true },
+    select: { id: true, name: true, role: true },
+  });
+  if (!assignee) return { success: false, error: "Assignee must be an active user in your organisation." };
+  if (["super_admin", "customer_admin", "viewer"].includes(assignee.role)) {
+    return { success: false, error: "Findings can only be assigned to operational staff, not platform or admin roles." };
+  }
+  if (finding.owner === assignee.id) {
+    return { success: false, error: "This finding is already assigned to that user." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    const updated = await prisma.finding.update({
+      where: { id: findingId, tenantId: session.user.tenantId },
+      data: { owner: assignee.id },
+    });
+
+    // Append-only edit trail (same as updateFinding tracks an owner change) so
+    // the reassignment shows in the finding's own history, not just auditLog.
+    await prisma.findingEdit.create({
+      data: {
+        findingId,
+        tenantId: session.user.tenantId,
+        editedBy: session.user.id,
+        editedByName: session.user.name,
+        reason: "Assigned to a different owner",
+        changes: JSON.stringify([{ field: "Owner", oldValue: finding.owner, newValue: assignee.id }]),
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Gap Assessment",
+        action: "FINDING_ASSIGNED",
+        recordId: findingId,
+        recordTitle: (finding.reference ?? finding.requirement).slice(0, 80),
+        newValue: JSON.stringify({ assigneeId: assignee.id, previousOwner: finding.owner }),
+      },
+    });
+
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: assignee.id,
+      actorUserId: actor.userId,
+      type: "ACTION_ASSIGNED",
+      title: `A gap finding was assigned to you (${finding.reference ?? findingId.slice(0, 8)})`,
+      body: finding.requirement.slice(0, 200),
+      linkPath: "/gap-assessment",
+      entityType: "Finding",
+      entityId: findingId,
+    });
+
+    revalidatePath("/gap-assessment");
+    return { success: true, data: updated };
+  } catch (err) {
+    console.error("[action] assignFinding failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to assign finding") };
   }
 }
 

@@ -8,11 +8,12 @@ import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { formatReference } from "@/lib/reference";
 import { ExportMenu } from "@/components/ui/ExportMenu";
 import type { Finding, FindingSeverity, FindingStatus } from "@/store/findings.slice";
-import { updateFinding as updateFindingAction } from "@/actions/findings";
+import { updateFinding as updateFindingAction, assignFinding as assignFindingAction } from "@/actions/findings";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import type { UserConfig } from "@/store/settings.slice";
@@ -120,6 +121,22 @@ export function GapRegisterTab({
   // Capability mirrors of the server (exclude super_admin from authoring).
   const gapCan = usePermissions("gap");
   const capaCan = usePermissions("capa");
+  // Gap Step 1 — QA assigns the finding to the person who will work it.
+  const { isQAHead } = usePermissions();
+  const complianceUsers = useComplianceUsers();
+  const [assignTo, setAssignTo] = useState("");
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  async function handleAssignFinding() {
+    if (!selectedFinding || !assignTo) return;
+    setAssignBusy(true); setAssignError(null);
+    const res = await assignFindingAction(selectedFinding.id, { assigneeId: assignTo });
+    setAssignBusy(false);
+    if (!res.success) { setAssignError(res.error || "Failed to assign finding."); return; }
+    setAssignTo("");
+    router.refresh();
+  }
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { sites: accessibleSites } = useTenantConfig();
   const showSiteColumn = !selectedSiteId && accessibleSites.length > 1;
@@ -509,13 +526,26 @@ export function GapRegisterTab({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <h3 className={LABEL}>Owner</h3>
-                {/* Owner is auto-assigned to the creator and read-only (both
-                    view and edit) — no longer a selectable field. */}
                 <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
                   {ownerName(selectedFinding.owner)}
                   {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` (${roleLabel(u.role)})` : ""; })()}
                 </p>
-                {isEditing && <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>Set to the creator — not editable.</p>}
+                {/* Gap Step 1 — QA reassigns the finding to whoever will work it
+                    (mirrors the deviation task assign). Active staff only. */}
+                {isQAHead && selectedFinding.status !== "Closed" && (
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <Dropdown
+                      placeholder="Assign to…"
+                      value={assignTo}
+                      onChange={setAssignTo}
+                      width="w-56"
+                      size="sm"
+                      options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))}
+                    />
+                    <Button variant="secondary" size="sm" disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign</Button>
+                  </div>
+                )}
+                {assignError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{assignError}</p>}
               </div>
 
               {/* ── Target date ── */}
