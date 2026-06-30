@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
+import { useQueryClient } from "@tanstack/react-query"; // ✅ Added React Query
 import { useAppDispatch } from "./useAppDispatch";
 import { useAppSelector } from "./useAppSelector";
 import { setFindings, setFindingsLoading, setFindingsError } from "@/store/findings.slice";
@@ -15,119 +16,176 @@ import { setReadinessData } from "@/store/readiness.slice";
 export function useDataLoader() {
   const { data: session, status } = useSession();
   const dispatch = useAppDispatch();
+  const queryClient = useQueryClient(); // ✅ Initialize queryClient
   const isAuthenticatedRedux = useAppSelector((s) => !!s.auth.user);
   const hasLoadedRef = useRef(false);
+
+  const STALE_TIME = 1000 * 60 * 5; // 5 minutes cache
 
   const loadFindings = useCallback(async () => {
     dispatch(setFindingsLoading(true));
     try {
-      const res = await fetch("/api/findings");
-      if (!res.ok) throw new Error("Failed to fetch findings");
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["findings"],
+        queryFn: async () => {
+          const res = await fetch("/api/findings");
+          if (!res.ok) throw new Error("Failed to fetch findings");
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
       dispatch(setFindings(data));
     } catch (error) {
       dispatch(setFindingsError(error instanceof Error ? error.message : "Failed to fetch findings"));
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadCAPAs = useCallback(async () => {
     dispatch(setCAPAsLoading(true));
     try {
-      const res = await fetch("/api/capas");
-      if (!res.ok) throw new Error("Failed to fetch CAPAs");
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["capas"],
+        queryFn: async () => {
+          const res = await fetch("/api/capas");
+          if (!res.ok) throw new Error("Failed to fetch CAPAs");
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
       dispatch(setCAPAs(data));
     } catch (error) {
       dispatch(setCAPAsError(error instanceof Error ? error.message : "Failed to fetch CAPAs"));
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadDeviations = useCallback(async () => {
     dispatch(setDeviationsLoading(true));
     try {
-      const res = await fetch("/api/deviations");
-      if (!res.ok) throw new Error("Failed to fetch deviations");
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["deviations"],
+        queryFn: async () => {
+          const res = await fetch("/api/deviations");
+          if (!res.ok) throw new Error("Failed to fetch deviations");
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
       dispatch(setDeviations(data));
     } catch (error) {
       dispatch(setDeviationsError(error instanceof Error ? error.message : "Failed to fetch deviations"));
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadSystems = useCallback(async () => {
     dispatch(setSystemsLoading(true));
     try {
-      const res = await fetch("/api/systems");
-      if (!res.ok) throw new Error("Failed to fetch systems");
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["systems"],
+        queryFn: async () => {
+          const res = await fetch("/api/systems");
+          if (!res.ok) throw new Error("Failed to fetch systems");
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
       dispatch(setSystems(data));
     } catch (error) {
       dispatch(setSystemsError(error instanceof Error ? error.message : "Failed to fetch systems"));
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadFDA483 = useCallback(async () => {
     dispatch(setFDA483Loading(true));
     try {
-      const res = await fetch("/api/fda483");
-      if (!res.ok) throw new Error("Failed to fetch FDA 483 events");
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["fda483"],
+        queryFn: async () => {
+          const res = await fetch("/api/fda483");
+          if (!res.ok) throw new Error("Failed to fetch FDA 483 events");
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
       dispatch(setFDA483Events(data));
     } catch (error) {
       dispatch(setFDA483Error(error instanceof Error ? error.message : "Failed to fetch FDA 483 events"));
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadRAID = useCallback(async () => {
     dispatch(setRAIDLoading(true));
     try {
-      const res = await fetch("/api/raid");
-      if (!res.ok) throw new Error("Failed to fetch RAID items");
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["raid"],
+        queryFn: async () => {
+          const res = await fetch("/api/raid");
+          if (!res.ok) throw new Error("Failed to fetch RAID items");
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
       dispatch(setRAIDItems(data));
     } catch (error) {
       dispatch(setRAIDError(error instanceof Error ? error.message : "Failed to fetch RAID items"));
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadDocuments = useCallback(async () => {
     dispatch(setEvidenceLoading(true));
     try {
-      const res = await fetch("/api/documents");
-      if (!res.ok) throw new Error("Failed to fetch documents");
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["documents"],
+        queryFn: async () => {
+          const res = await fetch("/api/documents");
+          if (!res.ok) throw new Error("Failed to fetch documents");
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
       dispatch(setDocuments(data));
     } catch (error) {
       dispatch(setEvidenceError(error instanceof Error ? error.message : "Failed to fetch documents"));
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadAuditTrail = useCallback(async () => {
     try {
-      const res = await fetch("/api/audit-trail");
-      if (!res.ok) {
-        // Don't throw - just log and return empty
-        console.warn("Audit trail API returned:", res.status);
-        return;
-      }
-      const data = await res.json();
-      if (Array.isArray(data)) {
+      const data = await queryClient.fetchQuery({
+        queryKey: ["audit-trail"],
+        queryFn: async () => {
+          const res = await fetch("/api/audit-trail");
+          if (!res.ok) {
+            console.warn("Audit trail API returned:", res.status);
+            return null; // Return null instead of throwing for this specific endpoint
+          }
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
+      
+      if (data && Array.isArray(data)) {
         dispatch(setAuditEntries(data));
       }
     } catch (error) {
       console.warn("Failed to load audit trail:", error);
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadReadiness = useCallback(async () => {
     try {
-      const res = await fetch("/api/readiness");
-      if (!res.ok) {
-        // Don't throw - just log and return empty
-        console.warn("Readiness API returned:", res.status);
-        return;
-      }
-      const data = await res.json();
+      const data = await queryClient.fetchQuery({
+        queryKey: ["readiness"],
+        queryFn: async () => {
+          const res = await fetch("/api/readiness");
+          if (!res.ok) {
+            console.warn("Readiness API returned:", res.status);
+            return null;
+          }
+          return res.json();
+        },
+        staleTime: STALE_TIME,
+      });
+
       if (data && typeof data === "object") {
         dispatch(setReadinessData({
           inspections: data.inspections || [],
@@ -140,7 +198,7 @@ export function useDataLoader() {
     } catch (error) {
       console.warn("Failed to load readiness data:", error);
     }
-  }, [dispatch]);
+  }, [dispatch, queryClient]);
 
   const loadAllData = useCallback(async () => {
     await Promise.all([
@@ -156,7 +214,6 @@ export function useDataLoader() {
     ]);
   }, [loadFindings, loadCAPAs, loadDeviations, loadSystems, loadFDA483, loadRAID, loadDocuments, loadAuditTrail, loadReadiness]);
 
-  // Check if any data exists in the store
   const hasData = useAppSelector((s) =>
     (s.findings?.items?.length ?? 0) > 0 ||
     (s.capa?.items?.length ?? 0) > 0 ||
@@ -164,24 +221,9 @@ export function useDataLoader() {
   );
 
   useEffect(() => {
-    // Load data when user is authenticated via NextAuth OR Redux
     const isAuthenticated = status === "authenticated" || isAuthenticatedRedux;
-
-    console.log("[useDataLoader] Auth check:", {
-      nextAuthStatus: status,
-      hasSession: !!session,
-      reduxAuth: isAuthenticatedRedux,
-      hasLoaded: hasLoadedRef.current,
-      hasData
-    });
-
-    // Load data if authenticated and either:
-    // 1. Haven't loaded yet, OR
-    // 2. Store is empty (data might have been cleared)
+    
     if (isAuthenticated && (!hasLoadedRef.current || !hasData)) {
-      console.log("[useDataLoader] Loading data...", {
-        reason: !hasLoadedRef.current ? "first load" : "store empty"
-      });
       hasLoadedRef.current = true;
       loadAllData();
     }

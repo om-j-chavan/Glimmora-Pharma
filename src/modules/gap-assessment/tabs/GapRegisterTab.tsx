@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { useForm, Controller } from "react-hook-form";
 import {
   ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, History,
@@ -122,12 +122,17 @@ export function GapRegisterTab({
 
   function ownerName(uid: string) { return users.find((u) => u.id === uid)?.name ?? uid; }
 
-  const displayed = searchQuery
-    ? filteredFindings.filter((f) => {
-        const q = searchQuery.toLowerCase();
-        return f.id.toLowerCase().includes(q) || f.area.toLowerCase().includes(q) || f.requirement.toLowerCase().includes(q);
-      })
-    : filteredFindings;
+    const displayed = useMemo(() => {
+    if (!searchQuery) return filteredFindings;
+    const q = searchQuery.toLowerCase();
+    return filteredFindings.filter(
+      (f) =>
+        f.id.toLowerCase().includes(q) ||
+        f.area.toLowerCase().includes(q) ||
+        f.requirement.toLowerCase().includes(q)
+    );
+  }, [searchQuery, filteredFindings]);
+
 
   function onSave(data: EditForm) {
     if (!selectedFinding || !user) return;
