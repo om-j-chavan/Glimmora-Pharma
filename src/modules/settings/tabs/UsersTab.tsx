@@ -50,6 +50,7 @@ const ROLE_ORDER = [
   "super_admin",
   "customer_admin",
   "qa_head",
+  "qa",
   "qc_lab_director",
   "regulatory_affairs",
   "csv_val_lead",
@@ -60,6 +61,7 @@ const ROLE_ORDER = [
 
 const TENANT_ROLES_FOR_CUSTOMER_ADMIN = [
   "qa_head",
+  "qa",
   "qc_lab_director",
   "regulatory_affairs",
   "csv_val_lead",
@@ -74,6 +76,7 @@ const roleChip: Record<string, string> = {
   super_admin: "bg-(--danger-bg) text-(--danger)",
   customer_admin: "bg-(--brand-muted) text-(--brand)",
   qa_head: "bg-(--info-bg) text-(--info)",
+  qa: "bg-indigo-500/12 text-indigo-400",
   qc_lab_director: "bg-(--success-bg) text-(--success)",
   regulatory_affairs: "bg-pink-500/12 text-pink-400",
   csv_val_lead: "bg-(--brand-muted) text-(--brand)",

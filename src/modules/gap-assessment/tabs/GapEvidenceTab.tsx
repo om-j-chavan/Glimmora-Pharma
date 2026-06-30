@@ -8,6 +8,7 @@ import { ExportMenu } from "@/components/ui/ExportMenu";
 import { Button } from "@/components/ui/Button";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 import type { FindingSeverity } from "@/store/findings.slice";
 import type { UserConfig } from "@/store/settings.slice";
@@ -153,73 +154,104 @@ export function GapEvidenceTab({
                   {isExp && (
                     <div id={`evidence-area-${areaKey}`} className="mt-2">
                       <div className="card overflow-hidden">
-                        <div className="overflow-x-auto">
-                          <table className="data-table" aria-label={`Evidence for ${area}`}>
-                            <caption className="sr-only">Evidence documents for {area} area findings</caption>
-                            <thead><tr>
-                              <th scope="col" className="w-8">
+                        <DataTable
+                          ariaLabel={`Evidence for ${area}`}
+                          caption={`Evidence documents for ${area} area findings`}
+                          data={rows}
+                          rowKey={(row) => row.findingId}
+                          columns={[
+                            {
+                              key: "select",
+                              // Per-area select-all checkbox lives in the column
+                              // header (ReactNode), wired to toggleSelectArea.
+                              header: (
                                 <input type="checkbox"
                                   checked={rows.length > 0 && rows.every((r) => selectedKeys.has(r.findingId))}
                                   onChange={() => toggleSelectArea(rows)}
                                   className="w-3.5 h-3.5 cursor-pointer accent-(--brand)" aria-label={`Select all evidence in ${area}`} />
-                              </th>
-                              <th scope="col">Finding ID</th><th scope="col">Doc type</th><th scope="col">Requirement</th>
-                              <th scope="col">Severity</th><th scope="col">Evidence link</th><th scope="col">Status</th>
-                              <th scope="col">Owner</th><th scope="col"><span className="sr-only">Actions</span></th>
-                            </tr></thead>
-                            <tbody>
-                              {rows.map((row) => (
-                                <tr key={row.findingId}>
-                                  <td>
-                                    <input type="checkbox" checked={selectedKeys.has(row.findingId)} onChange={() => toggleSelect(row.findingId)}
-                                      className="w-3.5 h-3.5 cursor-pointer accent-(--brand)" aria-label={`Select ${row.reference}`} />
-                                  </td>
-                                  <th scope="row">
-                                    <button type="button" onClick={() => onFindingClick(row.findingId)}
-                                      className="font-mono text-[11px] font-semibold text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0"
-                                      aria-label={`Open ${row.reference} in register`}>{row.reference}</button>
-                                  </th>
-                                  <td><Badge variant="gray">{row.docType}</Badge></td>
-                                  <td><span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 220, color: "var(--text-primary)" }}>{row.name}</span></td>
-                                  <td><Badge variant={getSeverityVariant(row.severity, "generic")}>{normalizeSeverityForDisplay(row.severity, "generic") ?? row.severity}</Badge></td>
-                                  <td>
-                                    {row.evidenceHref ? (
-                                      <a href={row.evidenceHref} target="_blank" rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 text-[11px] text-[#0ea5e9] hover:underline"
-                                        aria-label={`View evidence document ${row.evidenceLink} for ${row.reference}`}>
-                                        <FileCheck className="w-3.5 h-3.5 text-[#10b981] shrink-0" aria-hidden="true" />
-                                        <span className="truncate" style={{ maxWidth: 180 }}>{row.evidenceLink}</span>
-                                        <ExternalLink className="w-3 h-3 shrink-0" aria-hidden="true" />
-                                      </a>
-                                    ) : row.evidenceLink ? (
-                                      <div className="flex items-center gap-1.5"><FileCheck className="w-3.5 h-3.5 text-[#10b981]" aria-hidden="true" /><span className="text-[11px] truncate" style={{ maxWidth: 180, color: "var(--text-secondary)" }}>{row.evidenceLink}</span></div>
-                                    ) : (
-                                      <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No document linked</span>
-                                    )}
-                                  </td>
-                                  <td><Badge variant={row.status === "Complete" ? "green" : row.status === "Partial" ? "amber" : "red"}>{row.status}</Badge></td>
-                                  <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(row.owner)}</td>
-                                  <td>
-                                    <div className="flex items-center gap-1">
-                                      {!isViewOnly && gapCan.canEdit && (
-                                        <Button variant="ghost" size="xs" icon={Paperclip}
-                                          aria-label={row.evidenceLink ? `Update evidence for ${row.findingId}` : `Link evidence to ${row.findingId}`}
-                                          onClick={() => onLinkEvidence(row.findingId, row.evidenceLink ?? "")} />
-                                      )}
-                                      {row.evidenceHref && (
-                                        <a href={row.evidenceHref} target="_blank" rel="noopener noreferrer"
-                                          className="inline-flex items-center justify-center h-7 w-7 rounded-md text-(--text-secondary) hover:bg-(--bg-elevated) hover:text-(--text-primary) transition-colors"
-                                          aria-label={`View evidence document for ${row.reference}`}>
-                                          <ExternalLink className="w-3 h-3" aria-hidden="true" />
-                                        </a>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                              ),
+                              width: "w-8",
+                              render: (row) => (
+                                <input type="checkbox" checked={selectedKeys.has(row.findingId)} onChange={() => toggleSelect(row.findingId)}
+                                  className="w-3.5 h-3.5 cursor-pointer accent-(--brand)" aria-label={`Select ${row.reference}`} />
+                              ),
+                            },
+                            {
+                              key: "findingId",
+                              header: "Finding ID",
+                              render: (row) => (
+                                <button type="button" onClick={() => onFindingClick(row.findingId)}
+                                  className="font-mono text-[11px] font-semibold text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0"
+                                  aria-label={`Open ${row.reference} in register`}>{row.reference}</button>
+                              ),
+                            },
+                            {
+                              key: "docType",
+                              header: "Doc type",
+                              render: (row) => <Badge variant="gray">{row.docType}</Badge>,
+                            },
+                            {
+                              key: "requirement",
+                              header: "Requirement",
+                              render: (row) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 220, color: "var(--text-primary)" }}>{row.name}</span>,
+                            },
+                            {
+                              key: "severity",
+                              header: "Severity",
+                              render: (row) => <Badge variant={getSeverityVariant(row.severity, "generic")}>{normalizeSeverityForDisplay(row.severity, "generic") ?? row.severity}</Badge>,
+                            },
+                            {
+                              key: "evidenceLink",
+                              header: "Evidence link",
+                              render: (row) =>
+                                row.evidenceHref ? (
+                                  <a href={row.evidenceHref} target="_blank" rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 text-[11px] text-[#0ea5e9] hover:underline"
+                                    aria-label={`View evidence document ${row.evidenceLink} for ${row.reference}`}>
+                                    <FileCheck className="w-3.5 h-3.5 text-[#10b981] shrink-0" aria-hidden="true" />
+                                    <span className="truncate" style={{ maxWidth: 180 }}>{row.evidenceLink}</span>
+                                    <ExternalLink className="w-3 h-3 shrink-0" aria-hidden="true" />
+                                  </a>
+                                ) : row.evidenceLink ? (
+                                  <div className="flex items-center gap-1.5"><FileCheck className="w-3.5 h-3.5 text-[#10b981]" aria-hidden="true" /><span className="text-[11px] truncate" style={{ maxWidth: 180, color: "var(--text-secondary)" }}>{row.evidenceLink}</span></div>
+                                ) : (
+                                  <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No document linked</span>
+                                ),
+                            },
+                            {
+                              key: "status",
+                              header: "Status",
+                              render: (row) => <Badge variant={row.status === "Complete" ? "green" : row.status === "Partial" ? "amber" : "red"}>{row.status}</Badge>,
+                            },
+                            {
+                              key: "owner",
+                              header: "Owner",
+                              cellClassName: "text-[12px] text-(--text-secondary)",
+                              render: (row) => ownerName(row.owner),
+                            },
+                            {
+                              key: "actions",
+                              header: "Actions",
+                              srOnly: true,
+                              render: (row) => (
+                                <div className="flex items-center gap-1">
+                                  {!isViewOnly && gapCan.canEdit && (
+                                    <Button variant="ghost" size="xs" icon={Paperclip}
+                                      aria-label={row.evidenceLink ? `Update evidence for ${row.findingId}` : `Link evidence to ${row.findingId}`}
+                                      onClick={() => onLinkEvidence(row.findingId, row.evidenceLink ?? "")} />
+                                  )}
+                                  {row.evidenceHref && (
+                                    <a href={row.evidenceHref} target="_blank" rel="noopener noreferrer"
+                                      className="inline-flex items-center justify-center h-7 w-7 rounded-md text-(--text-secondary) hover:bg-(--bg-elevated) hover:text-(--text-primary) transition-colors"
+                                      aria-label={`View evidence document for ${row.reference}`}>
+                                      <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                                    </a>
+                                  )}
+                                </div>
+                              ),
+                            },
+                          ] satisfies Column<EvidenceRow>[]}
+                        />
                       </div>
                     </div>
                   )}

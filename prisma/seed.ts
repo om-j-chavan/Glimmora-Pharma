@@ -206,6 +206,11 @@ async function main() {
     // CAPA") is still testable. Sanjay (ra2) is symmetric on the RA side.
     { name: "Dr. Suresh Iyer", email: "qa2@pharmaglimmora.com", username: "suresh.iyer", role: "qa_head", gxpSignatory: true, siteId: chennai.id },
     { name: "Sanjay Verma", email: "ra2@pharmaglimmora.com", username: "sanjay.verma", role: "regulatory_affairs", gxpSignatory: true, siteId: bangalore.id },
+    // Execution-level QA test user — non-privileged observer/executor. Distinct
+    // from the qa_head accounts above: role "qa", gxpSignatory false (no
+    // e-signature), so it can never approve/sign/close/delete. Email/username
+    // kept distinct from priya.sharma's qa@... (qa_head) to avoid a collision.
+    { name: "QA Test User", email: "qa.exec@pharmaglimmora.com", username: "qa.exec", role: "qa", gxpSignatory: false, siteId: chennai.id },
   ];
   // Hash once — bcrypt generates a fresh random salt per call, so calling it
   // inside the loop wasted CPU and made re-runs slower than necessary.

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import clsx from "clsx";
 
@@ -30,6 +31,10 @@ export interface ModalProps {
 export function Modal({ open, onClose, title, header, children, footer, className, persistent }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  // Portal target is only available on the client. Defer the first render so
+  // we never call createPortal during SSR (document is undefined there).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (open) {
@@ -52,9 +57,13 @@ export function Modal({ open, onClose, title, header, children, footer, classNam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  // Render into <body> via a portal so the modal's `position: fixed` always
+  // resolves against the viewport. Without this, a transformed ancestor (e.g.
+  // the sidebar's translate-x slide-in drawer) becomes the containing block
+  // and the modal centers inside that element instead of the screen.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={persistent ? undefined : onClose}>
       <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
       <div
@@ -97,6 +106,7 @@ export function Modal({ open, onClose, title, header, children, footer, classNam
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

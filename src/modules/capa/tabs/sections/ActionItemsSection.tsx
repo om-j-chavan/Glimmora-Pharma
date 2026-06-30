@@ -379,6 +379,11 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
             : `Add action items and assign each to a person. Each task appears in that person's Worklist. ${canStructuralEdit ? "Add the first step below." : "The author has not yet defined the action plan."}`}
         </p>
       ) : (
+        // NOTE: intentionally NOT migrated to the shared <DataTable>. This is a
+        // stateful editing grid (inline edit + up/down reorder + delete), and
+        // its reorder math depends on each item's index in the FULL list while
+        // it renders a FILTERED subset — DataTable's render(row, index) passes
+        // the rendered-array index, which would silently corrupt reorder order.
         <table className="w-full text-[11px] mb-3" role="table">
           <thead>
             <tr style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--bg-border)" }}>

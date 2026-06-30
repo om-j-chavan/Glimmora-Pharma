@@ -1,5 +1,6 @@
 import type { AuditLog } from "@prisma/client";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 import { roleLabel } from "@/lib/labels/roles";
 import { auditEventLabel } from "@/lib/labels/auditEvents";
 import dayjs from "@/lib/dayjs";
@@ -38,54 +39,54 @@ export function PlatformAuditTable({ rows, tenantMap }: PlatformAuditTableProps)
   };
 
   return (
-    <div className="overflow-x-auto">
-      <table className="data-table" aria-label="Platform audit events">
-        <thead>
-          <tr>
-            <th scope="col">When</th>
-            <th scope="col">Who</th>
-            <th scope="col">Event</th>
-            <th scope="col">Tenant</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="text-center py-8">
-                <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>No events match the current filter.</p>
-              </td>
-            </tr>
-          ) : (
-            rows.map((e) => {
-              const cat = categoryOf(e.action);
-              return (
-                <tr key={e.id}>
-                  <td>
-                    <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                      {dayjs(e.createdAt).format("DD MMM YYYY, HH:mm")}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="text-[12px]">
-                      <p className="font-medium" style={{ color: "var(--text-primary)" }}>{e.userName}</p>
-                      {e.userRole && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{roleLabel(e.userRole)}</p>}
-                    </div>
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{auditEventLabel(e.action)}</span>
-                      <Badge variant={CATEGORY_VARIANT[cat]}>{cat}</Badge>
-                    </div>
-                  </td>
-                  <td>
-                    <span className="text-[12px] font-mono" style={{ color: "var(--text-secondary)" }}>{tenantOf(e)}</span>
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      ariaLabel="Platform audit events"
+      data={rows}
+      rowKey={(e) => e.id}
+      emptyState={
+        <p className="text-center text-[13px] py-8" style={{ color: "var(--text-muted)" }}>No events match the current filter.</p>
+      }
+      columns={[
+        {
+          key: "when",
+          header: "When",
+          render: (e) => (
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              {dayjs(e.createdAt).format("DD MMM YYYY, HH:mm")}
+            </span>
+          ),
+        },
+        {
+          key: "who",
+          header: "Who",
+          render: (e) => (
+            <div className="text-[12px]">
+              <p className="font-medium" style={{ color: "var(--text-primary)" }}>{e.userName}</p>
+              {e.userRole && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{roleLabel(e.userRole)}</p>}
+            </div>
+          ),
+        },
+        {
+          key: "event",
+          header: "Event",
+          render: (e) => {
+            const cat = categoryOf(e.action);
+            return (
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{auditEventLabel(e.action)}</span>
+                <Badge variant={CATEGORY_VARIANT[cat]}>{cat}</Badge>
+              </div>
+            );
+          },
+        },
+        {
+          key: "tenant",
+          header: "Tenant",
+          render: (e) => (
+            <span className="text-[12px] font-mono" style={{ color: "var(--text-secondary)" }}>{tenantOf(e)}</span>
+          ),
+        },
+      ] satisfies Column<AuditLog>[]}
+    />
   );
 }

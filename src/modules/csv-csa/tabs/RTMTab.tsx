@@ -17,7 +17,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
-import { StatCard } from "@/components/shared";
+import { StatCard, DataTable, type Column } from "@/components/shared";
 
 /* ── Helpers ── */
 const TR_VARIANT: Record<TraceabilityStatus, "green" | "amber" | "red"> = { complete: "green", partial: "amber", broken: "red" };
@@ -191,46 +191,46 @@ export function RTMTab({ entries: entriesProp, systemsOverride }: RTMTabProps = 
       <div className={clsx("grid gap-4", selected ? "grid-cols-1 lg:grid-cols-[1fr_380px]" : "grid-cols-1")}>
         {/* Table */}
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="data-table" style={{ minWidth: 900 }} aria-label="RTM entries">
-              <caption className="sr-only">Requirement traceability matrix showing validation lifecycle</caption>
-              <thead>
-                <tr>
-                  <th scope="col" style={{ width: 200 }}>URS Requirement</th>
-                  <th scope="col">Regulation</th>
-                  <th scope="col">FS</th>
-                  <th scope="col">DS</th>
-                  <th scope="col">IQ</th>
-                  <th scope="col">OQ</th>
-                  <th scope="col">PQ</th>
-                  <th scope="col">Evidence</th>
-                  <th scope="col">Status</th>
-                  <th scope="col"><span className="sr-only">Open</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sysEntries.length === 0 ? (
-                  <tr><td colSpan={10} className="text-center py-8"><FileText className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{systems.length === 0 ? "Add a system first" : "No RTM entries for this system"}</p></td></tr>
-                ) : sysEntries.map((e) => (
-                  <tr key={e.id} className={clsx("cursor-pointer", selected?.id === e.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))} onClick={() => setSelected(e)} style={{ borderLeft: `3px solid ${borderColor(e.traceabilityStatus)}` }}>
-                    <td>
-                      <p className="text-[11px] font-mono" style={{ color: "var(--brand)" }}>{e.ursId}</p>
-                      <p className="text-[11px] line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{e.ursRequirement}</p>
-                    </td>
-                    <td className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{e.ursRegulation}</td>
-                    <td>{linkBadge(e.fsStatus, e.fsReference)}</td>
-                    <td>{linkBadge(e.dsStatus, e.dsReference)}</td>
-                    <td>{e.iqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.iqTestId}</span> : null} {testBadge(e.iqResult)}</td>
-                    <td>{e.oqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.oqTestId}</span> : null} {testBadge(e.oqResult)}</td>
-                    <td>{e.pqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.pqTestId}</span> : null} {testBadge(e.pqResult)}</td>
-                    <td><Badge variant={e.evidenceStatus === "complete" ? "green" : e.evidenceStatus === "partial" ? "amber" : "red"}>{e.evidenceStatus.charAt(0).toUpperCase() + e.evidenceStatus.slice(1)}</Badge></td>
-                    <td><Badge variant={TR_VARIANT[e.traceabilityStatus]}>{TR_LABEL[e.traceabilityStatus]}</Badge></td>
-                    <td><ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            ariaLabel="RTM entries"
+            caption="Requirement traceability matrix showing validation lifecycle"
+            minWidth={900}
+            data={sysEntries}
+            rowKey={(e) => e.id}
+            onRowClick={(e) => setSelected(e)}
+            rowClassName={(e) => clsx(selected?.id === e.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))}
+            rowStyle={(e) => ({ borderLeft: `3px solid ${borderColor(e.traceabilityStatus)}` })}
+            emptyState={
+              <div className="text-center py-8"><FileText className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{systems.length === 0 ? "Add a system first" : "No RTM entries for this system"}</p></div>
+            }
+            columns={[
+              {
+                key: "ursRequirement",
+                header: "URS Requirement",
+                headerClassName: "w-[200px]",
+                render: (e) => (
+                  <>
+                    <p className="text-[11px] font-mono" style={{ color: "var(--brand)" }}>{e.ursId}</p>
+                    <p className="text-[11px] line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{e.ursRequirement}</p>
+                  </>
+                ),
+              },
+              {
+                key: "regulation",
+                header: "Regulation",
+                cellClassName: "text-[10px] font-mono",
+                render: (e) => <span style={{ color: "var(--text-secondary)" }}>{e.ursRegulation}</span>,
+              },
+              { key: "fs", header: "FS", render: (e) => linkBadge(e.fsStatus, e.fsReference) },
+              { key: "ds", header: "DS", render: (e) => linkBadge(e.dsStatus, e.dsReference) },
+              { key: "iq", header: "IQ", render: (e) => <>{e.iqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.iqTestId}</span> : null} {testBadge(e.iqResult)}</> },
+              { key: "oq", header: "OQ", render: (e) => <>{e.oqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.oqTestId}</span> : null} {testBadge(e.oqResult)}</> },
+              { key: "pq", header: "PQ", render: (e) => <>{e.pqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.pqTestId}</span> : null} {testBadge(e.pqResult)}</> },
+              { key: "evidence", header: "Evidence", render: (e) => <Badge variant={e.evidenceStatus === "complete" ? "green" : e.evidenceStatus === "partial" ? "amber" : "red"}>{e.evidenceStatus.charAt(0).toUpperCase() + e.evidenceStatus.slice(1)}</Badge> },
+              { key: "status", header: "Status", render: (e) => <Badge variant={TR_VARIANT[e.traceabilityStatus]}>{TR_LABEL[e.traceabilityStatus]}</Badge> },
+              { key: "open", header: "Open", srOnly: true, render: () => <ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /> },
+            ] satisfies Column<RTMEntry>[]}
+          />
         </div>
 
         {/* Detail panel */}

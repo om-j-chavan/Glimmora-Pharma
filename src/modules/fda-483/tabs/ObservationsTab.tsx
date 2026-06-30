@@ -18,6 +18,7 @@ import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
 import {
   eventStatusBadge,
@@ -233,145 +234,140 @@ export function ObservationsTab({
 
       {/* Observations table */}
       <div className="card overflow-hidden mb-4">
-        <div className="overflow-x-auto">
-          <table
-            className="data-table"
-            aria-label="Regulatory event observations"
-          >
-            <caption className="sr-only">
-              Observations from {liveEvent.referenceNumber}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">No.</th>
-                <th scope="col">Observation</th>
-                <th scope="col">Area</th>
-                <th scope="col">Regulation</th>
-                <th scope="col">Severity</th>
-                <th scope="col">RCA</th>
-                <th scope="col">CAPA</th>
-                <th scope="col">Status</th>
-                {role !== "viewer" && (
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {liveEvent.observations.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="text-center py-6">
-                    <p
-                      className="text-[12px] italic"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      No observations logged. Click &ldquo;Add
-                      observation&rdquo; above.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                liveEvent.observations.map((obs) => (
-                  <tr key={obs.id}>
-                    <th scope="row">
-                      <span
-                        className="font-mono text-[12px] font-semibold"
-                        style={{ color: "var(--text-primary)" }}
+        <DataTable
+          ariaLabel="Regulatory event observations"
+          caption={`Observations from ${liveEvent.referenceNumber}`}
+          data={liveEvent.observations}
+          rowKey={(obs) => obs.id}
+          emptyState={
+            <p
+              className="text-[12px] italic"
+              style={{ color: "var(--text-muted)" }}
+            >
+              No observations logged. Click &ldquo;Add
+              observation&rdquo; above.
+            </p>
+          }
+          columns={[
+            {
+              key: "number",
+              header: "No.",
+              render: (obs) => (
+                <span
+                  className="font-mono text-[12px] font-semibold"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  #{obs.number}
+                </span>
+              ),
+            },
+            {
+              key: "observation",
+              header: "Observation",
+              render: (obs) => (
+                <p
+                  className="text-[12px] line-clamp-2"
+                  style={{
+                    maxWidth: 240,
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  {obs.text}
+                </p>
+              ),
+            },
+            {
+              key: "area",
+              header: "Area",
+              cellClassName: "text-[12px] text-(--text-secondary)",
+              render: (obs) => obs.area || "\u2014",
+            },
+            {
+              key: "regulation",
+              header: "Regulation",
+              cellClassName: "text-[11px] text-(--text-secondary)",
+              render: (obs) => obs.regulation || "\u2014",
+            },
+            {
+              key: "severity",
+              header: "Severity",
+              render: (obs) => obsSevBadge(obs.severity),
+            },
+            {
+              key: "rca",
+              header: "RCA",
+              render: (obs) =>
+                obs.rcaMethod ? (
+                  <Badge variant="purple">{obs.rcaMethod}</Badge>
+                ) : (
+                  <span
+                    className="text-[11px] italic"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Pending
+                  </span>
+                ),
+            },
+            {
+              key: "capa",
+              header: "CAPA",
+              render: (obs) =>
+                obs.capaId ? (() => {
+                  // Live lookup from the capa.items Redux slice (via capas prop)
+                  const linkedCapa = capas.find((c) => c.id === obs.capaId);
+                  const isClosed = linkedCapa?.status === "closed";
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() =>
+                          router.push("/capa")
+                        }
+                        className="font-mono text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer shrink-0"
+                        aria-label={`Open ${obs.capaId}`}
                       >
-                        #{obs.number}
-                      </span>
-                    </th>
-                    <td>
-                      <p
-                        className="text-[12px] line-clamp-2"
-                        style={{
-                          maxWidth: 240,
-                          color: "var(--text-primary)",
-                        }}
-                      >
-                        {obs.text}
-                      </p>
-                    </td>
-                    <td
-                      className="text-[12px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {obs.area || "\u2014"}
-                    </td>
-                    <td
-                      className="text-[11px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {obs.regulation || "\u2014"}
-                    </td>
-                    <td>{obsSevBadge(obs.severity)}</td>
-                    <td>
-                      {obs.rcaMethod ? (
-                        <Badge variant="purple">{obs.rcaMethod}</Badge>
-                      ) : (
-                        <span
-                          className="text-[11px] italic"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          Pending
-                        </span>
+                        {obs.capaId}
+                      </button>
+                      {linkedCapa && (
+                        <Badge variant={isClosed ? "green" : linkedCapa.status === "pending_qa_review" ? "purple" : linkedCapa.status === "in_progress" ? "amber" : "blue"}>
+                          {isClosed ? "Closed \u2713" : CAPA_STATUS_LABEL[linkedCapa.status]}
+                        </Badge>
                       )}
-                    </td>
-                    <td>
-                      {obs.capaId ? (() => {
-                        // Live lookup from the capa.items Redux slice (via capas prop)
-                        const linkedCapa = capas.find((c) => c.id === obs.capaId);
-                        const isClosed = linkedCapa?.status === "closed";
-                        return (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() =>
-                                router.push("/capa")
-                              }
-                              className="font-mono text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer shrink-0"
-                              aria-label={`Open ${obs.capaId}`}
-                            >
-                              {obs.capaId}
-                            </button>
-                            {linkedCapa && (
-                              <Badge variant={isClosed ? "green" : linkedCapa.status === "pending_qa_review" ? "purple" : linkedCapa.status === "in_progress" ? "amber" : "blue"}>
-                                {isClosed ? "Closed \u2713" : CAPA_STATUS_LABEL[linkedCapa.status]}
-                              </Badge>
-                            )}
-                          </div>
-                        );
-                      })() : (
-                        <span
-                          className="text-[11px] italic"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          &mdash;
-                        </span>
-                      )}
-                    </td>
-                    <td>{obsStatBadge(obs.status)}</td>
-                    {role !== "viewer" && (
-                      <td>
-                        {fullyLocked ? (
-                          <Badge variant="gray">Locked</Badge>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            icon={Pencil}
-                            aria-label={`Edit observation ${obs.number}`}
-                            onClick={() => onEditObservation(obs)}
-                          />
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                  );
+                })() : (
+                  <span
+                    className="text-[11px] italic"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    &mdash;
+                  </span>
+                ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (obs) => obsStatBadge(obs.status),
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              srOnly: true,
+              hidden: role === "viewer",
+              render: (obs) =>
+                fullyLocked ? (
+                  <Badge variant="gray">Locked</Badge>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    icon={Pencil}
+                    aria-label={`Edit observation ${obs.number}`}
+                    onClick={() => onEditObservation(obs)}
+                  />
+                ),
+            },
+          ] satisfies Column<Observation>[]}
+        />
       </div>
 
       {/* Commitments */}

@@ -10,6 +10,7 @@ import { setActiveSite, setSelectedSite } from "@/store/auth.slice";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { ColorThemePicker } from "@/components/ui/ColorThemePicker";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { Button } from "@/components/ui/Button";
 import { NotificationBell } from "./NotificationBell";
 import dayjs from "@/lib/dayjs";
 
@@ -17,6 +18,7 @@ const roleBadge: Record<UserRole, { bg: string; color: string }> = {
   super_admin:        { bg: "var(--danger-bg)",   color: "#ef4444" },
   customer_admin:     { bg: "rgba(139,105,20,0.12)",  color: "#8b6914" },
   qa_head:            { bg: "rgba(139,92,246,0.12)",  color: "#a78bfa" },
+  qa:                 { bg: "rgba(99,102,241,0.12)",  color: "#818cf8" },
   qc_lab_director:    { bg: "var(--success-bg)",  color: "#10b981" },
   regulatory_affairs: { bg: "rgba(236,72,153,0.12)",  color: "#f472b6" },
   csv_val_lead:       { bg: "var(--brand-muted)",  color: "#38bdf8" },
@@ -91,15 +93,15 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
     >
       {/* ── Hamburger (mobile only) ── */}
       {onMenuToggle && (
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          icon={Menu}
           onClick={onMenuToggle}
           aria-label="Toggle navigation menu"
-          className="lg:hidden inline-flex items-center justify-center w-9 h-9 rounded-lg border-none cursor-pointer shrink-0"
+          className="lg:hidden shrink-0"
           style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)" }}
-        >
-          <Menu size={18} aria-hidden="true" />
-        </button>
+        />
       )}
 
       {/* ── Company name ── */}

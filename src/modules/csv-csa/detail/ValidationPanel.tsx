@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
+import { DataTable, type Column } from "@/components/shared";
 import { displayUserName } from "@/lib/identity-display";
 import { getDocumentReview, type DocumentReviewResult, type DocumentReviewSeverity } from "@/lib/ai";
 import { selectAiToken } from "@/lib/aiBackend";
@@ -956,9 +957,39 @@ export function ValidationPanel({
       {/* Roadmap */}
       <div className="card"><div className="card-header"><span className="card-title">Roadmap activities</span></div><div className="card-body">
         {roadmapActivities.length === 0 ? <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No roadmap activities planned.</p> : (
-          <table className="data-table" aria-label={`Roadmap for ${system.name}`}><thead><tr><th scope="col">Activity</th><th scope="col">Type</th><th scope="col">Status</th><th scope="col">Start</th><th scope="col">End</th><th scope="col">Owner</th></tr></thead><tbody>
-            {roadmapActivities.map((a) => (<tr key={a.id}><th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{a.title}</th><td><Badge variant="gray">{a.type}</Badge></td><td>{actStatusBadge(a.status)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.startDate).format(dateFormat)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.endDate).format(dateFormat)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(a.owner, users)}</td></tr>))}
-          </tbody></table>
+          <DataTable
+            ariaLabel={`Roadmap for ${system.name}`}
+            data={roadmapActivities}
+            rowKey={(a) => a.id}
+            columns={[
+              {
+                key: "activity",
+                header: "Activity",
+                cellClassName: "text-[12px] font-medium",
+                render: (a) => <span style={{ color: "var(--text-primary)" }}>{a.title}</span>,
+              },
+              { key: "type", header: "Type", render: (a) => <Badge variant="gray">{a.type}</Badge> },
+              { key: "status", header: "Status", render: (a) => actStatusBadge(a.status) },
+              {
+                key: "start",
+                header: "Start",
+                cellClassName: "text-[12px]",
+                render: (a) => <span style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.startDate).format(dateFormat)}</span>,
+              },
+              {
+                key: "end",
+                header: "End",
+                cellClassName: "text-[12px]",
+                render: (a) => <span style={{ color: "var(--text-secondary)" }}>{dayjs.utc(a.endDate).format(dateFormat)}</span>,
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                cellClassName: "text-[12px]",
+                render: (a) => <span style={{ color: "var(--text-secondary)" }}>{ownerName(a.owner, users)}</span>,
+              },
+            ] satisfies Column<RoadmapActivity>[]}
+          />
         )}
       </div></div>
 

@@ -20,7 +20,6 @@ import {
   FlaskConical,
   SlidersHorizontal,
   GraduationCap,
-  Radar,
   LifeBuoy,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -31,6 +30,9 @@ import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useActiveSite } from "@/hooks/useActiveSite";
 import { logout } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
+import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 
 interface NavItem {
   path: string;
@@ -58,7 +60,6 @@ const NAV_GROUPS: NavGroup[] = [
       { path: "worklist", label: "Worklist", icon: ListChecks },
       { path: "csv-csa", label: "CSV/CSA Validation", icon: Monitor },
       { path: "fda-483", label: "FDA 483 & Regulatory", icon: Building2 },
-      { path: "regulatory-intelligence", label: "Regulatory Intelligence", icon: Radar },
       { path: "evidence", label: "Evidence & Documents", icon: FileText },
     ],
   },
@@ -94,6 +95,7 @@ function getGroupForPath(pathname: string): string {
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const dispatch = useAppDispatch();
   const router = useRouter();
+  const toast = useToast();
   const pathname = usePathname();
   const activeSite = useActiveSite();
   const { allowedPaths, role } = useRole();
@@ -102,6 +104,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(pathname ?? "")]),
   );
+
+  // Sign-out confirmation modal. `signingOut` keeps the confirm button in a
+  // loading state (and prevents a double-submit) while the session is cleared.
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   // Auto-expand the group containing the active page on route change
   useEffect(() => {
@@ -141,13 +148,12 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           // the Worklist. super_admin already returned [] above. Imported from
           // roleSets so nav + routes share one source of truth (no drift).
           if (item.path === "capa") return CAPA_MODULE_VIEW_ROLES.includes(role);
-          // Deviation + Regulatory Intelligence modules are visible to all
-          // non-super_admin roles.
-          if (
-            item.path === "readiness" ||
-            item.path === "deviation" ||
-            item.path === "regulatory-intelligence"
-          )
+          // Deviation module is visible to all non-super_admin roles.
+          // (Regulatory Intelligence is no longer a sidebar module — it now
+          // lives as the "Ask Regulatory AI" assistant on Settings →
+          // Frameworks. The /regulatory-intelligence route still resolves for
+          // Dashboard deep-links; it's just removed from the nav.)
+          if (item.path === "readiness" || item.path === "deviation")
             return true;
           if (item.path === "audit-trail")
             // super_admin already returned [] above, so it's excluded here.
@@ -160,16 +166,22 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     // AUTH-03: Clear next-auth session cookie first (server-side), then
     // reset Redux state, then navigate. Errors are non-fatal — we still
     // want to clear local state and navigate if the network call fails.
+    setSigningOut(true);
+    toast.info("Signing out…");
     try {
       await nextAuthLogout();
     } catch (err) {
       console.warn("[logout] next-auth signOut failed", err);
     }
     dispatch(logout());
-    router.push("/login");
+    toast.success("Signed out.");
+    // Slight delay so the success toast renders before the route transition;
+    // ToastProvider lives at the root so the toast persists across the nav.
+    setTimeout(() => router.push("/login"), 500);
   };
 
   return (
+    <>
     <aside
       aria-label="Application navigation"
       className="w-60 h-screen flex flex-col shrink-0"
@@ -333,7 +345,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <div style={{ padding: "8px 8px 4px" }}>
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={() => setConfirmSignOut(true)}
             className="nav-item"
             style={{ width: "100%" }}
             aria-label="Sign out"
@@ -356,5 +368,42 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       </div>
     </aside>
+
+    {/* Sign-out confirmation — reuses the shared Modal + Button. `persistent`
+        keeps an accidental backdrop/Escape press from dismissing mid sign-out. */}
+    <Modal
+      open={confirmSignOut}
+      onClose={() => { if (!signingOut) setConfirmSignOut(false); }}
+      title="Sign out?"
+      persistent={signingOut}
+      className="max-w-[420px]"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setConfirmSignOut(false)}
+            disabled={signingOut}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            icon={LogOut}
+            loading={signingOut}
+            onClick={handleLogout}
+          >
+            Sign Out
+          </Button>
+        </div>
+      }
+    >
+      <p className="text-[13px] leading-relaxed text-(--text-secondary)">
+        You&apos;ll be returned to the login screen and will need to sign in
+        again to continue.
+      </p>
+    </Modal>
+    </>
   );
 }

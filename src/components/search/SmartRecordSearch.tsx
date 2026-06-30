@@ -13,6 +13,7 @@
 
 import { useState, useMemo, useEffect, type CSSProperties, type ReactNode } from "react";
 import { Search, Sparkles, X, ArrowRight, FileText, Download, ListFilter, Bookmark } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiSearchSend, AiChatError, type SearchResultResponse } from "@/lib/aiChat";
 import { executeSearch, type SearchCondition, type SearchFilters } from "@/lib/aiSearch";
@@ -278,9 +279,7 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
             {renderTable(src, rows)}
             <div className="flex items-center justify-between flex-wrap gap-2 mt-2">
               <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Found {rows.length} {src.label}{rows.length === 1 ? "" : "s"}.</p>
-              <button type="button" onClick={() => exportModule(src, rows)} className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", background: "var(--bg-surface)" }}>
-                <Download className="w-3 h-3" aria-hidden="true" /> Export
-              </button>
+              <Button type="button" variant="secondary" size="xs" icon={Download} onClick={() => exportModule(src, rows)}>Export</Button>
             </div>
           </>
         ) : (
@@ -327,7 +326,7 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
               <button type="button" aria-label="Clear search" onClick={clearAll} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded border-0 cursor-pointer bg-transparent" style={{ color: "var(--text-muted)" }}><X className="w-3.5 h-3.5" aria-hidden="true" /></button>
             )}
           </div>
-          <button type="button" aria-label="Run search" onClick={() => runSearch(query)} disabled={busy || !query.trim()} className="p-2 rounded-lg border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" style={{ background: "var(--brand)", color: "#fff" }}><ArrowRight className="w-4 h-4" aria-hidden="true" /></button>
+          <Button type="button" variant="primary" size="md" icon={ArrowRight} aria-label="Run search" onClick={() => runSearch(query)} disabled={busy || !query.trim()} />
         </div>
 
         {/* Resting state — example chips + saved searches */}
@@ -360,12 +359,8 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
           <div className="space-y-4">
             {activeSources.map((src) => renderModuleBlock(src))}
             <div className="flex items-center gap-2">
-              <button type="button" onClick={saveCurrentSearch} disabled={!query.trim()} className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border cursor-pointer disabled:opacity-40" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", background: "var(--bg-surface)" }}>
-                <Bookmark className="w-3 h-3" aria-hidden="true" /> Save this search
-              </button>
-              <button type="button" onClick={clearAll} className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md cursor-pointer border-0" style={{ background: "var(--brand)", color: "#fff" }}>
-                <ListFilter className="w-3 h-3" aria-hidden="true" /> Open full list
-              </button>
+              <Button type="button" variant="secondary" size="xs" icon={Bookmark} onClick={saveCurrentSearch} disabled={!query.trim()}>Save this search</Button>
+              <Button type="button" variant="primary" size="xs" icon={ListFilter} onClick={clearAll}>Open full list</Button>
             </div>
           </div>
         )}

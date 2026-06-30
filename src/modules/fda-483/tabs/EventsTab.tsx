@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
+import { DataTable, type Column } from "@/components/shared";
 import {
   daysUntil,
   getEffectiveEventStatus,
@@ -176,93 +177,117 @@ export function EventsTab({
           </Button>
         </div>
       ) : (
-        <>
-          <div className="card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="data-table" style={{ minWidth: 880 }} aria-label="FDA 483 events">
-                <caption className="sr-only">Regulatory events with type, site, observations, RCA progress, status, and response deadline</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Reference</th>
-                    <th scope="col">Type</th>
-                    <th scope="col">Site</th>
-                    <th scope="col">Obs</th>
-                    <th scope="col">RCA</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Deadline</th>
-                    <th scope="col"><span className="sr-only">Open</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageEvents.map((ev) => {
-                    const days = daysLeft(ev.responseDeadline);
-                    const effectiveStatus = getEffectiveStatus(ev);
-                    const isClosed = effectiveStatus === "Closed" || effectiveStatus === "Response Submitted";
-                    const obsCount = ev.observations.length;
-                    const rcaDone = ev.observations.filter((o) => !!o.rootCause?.trim()).length;
-                    const siteName = sites.find((s) => s.id === ev.siteId)?.name ?? "—";
-                    const stat = eventStatusBadge(effectiveStatus);
-                    const rcaColor =
-                      obsCount === 0 ? "var(--text-muted)"
-                      : rcaDone === obsCount ? "var(--success)"
-                      : rcaDone > 0 ? "var(--brand)"
-                      : "var(--text-muted)";
-                    return (
-                      <tr
-                        key={ev.id}
-                        onClick={() => onOpenEvent(ev)}
-                        className="cursor-pointer"
-                        style={isClosed ? { opacity: 0.6 } : undefined}
-                      >
-                        <td className="font-mono text-[12px] font-semibold" style={{ color: "var(--brand)" }}>
-                          {ev.referenceNumber}
-                        </td>
-                        <td><Badge variant="gray">{ev.type}</Badge></td>
-                        <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{siteName}</td>
-                        <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{obsCount}</td>
-                        <td className="text-[12px]" style={{ color: rcaColor }}>
-                          {obsCount === 0 ? "—" : `${rcaDone}/${obsCount}`}
-                        </td>
-                        <td><Badge variant={stat.variant}>{stat.label}</Badge></td>
-                        <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                          {isClosed ? (
-                            "—"
-                          ) : (
-                            <>
-                              {dayjs.utc(ev.responseDeadline).tz(timezone).format(dateFormat)}
-                              {days < 0 && (
-                                <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
-                                  {Math.abs(days)}d overdue
-                                </span>
-                              )}
-                              {days >= 0 && days <= 5 && (
-                                <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
-                                  {days === 0 ? "Due today" : `${days}d left`}
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </td>
-                        <td>
-                          <ArrowRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <Pagination
-            page={safePage}
-            pageSize={pageSize}
-            total={filteredEvents.length}
-            onChange={setPage}
-            itemLabel="event"
-            className="mt-4"
+        <div className="card overflow-hidden">
+          <DataTable
+            ariaLabel="FDA 483 events"
+            caption="Regulatory events with type, site, observations, RCA progress, status, and response deadline"
+            minWidth={880}
+            data={pageEvents}
+            rowKey={(ev) => ev.id}
+            onRowClick={onOpenEvent}
+            rowStyle={(ev) =>
+              (getEffectiveStatus(ev) === "Closed" || getEffectiveStatus(ev) === "Response Submitted")
+                ? { opacity: 0.6 }
+                : undefined
+            }
+            footer={
+              <Pagination
+                page={safePage}
+                pageSize={pageSize}
+                total={filteredEvents.length}
+                onChange={setPage}
+                itemLabel="event"
+                className="mt-4"
+              />
+            }
+            columns={[
+              {
+                key: "reference",
+                header: "Reference",
+                cellClassName: "font-mono text-[12px] font-semibold text-(--brand)",
+                render: (ev) => ev.referenceNumber,
+              },
+              {
+                key: "type",
+                header: "Type",
+                render: (ev) => <Badge variant="gray">{ev.type}</Badge>,
+              },
+              {
+                key: "site",
+                header: "Site",
+                cellClassName: "text-[12px] text-(--text-secondary)",
+                render: (ev) => sites.find((s) => s.id === ev.siteId)?.name ?? "—",
+              },
+              {
+                key: "obs",
+                header: "Obs",
+                cellClassName: "text-[12px] text-(--text-secondary)",
+                render: (ev) => ev.observations.length,
+              },
+              {
+                key: "rca",
+                header: "RCA",
+                render: (ev) => {
+                  const obsCount = ev.observations.length;
+                  const rcaDone = ev.observations.filter((o) => !!o.rootCause?.trim()).length;
+                  const rcaColor =
+                    obsCount === 0 ? "var(--text-muted)"
+                    : rcaDone === obsCount ? "var(--success)"
+                    : rcaDone > 0 ? "var(--brand)"
+                    : "var(--text-muted)";
+                  return (
+                    <span className="text-[12px]" style={{ color: rcaColor }}>
+                      {obsCount === 0 ? "—" : `${rcaDone}/${obsCount}`}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (ev) => {
+                  const stat = eventStatusBadge(getEffectiveStatus(ev));
+                  return <Badge variant={stat.variant}>{stat.label}</Badge>;
+                },
+              },
+              {
+                key: "deadline",
+                header: "Deadline",
+                cellClassName: "text-[12px] text-(--text-secondary)",
+                render: (ev) => {
+                  const days = daysLeft(ev.responseDeadline);
+                  const effectiveStatus = getEffectiveStatus(ev);
+                  const isClosed = effectiveStatus === "Closed" || effectiveStatus === "Response Submitted";
+                  return isClosed ? (
+                    "—"
+                  ) : (
+                    <>
+                      {dayjs.utc(ev.responseDeadline).tz(timezone).format(dateFormat)}
+                      {days < 0 && (
+                        <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
+                          {Math.abs(days)}d overdue
+                        </span>
+                      )}
+                      {days >= 0 && days <= 5 && (
+                        <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
+                          {days === 0 ? "Due today" : `${days}d left`}
+                        </span>
+                      )}
+                    </>
+                  );
+                },
+              },
+              {
+                key: "open",
+                header: "Open",
+                srOnly: true,
+                render: () => (
+                  <ArrowRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                ),
+              },
+            ] satisfies Column<FDA483Event>[]}
           />
-        </>
+        </div>
       )}
     </>
   );

@@ -6,6 +6,7 @@ import { RefreshCw, Sparkles, AlertTriangle, Search, ChevronRight, Plus } from "
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 import {
   capaListAll,
   capaListByCustomer,
@@ -181,85 +182,109 @@ export function AiCapaIndex() {
 
       {/* Table */}
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="data-table" style={{ minWidth: 900 }} aria-label="AI CAPAs">
-            <thead>
-              <tr>
-                <th scope="col">CAPA ID</th>
-                <th scope="col">Problem</th>
-                <th scope="col">Source</th>
-                <th scope="col">Severity</th>
-                <th scope="col">Status</th>
-                <th scope="col">Risk</th>
-                <th scope="col">Created</th>
-                <th scope="col"><span className="sr-only">Open</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && rows.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-6 text-[12px]" style={{ color: "var(--text-muted)" }}>Loading…</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-8">
-                  <Sparkles className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                  <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                    {rows.length === 0 ? "No AI CAPAs yet — create one from the CAPA Tracker." : "No CAPAs match your search."}
-                  </p>
-                </td></tr>
-              ) : filtered.map((r) => {
+        <DataTable
+          ariaLabel="AI CAPAs"
+          data={filtered}
+          rowKey={(r) => r.capa_id}
+          minWidth={900}
+          loading={loading}
+          rowClassName={() => "cursor-pointer"}
+          emptyState={
+            <div className="text-center py-8">
+              <Sparkles className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                {rows.length === 0 ? "No AI CAPAs yet — create one from the CAPA Tracker." : "No CAPAs match your search."}
+              </p>
+            </div>
+          }
+          columns={[
+            {
+              key: "capa_id",
+              header: "CAPA ID",
+              cellClassName: "font-mono text-[11px] font-semibold",
+              render: (r) => (
+                <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} style={{ color: "var(--brand)", textDecoration: "none" }}>
+                  {r.capa_id}
+                </Link>
+              ),
+            },
+            {
+              key: "problem",
+              header: "Problem",
+              cellClassName: "text-[12px]",
+              render: (r) => (
+                <>
+                  <p className="line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 360 }}>{r.problem_statement}</p>
+                  {r.is_recurring && (
+                    <span className="inline-flex items-center gap-1 text-[10px] mt-0.5" style={{ color: "var(--warning)" }}>
+                      <AlertTriangle className="w-3 h-3" aria-hidden="true" /> recurring
+                    </span>
+                  )}
+                </>
+              ),
+            },
+            {
+              key: "source",
+              header: "Source",
+              cellClassName: "text-[11px] text-(--text-secondary)",
+              render: (r) => r.source,
+            },
+            {
+              key: "severity",
+              header: "Severity",
+              render: (r) => (
+                <Badge variant={
+                  /critical/i.test(r.severity) ? "red" :
+                  /high|major/i.test(r.severity) ? "amber" :
+                  /low/i.test(r.severity) ? "green" : "gray"
+                }>{r.severity}</Badge>
+              ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (r) => (
+                <Badge variant={
+                  /closed/i.test(r.status) ? "green" :
+                  /review|pending/i.test(r.status) ? "purple" :
+                  /progress|submitted/i.test(r.status) ? "amber" : "blue"
+                }>{r.status}</Badge>
+              ),
+            },
+            {
+              key: "risk",
+              header: "Risk",
+              render: (r) => {
                 const riskPct = Math.round(r.risk_score * 100);
                 const riskColor = r.risk_score >= 0.75 ? "var(--danger)" : r.risk_score >= 0.4 ? "var(--warning)" : "var(--success)";
                 return (
-                  <tr key={r.capa_id} className="cursor-pointer">
-                    <td className="font-mono text-[11px] font-semibold" style={{ color: "var(--brand)" }}>
-                      <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} style={{ color: "inherit", textDecoration: "none" }}>
-                        {r.capa_id}
-                      </Link>
-                    </td>
-                    <td className="text-[12px]">
-                      <p className="line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 360 }}>{r.problem_statement}</p>
-                      {r.is_recurring && (
-                        <span className="inline-flex items-center gap-1 text-[10px] mt-0.5" style={{ color: "var(--warning)" }}>
-                          <AlertTriangle className="w-3 h-3" aria-hidden="true" /> recurring
-                        </span>
-                      )}
-                    </td>
-                    <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{r.source}</td>
-                    <td>
-                      <Badge variant={
-                        /critical/i.test(r.severity) ? "red" :
-                        /high|major/i.test(r.severity) ? "amber" :
-                        /low/i.test(r.severity) ? "green" : "gray"
-                      }>{r.severity}</Badge>
-                    </td>
-                    <td>
-                      <Badge variant={
-                        /closed/i.test(r.status) ? "green" :
-                        /review|pending/i.test(r.status) ? "purple" :
-                        /progress|submitted/i.test(r.status) ? "amber" : "blue"
-                      }>{r.status}</Badge>
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <div className="rounded-full overflow-hidden" style={{ width: 50, height: 4, background: "var(--bg-border)" }}>
-                          <div style={{ width: `${riskPct}%`, height: "100%", background: riskColor }} />
-                        </div>
-                        <span className="text-[11px] font-mono tabular-nums" style={{ color: riskColor }}>{riskPct}%</span>
-                      </div>
-                    </td>
-                    <td className="text-[11px] whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
-                      {formatDate(r.created_at)}
-                    </td>
-                    <td>
-                      <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} aria-label={`Open ${r.capa_id}`}>
-                        <ChevronRight className="w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                      </Link>
-                    </td>
-                  </tr>
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-full overflow-hidden" style={{ width: 50, height: 4, background: "var(--bg-border)" }}>
+                      <div style={{ width: `${riskPct}%`, height: "100%", background: riskColor }} />
+                    </div>
+                    <span className="text-[11px] font-mono tabular-nums" style={{ color: riskColor }}>{riskPct}%</span>
+                  </div>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
+              },
+            },
+            {
+              key: "created",
+              header: "Created",
+              cellClassName: "text-[11px] whitespace-nowrap text-(--text-muted)",
+              render: (r) => formatDate(r.created_at),
+            },
+            {
+              key: "open",
+              header: "Open",
+              srOnly: true,
+              render: (r) => (
+                <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} aria-label={`Open ${r.capa_id}`}>
+                  <ChevronRight className="w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                </Link>
+              ),
+            },
+          ] satisfies Column<AiCapaRow>[]}
+        />
       </div>
     </main>
   );

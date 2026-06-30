@@ -20,7 +20,19 @@ import { canApproveCAPA, type ApprovalTier } from "@/lib/capa-approvals";
 export { canApproveCAPA };
 export type { ApprovalTier };
 
-/* ── GxP authoring bright line ──────────────────────────────────────────────
+/* ── "qa" (execution-level QA) — INTENTIONALLY in NONE of the sets below ──────
+ * qa is a non-privileged observer/executor: it must never author GxP records,
+ * approve, sign, reject, close, or delete. That posture is achieved purely by
+ * OMISSION — qa is deliberately absent from COMPLIANCE_AUTHOR_ROLES,
+ * ADMIN_DELETE_ROLES, the CAPA / CSV / FDA483 and *_MANAGE sets, and the
+ * APPROVAL_REQUIREMENTS in capa-approvals.ts — so every `has(SET)` gate and
+ * canApproveCAPA() returns false, and getModuleCapabilities' default branch is
+ * view-only. qa DOES retain the baseline non-viewer executor abilities the
+ * capability layer already grants every non-viewer role: drafting deviations
+ * (canWriteDeviation) and creating governance/RAID items, plus working tasks
+ * assigned to it (isAssignedToTask). Do not add qa to any set below.
+ *
+ * ── GxP authoring bright line ──────────────────────────────────────────────
  * super_admin (platform admin) manages tenants; it NEVER authors GxP records.
  * The server enforces this via requireGxPAuthor(resolution.isPlatformAdmin).
  * The pure role-string mirror the UI uses: */

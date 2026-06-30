@@ -19,6 +19,7 @@ import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   setDeviations,
   type DeviationSeverity,
+  type Deviation as DeviationItem,
 } from "@/store/deviation.slice";
 import {
   createDeviation as createDeviationAction,
@@ -36,7 +37,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
-import { PageHeader, StatCard, StatusGuide } from "@/components/shared";
+import { PageHeader, StatCard, StatusGuide, DataTable, type Column } from "@/components/shared";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
 import {
   STATUS_VARIANT, STATUS_LABEL, IMPACT_COLOR, CATEGORIES, AREAS,
@@ -412,48 +413,88 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       <div className="grid gap-4 grid-cols-1">
         {/* Table */}
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="data-table" style={{ minWidth: 800 }} aria-label="Deviation register">
-              <caption className="sr-only">List of deviations with status and severity</caption>
-              <thead>
-                <tr>
-                  <th scope="col">ID</th>
-                  <th scope="col">Title</th>
-                  <th scope="col">Category</th>
-                  <th scope="col">Severity</th>
-                  <th scope="col">Area</th>
-                  <th scope="col">Detected</th>
-                  <th scope="col">Owner</th>
-                  <th scope="col">Due</th>
-                  <th scope="col">CAPA</th>
-                  <th scope="col">Status</th>
-                  <th scope="col"><span className="sr-only">Open</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr><td colSpan={11} className="text-center py-8"><AlertTriangle className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{tenantDevs.length === 0 ? "No deviations reported yet" : "No deviations match filters"}</p></td></tr>
-                ) : filtered.map((dev) => {
+          <DataTable
+            ariaLabel="Deviation register"
+            caption="List of deviations with status and severity"
+            minWidth={800}
+            data={filtered}
+            rowKey={(dev) => dev.id}
+            onRowClick={(dev) => setSelectedId(dev.id)}
+            rowClassName={(dev) => clsx(selected?.id === dev.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))}
+            rowStyle={(dev) => (dev.status === "closed" ? { opacity: 0.6 } : undefined)}
+            emptyState={
+              <div className="text-center py-8"><AlertTriangle className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{tenantDevs.length === 0 ? "No deviations reported yet" : "No deviations match filters"}</p></div>
+            }
+            columns={[
+              {
+                key: "id",
+                header: "ID",
+                cellClassName: "font-mono text-[11px] text-(--brand)",
+                render: (dev) => dev.reference ?? dev.id.slice(0, 8),
+              },
+              {
+                key: "title",
+                header: "Title",
+                cellClassName: "text-[12px] font-medium max-w-[180px] truncate text-(--text-primary)",
+                render: (dev) => dev.title,
+              },
+              {
+                key: "category",
+                header: "Category",
+                cellClassName: "text-[11px] capitalize text-(--text-secondary)",
+                render: (dev) => dev.category,
+              },
+              {
+                key: "severity",
+                header: "Severity",
+                render: (dev) => <Badge variant={getSeverityVariant(dev.severity, "fda")}>{normalizeSeverityForDisplay(dev.severity, "fda") ?? dev.severity}</Badge>,
+              },
+              {
+                key: "area",
+                header: "Area",
+                cellClassName: "text-[11px] text-(--text-secondary)",
+                render: (dev) => dev.area,
+              },
+              {
+                key: "detected",
+                header: "Detected",
+                cellClassName: "text-[11px] text-(--text-secondary)",
+                render: (dev) => dayjs.utc(dev.detectedDate).tz(timezone).format("DD MMM"),
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                cellClassName: "text-[11px] text-(--text-secondary)",
+                render: (dev) => ownerName(dev.owner),
+              },
+              {
+                key: "due",
+                header: "Due",
+                render: (dev) => {
                   const isOd = dev.status !== "closed" && dev.status !== "rejected" && dayjs.utc(dev.dueDate).isBefore(dayjs());
                   return (
-                    <tr key={dev.id} className={clsx("cursor-pointer", selected?.id === dev.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))} onClick={() => setSelectedId(dev.id)} style={dev.status === "closed" ? { opacity: 0.6 } : undefined}>
-                      <td className="font-mono text-[11px]" style={{ color: "var(--brand)" }}>{dev.reference ?? dev.id.slice(0, 8)}</td>
-                      <td className="text-[12px] font-medium max-w-[180px] truncate" style={{ color: "var(--text-primary)" }}>{dev.title}</td>
-                      <td className="text-[11px] capitalize" style={{ color: "var(--text-secondary)" }}>{dev.category}</td>
-                      <td><Badge variant={getSeverityVariant(dev.severity, "fda")}>{normalizeSeverityForDisplay(dev.severity, "fda") ?? dev.severity}</Badge></td>
-                      <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{dev.area}</td>
-                      <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(dev.detectedDate).tz(timezone).format("DD MMM")}</td>
-                      <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{ownerName(dev.owner)}</td>
-                      <td className="text-[11px]" style={{ color: isOd ? "#ef4444" : "var(--text-secondary)" }}>{dayjs.utc(dev.dueDate).tz(timezone).format("DD MMM")}{isOd && <span className="block text-[9px] text-[#ef4444]">Overdue</span>}</td>
-                      <td>{dev.linkedCAPAId ? <Badge variant="blue">{dev.linkedCAPARef ?? dev.linkedCAPAId.slice(0, 8)}</Badge> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>—</span>}</td>
-                      <td><Badge variant={STATUS_VARIANT[dev.status]}>{STATUS_LABEL[dev.status]}</Badge></td>
-                      <td><ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /></td>
-                    </tr>
+                    <span className="text-[11px]" style={{ color: isOd ? "#ef4444" : "var(--text-secondary)" }}>{dayjs.utc(dev.dueDate).tz(timezone).format("DD MMM")}{isOd && <span className="block text-[9px] text-[#ef4444]">Overdue</span>}</span>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
+                },
+              },
+              {
+                key: "capa",
+                header: "CAPA",
+                render: (dev) => dev.linkedCAPAId ? <Badge variant="blue">{dev.linkedCAPARef ?? dev.linkedCAPAId.slice(0, 8)}</Badge> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>—</span>,
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (dev) => <Badge variant={STATUS_VARIANT[dev.status]}>{STATUS_LABEL[dev.status]}</Badge>,
+              },
+              {
+                key: "open",
+                header: "Open",
+                srOnly: true,
+                render: () => <ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />,
+              },
+            ] satisfies Column<DeviationItem>[]}
+          />
         </div>
 
       </div>

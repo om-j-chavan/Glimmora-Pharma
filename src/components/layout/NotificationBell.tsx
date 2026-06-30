@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { RelativeTime } from "@/components/ui/RelativeTime";
+import { Button } from "@/components/ui/Button";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   getNotifications, markRead, markAllRead, unreadCount,
@@ -143,11 +144,9 @@ export function NotificationBell() {
             <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Notifications</span>
             <div className="flex items-center gap-2">
               {unread > 0 && (
-                <button type="button" onClick={handleMarkAll} className="text-[10px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer">Mark all read</button>
+                <Button type="button" variant="ghost" size="xs" onClick={handleMarkAll} className="!h-auto !p-0 text-[10px] text-[#0ea5e9] hover:underline">Mark all read</Button>
               )}
-              <button type="button" onClick={() => setOpen(false)} className="opacity-40 hover:opacity-100 border-none bg-transparent cursor-pointer" aria-label="Close">
-                <X className="w-3.5 h-3.5" style={{ color: "var(--text-primary)" }} />
-              </button>
+              <Button type="button" variant="ghost" size="xs" icon={X} onClick={() => setOpen(false)} className="opacity-40 hover:opacity-100" style={{ color: "var(--text-primary)" }} aria-label="Close" />
             </div>
           </div>
 

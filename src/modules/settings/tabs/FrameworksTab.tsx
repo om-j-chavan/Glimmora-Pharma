@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { toggleFramework } from "@/store/settings.slice";
 import type { FrameworkSettings } from "@/store/settings.slice";
-import { Info } from "lucide-react";
+import { Info, Sparkles } from "lucide-react";
 import { Popup } from "@/components/ui/Popup";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { RegulatoryAIAssistant } from "@/modules/regulatory-intelligence/RegulatoryAIAssistant";
 
 interface FrameworkEntry {
   key: keyof FrameworkSettings;
@@ -41,6 +43,23 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
   );
   const [warnPopup, setWarnPopup] = useState(false);
   const [pendingKey, setPendingKey] = useState<keyof FrameworkSettings | null>(null);
+  // Regulatory AI Assistant overlay — opened from the header button or the
+  // Ctrl/Cmd + Shift + R shortcut. Closed by default so the AI never
+  // auto-triggers (the user must explicitly ask for it).
+  const [aiOpen, setAiOpen] = useState(false);
+
+  // Keyboard shortcut: Ctrl/Cmd + Shift + R opens the assistant. Guarded so it
+  // only fires while this tab is mounted (Frameworks is in view).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "R" || e.key === "r")) {
+        e.preventDefault();
+        setAiOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const handleToggle = (key: keyof FrameworkSettings) => {
     if (readOnly) return;
@@ -54,12 +73,27 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
 
   return (
     <section aria-labelledby="frameworks-heading" className="space-y-6">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <h2 id="frameworks-heading" className="text-[15px] font-semibold text-(--text-primary)">
-          Regulatory frameworks
-        </h2>
-        <Badge variant="blue">{activeCount} of 9 active</Badge>
+      {/* Header row — title + active count on the left, the Regulatory AI
+          launcher on the right. The button sits clear of the framework
+          toggles below so it never disturbs the existing actions. */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <h2 id="frameworks-heading" className="text-[15px] font-semibold text-(--text-primary)">
+            Regulatory frameworks
+          </h2>
+          <Badge variant="blue">{activeCount} of 9 active</Badge>
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          icon={Sparkles}
+          onClick={() => setAiOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={aiOpen}
+          title="Ask Regulatory AI about your frameworks, region, and the latest FDA/EMA guidance (Ctrl + Shift + R)"
+        >
+          Ask Regulatory AI
+        </Button>
       </div>
 
       {/* Info banner */}
@@ -124,6 +158,11 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
           },
         ]}
       />
+
+      {/* Regulatory AI Assistant — focus-mode overlay. Renders nothing until
+          opened; when open it docks right over a blurred backdrop so the
+          sidebar and page recede. */}
+      <RegulatoryAIAssistant open={aiOpen} onClose={() => setAiOpen(false)} />
     </section>
   );
 }
