@@ -17,6 +17,7 @@ import {
   startDeviationTask, submitDeviationTask, attachDeviationTaskDocument,
   postDeviationTaskMessage, removeDeviationTaskDocument,
 } from "@/actions/deviation-tasks";
+import { EVIDENCE_CATEGORIES, EVIDENCE_CATEGORY_LABEL, type EvidenceCategory } from "@/lib/queries/evidence";
 import type { WorklistDeviationTask, WorklistDoc } from "@/lib/queries/worklist";
 
 /** Map a worklist Document row → the shared DocList view shape. */
@@ -27,6 +28,43 @@ const toDocItem = (d: WorklistDoc): DocItemView => ({
   uploadedBy: d.uploadedBy,
   uploadedAt: d.uploadedAt,
 });
+
+/** Group task docs by GxP category (canonical order, then Uncategorized). */
+function groupTaskDocsByCategory(docs: WorklistDoc[]): { category: EvidenceCategory | null; docs: WorklistDoc[] }[] {
+  const groups: { category: EvidenceCategory | null; docs: WorklistDoc[] }[] = [];
+  for (const cat of EVIDENCE_CATEGORIES) {
+    const ds = docs.filter((d) => d.category === cat);
+    if (ds.length) groups.push({ category: cat, docs: ds });
+  }
+  const uncategorized = docs.filter((d) => !d.category || !(EVIDENCE_CATEGORIES as readonly string[]).includes(d.category));
+  if (uncategorized.length) groups.push({ category: null, docs: uncategorized });
+  return groups;
+}
+
+/** Task docs rendered grouped by category — a labeled DocList per group. DocList
+ *  stays category-agnostic; the grouping lives here. */
+function GroupedTaskDocs({ docs, emptyText, onRemove, busyId }: {
+  docs: WorklistDoc[];
+  emptyText: string;
+  onRemove?: (id: string) => void;
+  busyId?: string | null;
+}) {
+  if (docs.length === 0) {
+    return <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>{emptyText}</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {groupTaskDocsByCategory(docs).map((g) => (
+        <div key={g.category ?? "uncategorized"}>
+          <p className="text-[10px] font-medium mb-0.5" style={{ color: "var(--text-secondary)" }}>
+            {g.category ? EVIDENCE_CATEGORY_LABEL[g.category] : "Uncategorized"}
+          </p>
+          <DocList docs={g.docs.map(toDocItem)} onRemove={onRemove} busyId={busyId} />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const DEV_TASK_STATUS_LABEL: Record<string, string> = {
   pending: "Pending", in_progress: "In Progress", submitted: "Submitted for Review", rework: "Needs Rework",
@@ -61,6 +99,7 @@ export function DeviationTaskPanel({
   const [msgBody, setMsgBody] = useState("");
   const [posting, setPosting] = useState(false);
   const [removingDocId, setRemovingDocId] = useState<string | null>(null);
+  const [uploadCategory, setUploadCategory] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
 
   const canWork = task.status === "pending" || task.status === "in_progress" || task.status === "rework";
@@ -87,7 +126,7 @@ export function DeviationTaskPanel({
     const fd = new FormData();
     fd.set("fileName", file.name);
     fd.set("file", file);
-    const res = await attachDeviationTaskDocument(task.id, fd);
+    const res = await attachDeviationTaskDocument(task.id, fd, uploadCategory);
     setBusy(false);
     if (!res.success) { setErr(res.error || "Upload failed."); toast.error(res.error || "Upload failed."); return; }
     toast.success("Document attached."); onChanged();
@@ -177,7 +216,7 @@ export function DeviationTaskPanel({
               the "Send to QA" modal (req 5). */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Your task documents</p>
-            <DocList docs={task.taskDocs.map(toDocItem)} emptyText="No documents uploaded yet — add them when you send your response." />
+            <GroupedTaskDocs docs={task.taskDocs} emptyText="No documents uploaded yet — add them when you send your response." />
           </div>
 
           {/* Conversation — flat QA↔worker thread */}
@@ -217,13 +256,30 @@ export function DeviationTaskPanel({
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Supporting documents (optional)</p>
             {task.taskDocs.length > 0 && (
               <div className="mb-1.5">
-                <DocList docs={task.taskDocs.map(toDocItem)} onRemove={(id) => void removeDoc(id)} busyId={removingDocId} />
+                <GroupedTaskDocs docs={task.taskDocs} emptyText="" onRemove={(id) => void removeDoc(id)} busyId={removingDocId} />
               </div>
             )}
-            <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", opacity: busy ? 0.6 : 1 }}>
-              <Paperclip className="w-3.5 h-3.5" /> Upload file
-              <input type="file" className="hidden" disabled={busy} onChange={onPickFile} />
-            </label>
+            {/* Piece 1 — pick a GxP category, then upload. The category is stored
+                on the doc and groups it above (and maps to CAPA evidence on carryover). */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                className="input text-[12px]"
+                value={uploadCategory}
+                onChange={(e) => setUploadCategory(e.target.value)}
+                disabled={busy}
+                aria-label="Evidence category"
+              >
+                <option value="">Select category…</option>
+                {EVIDENCE_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{EVIDENCE_CATEGORY_LABEL[c]}</option>
+                ))}
+              </select>
+              <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", opacity: (busy || !uploadCategory) ? 0.6 : 1 }}>
+                <Paperclip className="w-3.5 h-3.5" /> Upload file
+                <input type="file" className="hidden" disabled={busy || !uploadCategory} onChange={onPickFile} />
+              </label>
+            </div>
+            {!uploadCategory && <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Pick a category to enable upload.</p>}
           </div>
           {err && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{err}</p>}
         </div>

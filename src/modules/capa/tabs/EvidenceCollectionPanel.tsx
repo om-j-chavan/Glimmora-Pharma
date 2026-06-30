@@ -39,6 +39,7 @@ import {
 } from "@/actions/evidence";
 import {
   EVIDENCE_CATEGORIES,
+  EVIDENCE_CATEGORY_LABEL as CATEGORY_LABEL,
   type EvidenceCategory,
   type EvidenceItemSummary,
   type EvidenceStatus,
@@ -63,16 +64,6 @@ interface EvidenceCollectionPanelProps {
    *  edit notes, remove files). The server enforces the same — this is UX. */
   assigneeMode?: boolean;
 }
-
-const CATEGORY_LABEL: Record<EvidenceCategory, string> = {
-  BATCH_RECORDS: "Batch Records",
-  TRAINING_RECORDS: "Training Records",
-  EQUIPMENT_LOGS: "Equipment Logs",
-  ENVIRONMENTAL_DATA: "Environmental Data",
-  DEVIATION_HISTORY: "Deviation History",
-  WITNESS_INTERVIEWS: "Witness Interviews",
-  SUPPLIER_DATA: "Supplier Data",
-};
 
 const CATEGORY_ICON: Record<EvidenceCategory, typeof FileText> = {
   BATCH_RECORDS: FileText,

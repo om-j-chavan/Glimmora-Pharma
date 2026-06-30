@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { createDocument } from "@/actions/documents";
+import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import { notify } from "@/lib/notify";
 import { sanitizeServerError } from "@/lib/errors";
 import type { ActionResult } from "@/actions/capas/_types";
@@ -257,6 +258,10 @@ export async function submitDeviationTask(
 export async function attachDeviationTaskDocument(
   taskId: string,
   formData: FormData,
+  // Piece 1 — optional GxP category (one of EVIDENCE_CATEGORIES). Stored on the
+  // existing Document.category column so the doc groups in the modal and maps
+  // 1:1 to a CAPA evidence category on carryover (Piece 2).
+  category?: string,
 ): Promise<ActionResult> {
   const session = await requireAuth();
   const task = await prisma.deviationTask.findFirst({
@@ -280,6 +285,15 @@ export async function attachDeviationTaskDocument(
   // author-role gate in createDocument (its super_admin + viewer stops remain).
   const created = await createDocument(formData, { bypassAuthorGate: isAssignee });
   if (!created.success) return created;
+
+  // Tag the new Document with its GxP category (validated against the shared
+  // list). Done as a post-create update so the generic createDocument is
+  // untouched. Invalid/absent category leaves Document.category null
+  // (renders under "Uncategorized").
+  const docId = (created.data as { id?: string } | null)?.id ?? null;
+  if (docId && category && (EVIDENCE_CATEGORIES as readonly string[]).includes(category)) {
+    await prisma.document.update({ where: { id: docId }, data: { category } });
+  }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   await prisma.auditLog.create({

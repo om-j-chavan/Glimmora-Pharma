@@ -50,6 +50,9 @@ export interface WorklistDoc {
   fileSize: string | null;
   uploadedBy: string;
   uploadedAt: string;
+  /** Piece 1 — GxP category (one of EVIDENCE_CATEGORIES) for task docs; null for
+   *  parent deviation docs and legacy/uncategorized task docs. */
+  category: string | null;
 }
 
 /** Stage 5 — one flat, append-only QA↔worker message (no threading/concern). */
@@ -246,6 +249,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         select: {
           id: true, fileName: true, originalFileName: true, fileType: true, fileExtension: true,
           fileSize: true, uploadedBy: true, uploadedAt: true, createdAt: true, linkedModule: true, linkedRecordId: true,
+          category: true,
         },
       })
     : [];
@@ -261,6 +265,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
       fileSize: d.fileSize,
       uploadedBy: d.uploadedBy,
       uploadedAt: (d.uploadedAt ?? d.createdAt).toISOString(),
+      category: d.category,
     };
     const bucket = d.linkedModule === "Deviation Task" ? taskDocsByTask : devDocsByDev;
     const arr = bucket.get(d.linkedRecordId) ?? [];
