@@ -304,6 +304,66 @@ async function convertCategorizedDocsToEvidence(
   return converted;
 }
 
+/** Finding→CAPA carryover — copy the finding's conversation (the FindingMessage
+ *  thread) into the CAPA as CAPA-level CAPAComments so it's visible to CAPA
+ *  reviewers in the Discussion section. REAL records (mirrors how categorized docs
+ *  become real EvidenceFiles + RCA text becomes CAPA.rca), attributed to the
+ *  ORIGINAL authors with the original timestamps preserved (thread chronology),
+ *  each tagged with the source finding. POST-tx + fault-isolated: never throws, so
+ *  a copy failure can't fail the CAPA. Returns the count carried.
+ *  NOTE: finding-only by design — the deviation carryover deliberately does NOT
+ *  carry its task conversation (it stays on the deviation, reachable via the link). */
+async function convertFindingMessagesToComments(
+  capaId: string,
+  tenantId: string,
+  findingId: string,
+  findingRef: string,
+  audit: { userId: string | null; userName: string; userRole: string },
+): Promise<number> {
+  try {
+    const messages = await prisma.findingMessage.findMany({
+      where: { findingId, tenantId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true },
+    });
+    if (messages.length === 0) return 0;
+    await prisma.cAPAComment.createMany({
+      data: messages.map((m) => ({
+        tenantId,
+        capaId,
+        parentId: null,
+        actionItemId: null,
+        // Provenance tag so reviewers see these are carried from the finding.
+        body: `(from finding ${findingRef}) ${m.body}`,
+        isConcern: false,
+        // CAPAComment.authorId is non-null (and NOT a User FK) — keep the original
+        // author id when present, else empty. Display attribution is preserved via
+        // authorName/authorRole regardless.
+        authorId: m.authorId ?? "",
+        authorName: m.authorName,
+        authorRole: m.authorRole,
+        // Preserve the original time so the carried thread keeps its chronology.
+        createdAt: m.createdAt,
+      })),
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: audit.userId, userName: audit.userName, userRole: audit.userRole,
+        module: "CAPA",
+        action: "CAPA_COMMENTS_CARRIED_FROM_FINDING",
+        recordId: capaId,
+        recordTitle: findingRef,
+        newValue: JSON.stringify({ findingId, carriedCount: messages.length }),
+      },
+    });
+    return messages.length;
+  } catch (err) {
+    console.error("[carryover] convertFindingMessagesToComments failed:", err);
+    return 0;
+  }
+}
+
 /** Finding→CAPA carryover (Step 5) — a contextual CAPA description from the
  *  originating finding (mirrors buildDeviationCarryDescription). Plain text only;
  *  the structured RCA method/JSON is intentionally left for the CAPA author. */
@@ -551,6 +611,8 @@ export async function createCAPA(
             activeTaskId: activeTask?.id ?? null,
             rcaCarried: !!(sourceDev?.rootCause || sourceFinding?.rootCause),
             actionItemInfo,
+            // For the post-tx comment carryover's provenance tag.
+            findingRef: sourceFinding?.reference ?? null,
           };
         });
         break;
@@ -655,7 +717,17 @@ export async function createCAPA(
         { userId: actor.userId, userName: actor.displayName, userRole: actor.role },
         { source: "gap_finding_carryover", key: "findingId", value: linkedFindingId },
       );
-      if (convertedEvidenceCount > 0) {
+      // Carry the finding's conversation (FindingMessage thread) into the CAPA as
+      // CAPA-level comments. Same POST-tx + fault-isolated shape as the doc→evidence
+      // conversion above — never fails the CAPA.
+      const carriedCommentCount = await convertFindingMessagesToComments(
+        capa.created.id,
+        session.user.tenantId,
+        linkedFindingId,
+        capa.findingRef ?? linkedFindingId.slice(0, 8),
+        { userId: actor.userId, userName: actor.displayName, userRole: actor.role },
+      );
+      if (convertedEvidenceCount > 0 || carriedCommentCount > 0) {
         revalidatePath(`/capa/${capa.created.id}`);
       }
       return {
@@ -667,6 +739,7 @@ export async function createCAPA(
             rcaCarried: capa.rcaCarried,
             ownerId: capa.created.ownerId,
             convertedEvidenceCount,
+            carriedCommentCount,
           },
         },
       };
