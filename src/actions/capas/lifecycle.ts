@@ -410,10 +410,14 @@ export async function createCAPA(
                 select: { id: true, reference: true, requirement: true, framework: true, owner: true, rootCause: true },
               })
             : null;
-          // The finding's `owner` is a userId; resolve its display name for the
-          // CAPA.owner string column. Fallback to the raising QA if unresolvable.
+          // Resolve the finding owner to a REAL User. finding.owner is a raw
+          // userId string (Step 1) that may NOT correspond to a User row (e.g. a
+          // finding created by an admin whose session id has no User record), so
+          // it must NOT be written straight into CAPA.ownerId (a User FK) — that
+          // throws P2003 "foreign key constraint failed". We use the RESOLVED
+          // User's id (guaranteed valid), else fall back to the raising QA.
           const findingOwnerUser = sourceFinding?.owner
-            ? await tx.user.findFirst({ where: { id: sourceFinding.owner, tenantId: session.user.tenantId }, select: { name: true } })
+            ? await tx.user.findFirst({ where: { id: sourceFinding.owner, tenantId: session.user.tenantId }, select: { id: true, name: true } })
             : null;
 
           // Step 3/5 — the single assigned worker for CAPA.ownerId. Deviation-
@@ -423,7 +427,7 @@ export async function createCAPA(
           const ownerId = linkedDeviationId
             ? (activeTask?.assigneeId ?? actor.userId)
             : linkedFindingId
-              ? (sourceFinding?.owner ?? actor.userId)
+              ? (findingOwnerUser?.id ?? actor.userId)
               : ownerIdInput;
           const ownerName = linkedDeviationId
             ? (activeTask?.assignee ?? actor.displayName)
@@ -669,7 +673,12 @@ export async function createCAPA(
     }
     return { success: true, data: capa.created };
   } catch (err) {
-    console.error("[action] createCAPA failed:", err);
+    // Surface the Prisma code + meta (WHICH field/relation) so a constraint
+    // failure is diagnosable from the server log — e.g. P2003 + meta naming the
+    // FK relation. The UI still gets the sanitized message (no internals leaked).
+    const code = (err as { code?: string })?.code;
+    const meta = (err as { meta?: unknown })?.meta;
+    console.error(`[action] createCAPA failed${code ? ` (${code} ${JSON.stringify(meta)})` : ""}:`, err);
     return { success: false, error: sanitizeServerError(err, "Failed to create CAPA") };
   }
 }
