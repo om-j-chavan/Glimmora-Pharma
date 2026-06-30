@@ -692,6 +692,38 @@ export async function uploadFindingEvidence(
   }
 }
 
+/** Read-only loader for a finding's uploaded evidence documents (Document rows,
+ *  linkedModule "Gap Assessment"), grouped/displayed in the detail+edit modal so
+ *  existing docs are visible there (not just in the worklist). Tenant-scoped;
+ *  oldest first; soft-deleted excluded. Shape matches WorklistDoc. */
+export async function loadFindingDocuments(findingId: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  const docs = await prisma.document.findMany({
+    where: {
+      tenantId: session.user.tenantId,
+      linkedModule: "Gap Assessment", linkedRecordId: findingId,
+      deletedAt: null,
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, fileName: true, category: true, uploadedBy: true, createdAt: true },
+  });
+  return {
+    success: true,
+    data: docs.map((d) => ({
+      id: d.id,
+      fileName: d.fileName,
+      category: d.category,
+      uploadedBy: d.uploadedBy,
+      uploadedAt: d.createdAt.toISOString(),
+    })),
+  };
+}
+
 /** Soft-delete a finding's evidence document before it's submitted to QA — lets
  *  the assignee remove a wrong upload (mirrors removeDeviationTaskDocument). Auth:
  *  an author role OR the finding's assignee (owner), same as the upload. Only a

@@ -20,9 +20,10 @@ import {
   reworkFinding as reworkFindingAction,
   postFindingMessage as postFindingMessageAction,
   loadFindingReview as loadFindingReviewAction,
+  loadFindingDocuments as loadFindingDocumentsAction,
 } from "@/actions/findings";
-import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
-import type { WorklistTaskMessage } from "@/lib/queries/worklist";
+import { TaskThread, GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
+import type { WorklistTaskMessage, WorklistDoc } from "@/lib/queries/worklist";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import type { UserConfig } from "@/store/settings.slice";
@@ -156,6 +157,10 @@ export function GapRegisterTab({
   const [reworkReasonInput, setReworkReasonInput] = useState("");
   const [reviewMsg, setReviewMsg] = useState("");
   const [reviewError, setReviewError] = useState<string | null>(null);
+  // Round 4 — the finding's uploaded evidence docs (read-only in the modal) +
+  // the collapsible Audit Trail open state (collapsed by default).
+  const [findingDocs, setFindingDocs] = useState<WorklistDoc[]>([]);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   useEffect(() => {
     const id = selectedFinding?.id;
@@ -164,6 +169,19 @@ export function GapRegisterTab({
     void (async () => {
       const res = await loadFindingReviewAction(id);
       if (!cancelled) setReview(res.success ? (res.data as FindingReview) : null);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedFinding?.id]);
+
+  // Round 4 (#11) — load the finding's uploaded evidence docs so existing docs
+  // are visible in the detail/edit modal (previously only surfaced in the worklist).
+  useEffect(() => {
+    const id = selectedFinding?.id;
+    if (!id) { setFindingDocs([]); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await loadFindingDocumentsAction(id);
+      if (!cancelled) setFindingDocs(res.success ? (res.data as WorklistDoc[]) : []);
     })();
     return () => { cancelled = true; };
   }, [selectedFinding?.id]);
@@ -261,6 +279,7 @@ export function GapRegisterTab({
     setIsEditing(false);
     setEditReason("");
     setSaveError("");
+    setAuditOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFinding?.id]);
 
@@ -514,6 +533,7 @@ export function GapRegisterTab({
                 title={findingRef(selectedFinding)}
                 recordId={selectedFinding.id}
                 module="finding"
+                buttonLabel="Summary"
                 content={[
                   `Requirement: ${selectedFinding.requirement}`,
                   selectedFinding.purpose ? `Purpose: ${selectedFinding.purpose}` : "",
@@ -594,6 +614,7 @@ export function GapRegisterTab({
                 <h3 className={LABEL}>Owner</h3>
                 <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
                   {ownerName(selectedFinding.owner)}
+                  {selectedFinding.owner === user?.id ? " (You)" : ""}
                   {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` (${roleLabel(u.role)})` : ""; })()}
                 </p>
                 {/* Assign moved to the severity-gated Disposition block below (LOW →
@@ -836,11 +857,29 @@ export function GapRegisterTab({
               );
             })()}
 
-            {/* ── Timeline ── */}
+            {/* ── Documents (read-only) — the finding's uploaded evidence, shown
+                in view + edit so existing docs are visible here (Round 4 #11). ── */}
+            <div className="pt-4 border-t border-(--bg-border)">
+              <h3 className={LABEL}>Documents</h3>
+              <GroupedTaskDocs docs={findingDocs} emptyText="No documents uploaded to this finding." />
+            </div>
+
+            {/* ── Created (always visible, #8) + Audit Trail (collapsible, collapsed
+                by default) — the former "Timeline", renamed (Round 4 #7+#9). ── */}
             {!isEditing && (
               <div className="pt-4 border-t border-(--bg-border)">
-                <p className={LABEL}>Timeline</p>
-                <div className="space-y-2.5 text-[11px]">
+                {selectedFinding.createdAt && (
+                  <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
+                    Created {dayjs.utc(selectedFinding.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
+                  </p>
+                )}
+                <button type="button" onClick={() => setAuditOpen((v) => !v)} aria-expanded={auditOpen}
+                  className="flex items-center gap-1.5 bg-transparent border-none cursor-pointer p-0">
+                  <ChevronRight className={clsx("w-3.5 h-3.5 transition-transform", auditOpen && "rotate-90")} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                  <span className={LABEL} style={{ marginBottom: 0 }}>Audit Trail</span>
+                </button>
+                {auditOpen && (
+                <div className="space-y-2.5 text-[11px] mt-2">
                   {selectedFinding.createdAt && (
                     <div className="flex items-start gap-2">
                       <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "var(--brand)" }} />
@@ -880,14 +919,12 @@ export function GapRegisterTab({
                       </div>
                     );
                   })()}
-                  {!selectedFinding.createdAt && !selectedFinding.editHistory?.length && (
-                    <p style={{ color: "var(--text-muted)" }}>&mdash;</p>
+                  {selectedFinding.linkedSystemName && (
+                    <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
+                      Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
+                    </p>
                   )}
                 </div>
-                {selectedFinding.linkedSystemName && (
-                  <p className="text-[11px] mt-3" style={{ color: "var(--text-muted)" }}>
-                    Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
-                  </p>
                 )}
               </div>
             )}

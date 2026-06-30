@@ -9,10 +9,10 @@ import type { DocType } from "@/store/evidence.slice";
 import type { SiteConfig } from "@/store/settings.slice";
 import type { GxPSystem } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
-import { roleLabel } from "@/lib/labels/roles";
 import { RcaMethodFields, rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
 import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
 
@@ -37,6 +37,8 @@ const findingSchema = z.object({
   rcaMethod: z.enum(CAPA_RCA_METHODS).optional(),
   linkedSystemId: z.string().optional(),
   linkedSystemName: z.string().optional(),
+  // Kept (defaults false) so the server payload shape is stable; the UI option is
+  // hidden — immediate-raise happens via the normal disposition, not at creation.
   raiseCapaImmediately: z.boolean().optional(),
 });
 type FindingForm = z.infer<typeof findingSchema>;
@@ -61,14 +63,15 @@ interface AddFindingModalProps {
   systems: GxPSystem[];
   activeFrameworks: string[];
   lockedSiteId?: string | null;
-  /** Creator identity — owner is auto-assigned to the current user (read-only). */
-  currentUserName: string;
-  currentUserRole: string;
+  /** Creator identity — owner is auto-assigned to the current user server-side.
+   *  Retained for API stability; the create form no longer renders an Owner field. */
+  currentUserName?: string;
+  currentUserRole?: string;
   /** Gates the AI "Suggest classification" action (AGI mode + CAPA agent on). */
   aiEnabled?: boolean;
 }
 
-export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, currentUserName, currentUserRole, aiEnabled = true }: AddFindingModalProps) {
+export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, aiEnabled = true }: AddFindingModalProps) {
   const { register: reg, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } = useForm<FindingForm>({
     resolver: zodResolver(findingSchema),
     defaultValues: { severity: "High", siteId: lockedSiteId ?? "", raiseCapaImmediately: false },
@@ -185,25 +188,25 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     >
       <form onSubmit={handleSubmit(onSubmit)} aria-label="Add new finding" className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          {/* Site — hidden for non-admin (auto-assigned from login), visible dropdown for admin */}
+          {/* Site + Area on one row (Site hidden for non-admin — auto from login). */}
           {!lockedSiteId && (
-            <div className="col-span-2">
+            <div>
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p>
               <Dropdown placeholder="Select site..." value={watch("siteId") ?? ""} onChange={(v) => setValue("siteId", v, { shouldValidate: true })} width="w-full"
                 options={sites.filter((s) => s.status === "Active").map((s) => ({ value: s.id, label: s.name }))} />
               {errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}
             </div>
           )}
-          {/* Area + linked CSV system — the system link (shown for CSV/IT &
-              QC Lab) sits beside Area for context. */}
-          <div className={(watchArea === "CSV/IT" || watchArea === "QC Lab") ? "" : "col-span-2"}>
+          <div className={lockedSiteId ? "col-span-2" : ""}>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Area <span className="text-(--danger)">*</span></p>
             <Dropdown placeholder="Select area..." value={watch("area") ?? ""} onChange={(v) => setValue("area", v, { shouldValidate: true })} width="w-full"
               options={AREAS.map((a) => ({ value: a, label: a }))} />
             {errors.area && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.area.message}</p>}
           </div>
+
+          {/* Linked CSV system — own row, shown for CSV/IT & QC Lab. */}
           {(watchArea === "CSV/IT" || watchArea === "QC Lab") && (
-            <div>
+            <div className="col-span-2">
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Linked system <span className="text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span></p>
               <Dropdown
                 placeholder="Select system..."
@@ -215,106 +218,116 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Links this finding to the system&apos;s DI &amp; Audit Trail tab.</p>
             </div>
           )}
-          <div className="col-span-2">
-            <label htmlFor="f-req" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Requirement <span className="text-(--danger)">*</span></label>
-            <input id="f-req" type="text" className="input text-[12px]" placeholder="e.g. Annex 11 §11 — Audit trail completeness" {...reg("requirement")} />
-            {errors.requirement && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.requirement.message}</p>}
 
-            {/* Feature I — Finding Triage. Classifies framework + severity and
-                surfaces a risk summary + evidence gaps the user can act on. */}
-            {aiEnabled && (
-              <div className="mt-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  icon={Sparkles}
-                  loading={triageLoading}
-                  onClick={runTriage}
-                  disabled={(watchRequirement ?? "").trim().length < 10}
-                >
-                  {triageLoading ? "Analysing…" : "Suggest classification (AI)"}
-                </Button>
-                {triageError && <p role="alert" className="text-[11px] text-(--danger) mt-1.5">{triageError}</p>}
-
-                {triage && (
-                  <div className="agi-panel mt-2.5" role="status" aria-live="polite">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
-                        <Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" />
-                        <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>AGI Triage</span>
-                      </div>
-                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                        {triage.confidence}% confidence · {triage.source === "backend" ? "live" : "demo"}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="badge badge-blue text-[10px]">{triage.frameworkLabel}</span>
-                      {triage.clause && <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{triage.clause}</span>}
-                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>·</span>
-                      <span className="badge text-[10px]" style={{
-                        background: triage.severity === "Critical" ? "var(--danger-bg)" : triage.severity === "High" ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)",
-                        color: triage.severity === "Critical" ? "#ef4444" : triage.severity === "High" ? "#f59e0b" : "#10b981",
-                      }}>{triage.severity}</span>
-                    </div>
-                    {triage.agiSummary && <p className="text-[11px] leading-relaxed mb-2" style={{ color: "var(--text-secondary)" }}>{triage.agiSummary}</p>}
-                    {triage.severityRationale && <p className="text-[10px] italic mb-2" style={{ color: "var(--text-muted)" }}>{triage.severityRationale}</p>}
-                    {triage.evidenceGaps.length > 0 && (
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Evidence to assemble</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {triage.evidenceGaps.map((g, i) => (
-                            <span key={i} className="text-[10px] rounded-md px-2 py-1" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)", color: "var(--text-secondary)" }}>{g}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>
-                      Framework &amp; severity pre-filled below — review and edit before saving.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
+          {/* Requirement + Framework + Severity on one row (nested 4-col;
+              Requirement gets the wider half). */}
+          <div className="col-span-2 grid grid-cols-4 gap-4">
+            <Input
+              id="f-req"
+              label="Requirement"
+              required
+              className="col-span-2"
+              placeholder="e.g. Annex 11 §11 — Audit trail completeness"
+              error={errors.requirement?.message}
+              {...reg("requirement")}
+            />
+            <div>
+              <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Framework <span className="text-(--danger)">*</span></p>
+              <Dropdown placeholder="Select framework..." value={watch("framework") ?? ""} onChange={(v) => setValue("framework", v, { shouldValidate: true })} width="w-full"
+                options={activeFrameworks.map((k) => ({ value: k, label: FRAMEWORK_LABELS[k] ?? k }))} />
+              {errors.framework && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.framework.message}</p>}
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Severity <span className="text-(--danger)">*</span></p>
+              <Dropdown value={watch("severity") ?? "High"} onChange={(v) => setValue("severity", v as FindingSeverity)} width="w-full"
+                options={[
+                  { value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const },
+                  { value: "High", label: "High", badge: "H", badgeVariant: "amber" as const },
+                  { value: "Medium", label: "Medium", badge: "M", badgeVariant: "amber" as const },
+                  { value: "Low", label: "Low", badge: "L", badgeVariant: "green" as const },
+                ]} />
+            </div>
           </div>
+
+          {/* Feature I — Finding Triage. Classifies framework + severity and
+              surfaces a risk summary + evidence gaps the user can act on. Full
+              width, under the classification row. */}
+          {aiEnabled && (
+            <div className="col-span-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                icon={Sparkles}
+                loading={triageLoading}
+                onClick={runTriage}
+                disabled={(watchRequirement ?? "").trim().length < 10}
+              >
+                {triageLoading ? "Analysing…" : "Suggest classification (AI)"}
+              </Button>
+              {triageError && <p role="alert" className="text-[11px] text-(--danger) mt-1.5">{triageError}</p>}
+
+              {triage && (
+                <div className="agi-panel mt-2.5" role="status" aria-live="polite">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" />
+                      <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>AGI Triage</span>
+                    </div>
+                    <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                      {triage.confidence}% confidence · {triage.source === "backend" ? "live" : "demo"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span className="badge badge-blue text-[10px]">{triage.frameworkLabel}</span>
+                    {triage.clause && <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{triage.clause}</span>}
+                    <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>·</span>
+                    <span className="badge text-[10px]" style={{
+                      background: triage.severity === "Critical" ? "var(--danger-bg)" : triage.severity === "High" ? "rgba(245,158,11,0.15)" : "rgba(16,185,129,0.15)",
+                      color: triage.severity === "Critical" ? "#ef4444" : triage.severity === "High" ? "#f59e0b" : "#10b981",
+                    }}>{triage.severity}</span>
+                  </div>
+                  {triage.agiSummary && <p className="text-[11px] leading-relaxed mb-2" style={{ color: "var(--text-secondary)" }}>{triage.agiSummary}</p>}
+                  {triage.severityRationale && <p className="text-[10px] italic mb-2" style={{ color: "var(--text-muted)" }}>{triage.severityRationale}</p>}
+                  {triage.evidenceGaps.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Evidence to assemble</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {triage.evidenceGaps.map((g, i) => (
+                          <span key={i} className="text-[10px] rounded-md px-2 py-1" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)", color: "var(--text-secondary)" }}>{g}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>
+                    Framework &amp; severity pre-filled in the form — review and edit before saving.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="col-span-2">
             <label htmlFor="f-purpose" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Purpose <span className="text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span></label>
             <textarea id="f-purpose" rows={2} className="input text-[12px] resize-none" placeholder="Why this gap matters / what closing it achieves" {...reg("purpose")} />
           </div>
-          {/* Framework + Severity — classification fields grouped together. */}
-          <div>
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Framework <span className="text-(--danger)">*</span></p>
-            <Dropdown placeholder="Select framework..." value={watch("framework") ?? ""} onChange={(v) => setValue("framework", v, { shouldValidate: true })} width="w-full"
-              options={activeFrameworks.map((k) => ({ value: k, label: FRAMEWORK_LABELS[k] ?? k }))} />
-            {errors.framework && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.framework.message}</p>}
-          </div>
-          <div>
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Severity <span className="text-(--danger)">*</span></p>
-            <Dropdown value={watch("severity") ?? "High"} onChange={(v) => setValue("severity", v as FindingSeverity)} width="w-full"
-              options={[
-                { value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const },
-                { value: "High", label: "High", badge: "H", badgeVariant: "amber" as const },
-                { value: "Medium", label: "Medium", badge: "M", badgeVariant: "amber" as const },
-                { value: "Low", label: "Low", badge: "L", badgeVariant: "green" as const },
-              ]} />
-          </div>
-          {/* Target date + Owner (read-only — auto-assigned to the creator). */}
-          <div>
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Owner</p>
-            <div className="text-[12px] rounded-lg px-3 py-2.5" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)", color: "var(--text-secondary)" }}>
-              {currentUserName || "You"}{currentUserRole ? ` (${roleLabel(currentUserRole)})` : ""}
-            </div>
-            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Auto-assigned to you as the creator.</p>
-          </div>
+
+          {/* Target date (Owner field removed — owner is auto-assigned to the
+              creator server-side). */}
           <div>
             <DatePicker id="f-target" label="Target date" required
               value={watch("targetDate") ?? ""}
               onChange={(v) => setValue("targetDate", v, { shouldValidate: true })}
               error={errors.targetDate?.message} />
           </div>
+
           <div className="col-span-2">
-            <label htmlFor="f-evidence" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Evidence link (optional)</label>
-            <input id="f-evidence" type="text" className="input text-[12px]" placeholder="Document reference or URL" {...reg("evidenceLink")} />
+            <Input
+              id="f-evidence"
+              label="Evidence link (optional)"
+              placeholder="Document reference or URL"
+              {...reg("evidenceLink")}
+            />
             <div className="mt-2 rounded-lg border p-3" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)" }}>
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -351,6 +364,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               )}
             </div>
           </div>
+
           {/* Root Cause Analysis — method-driven (reuses CAPA's RcaMethodFields
               + canonical CAPA_RCA_METHODS). Serialized to rootCause (mirror) +
               rcaDetail (JSON) on save. */}
@@ -371,15 +385,6 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
                 draftContext={[watchRequirement, watch("purpose")].filter(Boolean).join("\n\n")}
               />
             </div>
-          </div>
-          <div className="col-span-2 pt-1">
-            <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: "var(--text-primary)" }}>
-              <input type="checkbox" className="w-4 h-4 cursor-pointer accent-(--brand)" {...reg("raiseCapaImmediately")} />
-              <span>Raise CAPA immediately</span>
-            </label>
-            <p className="text-[10px] mt-1 ml-6" style={{ color: "var(--text-muted)" }}>
-              A linked CAPA will be created automatically and appear in the CAPA Tracker.
-            </p>
           </div>
         </div>
       </form>
