@@ -21,7 +21,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
+import { DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import { notify } from "@/lib/notify";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
@@ -583,6 +584,11 @@ const EVIDENCE_ALLOWED_MIME = new Set([
 export async function uploadFindingEvidence(
   findingId: string,
   formData: FormData,
+  // Gap Step 3 — optional GxP category (one of EVIDENCE_CATEGORIES). Stored on
+  // Document.category so the finding's docs group like deviation task docs and
+  // map 1:1 to a CAPA evidence category on a future carryover. Invalid/absent
+  // leaves category null (Uncategorized). Mirrors attachDeviationTaskDocument.
+  category?: string,
 ): Promise<ActionResult<{ fileName: string }>> {
   const session = await requireAuth();
 
@@ -598,9 +604,25 @@ export async function uploadFindingEvidence(
 
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId },
-    select: { id: true, reference: true, requirement: true },
+    select: { id: true, reference: true, requirement: true, owner: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+
+  // Authorization: an author role OR the finding's assignee (owner == userId).
+  // Mirrors addEvidenceFile / attachDeviationTaskDocument. requireGxPAuthor
+  // blocks the platform super_admin; the viewer hard-stop is in isAssignedToTask.
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: finding.owner });
+  if (!isAuthorRole && !isAssignee) {
+    return { success: false, error: "Your role does not permit this action." };
+  }
+  const cat = category && (EVIDENCE_CATEGORIES as readonly string[]).includes(category) ? category : null;
 
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -624,6 +646,8 @@ export async function uploadFindingEvidence(
           description: `Evidence for ${finding.reference ?? findingId}`,
           linkedModule: "Gap Assessment",
           linkedRecordId: findingId,
+          // Gap Step 3 — GxP category (validated above; null = Uncategorized).
+          category: cat,
           // Persist the retrieval metadata so the Evidence Index can serve
           // the bytes back via GET /api/findings/[id]/evidence. Without
           // storageKey the uploaded file was written to disk but orphaned —
@@ -660,5 +684,65 @@ export async function uploadFindingEvidence(
   } catch (err) {
     console.error("[action] uploadFindingEvidence failed:", err);
     return { success: false, error: "Failed to upload evidence file" };
+  }
+}
+
+// Gap Step 3 — the assignee's work/completion notes (mirrors the deviation task's
+// completionNotes). Author OR the finding's assignee (owner) may set it.
+const SaveFindingNotesSchema = z.object({
+  notes: z.string().max(5000),
+});
+
+export async function saveFindingWorkNotes(
+  findingId: string,
+  input: z.input<typeof SaveFindingNotesSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = SaveFindingNotesSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, reference: true, owner: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: finding.owner });
+  if (!isAuthorRole && !isAssignee) {
+    return { success: false, error: "Your role does not permit this action." };
+  }
+
+  try {
+    await prisma.finding.update({
+      where: { id: findingId, tenantId: session.user.tenantId },
+      data: { completionNotes: parsed.data.notes.trim() || null },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Gap Assessment",
+        action: "FINDING_NOTES_SAVED",
+        recordId: findingId,
+        recordTitle: finding.reference ?? undefined,
+      },
+    });
+    revalidatePath("/gap-assessment");
+    revalidatePath("/worklist");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] saveFindingWorkNotes failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to save notes") };
   }
 }

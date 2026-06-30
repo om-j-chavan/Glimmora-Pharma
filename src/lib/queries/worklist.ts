@@ -114,6 +114,11 @@ export interface WorklistFinding {
   severity: string;
   status: string;
   targetDate: string | null;
+  /** Gap Step 3 — the assignee's work/completion notes. */
+  completionNotes: string | null;
+  /** Gap Step 3 — the finding's evidence docs (Document, linkedModule
+   *  "Gap Assessment"), grouped by GxP category in the panel. */
+  docs: WorklistDoc[];
 }
 
 export interface Worklist {
@@ -179,7 +184,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     prisma.finding.findMany({
       where: { owner: userId, tenantId, deletedAt: null, status: { in: FINDING_ACTIVE_STATUSES } },
       orderBy: { targetDate: "asc" },
-      select: { id: true, reference: true, requirement: true, framework: true, area: true, severity: true, status: true, targetDate: true },
+      select: { id: true, reference: true, requirement: true, framework: true, area: true, severity: true, status: true, targetDate: true, completionNotes: true },
     }),
   ]);
 
@@ -336,6 +341,38 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
 
   // Gap Step 2 — serialise the findings union (Dates → ISO). Every returned
   // finding is active ("Open" / "In Progress"), so all of them are open work.
+  // Gap Step 3 — each assigned finding's own evidence documents (linkedModule
+  // "Gap Assessment"), with category, so the panel shows them grouped (reusing
+  // GroupedTaskDocs). ONE tenant-scoped query; serialised to the WorklistDoc shape.
+  const findingIds = assignedFindingRows.map((f) => f.id);
+  const findingDocsByFinding = new Map<string, WorklistDoc[]>();
+  if (findingIds.length > 0) {
+    const findingDocs = await prisma.document.findMany({
+      where: { tenantId, linkedModule: "Gap Assessment", linkedRecordId: { in: findingIds }, deletedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true, fileName: true, originalFileName: true, fileType: true, fileExtension: true,
+        fileSize: true, uploadedBy: true, uploadedAt: true, createdAt: true, category: true, linkedRecordId: true,
+      },
+    });
+    for (const d of findingDocs) {
+      if (!d.linkedRecordId) continue;
+      const row: WorklistDoc = {
+        id: d.id,
+        fileName: d.originalFileName ?? d.fileName,
+        fileType: d.fileType,
+        fileExtension: d.fileExtension,
+        fileSize: d.fileSize,
+        uploadedBy: d.uploadedBy,
+        uploadedAt: (d.uploadedAt ?? d.createdAt).toISOString(),
+        category: d.category,
+      };
+      const arr = findingDocsByFinding.get(d.linkedRecordId) ?? [];
+      arr.push(row);
+      findingDocsByFinding.set(d.linkedRecordId, arr);
+    }
+  }
+
   const assignedFindings: WorklistFinding[] = assignedFindingRows.map((f) => ({
     id: f.id,
     reference: f.reference,
@@ -345,6 +382,8 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     severity: f.severity,
     status: f.status,
     targetDate: f.targetDate ? f.targetDate.toISOString() : null,
+    completionNotes: f.completionNotes,
+    docs: findingDocsByFinding.get(f.id) ?? [],
   }));
 
   const openItems = items.filter((i) => OPEN_ITEM_STATUSES.has(i.status));

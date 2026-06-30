@@ -17,6 +17,7 @@ import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask, Work
 import { EvidenceCollectionPanel } from "@/modules/capa/tabs/EvidenceCollectionPanel";
 import { TaskPanel } from "./TaskPanel";
 import { DeviationTaskPanel } from "./DeviationTaskPanel";
+import { FindingWorkPanel } from "./FindingWorkPanel";
 import { StatusPill, ACTION_STATUS_TOKEN } from "@/modules/capa/lib/statusTokens";
 
 const ITEM_STATUS_LABEL: Record<string, string> = {
@@ -83,6 +84,8 @@ export function WorklistPage({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // Stage 4 (deviation redesign) — open low-priority deviation-task panel.
   const [selectedDevTaskId, setSelectedDevTaskId] = useState<string | null>(null);
+  // Gap Step 3 — open the assigned-finding work panel.
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [busyCapa, setBusyCapa] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
@@ -565,7 +568,7 @@ export function WorklistPage({
           </div>
           <div>
             {visibleFindings.map((f) => (
-              <div key={f.id} className="flex items-center gap-3 p-3" style={{ borderBottom: "1px solid var(--bg-border)" }}>
+              <button key={f.id} type="button" onClick={() => setSelectedFindingId(f.id)} className="w-full text-left flex items-center gap-3 p-3 border-none cursor-pointer bg-transparent hover:bg-(--bg-hover)" style={{ borderBottom: "1px solid var(--bg-border)" }}>
                 <div className="flex-1 min-w-0">
                   <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
                     {f.reference ?? f.id.slice(0, 8)} · {f.requirement}
@@ -577,7 +580,7 @@ export function WorklistPage({
                 </div>
                 <Badge variant={getSeverityVariant(f.severity, "generic")}>{f.severity}</Badge>
                 <Badge variant={f.status === "In Progress" ? "amber" : "blue"}>{f.status}</Badge>
-              </div>
+              </button>
             ))}
           </div>
         </section>
@@ -600,6 +603,14 @@ export function WorklistPage({
         const t = worklist.deviationTasks.find((d) => d.id === selectedDevTaskId);
         return t ? (
           <DeviationTaskPanel task={t} onClose={() => setSelectedDevTaskId(null)} onChanged={() => router.refresh()} />
+        ) : null;
+      })()}
+
+      {/* Gap Step 3 — assigned-finding work panel (categorized doc upload + notes). */}
+      {selectedFindingId && (() => {
+        const f = worklist.assignedFindings.find((x) => x.id === selectedFindingId);
+        return f ? (
+          <FindingWorkPanel finding={f} onClose={() => setSelectedFindingId(null)} onChanged={() => router.refresh()} />
         ) : null;
       })()}
 

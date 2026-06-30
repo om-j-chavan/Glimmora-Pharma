@@ -198,6 +198,9 @@ model Finding {
   rcaDetail    String?
   rootCause    String?
   evidenceLink String?
+  // Gap Step 3 — the assignee's work/completion notes (mirrors
+  // DeviationTask.completionNotes). Distinct from rootCause (RCA); nullable.
+  completionNotes String?
   linkedCAPAId String?
   createdBy    String
   // SME Section 1, Stage 6 (FULL) — recurrence linkage. Same shape as
