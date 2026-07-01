@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
+import { useToast } from "@/components/ui/Toast";
 
 /* ── Document interface — used across all modules ── */
 
@@ -127,6 +128,7 @@ export function DocumentUpload({
   const { isQAHead } = usePermissions();
   const { org } = useTenantConfig();
   const timezone = org.timezone;
+  const toast = useToast();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ name: string; size: number; type: DocFileType; dataUrl: string } | null>(null);
@@ -142,7 +144,7 @@ export function DocumentUpload({
 
   function handleFileSelect(file: File) {
     if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-      alert(`File too large. Maximum size is ${MAX_SIZE_MB} MB.`);
+      toast.error(`File too large. Maximum size is ${MAX_SIZE_MB} MB.`);
       return;
     }
     const ft = fileTypeFromName(file.name);
@@ -154,7 +156,7 @@ export function DocumentUpload({
       setExistingMatch(match ?? null);
       setVersionMode("new_version");
     };
-    reader.onerror = () => alert("Failed to read file. Please try again.");
+    reader.onerror = () => toast.error("Failed to read file. Please try again.");
     reader.readAsDataURL(file);
   }
 
@@ -279,49 +281,55 @@ export function DocumentUpload({
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {statusBadge(doc.status)}
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="xs"
+                    icon={ExternalLink}
                     onClick={() => { if (doc.dataUrl) window.open(doc.dataUrl, "_blank", "noopener,noreferrer"); }}
                     disabled={!doc.dataUrl}
                     title={doc.dataUrl ? `View ${doc.fileName}` : "File not available to view"}
                     aria-label={`View ${doc.fileName}`}
-                    className="p-1 rounded cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.1)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="hover:bg-[rgba(14,165,233,0.1)]"
                     style={{ color: "var(--brand)" }}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
-                  <button
+                  />
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="xs"
+                    icon={Download}
                     onClick={() => downloadLinkedDocument(doc)}
                     disabled={!doc.dataUrl}
                     title={doc.dataUrl ? `Download ${doc.fileName}` : "File not available for download"}
                     aria-label={`Download ${doc.fileName}`}
-                    className="p-1 rounded cursor-pointer border-none bg-transparent hover:bg-[rgba(14,165,233,0.1)] disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="hover:bg-[rgba(14,165,233,0.1)]"
                     style={{ color: "var(--brand)" }}
-                  >
-                    <Download className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
+                  />
                   {isQAHead && doc.status !== "approved" && doc.status !== "superseded" && onApprove && (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="xs"
+                      icon={CheckCircle2}
                       onClick={() => handleApprove(doc)}
                       title="Approve document"
-                      className="p-1 rounded cursor-pointer border-none bg-transparent hover:bg-[rgba(16,185,129,0.1)]"
+                      aria-label="Approve document"
+                      className="hover:bg-[rgba(16,185,129,0.1)]"
                       style={{ color: "#10b981" }}
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-                    </button>
+                    />
                   )}
                   {!readOnly && onDelete && (
-                    <button
+                    <Button
                       type="button"
+                      variant="danger-ghost"
+                      size="xs"
+                      icon={Trash2}
                       onClick={() => onDelete(doc.id)}
                       title="Delete document"
-                      className="p-1 rounded cursor-pointer border-none bg-transparent hover:bg-[rgba(239,68,68,0.1)]"
+                      aria-label="Delete document"
+                      className="!border-transparent hover:bg-[rgba(239,68,68,0.1)]"
                       style={{ color: "var(--text-muted)" }}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                    </button>
+                    />
                   )}
                 </div>
               </div>
@@ -362,9 +370,7 @@ export function DocumentUpload({
                   <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{selectedFile.name}</p>
                   <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{formatSize(selectedFile.size)} · {selectedFile.type.toUpperCase()}</p>
                 </div>
-                <button type="button" onClick={() => setSelectedFile(null)} className="p-1 cursor-pointer border-none bg-transparent" style={{ color: "var(--text-muted)" }} aria-label="Remove selected file">
-                  <X className="w-4 h-4" aria-hidden="true" />
-                </button>
+                <Button type="button" variant="ghost" size="sm" icon={X} onClick={() => setSelectedFile(null)} style={{ color: "var(--text-muted)" }} aria-label="Remove selected file" />
               </div>
 
               {/* Versioning prompt */}

@@ -10,6 +10,7 @@ import { ExportMenu } from "@/components/ui/ExportMenu";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { updateRTMEntry, createRTMEntry } from "@/actions/rtm";
 import { Modal } from "@/components/ui/Modal";
+import { DataTable, type Column } from "@/components/shared";
 
 const TR_VARIANT: Record<TraceabilityStatus, "green" | "amber" | "red"> = { complete: "green", partial: "amber", broken: "red" };
 const TR_LABEL: Record<TraceabilityStatus, string> = { complete: "Traced", partial: "Partial", broken: "Broken" };
@@ -75,31 +76,49 @@ export function SystemRTMTab({ systemId, entries, canEdit, onError }: SystemRTMT
         />
         {canEdit && <Button variant="secondary" size="sm" icon={Plus} onClick={() => setAddOpen(true)}>Add</Button>}
       </div>
-      <div className="card overflow-hidden"><div className="overflow-x-auto">
-        <table className="data-table" aria-label="Requirements traceability">
-          <thead><tr><th scope="col">URS ID</th><th scope="col">Requirement</th><th scope="col">Priority</th><th scope="col">Coverage</th></tr></thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={4} className="text-center py-6 text-[12px]" style={{ color: "var(--text-muted)" }}>No requirements{total > 0 ? " match filters" : " captured yet"}.</td></tr>
-            ) : filtered.map((e) => (
-              <tr key={e.id} className="cursor-pointer" onClick={() => setSelectedId(e.id)}>
-                <td className="font-mono text-[11px]" style={{ color: "var(--brand)" }}>{e.reference ?? e.ursId}</td>
-                <td className="text-[12px]" style={{ color: "var(--text-primary)" }} title={e.ursRequirement}>{truncate(e.ursRequirement, 60)}</td>
-                <td><Badge variant={e.ursPriority === "critical" ? "red" : e.ursPriority === "high" ? "amber" : "blue"}>{e.ursPriority}</Badge></td>
-                <td>
-                  <span className="inline-flex items-center gap-1.5">
-                    {e.traceabilityStatus === "complete" ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981]" /> : e.traceabilityStatus === "partial" ? <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b]" /> : <Circle className="w-3.5 h-3.5 text-[#ef4444]" />}
-                    <Badge variant={TR_VARIANT[e.traceabilityStatus]}>{TR_LABEL[e.traceabilityStatus]}</Badge>
-                    <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
-                      FS{e.fsReference ? "✓" : "○"} IQ{e.iqResult === "pass" ? "✓" : "○"} OQ{e.oqResult === "pass" ? "✓" : "○"} PQ{e.pqResult === "pass" ? "✓" : "○"}
-                    </span>
+      <div className="card overflow-hidden">
+        <DataTable
+          ariaLabel="Requirements traceability"
+          data={filtered}
+          rowKey={(e) => e.id}
+          onRowClick={(e) => setSelectedId(e.id)}
+          emptyState={
+            <p className="text-center py-6 text-[12px]" style={{ color: "var(--text-muted)" }}>No requirements{total > 0 ? " match filters" : " captured yet"}.</p>
+          }
+          columns={[
+            {
+              key: "ursId",
+              header: "URS ID",
+              cellClassName: "font-mono text-[11px]",
+              render: (e) => <span style={{ color: "var(--brand)" }}>{e.reference ?? e.ursId}</span>,
+            },
+            {
+              key: "requirement",
+              header: "Requirement",
+              cellClassName: "text-[12px]",
+              render: (e) => <span style={{ color: "var(--text-primary)" }} title={e.ursRequirement}>{truncate(e.ursRequirement, 60)}</span>,
+            },
+            {
+              key: "priority",
+              header: "Priority",
+              render: (e) => <Badge variant={e.ursPriority === "critical" ? "red" : e.ursPriority === "high" ? "amber" : "blue"}>{e.ursPriority}</Badge>,
+            },
+            {
+              key: "coverage",
+              header: "Coverage",
+              render: (e) => (
+                <span className="inline-flex items-center gap-1.5">
+                  {e.traceabilityStatus === "complete" ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981]" /> : e.traceabilityStatus === "partial" ? <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b]" /> : <Circle className="w-3.5 h-3.5 text-[#ef4444]" />}
+                  <Badge variant={TR_VARIANT[e.traceabilityStatus]}>{TR_LABEL[e.traceabilityStatus]}</Badge>
+                  <span className="text-[9px] font-mono" style={{ color: "var(--text-muted)" }}>
+                    FS{e.fsReference ? "✓" : "○"} IQ{e.iqResult === "pass" ? "✓" : "○"} OQ{e.oqResult === "pass" ? "✓" : "○"} PQ{e.pqResult === "pass" ? "✓" : "○"}
                   </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div></div>
+                </span>
+              ),
+            },
+          ] satisfies Column<RTMEntry>[]}
+        />
+      </div>
 
       {selected && (
         <RTMDetailModal key={selected.id} entry={selected} canEdit={canEdit} onClose={() => setSelectedId(null)} onError={onError} onSaved={() => router.refresh()} router={router} />

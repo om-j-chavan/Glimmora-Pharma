@@ -4,6 +4,7 @@ import { useState } from "react";
 import { HelpCircle } from "lucide-react";
 import { type StatusDef } from "@/constants/statusTaxonomy";
 import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
 
 export interface StatusGuideProps {
   module: string;
@@ -23,16 +24,18 @@ export function StatusGuide({ module, statuses }: StatusGuideProps) {
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="xs"
+        icon={HelpCircle}
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1 text-[11px] font-medium cursor-pointer border-none bg-transparent"
+        className="!h-auto !gap-1 !p-0 text-[11px] font-medium"
         style={{ color: "var(--text-muted)" }}
         aria-label="Open status guide"
       >
-        <HelpCircle className="w-3.5 h-3.5" aria-hidden="true" />
         Status guide
-      </button>
+      </Button>
 
       <Modal open={open} onClose={() => setOpen(false)} title={`Status Guide \u2014 ${module}`}>
         <div className="space-y-3 max-h-[60vh] overflow-y-auto">

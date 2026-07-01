@@ -1,6 +1,7 @@
 import { Layers } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
+import { DataTable, type Column } from "@/components/shared";
 import { PLAN_TIERS, TAILORED_CEILINGS } from "@/lib/plans";
 
 /**
@@ -27,6 +28,7 @@ export function PlanCatalogCard() {
       ceiling: true,
     },
   ];
+  type PlanRow = (typeof rows)[number];
 
   return (
     <Card
@@ -41,33 +43,28 @@ export function PlanCatalogCard() {
         </>
       }
     >
-      <div className="overflow-x-auto">
-        <table className="data-table" aria-label="Plan catalog">
-          <thead>
-            <tr>
-              <th scope="col">Tier</th>
-              <th scope="col">Max Users</th>
-              <th scope="col">Max Sites</th>
-              <th scope="col">Min Retention</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.tier}>
-                <td>
-                  <span className="font-medium" style={{ color: "var(--text-primary)" }}>{r.tier}</span>
-                  {r.ceiling && (
-                    <span className="text-[10px] ml-2" style={{ color: "var(--text-muted)" }}>(ceiling — caps configurable up to these)</span>
-                  )}
-                </td>
-                <td>{r.maxUsers}</td>
-                <td>{r.maxSites}</td>
-                <td>{r.minRetentionYears} yr</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        ariaLabel="Plan catalog"
+        data={rows}
+        rowKey={(r) => r.tier}
+        columns={[
+          {
+            key: "tier",
+            header: "Tier",
+            render: (r) => (
+              <>
+                <span className="font-medium" style={{ color: "var(--text-primary)" }}>{r.tier}</span>
+                {r.ceiling && (
+                  <span className="text-[10px] ml-2" style={{ color: "var(--text-muted)" }}>(ceiling — caps configurable up to these)</span>
+                )}
+              </>
+            ),
+          },
+          { key: "maxUsers", header: "Max Users", render: (r) => r.maxUsers },
+          { key: "maxSites", header: "Max Sites", render: (r) => r.maxSites },
+          { key: "minRetention", header: "Min Retention", render: (r) => <>{r.minRetentionYears} yr</> },
+        ] satisfies Column<PlanRow>[]}
+      />
       <p className="text-[11px] px-5 py-3" style={{ color: "var(--text-muted)" }}>
         Caps are frozen onto each tenant&apos;s plan at assignment — these tier values come from <span className="font-mono">src/lib/plans.ts</span> and are not editable here.
       </p>

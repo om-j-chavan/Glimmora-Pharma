@@ -33,6 +33,7 @@ const DEV_TASK_ROW_LABEL: Record<string, string> = {
 };
 const ROLE_LABEL: Record<string, string> = {
   qa_head: "QA Head",
+  qa: "Quality Assurance",
   qc_lab_director: "QC Lab Director",
   regulatory_affairs: "Regulatory Affairs",
   customer_admin: "Administrator",

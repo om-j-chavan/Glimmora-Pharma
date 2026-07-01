@@ -14,6 +14,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Badge } from "@/components/ui/Badge";
 import { Pagination } from "@/components/ui/Pagination";
+import { DataTable, type Column } from "@/components/shared";
 
 type LucideIcon = React.ComponentType<{ className?: string; style?: React.CSSProperties; "aria-hidden"?: boolean | "true" | "false" }>;
 
@@ -179,38 +180,84 @@ export function DocumentLibraryTab({
         </div>
       ) : (
         /* LIST VIEW */
-        <div className="card overflow-hidden"><div className="overflow-x-auto">
-          <table className="data-table" style={{ minWidth: 1000 }} aria-label="Evidence document library">
-            <caption className="sr-only">GxP evidence documents with status and compliance tags</caption>
-            <thead><tr>
-              <th scope="col"><input type="checkbox" className="w-4 h-4 accent-[#0ea5e9]" checked={selectedDocs.size === filteredDocs.length && filteredDocs.length > 0} onChange={() => setSelectedDocs(selectedDocs.size === filteredDocs.length ? new Set() : new Set(filteredDocs.map((d) => d.id)))} aria-label="Select all" /></th>
-              <th scope="col">Document</th><th scope="col">Type</th><th scope="col">Area</th><th scope="col">Status</th><th scope="col">Version</th><th scope="col">Effective date</th><th scope="col">Compliance</th><th scope="col">Links</th>
-            </tr></thead>
-            <tbody>
-              {pageDocs.map((doc) => {
-                const DocIcon = DOC_TYPE_ICONS[doc.type]; const iconColor = DOC_TYPE_COLORS[doc.type];
-                return (
-                  <tr key={doc.id} className={clsx(selectedDocs.has(doc.id) && "bg-(--brand-muted)")}>
-                    <td><input type="checkbox" className="w-4 h-4 accent-[#0ea5e9]" checked={selectedDocs.has(doc.id)} onChange={() => toggleDocSelection(doc.id)} aria-label={`Select ${doc.title}`} /></td>
-                    <th scope="row"><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-md shrink-0 flex items-center justify-center" style={{ background: iconColor + "18" }}><DocIcon className="w-3.5 h-3.5" style={{ color: iconColor }} aria-hidden="true" /></div><div className="min-w-0 max-w-[260px]"><p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }} title={doc.title}>{doc.title}</p><p className="font-mono text-[10px] truncate" style={{ color: "var(--text-muted)" }} title={doc.reference}>{doc.reference}</p></div></div></th>
-                    <td><Badge variant="gray">{doc.type}</Badge></td>
-                    <td><Badge variant="gray">{doc.area}</Badge></td>
-                    <td>{docStatusBadge(doc.status)}</td>
-                    <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>v{doc.version}</td>
-                    <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{doc.effectiveDate ? dayjs.utc(doc.effectiveDate).tz(timezone).format(dateFormat) : "\u2014"}{doc.expiryDate && dayjs.utc(doc.expiryDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Expired</div>}</td>
-                    <td><div className="flex gap-1 flex-wrap">{doc.complianceTags.map((tag) => <span key={tag} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-(--info-bg) text-[#6366f1]">{tag}</span>)}</div></td>
-                    <td><div className="flex items-center gap-1.5">
-                      {doc.url && <button type="button" onClick={() => downloadEvidenceDoc(doc)} title={`Download ${doc.title}`} aria-label={`Download ${doc.title}`} className="opacity-70 hover:opacity-100 border-none bg-transparent cursor-pointer"><Download className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
-                      {doc.findingId && <button onClick={() => onNavigate("/gap-assessment", { state: { openFindingId: doc.findingId } })} title={`Finding: ${doc.findingId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><Search className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
-                      {doc.capaId && <button onClick={() => onNavigate("/capa", { state: { openCapaId: doc.capaId } })} title={`CAPA: ${doc.capaId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><ClipboardCheck className="w-3.5 h-3.5 text-[#10b981]" /></button>}
-                      {doc.eventId && <button onClick={() => onNavigate("/fda-483")} title="FDA 483" className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><FileWarning className="w-3.5 h-3.5 text-[#ef4444]" /></button>}
-                    </div></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div></div>
+        <div className="card overflow-hidden">
+          <DataTable
+            ariaLabel="Evidence document library"
+            caption="GxP evidence documents with status and compliance tags"
+            data={pageDocs}
+            rowKey={(doc) => doc.id}
+            minWidth={1000}
+            rowClassName={(doc) => clsx(selectedDocs.has(doc.id) && "bg-(--brand-muted)")}
+            columns={[
+              {
+                key: "select",
+                // Select-all checkbox in the column header (ReactNode).
+                header: (
+                  <input type="checkbox" className="w-4 h-4 accent-[#0ea5e9]" checked={selectedDocs.size === filteredDocs.length && filteredDocs.length > 0} onChange={() => setSelectedDocs(selectedDocs.size === filteredDocs.length ? new Set() : new Set(filteredDocs.map((d) => d.id)))} aria-label="Select all" />
+                ),
+                render: (doc) => (
+                  <input type="checkbox" className="w-4 h-4 accent-[#0ea5e9]" checked={selectedDocs.has(doc.id)} onChange={() => toggleDocSelection(doc.id)} aria-label={`Select ${doc.title}`} />
+                ),
+              },
+              {
+                key: "document",
+                header: "Document",
+                render: (doc) => {
+                  const DocIcon = DOC_TYPE_ICONS[doc.type]; const iconColor = DOC_TYPE_COLORS[doc.type];
+                  return (
+                    <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-md shrink-0 flex items-center justify-center" style={{ background: iconColor + "18" }}><DocIcon className="w-3.5 h-3.5" style={{ color: iconColor }} aria-hidden="true" /></div><div className="min-w-0 max-w-[260px]"><p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }} title={doc.title}>{doc.title}</p><p className="font-mono text-[10px] truncate" style={{ color: "var(--text-muted)" }} title={doc.reference}>{doc.reference}</p></div></div>
+                  );
+                },
+              },
+              {
+                key: "type",
+                header: "Type",
+                render: (doc) => <Badge variant="gray">{doc.type}</Badge>,
+              },
+              {
+                key: "area",
+                header: "Area",
+                render: (doc) => <Badge variant="gray">{doc.area}</Badge>,
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (doc) => docStatusBadge(doc.status),
+              },
+              {
+                key: "version",
+                header: "Version",
+                cellClassName: "text-[12px]",
+                render: (doc) => <span style={{ color: "var(--text-secondary)" }}>v{doc.version}</span>,
+              },
+              {
+                key: "effectiveDate",
+                header: "Effective date",
+                cellClassName: "text-[12px]",
+                render: (doc) => (
+                  <span style={{ color: "var(--text-secondary)" }}>{doc.effectiveDate ? dayjs.utc(doc.effectiveDate).tz(timezone).format(dateFormat) : "\u2014"}{doc.expiryDate && dayjs.utc(doc.expiryDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Expired</div>}</span>
+                ),
+              },
+              {
+                key: "compliance",
+                header: "Compliance",
+                render: (doc) => <div className="flex gap-1 flex-wrap">{doc.complianceTags.map((tag) => <span key={tag} className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-(--info-bg) text-[#6366f1]">{tag}</span>)}</div>,
+              },
+              {
+                key: "links",
+                header: "Links",
+                render: (doc) => (
+                  <div className="flex items-center gap-1.5">
+                    {doc.url && <button type="button" onClick={() => downloadEvidenceDoc(doc)} title={`Download ${doc.title}`} aria-label={`Download ${doc.title}`} className="opacity-70 hover:opacity-100 border-none bg-transparent cursor-pointer"><Download className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
+                    {doc.findingId && <button onClick={() => onNavigate("/gap-assessment", { state: { openFindingId: doc.findingId } })} title={`Finding: ${doc.findingId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><Search className="w-3.5 h-3.5 text-[#0ea5e9]" /></button>}
+                    {doc.capaId && <button onClick={() => onNavigate("/capa", { state: { openCapaId: doc.capaId } })} title={`CAPA: ${doc.capaId}`} className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><ClipboardCheck className="w-3.5 h-3.5 text-[#10b981]" /></button>}
+                    {doc.eventId && <button onClick={() => onNavigate("/fda-483")} title="FDA 483" className="opacity-50 hover:opacity-100 border-none bg-transparent cursor-pointer"><FileWarning className="w-3.5 h-3.5 text-[#ef4444]" /></button>}
+                  </div>
+                ),
+              },
+            ] satisfies Column<EvidenceDocument>[]}
+          />
+        </div>
       )}
 
       {/* Pagination — shown for both views (grid + list) when there are results. */}

@@ -10,6 +10,7 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { chartDefaults } from "@/lib/chartColors";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 
 export interface SiteKPI {
   siteId: string;
@@ -134,43 +135,60 @@ export function KPIScorecardTab({
             <div className="card-header">
               <div className="flex items-center gap-2"><BarChart3 className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">Multi-site comparison</span></div>
             </div>
-            <div className="card-body overflow-x-auto">
-              <table className="data-table" style={{ minWidth: 700 }} aria-label="Site comparison matrix">
-                <thead>
-                  <tr>
-                    <th scope="col">Metric</th>
-                    {siteKPIs.map((s) => <th key={s.siteId} scope="col" className="text-center">{s.siteName.split(" ")[0]}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {([
-                    { label: "Readiness %", key: "readinessScore", thresh: [80, 60] },
-                    { label: "Open findings", key: "openFindings", thresh: [0, 1], invert: true },
-                    { label: "Overdue CAPAs", key: "overdueCAPAs", thresh: [0, 1], invert: true },
-                    { label: "Active FDA 483", key: "activeFDA483", thresh: [0, 1], invert: true },
-                    { label: "DI exceptions", key: "diExceptions", thresh: [0, 1], invert: true },
-                    { label: "CAPA timeliness", key: "capaTimeliness", thresh: [80, 60] },
-                    { label: "Audit trail %", key: "auditTrailCoverage", thresh: [80, 60] },
-                  ] as { label: string; key: keyof SiteKPI; thresh: number[]; invert?: boolean }[]).map((row) => (
-                    <tr key={row.label}>
-                      <th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{row.label}</th>
-                      {siteKPIs.map((s) => {
-                        const v = s[row.key] as number;
-                        const isGood = row.invert ? v <= row.thresh[0] : v >= row.thresh[0];
-                        const isMid = row.invert ? v <= row.thresh[1] : v >= row.thresh[1];
-                        const bg = isGood ? "#E8F5F1" : isMid ? "#FEF9EC" : "#FEF2F2";
-                        const col = isGood ? "#0F6E56" : isMid ? "#7A6200" : "#A32D2D";
-                        const bgDark = isGood ? "rgba(16,185,129,0.08)" : isMid ? "rgba(245,158,11,0.08)" : "rgba(239,68,68,0.08)";
-                        return (
-                          <td key={s.siteId} className="text-center text-[12px] font-semibold" style={{ background: isDark ? bgDark : bg, color: col }}>
-                            {row.key === "readinessScore" || row.key === "capaTimeliness" || row.key === "auditTrailCoverage" ? `${v}%` : String(v)}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="card-body">
+              {(() => {
+                type MetricRow = { label: string; key: keyof SiteKPI; thresh: number[]; invert?: boolean };
+                const metricRows: MetricRow[] = [
+                  { label: "Readiness %", key: "readinessScore", thresh: [80, 60] },
+                  { label: "Open findings", key: "openFindings", thresh: [0, 1], invert: true },
+                  { label: "Overdue CAPAs", key: "overdueCAPAs", thresh: [0, 1], invert: true },
+                  { label: "Active FDA 483", key: "activeFDA483", thresh: [0, 1], invert: true },
+                  { label: "DI exceptions", key: "diExceptions", thresh: [0, 1], invert: true },
+                  { label: "CAPA timeliness", key: "capaTimeliness", thresh: [80, 60] },
+                  { label: "Audit trail %", key: "auditTrailCoverage", thresh: [80, 60] },
+                ];
+                // Per-cell heat-map colours (background + text), computed per
+                // metric row + site — identical to the original inline logic.
+                const cellColors = (row: MetricRow, v: number) => {
+                  const isGood = row.invert ? v <= row.thresh[0] : v >= row.thresh[0];
+                  const isMid = row.invert ? v <= row.thresh[1] : v >= row.thresh[1];
+                  const bg = isGood ? "#E8F5F1" : isMid ? "#FEF9EC" : "#FEF2F2";
+                  const col = isGood ? "#0F6E56" : isMid ? "#7A6200" : "#A32D2D";
+                  const bgDark = isGood ? "rgba(16,185,129,0.08)" : isMid ? "rgba(245,158,11,0.08)" : "rgba(239,68,68,0.08)";
+                  return { background: isDark ? bgDark : bg, color: col };
+                };
+                const isPct = (key: keyof SiteKPI) =>
+                  key === "readinessScore" || key === "capaTimeliness" || key === "auditTrailCoverage";
+                return (
+                  <DataTable
+                    ariaLabel="Site comparison matrix"
+                    data={metricRows}
+                    rowKey={(row) => row.label}
+                    minWidth={700}
+                    columns={[
+                      {
+                        key: "metric",
+                        header: "Metric",
+                        cellClassName: "text-[12px] font-medium",
+                        render: (row) => <span style={{ color: "var(--text-primary)" }}>{row.label}</span>,
+                      },
+                      // One column per site — mirrors the original siteKPIs map.
+                      ...siteKPIs.map((s): Column<MetricRow> => ({
+                        key: s.siteId,
+                        header: s.siteName.split(" ")[0],
+                        align: "center",
+                        headerClassName: "text-center",
+                        cellClassName: "text-center text-[12px] font-semibold",
+                        cellStyle: (row) => cellColors(row, s[row.key] as number),
+                        render: (row) => {
+                          const v = s[row.key] as number;
+                          return isPct(row.key) ? `${v}%` : String(v);
+                        },
+                      })),
+                    ]}
+                  />
+                );
+              })()}
             </div>
           </div>
 

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Plus, Filter, Search, LifeBuoy } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { PageHeader } from "@/components/shared";
+import { PageHeader, DataTable } from "@/components/shared";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
@@ -108,41 +108,29 @@ export function TicketQueue({ result, admin, tenantOptions = [], assigneeOptions
           {/* Fixed-height, scrollable table area so the layout stays stable at 1
               row or many (matches the Deviation/CAPA data-table treatment). */}
           <div className="card overflow-hidden">
-            <div className="overflow-auto" style={{ minHeight: 360, maxHeight: 560 }}>
-              <table className="data-table" style={{ minWidth: admin ? 1100 : 820 }} aria-label={admin ? "All-tenants ticket queue" : "My tickets"}>
-                <caption className="sr-only">{admin ? "Tickets across all tenants" : "Tickets you have raised"}</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Ticket</th>
-                    <th scope="col">Subject</th>
-                    <th scope="col">Category</th>
-                    <th scope="col">Priority</th>
-                    <th scope="col">Status</th>
-                    {admin && <th scope="col">Requester</th>}
-                    {admin && <th scope="col">Assignee</th>}
-                    {admin && <th scope="col">Tenant</th>}
-                    <th scope="col">SLA due</th>
-                    <th scope="col">Updated</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.rows.map((t) => (
-                    <tr key={t.id} onClick={() => router.push(`${basePath}/${t.id}`)} className="cursor-pointer">
-                      <td className="font-mono text-[12px] font-semibold" style={{ color: "var(--brand)" }}>{t.reference ?? t.id.slice(0, 8)}</td>
-                      <td className="text-[12px] max-w-[280px] truncate" style={{ color: "var(--text-primary)" }} title={t.subject}>{t.subject}</td>
-                      <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{t.category}</td>
-                      <td>{priorityBadge(t.priority)}</td>
-                      <td>{statusBadge(t.status)}</td>
-                      {admin && <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{t.requesterName}</td>}
-                      {admin && <td className="text-[12px]" style={{ color: t.assigneeName ? "var(--text-secondary)" : "var(--text-muted)" }}>{t.assigneeName ?? "Unassigned"}</td>}
-                      {admin && <td className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>{tenantName(t.tenantId)}</td>}
-                      <td>{slaCell(t.slaDueAt, t.status)}</td>
-                      <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{dayjs.utc(t.updatedAt).tz(timezone).format(dateFormat)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              ariaLabel={admin ? "All-tenants ticket queue" : "My tickets"}
+              caption={admin ? "Tickets across all tenants" : "Tickets you have raised"}
+              data={result.rows}
+              rowKey={(t) => t.id}
+              onRowClick={(t) => router.push(`${basePath}/${t.id}`)}
+              container="fixed"
+              minHeight={360}
+              maxHeight={560}
+              minWidth={admin ? 1100 : 820}
+              columns={[
+                { key: "ticket", header: "Ticket", cellClassName: "font-mono text-[12px] font-semibold text-(--brand)", render: (t) => t.reference ?? t.id.slice(0, 8) },
+                { key: "subject", header: "Subject", cellClassName: "text-[12px] max-w-[280px] truncate text-(--text-primary)", render: (t) => <span title={t.subject}>{t.subject}</span> },
+                { key: "category", header: "Category", cellClassName: "text-[12px] text-(--text-secondary)", render: (t) => t.category },
+                { key: "priority", header: "Priority", render: (t) => priorityBadge(t.priority) },
+                { key: "status", header: "Status", render: (t) => statusBadge(t.status) },
+                { key: "requester", header: "Requester", hidden: !admin, cellClassName: "text-[12px] text-(--text-secondary)", render: (t) => t.requesterName },
+                { key: "assignee", header: "Assignee", hidden: !admin, cellClassName: "text-[12px]", render: (t) => <span style={{ color: t.assigneeName ? "var(--text-secondary)" : "var(--text-muted)" }}>{t.assigneeName ?? "Unassigned"}</span> },
+                { key: "tenant", header: "Tenant", hidden: !admin, cellClassName: "font-mono text-[11px] text-(--text-muted)", render: (t) => tenantName(t.tenantId) },
+                { key: "sla", header: "SLA due", render: (t) => slaCell(t.slaDueAt, t.status) },
+                { key: "updated", header: "Updated", cellClassName: "text-[12px] text-(--text-secondary)", render: (t) => dayjs.utc(t.updatedAt).tz(timezone).format(dateFormat) },
+              ]}
+            />
           </div>
           <Pagination page={result.page} pageSize={result.pageSize} total={result.total} onChange={(p) => setParams({ page: String(p) })} itemLabel="ticket" className="mt-4" />
         </>

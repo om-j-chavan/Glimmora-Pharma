@@ -96,15 +96,15 @@ export function SitePicker() {
               </p>
             </div>
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
+            icon={X}
             onClick={() => router.push("/login")}
             aria-label="Close"
-            className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent border-none cursor-pointer transition-colors duration-150"
             style={{ color: "var(--text-muted)" }}
-          >
-            <X className="w-[14px] h-[14px]" aria-hidden="true" />
-          </button>
+          />
         </div>
 
         {activeSites.length === 0 ? (
@@ -220,8 +220,11 @@ export function SitePicker() {
               <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
                 {selectedSite ? `${selectedSite.name} selected` : "No site selected"}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="primary"
+                icon={ArrowRight}
+                iconPosition="right"
                 onClick={handleEnter}
                 disabled={!selectedSite}
                 aria-label={
@@ -229,16 +232,9 @@ export function SitePicker() {
                     ? `Enter platform at ${selectedSite.name}`
                     : "Select a site to continue"
                 }
-                className="flex items-center gap-1.5 rounded-lg px-5 py-2.5 text-[12px] font-semibold transition-colors duration-150 disabled:cursor-not-allowed"
-                style={{
-                  background: selectedSite ? "var(--brand)" : "var(--bg-border)",
-                  color: selectedSite ? "#ffffff" : "var(--text-muted)",
-                  border: "none",
-                }}
               >
                 Enter platform
-                <ArrowRight className="w-[13px] h-[13px]" aria-hidden="true" />
-              </button>
+              </Button>
             </div>
           </>
         )}

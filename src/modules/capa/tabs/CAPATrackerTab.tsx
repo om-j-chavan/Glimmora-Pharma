@@ -11,6 +11,7 @@ import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -213,62 +214,99 @@ export function CAPATrackerTab({
             )}
           </div>
         ) : (
-          <table className="data-table capa-table" aria-label="CAPA register">
-            <caption className="sr-only">Corrective and preventive actions with RCA, status and closure tracking</caption>
-            <thead><tr>
-              <th scope="col">Reference</th>
-              {showSiteColumn && <th scope="col">Site</th>}
-              <th scope="col">Source</th><th scope="col">Title</th>
-              <th scope="col">Risk</th><th scope="col">Status</th><th scope="col">Owner</th>
-              <th scope="col">Due date</th><th scope="col" title="90-day effectiveness check status">Effectiveness</th><th scope="col"><span className="sr-only">Open</span></th>
-            </tr></thead>
-            <tbody>
-              {displayed.map((c) => {
-                // Mirrors the CAPA detail page: prefer the per-tenant reference;
-                // fall back to a stable legacy label rather than exposing the
-                // raw cuid, which carries no domain meaning. The cuid stays
-                // available on hover (title) for support / log lookups.
-                const referenceDisplay = c.reference ?? `CAPA-LEGACY-${c.id.slice(0, 8)}`;
-                return (
-                <tr key={c.id} onClick={() => { onSelectCAPA(c); go(c.id); }} className="cursor-pointer" aria-selected={selectedCAPA?.id === c.id}
-                  style={selectedCAPA?.id === c.id ? { background: isDark ? "#0c2f5a" : "#eff6ff" } : {}}>
-                  <th scope="row">
-                    <div
-                      className="font-mono text-[11px] font-semibold"
-                      style={{ color: "var(--text-primary)" }}
-                      title={c.id}
-                    >
-                      {referenceDisplay}
-                    </div>
-                    {/* Readable source reference (gap / deviation), not the raw cuid. */}
-                    {(c.findingId || c.deviation) && (
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <Link2 className="w-3 h-3" style={{ color: "var(--brand)" }} aria-hidden="true" />
-                        <span className="text-[10px]" style={{ color: "var(--brand)" }}>
-                          {c.findingId ? (c.finding?.reference ?? c.findingId) : (c.deviation?.reference ?? "Deviation")}
-                        </span>
+          <DataTable
+            ariaLabel="CAPA register"
+            caption="Corrective and preventive actions with RCA, status and closure tracking"
+            data={displayed}
+            rowKey={(c) => c.id}
+            onRowClick={(c) => { onSelectCAPA(c); go(c.id); }}
+            rowClassName={() => "cursor-pointer transition-colors hover:bg-(--bg-hover)"}
+            rowStyle={(c) => selectedCAPA?.id === c.id ? { background: isDark ? "#0c2f5a" : "#eff6ff" } : {}}
+            columns={[
+              {
+                key: "reference",
+                header: "Reference",
+                render: (c) => {
+                  // Mirrors the CAPA detail page: prefer the per-tenant reference;
+                  // fall back to a stable legacy label rather than exposing the
+                  // raw cuid, which carries no domain meaning. The cuid stays
+                  // available on hover (title) for support / log lookups.
+                  const referenceDisplay = c.reference ?? `CAPA-LEGACY-${c.id.slice(0, 8)}`;
+                  return (
+                    <>
+                      <div
+                        className="font-mono text-[11px] font-semibold"
+                        style={{ color: "var(--text-primary)" }}
+                        title={c.id}
+                      >
+                        {referenceDisplay}
                       </div>
-                    )}
-                  </th>
-                  {showSiteColumn && <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{siteName(c.siteId)}</td>}
-                  <td><Badge variant="gray">{sourceLabel(c.source)}</Badge></td>
-                  <td><span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{c.title}</span></td>
-                  <td>{riskBadge(c.risk)}</td>
-                  <td>
+                      {/* Readable source reference (gap / deviation), not the raw cuid. */}
+                      {(c.findingId || c.deviation) && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Link2 className="w-3 h-3" style={{ color: "var(--brand)" }} aria-hidden="true" />
+                          <span className="text-[10px]" style={{ color: "var(--brand)" }}>
+                            {c.findingId ? (c.finding?.reference ?? c.findingId) : (c.deviation?.reference ?? "Deviation")}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  );
+                },
+              },
+              {
+                key: "site",
+                header: "Site",
+                hidden: !showSiteColumn,
+                cellClassName: "text-[12px] whitespace-nowrap text-(--text-secondary)",
+                render: (c) => siteName(c.siteId),
+              },
+              { key: "source", header: "Source", render: (c) => <Badge variant="gray">{sourceLabel(c.source)}</Badge> },
+              { key: "title", header: "Title", render: (c) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{c.title}</span> },
+              { key: "risk", header: "Risk", render: (c) => riskBadge(c.risk) },
+              {
+                key: "status",
+                header: "Status",
+                render: (c) => (
+                  <>
                     {capaStatusBadge(c.status)}
                     {/* Phase 4 — hint that an in-progress CAPA was bounced back
                         by QA and has action items awaiting rework. */}
                     {c.status === "in_progress" && (c.actionItems ?? []).some((a) => a.status === "rework") && (
                       <StatusPill token="blocked">Rework</StatusPill>
                     )}
-                  </td>
-                  <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{ownerName(c.owner, users)}</td>
-                  <td className="whitespace-nowrap">
+                  </>
+                ),
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                cellClassName: "text-[12px] whitespace-nowrap text-(--text-secondary)",
+                render: (c) => ownerName(c.owner, users),
+              },
+              {
+                key: "due",
+                header: "Due date",
+                cellClassName: "whitespace-nowrap",
+                render: (c) => (
+                  <>
                     <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(c.dueDate).tz(timezone).format(dateFormat)}</div>
                     {isOverdue(c) && <div className="text-[10px] font-medium" style={{ color: "var(--status-blocked)" }}>Overdue</div>}
-                  </td>
-                  <td>{c.effectivenessCheck ? <CheckCircle2 className="w-4 h-4" style={{ color: "var(--status-done)" }} aria-label="Effectiveness check planned" /> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>}</td>
-                  <td>
+                  </>
+                ),
+              },
+              {
+                key: "effectiveness",
+                header: "Effectiveness",
+                render: (c) => c.effectivenessCheck ? <CheckCircle2 className="w-4 h-4" style={{ color: "var(--status-done)" }} aria-label="Effectiveness check planned" /> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>,
+              },
+              {
+                key: "open",
+                header: "Open",
+                srOnly: true,
+                render: (c) => {
+                  const referenceDisplay = c.reference ?? `CAPA-LEGACY-${c.id.slice(0, 8)}`;
+                  return (
                     <div className="flex items-center justify-end gap-1">
                       {/* AI Lifecycle — opens /ai-capa/<reference> in the
                           AI-managed lifecycle dashboard. stopPropagation so
@@ -292,12 +330,11 @@ export function CAPATrackerTab({
                       )}
                       <Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${referenceDisplay} detail`} />
                     </div>
-                  </td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  );
+                },
+              },
+            ] satisfies Column<CAPA>[]}
+          />
         )}
       </div>
 

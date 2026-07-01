@@ -7,6 +7,7 @@ import type { RAIDItem, RAIDType, RAIDStatus, RAIDPriority } from "@/store/raid.
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 
 function raidTypeBadge(t: RAIDType) { const m: Record<RAIDType, "red" | "blue" | "amber" | "green"> = { Risk: "red", Action: "blue", Issue: "amber", Decision: "green" }; return <Badge variant={m[t]}>{t}</Badge>; }
 function raidStatusBadge(s: RAIDStatus) { const m: Record<RAIDStatus, "blue" | "amber" | "green" | "red"> = { Open: "blue", "In Progress": "amber", Closed: "green", Escalated: "red" }; return <Badge variant={m[s]}>{s}</Badge>; }
@@ -94,79 +95,130 @@ export function RAIDTab({
       ) : filteredRaid.length === 0 ? (
         <div className="card p-8 text-center"><p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>No items match filters</p><Button variant="ghost" size="sm" className="mt-2" onClick={() => { setTypeFilter(""); setStatusFilter(""); setPriorityFilter(""); }}>Clear filters</Button></div>
       ) : (
-        <div className="card overflow-hidden"><div className="overflow-x-auto"><table className="data-table" aria-label="RAID log"><caption className="sr-only">Risks, actions, issues and decisions</caption><thead><tr><th scope="col">Type</th><th scope="col">Title</th><th scope="col">Priority</th><th scope="col">Owner</th><th scope="col">Due date</th><th scope="col">Status</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>
-          {filteredRaid.map((r) => (<tr key={r.id} style={r.status === "Closed" ? { opacity: 0.55 } : undefined}><td>{raidTypeBadge(r.type)}</td><th scope="row"><p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{r.title}</p><p className="text-[10px] line-clamp-1" style={{ color: "var(--text-muted)", maxWidth: 240 }}>{r.description}</p></th><td>{priorityBadge(r.priority)}</td><td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(r.owner)}</td><td className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(r.dueDate).tz(timezone).format(dateFormat)}{r.status !== "Closed" && dayjs.utc(r.dueDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Overdue</div>}</td><td>{raidStatusBadge(r.status)}</td>
-            <td>
-              {hasAnyAction(r) ? (
-                <div className="relative inline-block" ref={openMenu === r.id ? menuRef : null}>
-                  <button
-                    type="button"
-                    onClick={() => setOpenMenu(openMenu === r.id ? null : r.id)}
-                    aria-label={`Actions for ${r.title}`}
-                    aria-haspopup="menu"
-                    aria-expanded={openMenu === r.id}
-                    className="p-1 rounded border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    <MoreVertical className="w-4 h-4" aria-hidden="true" />
-                  </button>
-                  {openMenu === r.id && (
-                    <div
-                      role="menu"
-                      className="absolute right-0 top-full mt-1 z-20 min-w-35 rounded-lg py-1 shadow-lg"
-                      style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}
-                    >
-                      {canEditItem(r) && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => { setOpenMenu(null); onEditRaid(r); }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
-                          style={{ color: "var(--text-primary)" }}
+        <div className="card overflow-hidden">
+          <DataTable
+            ariaLabel="RAID log"
+            caption="Risks, actions, issues and decisions"
+            data={filteredRaid}
+            rowKey={(r) => r.id}
+            rowStyle={(r) => (r.status === "Closed" ? { opacity: 0.55 } : undefined)}
+            columns={[
+              {
+                key: "type",
+                header: "Type",
+                render: (r) => raidTypeBadge(r.type),
+              },
+              {
+                key: "title",
+                header: "Title",
+                render: (r) => (
+                  <>
+                    <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{r.title}</p>
+                    <p className="text-[10px] line-clamp-1" style={{ color: "var(--text-muted)", maxWidth: 240 }}>{r.description}</p>
+                  </>
+                ),
+              },
+              {
+                key: "priority",
+                header: "Priority",
+                render: (r) => priorityBadge(r.priority),
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                cellClassName: "text-[12px]",
+                render: (r) => <span style={{ color: "var(--text-secondary)" }}>{ownerName(r.owner)}</span>,
+              },
+              {
+                key: "dueDate",
+                header: "Due date",
+                cellClassName: "text-[12px]",
+                render: (r) => (
+                  <span style={{ color: "var(--text-primary)" }}>{dayjs.utc(r.dueDate).tz(timezone).format(dateFormat)}{r.status !== "Closed" && dayjs.utc(r.dueDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Overdue</div>}</span>
+                ),
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (r) => raidStatusBadge(r.status),
+              },
+              {
+                key: "actions",
+                header: "Actions",
+                srOnly: true,
+                render: (r) => (
+                  hasAnyAction(r) ? (
+                    <div className="relative inline-block" ref={openMenu === r.id ? menuRef : null}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenMenu(openMenu === r.id ? null : r.id)}
+                        aria-label={`Actions for ${r.title}`}
+                        aria-haspopup="menu"
+                        aria-expanded={openMenu === r.id}
+                        className="p-1 rounded border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
+                        <MoreVertical className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                      {openMenu === r.id && (
+                        <div
+                          role="menu"
+                          className="absolute right-0 top-full mt-1 z-20 min-w-35 rounded-lg py-1 shadow-lg"
+                          style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}
                         >
-                          <Pencil className="w-3.5 h-3.5" aria-hidden="true" /> Edit
-                        </button>
-                      )}
-                      {canCloseItem(r) && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => { setOpenMenu(null); onCloseRaid(r); }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Close
-                        </button>
-                      )}
-                      {canReopenItem(r) && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => { setOpenMenu(null); onReopenRaid(r); }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Reopen
-                        </button>
-                      )}
-                      {canDeleteAny && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => { setOpenMenu(null); onDeleteRaid(r); }}
-                          className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
-                          style={{ color: "var(--danger)" }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" aria-hidden="true" /> Delete
-                        </button>
+                          {canEditItem(r) && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => { setOpenMenu(null); onEditRaid(r); }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              <Pencil className="w-3.5 h-3.5" aria-hidden="true" /> Edit
+                            </button>
+                          )}
+                          {canCloseItem(r) && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => { setOpenMenu(null); onCloseRaid(r); }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Close
+                            </button>
+                          )}
+                          {canReopenItem(r) && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => { setOpenMenu(null); onReopenRaid(r); }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
+                              style={{ color: "var(--text-primary)" }}
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Reopen
+                            </button>
+                          )}
+                          {canDeleteAny && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => { setOpenMenu(null); onDeleteRaid(r); }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left border-none bg-transparent cursor-pointer hover:bg-(--bg-hover)"
+                              style={{ color: "var(--danger)" }}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" /> Delete
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-              ) : null}
-            </td>
-          </tr>))}
-        </tbody></table></div></div>
+                  ) : null
+                ),
+              },
+            ] satisfies Column<RAIDItem>[]}
+          />
+        </div>
       )}
     </>
   );

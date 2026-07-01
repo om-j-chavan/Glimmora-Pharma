@@ -14,6 +14,7 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DataTable, type Column } from "@/components/shared";
 import {
   CHANGE_CONTROL_RISKS,
   CHANGE_CONTROL_STATUSES,
@@ -199,87 +200,97 @@ export function ChangeControlListPage({ initial }: Props) {
             border: "1px solid var(--card-border)",
           }}
         >
-          <table className="data-table" aria-label="Change control register">
-            <caption className="sr-only">
-              Change controls with risk, status, owner, and CAPA link counts
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Reference</th>
-                <th scope="col">Title</th>
-                <th scope="col">Type</th>
-                <th scope="col">Risk</th>
-                <th scope="col">Status</th>
-                <th scope="col">Owner</th>
-                <th scope="col">Target date</th>
-                <th scope="col">Linked CAPAs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((cc) => (
-                <tr
-                  key={cc.id}
-                  onClick={() => setDetailId(cc.id)}
-                  className="cursor-pointer"
-                >
-                  <td>
-                    <span
-                      className="font-mono text-[12px] font-semibold"
-                      style={{ color: "var(--text-primary)" }}
-                    >
-                      {cc.reference ?? cc.id.slice(0, 8)}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="text-[12px]">{cc.title}</span>
-                  </td>
-                  <td>
-                    <Badge variant="gray">{cc.changeType}</Badge>
-                  </td>
-                  <td>
-                    <Badge variant={getSeverityVariant(cc.risk, "generic")}>
-                      {normalizeSeverityForDisplay(cc.risk, "generic") ?? cc.risk}
-                    </Badge>
-                  </td>
-                  <td>
-                    <Badge variant={CC_STATUS_VARIANT[cc.status as keyof typeof CC_STATUS_VARIANT] ?? "gray"}>
-                      {cc.status}
-                    </Badge>
-                  </td>
-                  <td>
-                    <span
-                      className="text-[12px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {cc.ownerName}
-                    </span>
-                  </td>
-                  <td>
-                    <span
-                      className="text-[12px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {cc.targetImplementationDate
-                        ? dayjs.utc(cc.targetImplementationDate).format(dateFormat)
-                        : "—"}
-                    </span>
-                  </td>
-                  <td>
-                    <span
-                      className="inline-flex items-center gap-1 text-[12px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      <GitMerge
-                        className="w-3.5 h-3.5"
-                        aria-hidden="true"
-                      />
-                      {cc._count?.capaLinks ?? 0}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            ariaLabel="Change control register"
+            caption="Change controls with risk, status, owner, and CAPA link counts"
+            data={filtered}
+            rowKey={(cc) => cc.id}
+            onRowClick={(cc) => setDetailId(cc.id)}
+            columns={[
+              {
+                key: "reference",
+                header: "Reference",
+                render: (cc) => (
+                  <span
+                    className="font-mono text-[12px] font-semibold"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {cc.reference ?? cc.id.slice(0, 8)}
+                  </span>
+                ),
+              },
+              {
+                key: "title",
+                header: "Title",
+                render: (cc) => <span className="text-[12px]">{cc.title}</span>,
+              },
+              {
+                key: "type",
+                header: "Type",
+                render: (cc) => <Badge variant="gray">{cc.changeType}</Badge>,
+              },
+              {
+                key: "risk",
+                header: "Risk",
+                render: (cc) => (
+                  <Badge variant={getSeverityVariant(cc.risk, "generic")}>
+                    {normalizeSeverityForDisplay(cc.risk, "generic") ?? cc.risk}
+                  </Badge>
+                ),
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (cc) => (
+                  <Badge variant={CC_STATUS_VARIANT[cc.status as keyof typeof CC_STATUS_VARIANT] ?? "gray"}>
+                    {cc.status}
+                  </Badge>
+                ),
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                render: (cc) => (
+                  <span
+                    className="text-[12px]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {cc.ownerName}
+                  </span>
+                ),
+              },
+              {
+                key: "targetDate",
+                header: "Target date",
+                render: (cc) => (
+                  <span
+                    className="text-[12px]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {cc.targetImplementationDate
+                      ? dayjs.utc(cc.targetImplementationDate).format(dateFormat)
+                      : "—"}
+                  </span>
+                ),
+              },
+              {
+                key: "linkedCapas",
+                header: "Linked CAPAs",
+                render: (cc) => (
+                  <span
+                    className="inline-flex items-center gap-1 text-[12px]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    <GitMerge
+                      className="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                    {cc._count?.capaLinks ?? 0}
+                  </span>
+                ),
+              },
+            ] satisfies Column<CCRow>[]}
+          />
         </div>
       )}
 

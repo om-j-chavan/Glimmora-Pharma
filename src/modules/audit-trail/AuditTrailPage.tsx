@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { ExportMenu } from "@/components/ui/ExportMenu";
+import { DataTable, type Column } from "@/components/shared";
 import { roleLabel } from "@/lib/labels/roles";
 import type { AuditTrailView } from "@/lib/queries";
 import { AuditDetailModal } from "./_components/AuditDetailModal";
@@ -230,61 +231,72 @@ export function AuditTrailPage({ rows, totalCount, truncated, limit }: AuditTrai
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-          <table className="data-table" style={{ minWidth: 760 }} aria-label="Audit trail">
-            <caption className="sr-only">
-              Audit events with timestamp, actor, module, action, and affected record. Showing {filtered.length} of {rows.length} loaded {entryWord(rows.length)}.
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Timestamp</th>
-                <th scope="col">User</th>
-                <th scope="col">Module</th>
-                <th scope="col">Action</th>
-                <th scope="col">Record</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((e) => (
-                <tr key={e.id} onClick={() => setDetailId(e.id)} className="cursor-pointer">
-                  <td>
-                    <time
-                      dateTime={dayjs(e.createdAt).toISOString()}
-                      title={dayjs(e.createdAt).tz(timezone).format("DD MMM YYYY HH:mm:ss")}
-                      className="font-mono text-[12px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {formatTimestamp(e.createdAt, timezone)}
-                    </time>
-                  </td>
-                  <td>
+          <DataTable
+            ariaLabel="Audit trail"
+            caption={`Audit events with timestamp, actor, module, action, and affected record. Showing ${filtered.length} of ${rows.length} loaded ${entryWord(rows.length)}.`}
+            data={filtered}
+            rowKey={(e) => e.id}
+            minWidth={760}
+            onRowClick={(e) => setDetailId(e.id)}
+            columns={[
+              {
+                key: "timestamp",
+                header: "Timestamp",
+                render: (e) => (
+                  <time
+                    dateTime={dayjs(e.createdAt).toISOString()}
+                    title={dayjs(e.createdAt).tz(timezone).format("DD MMM YYYY HH:mm:ss")}
+                    className="font-mono text-[12px]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {formatTimestamp(e.createdAt, timezone)}
+                  </time>
+                ),
+              },
+              {
+                key: "user",
+                header: "User",
+                render: (e) => (
+                  <>
                     <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{e.userName}</span>
                     {e.userRole && (
                       <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-(--bg-elevated) text-(--text-secondary)">
                         {roleLabel(e.userRole)}
                       </span>
                     )}
-                  </td>
-                  <td>
-                    <span className="font-mono text-[12px]" style={{ color: "var(--brand)" }}>{e.module}</span>
-                  </td>
-                  <td>
-                    <Badge variant={SEVERITY_VARIANT[severityOf(e.action)]}>{formatAction(e.action)}</Badge>
-                  </td>
-                  <td className="max-w-[280px]">
-                    <span
-                      className="font-mono text-[12px] block truncate"
-                      style={{ color: "var(--text-secondary)" }}
-                      title={e.recordTitle && e.recordTitle !== e.displayId ? `${e.displayId} · ${e.recordTitle}` : e.displayId}
-                    >
-                      {e.displayId}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
+                  </>
+                ),
+              },
+              {
+                key: "module",
+                header: "Module",
+                render: (e) => (
+                  <span className="font-mono text-[12px]" style={{ color: "var(--brand)" }}>{e.module}</span>
+                ),
+              },
+              {
+                key: "action",
+                header: "Action",
+                render: (e) => (
+                  <Badge variant={SEVERITY_VARIANT[severityOf(e.action)]}>{formatAction(e.action)}</Badge>
+                ),
+              },
+              {
+                key: "record",
+                header: "Record",
+                cellClassName: "max-w-[280px]",
+                render: (e) => (
+                  <span
+                    className="font-mono text-[12px] block truncate"
+                    style={{ color: "var(--text-secondary)" }}
+                    title={e.recordTitle && e.recordTitle !== e.displayId ? `${e.displayId} · ${e.recordTitle}` : e.displayId}
+                  >
+                    {e.displayId}
+                  </span>
+                ),
+              },
+            ] satisfies Column<(typeof rows)[number]>[]}
+          />
         </div>
       )}
 

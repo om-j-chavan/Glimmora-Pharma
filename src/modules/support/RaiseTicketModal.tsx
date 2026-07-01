@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ShieldAlert, Upload, FileText, X } from "lucide-react";
+import { ShieldAlert, Upload, FileText, X, Sparkles, Check } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Toast";
-import { createTicket } from "@/actions/support";
+import { createTicket, suggestTriage, type TriageSuggestion } from "@/actions/support";
 import { createDocument } from "@/actions/documents";
 import { TICKET_CATEGORIES, TICKET_PRIORITIES, GXP_REQUEST_CATEGORIES, type TicketCategory } from "@/lib/support/constants";
 import { RELATED_MODULES } from "./_shared";
@@ -58,11 +58,32 @@ export function RaiseTicketModal({
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
 
-  const { register, handleSubmit, control, watch, reset, formState: { errors, isSubmitting } } =
+  const { register, handleSubmit, control, watch, reset, setValue, getValues, formState: { errors, isSubmitting } } =
     useForm<FormValues>({
       resolver: zodResolver(schema),
       defaultValues: { category: "Technical/Bug", priority: "Medium" },
     });
+
+  // Smart Triage (suggestion-only). Holds the latest AI suggestion + busy
+  // state; never auto-applies — the user clicks Apply per field.
+  const [triage, setTriage] = useState<TriageSuggestion | null>(null);
+  const [triageBusy, setTriageBusy] = useState(false);
+
+  async function runTriage() {
+    const { subject, description } = getValues();
+    if ((subject?.trim().length ?? 0) < 3 || (description?.trim().length ?? 0) < 5) {
+      toast.error("Add a subject and a short description first.");
+      return;
+    }
+    setTriageBusy(true);
+    const res = await suggestTriage({ subject, description });
+    setTriageBusy(false);
+    if (!res.success) {
+      toast.error(res.error);
+      return;
+    }
+    setTriage(res.data);
+  }
 
   // Apply prefill each time the modal opens (and clear any stale file). The
   // queue caller passes no prefill → blank defaults, exactly as before.
@@ -77,6 +98,7 @@ export function RaiseTicketModal({
       relatedRecordRef: prefill?.relatedRecordRef ?? "",
     });
     setFile(null);
+    setTriage(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -85,6 +107,7 @@ export function RaiseTicketModal({
 
   function close() {
     setFile(null);
+    setTriage(null);
     reset({ category: "Technical/Bug", priority: "Medium" });
     onClose();
   }
@@ -139,8 +162,41 @@ export function RaiseTicketModal({
       }
     >
       <form id="raise-ticket-form" onSubmit={onSubmit} noValidate className="space-y-4">
-        {/* AI_SUGGESTION_SEAM: a suggested priority/category box renders here
-            later (Smart Routing). Renders nothing for now — never auto-fills. */}
+        {/* Smart Triage (suggestion-only) — recommends category + priority from
+            the subject/description. Never auto-fills; the user clicks Apply. */}
+        <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--brand)" }} aria-hidden="true" /> Smart Triage
+            </div>
+            <Button variant="secondary" size="sm" type="button" icon={Sparkles} loading={triageBusy} onClick={runTriage}>
+              {triage ? "Re-analyse" : "Suggest category & priority"}
+            </Button>
+          </div>
+          {triage && (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                <SuggestionChip
+                  label="Category" value={triage.category}
+                  applied={watch("category") === triage.category}
+                  onApply={() => setValue("category", triage.category, { shouldValidate: true })}
+                />
+                <SuggestionChip
+                  label="Priority" value={triage.priority}
+                  applied={watch("priority") === triage.priority}
+                  onApply={() => setValue("priority", triage.priority, { shouldValidate: true })}
+                />
+              </div>
+              {triage.rationale && (
+                <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                  {triage.rationale}
+                  {triage.confidence > 0 && ` · ${Math.round(triage.confidence * 100)}% confidence`}
+                </p>
+              )}
+              <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>AI suggestion — review before applying. Support may re-triage.</p>
+            </div>
+          )}
+        </div>
 
         <div>
           <label htmlFor="t-subject" className={lbl} style={{ color: "var(--text-muted)" }}>Subject *</label>
@@ -210,5 +266,39 @@ export function RaiseTicketModal({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** A single AI-suggested field value with an Apply control. Shows an applied
+ *  (checked) state when the form already matches the suggestion. */
+function SuggestionChip({
+  label,
+  value,
+  applied,
+  onApply,
+}: {
+  label: string;
+  value: string;
+  applied: boolean;
+  onApply: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onApply}
+      disabled={applied}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:cursor-default"
+      style={{
+        borderColor: applied ? "var(--success)" : "var(--brand)",
+        color: applied ? "var(--success)" : "var(--brand)",
+        background: "var(--bg-surface)",
+      }}
+      aria-label={applied ? `${label} ${value} applied` : `Apply suggested ${label} ${value}`}
+    >
+      {applied ? <Check className="w-3 h-3" aria-hidden="true" /> : <Sparkles className="w-3 h-3" aria-hidden="true" />}
+      <span style={{ color: "var(--text-muted)" }}>{label}:</span>
+      <span>{value}</span>
+      {!applied && <span style={{ color: "var(--text-muted)" }}>· Apply</span>}
+    </button>
   );
 }

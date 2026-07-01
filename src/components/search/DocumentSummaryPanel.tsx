@@ -16,6 +16,7 @@
 
 import { useState, type CSSProperties } from "react";
 import { Sparkles, Copy, Check, ThumbsUp, ThumbsDown, AlertTriangle, ChevronDown } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiSummarizeSend, AiChatError, type SummaryResponse } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -90,13 +91,13 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
     } catch { /* ignore */ }
   }
 
-  const btn: CSSProperties = { background: "var(--brand)", color: "#fff" };
   const toggleBtn = (active: boolean): CSSProperties =>
     active ? { background: "var(--brand)", color: "#fff" } : { background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" };
 
   // Collapsed — just the Summarize button (the "before" state).
   if (!open) {
     return (
+<<<<<<< HEAD
       <button
         type="button"
         onClick={() => run(length, lens)}
@@ -105,6 +106,11 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
       >
         <Sparkles className="w-3.5 h-3.5" aria-hidden="true" /> {buttonLabel}
       </button>
+=======
+      <Button type="button" variant="primary" size="sm" icon={Sparkles} onClick={() => run(length, lens)} className={className}>
+        Summarize
+      </Button>
+>>>>>>> 6360cf006d85ce5bb7d76219e7b4cda71f4d02d7
     );
   }
 
@@ -140,7 +146,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
             <p className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "var(--bg-surface)", color: "var(--text-secondary)" }}>
               <span className="font-semibold" style={{ color: "var(--brand)" }}>AI </span>{result.reason}
             </p>
-            <button type="button" onClick={() => { setOpen(false); setResult(null); }} className="text-[11px] px-2.5 py-1 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", background: "var(--bg-surface)" }}>Close</button>
+            <Button type="button" variant="secondary" size="xs" onClick={() => { setOpen(false); setResult(null); }}>Close</Button>
           </div>
         )}
 
@@ -173,9 +179,9 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
 
             {/* Copy + feedback */}
             <div className="flex items-center gap-2">
-              <button type="button" onClick={copyAll} className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", background: "var(--bg-surface)" }}>
-                {copied ? <><Check className="w-3 h-3" aria-hidden="true" /> Copied</> : <><Copy className="w-3 h-3" aria-hidden="true" /> Copy</>}
-              </button>
+              <Button type="button" variant="secondary" size="xs" icon={copied ? Check : Copy} onClick={copyAll}>
+                {copied ? "Copied" : "Copy"}
+              </Button>
               <button type="button" aria-label="Helpful" onClick={() => setVote("up")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "up" ? "var(--brand)" : "var(--text-muted)" }}>
                 <ThumbsUp className="w-3 h-3" aria-hidden="true" />
               </button>

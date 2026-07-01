@@ -9,6 +9,7 @@ import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 import { displayUserName } from "@/lib/identity-display";
 
 /* ── Helpers (pure, no Redux) ── */
@@ -174,91 +175,127 @@ export function SystemInventoryTab({
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="data-table" aria-label="GxP system inventory and risk register">
-              <caption className="sr-only">GxP computerised systems with validation and compliance status</caption>
-              <thead>
-                <tr>
-                  <th scope="col">System</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">GxP relevance</th>
-                  <th scope="col">Risk</th>
-                  <th scope="col">Validation</th>
-                  <th scope="col">Progress</th>
-                  {showPart11 && <th scope="col">Part 11</th>}
-                  {showAnnex11 && <th scope="col">Annex 11</th>}
-                  {showGAMP5 && <th scope="col">GAMP 5</th>}
-                  <th scope="col">Owner</th>
-                  <th scope="col">Next review</th>
-                  {role !== "viewer" && <th scope="col"><span className="sr-only">Edit/Remove</span></th>}
-                  <th scope="col"><span className="sr-only">Open detail</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSystems.map((sys) => {
+          <DataTable
+            ariaLabel="GxP system inventory and risk register"
+            caption="GxP computerised systems with validation and compliance status"
+            data={filteredSystems}
+            rowKey={(sys) => sys.id}
+            onRowClick={(sys) => onSelectSystem(sys)}
+            columns={[
+              {
+                key: "system",
+                header: "System",
+                render: (sys) => {
                   const si = getSystemIcon(sys.type);
                   return (
-                  <tr key={sys.id} onClick={() => onSelectSystem(sys)} className="cursor-pointer">
-                    <th scope="row">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: si.color + "18" }}>
-                          <si.icon className="w-3.5 h-3.5" style={{ color: si.color }} aria-hidden="true" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            {sys.reference && <span className="font-mono text-[11px] font-semibold" style={{ color: "var(--brand)" }}>{sys.reference}</span>}
-                            <span className="font-medium text-[12px]" style={{ color: "var(--text-primary)" }}>{sys.name}</span>
-                            {isReviewOverdue(sys) && <Badge variant="red">Review overdue</Badge>}
-                          </div>
-                          <div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sys.vendor} v{sys.version}</div>
-                        </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: si.color + "18" }}>
+                        <si.icon className="w-3.5 h-3.5" style={{ color: si.color }} aria-hidden="true" />
                       </div>
-                    </th>
-                    <td><Badge variant="gray">{sys.type}</Badge></td>
-                    <td>{relevanceBadge(sys.gxpRelevance)}</td>
-                    <td>{riskBadge(sys.riskLevel)}</td>
-                    <td>{validationBadge(sys.validationStatus)}</td>
-                    <td>
-                      {(() => {
-                        const pct = getValidationProgress(sys);
-                        const col = pct >= 100 ? "#10b981" : pct >= 50 ? "#f59e0b" : pct > 0 ? "#ef4444" : "#64748b";
-                        return (
-                          <div className="flex items-center gap-2">
-                            <div className="h-1.5 w-20 rounded-full" style={{ background: "var(--bg-elevated)" }}>
-                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: col }} />
-                            </div>
-                            <span className="text-[11px] font-semibold tabular-nums" style={{ color: col }}>{pct}%</span>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    {showPart11 && <td>{complianceBadge(sys.part11Status)}</td>}
-                    {showAnnex11 && <td>{complianceBadge(sys.annex11Status)}</td>}
-                    {showGAMP5 && <td>{gampBadge(sys.gamp5Category)}</td>}
-                    <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(sys.owner, users)}</td>
-                    <td>
-                      {sys.nextReview ? (
-                        <>
-                          <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(sys.nextReview).tz(timezone).format(dateFormat)}</div>
-                          {dayjs.utc(sys.nextReview).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444] font-medium">Overdue</div>}
-                        </>
-                      ) : <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>&mdash;</span>}
-                    </td>
-                    {role !== "viewer" && (
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="xs" icon={Pencil} aria-label={`Edit ${sys.name}`} onClick={() => onEditSystem(sys)} />
-                          <Button variant="ghost" size="xs" icon={Trash2} aria-label={`Remove ${sys.name}`} onClick={() => onRemoveSystem(sys.id)} />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          {sys.reference && <span className="font-mono text-[11px] font-semibold" style={{ color: "var(--brand)" }}>{sys.reference}</span>}
+                          <span className="font-medium text-[12px]" style={{ color: "var(--text-primary)" }}>{sys.name}</span>
+                          {isReviewOverdue(sys) && <Badge variant="red">Review overdue</Badge>}
                         </div>
-                      </td>
-                    )}
-                    <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${sys.name} detail`} /></td>
-                  </tr>
+                        <div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sys.vendor} v{sys.version}</div>
+                      </div>
+                    </div>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
+                },
+              },
+              {
+                key: "type",
+                header: "Type",
+                render: (sys) => <Badge variant="gray">{sys.type}</Badge>,
+              },
+              {
+                key: "relevance",
+                header: "GxP relevance",
+                render: (sys) => relevanceBadge(sys.gxpRelevance),
+              },
+              {
+                key: "risk",
+                header: "Risk",
+                render: (sys) => riskBadge(sys.riskLevel),
+              },
+              {
+                key: "validation",
+                header: "Validation",
+                render: (sys) => validationBadge(sys.validationStatus),
+              },
+              {
+                key: "progress",
+                header: "Progress",
+                render: (sys) => {
+                  const pct = getValidationProgress(sys);
+                  const col = pct >= 100 ? "#10b981" : pct >= 50 ? "#f59e0b" : pct > 0 ? "#ef4444" : "#64748b";
+                  return (
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-20 rounded-full" style={{ background: "var(--bg-elevated)" }}>
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: col }} />
+                      </div>
+                      <span className="text-[11px] font-semibold tabular-nums" style={{ color: col }}>{pct}%</span>
+                    </div>
+                  );
+                },
+              },
+              {
+                key: "part11",
+                header: "Part 11",
+                hidden: !showPart11,
+                render: (sys) => complianceBadge(sys.part11Status),
+              },
+              {
+                key: "annex11",
+                header: "Annex 11",
+                hidden: !showAnnex11,
+                render: (sys) => complianceBadge(sys.annex11Status),
+              },
+              {
+                key: "gamp5",
+                header: "GAMP 5",
+                hidden: !showGAMP5,
+                render: (sys) => gampBadge(sys.gamp5Category),
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                cellClassName: "text-[12px]",
+                render: (sys) => <span style={{ color: "var(--text-secondary)" }}>{ownerName(sys.owner, users)}</span>,
+              },
+              {
+                key: "nextReview",
+                header: "Next review",
+                render: (sys) => (
+                  sys.nextReview ? (
+                    <>
+                      <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(sys.nextReview).tz(timezone).format(dateFormat)}</div>
+                      {dayjs.utc(sys.nextReview).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444] font-medium">Overdue</div>}
+                    </>
+                  ) : <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>&mdash;</span>
+                ),
+              },
+              {
+                key: "editRemove",
+                header: "Edit/Remove",
+                srOnly: true,
+                hidden: role === "viewer",
+                render: (sys) => (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="xs" icon={Pencil} aria-label={`Edit ${sys.name}`} onClick={() => onEditSystem(sys)} />
+                    <Button variant="ghost" size="xs" icon={Trash2} aria-label={`Remove ${sys.name}`} onClick={() => onRemoveSystem(sys.id)} />
+                  </div>
+                ),
+              },
+              {
+                key: "openDetail",
+                header: "Open detail",
+                srOnly: true,
+                render: (sys) => <Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${sys.name} detail`} />,
+              },
+            ] satisfies Column<GxPSystem>[]}
+          />
         </div>
       )}
     </>

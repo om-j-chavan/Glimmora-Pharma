@@ -29,6 +29,7 @@ import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -435,70 +436,130 @@ export function GapRegisterTab({
             )}
           </div>
         ) : (
-          <table className="data-table" aria-label="GxP/GMP findings register">
-            <caption className="sr-only">List of all GxP/GMP findings with severity, status and target dates</caption>
-            <thead><tr>
-              <th scope="col" className="w-8">
-                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
-                  className="w-3.5 h-3.5 cursor-pointer accent-(--brand)" aria-label="Select all findings" />
-              </th>
-              <th scope="col" className="whitespace-nowrap">ID</th>
-              {showSiteColumn && <th scope="col">Site</th>}
-              <th scope="col">Area</th><th scope="col">Requirement</th><th scope="col">Purpose</th>
-              <th scope="col">Framework</th><th scope="col">Severity</th><th scope="col">Status</th>
-              <th scope="col">CAPA</th>
-              <th scope="col">Owner</th><th scope="col">Target date</th><th scope="col">Evidence</th>
-              <th scope="col"><span className="sr-only">Open</span></th>
-            </tr></thead>
-            <tbody>
-              {displayed.map((f) => {
-                // Reverse lookup in case finding.capaId hasn't been updated but a CAPA references it
-                const linkedCapa = capas.find((c) => c.id === f.capaId) ?? capas.find((c) => c.findingId === f.id);
-                return (
-                <tr key={f.id} onClick={() => onSelectFinding(f)} className="cursor-pointer" aria-selected={selectedFinding?.id === f.id}
-                  style={selectedFinding?.id === f.id ? { background: isDark ? "#0c2f5a" : "#eff6ff" } : {}}>
-                  <td onClick={(e) => e.stopPropagation()}>
+          <DataTable
+            ariaLabel="GxP/GMP findings register"
+            caption="List of all GxP/GMP findings with severity, status and target dates"
+            data={displayed}
+            rowKey={(f) => f.id}
+            onRowClick={(f) => onSelectFinding(f)}
+            rowStyle={(f) => selectedFinding?.id === f.id ? { background: isDark ? "#0c2f5a" : "#eff6ff" } : {}}
+            columns={[
+              {
+                key: "select",
+                // Select-all checkbox lives in the column header (DataTable
+                // headers accept ReactNode), wired to toggleSelectAll / allSelected.
+                header: (
+                  <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
+                    className="w-3.5 h-3.5 cursor-pointer accent-(--brand)" aria-label="Select all findings" />
+                ),
+                width: "w-8",
+                render: (f) => (
+                  <span onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selectedIds.has(f.id)} onChange={() => toggleSelect(f.id)}
                       className="w-3.5 h-3.5 cursor-pointer accent-(--brand)" aria-label={`Select ${findingRef(f)}`} />
-                  </td>
-                  <th scope="row" className="whitespace-nowrap">
-                    <div className="font-mono text-[11px] font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{findingRef(f)}</div>
-                  </th>
-                  {showSiteColumn && <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{siteName(f.siteId)}</td>}
-                  <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{f.area}</td>
-                  <td><span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{f.requirement}</span></td>
-                  <td><span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 180, color: "var(--text-secondary)" }}>{f.purpose ? f.purpose : <span style={{ color: "var(--text-muted)" }}>&mdash;</span>}</span></td>
-                  <td><span className="badge badge-blue text-[10px]">{FRAMEWORK_LABELS[f.framework] ?? f.framework}</span></td>
-                  <td>{severityBadge(f.severity)}</td>
-                  <td>{statusBadge(f.status)}</td>
-                  <td className="whitespace-nowrap">
-                    {linkedCapa ? (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); onNavigateCapa(linkedCapa.id); }}
-                        className="flex items-center gap-1.5 bg-transparent border-none p-0 cursor-pointer hover:underline"
-                        aria-label={`Open ${linkedCapa.reference ?? linkedCapa.id}`}
-                      >
-                        <Link2 className="w-3 h-3 text-[#0ea5e9]" aria-hidden="true" />
-                        <span className="font-mono text-[11px] font-semibold text-[#0ea5e9]">{linkedCapa.reference ?? linkedCapa.id}</span>
-                        {capaStatusBadge(linkedCapa.status)}
-                      </button>
-                    ) : (
-                      <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>
-                    )}
-                  </td>
-                  <td className="text-[12px] whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{ownerName(f.owner)}</td>
-                  <td className="whitespace-nowrap">
+                  </span>
+                ),
+              },
+              {
+                key: "id",
+                header: "ID",
+                headerClassName: "whitespace-nowrap",
+                cellClassName: "whitespace-nowrap",
+                render: (f) => (
+                  <div className="font-mono text-[11px] font-semibold whitespace-nowrap" style={{ color: "var(--text-primary)" }}>{findingRef(f)}</div>
+                ),
+              },
+              {
+                key: "site",
+                header: "Site",
+                hidden: !showSiteColumn,
+                cellClassName: "text-[12px] whitespace-nowrap text-(--text-secondary)",
+                render: (f) => siteName(f.siteId),
+              },
+              {
+                key: "area",
+                header: "Area",
+                cellClassName: "text-[12px] whitespace-nowrap text-(--text-secondary)",
+                render: (f) => f.area,
+              },
+              {
+                key: "requirement",
+                header: "Requirement",
+                render: (f) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{f.requirement}</span>,
+              },
+              {
+                key: "purpose",
+                header: "Purpose",
+                render: (f) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 180, color: "var(--text-secondary)" }}>{f.purpose ? f.purpose : <span style={{ color: "var(--text-muted)" }}>&mdash;</span>}</span>,
+              },
+              {
+                key: "framework",
+                header: "Framework",
+                render: (f) => <span className="badge badge-blue text-[10px]">{FRAMEWORK_LABELS[f.framework] ?? f.framework}</span>,
+              },
+              {
+                key: "severity",
+                header: "Severity",
+                render: (f) => severityBadge(f.severity),
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (f) => statusBadge(f.status),
+              },
+              {
+                key: "capa",
+                header: "CAPA",
+                cellClassName: "whitespace-nowrap",
+                render: (f) => {
+                  // Reverse lookup in case finding.capaId hasn't been updated but a CAPA references it
+                  const linkedCapa = capas.find((c) => c.id === f.capaId) ?? capas.find((c) => c.findingId === f.id);
+                  return linkedCapa ? (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onNavigateCapa(linkedCapa.id); }}
+                      className="flex items-center gap-1.5 bg-transparent border-none p-0 cursor-pointer hover:underline"
+                      aria-label={`Open ${linkedCapa.reference ?? linkedCapa.id}`}
+                    >
+                      <Link2 className="w-3 h-3 text-[#0ea5e9]" aria-hidden="true" />
+                      <span className="font-mono text-[11px] font-semibold text-[#0ea5e9]">{linkedCapa.reference ?? linkedCapa.id}</span>
+                      {capaStatusBadge(linkedCapa.status)}
+                    </button>
+                  ) : (
+                    <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>
+                  );
+                },
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                cellClassName: "text-[12px] whitespace-nowrap text-(--text-secondary)",
+                render: (f) => ownerName(f.owner),
+              },
+              {
+                key: "targetDate",
+                header: "Target date",
+                cellClassName: "whitespace-nowrap",
+                render: (f) => (
+                  <>
                     <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(f.targetDate).tz(timezone).format(dateFormat)}</div>
                     {f.status !== "Closed" && dayjs.utc(f.targetDate).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444]">Overdue</div>}
-                  </td>
-                  <td>{f.evidenceLink ? <span className="text-[11px] text-[#0ea5e9]">{f.evidenceLink}</span> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>}</td>
-                  <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View detail for ${f.id}`} /></td>
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  </>
+                ),
+              },
+              {
+                key: "evidence",
+                header: "Evidence",
+                render: (f) => f.evidenceLink ? <span className="text-[11px] text-[#0ea5e9]">{f.evidenceLink}</span> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>&mdash;</span>,
+              },
+              {
+                key: "open",
+                header: "Open",
+                srOnly: true,
+                render: (f) => <Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View detail for ${f.id}`} />,
+              },
+            ] satisfies Column<Finding>[]}
+          />
         )}
       </div>
 

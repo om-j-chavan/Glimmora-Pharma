@@ -42,7 +42,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
-import { PageHeader, TabBar, StatCard, CardSection } from "@/components/shared";
+import { PageHeader, TabBar, StatCard, CardSection, DataTable, type Column } from "@/components/shared";
 import { RoadmapPrismaTab } from "./RoadmapPrismaTab";
 import { TrainingPrismaTab } from "./tabs/TrainingPrismaTab";
 import { PlaybooksPrismaTab } from "./tabs/PlaybooksPrismaTab";
@@ -788,23 +788,25 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
           {/* ─── SECTION 6 — RACI ─── */}
           <CollapsibleSection id="raci" icon={ClipboardList} iconColor="#6366f1" title="RACI — key inspection activities" isOpen={openSections.has("raci")} onToggle={() => toggleSection("raci")}>
             <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="data-table" style={{ minWidth: 600 }} aria-label="RACI matrix">
-                  <caption className="sr-only">RACI matrix for key inspection activities</caption>
-                  <thead><tr><th scope="col">Activity</th><th scope="col">R — Responsible</th><th scope="col">A — Accountable</th><th scope="col">C — Consulted</th><th scope="col">I — Informed</th></tr></thead>
-                  <tbody>
-                    {RACI_DATA.map((r) => (
-                      <tr key={r.activity}>
-                        <th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{r.activity}</th>
-                        <td><Badge variant="blue">{r.r}</Badge></td>
-                        <td><Badge variant="red">{r.a}</Badge></td>
-                        <td><Badge variant="amber">{r.c}</Badge></td>
-                        <td><Badge variant="gray">{r.i}</Badge></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                ariaLabel="RACI matrix"
+                caption="RACI matrix for key inspection activities"
+                minWidth={600}
+                data={RACI_DATA}
+                rowKey={(r) => r.activity}
+                columns={[
+                  {
+                    key: "activity",
+                    header: "Activity",
+                    cellClassName: "text-[12px] font-medium",
+                    render: (r) => <span style={{ color: "var(--text-primary)" }}>{r.activity}</span>,
+                  },
+                  { key: "r", header: "R — Responsible", render: (r) => <Badge variant="blue">{r.r}</Badge> },
+                  { key: "a", header: "A — Accountable", render: (r) => <Badge variant="red">{r.a}</Badge> },
+                  { key: "c", header: "C — Consulted", render: (r) => <Badge variant="amber">{r.c}</Badge> },
+                  { key: "i", header: "I — Informed", render: (r) => <Badge variant="gray">{r.i}</Badge> },
+                ] satisfies Column<(typeof RACI_DATA)[number]>[]}
+              />
             </div>
           </CollapsibleSection>
         </section>

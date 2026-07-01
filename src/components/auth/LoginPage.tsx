@@ -55,6 +55,7 @@ const CRED_ROWS: { org: string; rows: [string, string, string, string][] }[] = [
     rows: [
       ["Customer Admin", "admin@pharmaglimmora.com", "Admin@123", "#8b6914"],
       ["QA Head", "qa@pharmaglimmora.com", "Demo@123", "#a78bfa"],
+      ["Quality Assurance", "qa.exec@pharmaglimmora.com", "Demo@123", "#818cf8"],
       ["Regulatory Affairs", "ra@pharmaglimmora.com", "Demo@123", "#fb923c"],
       ["CSV/Val Lead", "csv@pharmaglimmora.com", "Demo@123", "#38bdf8"],
       ["QC/Lab Director", "qc@pharmaglimmora.com", "Demo@123", "#10b981"],
@@ -355,7 +356,7 @@ export function LoginPage() {
               <label htmlFor="password" className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
                 Passcode <span style={{ color: "var(--danger)" }} aria-hidden="true">*</span>
               </label>
-              <button type="button" onClick={() => setForgotOpen(true)} className="text-[11px] cursor-pointer underline border-none bg-transparent p-0" style={{ color: "var(--brand)" }}>Forgot passcode?</button>
+              <Button type="button" variant="ghost" size="xs" onClick={() => setForgotOpen(true)} className="!h-auto !p-0 text-[11px] underline" style={{ color: "var(--brand)" }}>Forgot passcode?</Button>
             </div>
             <div className="relative">
               <Lock className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} aria-hidden="true" />

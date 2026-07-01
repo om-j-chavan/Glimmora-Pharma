@@ -54,6 +54,7 @@ function isAdmin(role: string): boolean {
 // authoritative server-side gate.
 const CUSTOMER_ADMIN_GRANTABLE_ROLES = new Set<string>([
   "qa_head",
+  "qa", // execution-level QA — site-level, customer_admin-grantable
   "qc_lab_director",
   "regulatory_affairs",
   "csv_val_lead",

@@ -7,6 +7,7 @@ import {
 } from "recharts";
 import { chartDefaults } from "@/lib/chartColors";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable } from "@/components/shared";
 
 interface CAPAMetricsTabProps {
   capasTotal: number;
@@ -81,13 +82,20 @@ export function CAPAMetricsTab({
           <div className="card-header"><h2 id="source-title" className="card-title">CAPAs by source</h2></div>
           <div className="card-body p-0">
             {sourceBreakdown.length === 0 ? <div className="text-center py-10"><ClipboardCheck className="w-8 h-8 mx-auto mb-2 text-[#334155]" /><p className="text-[13px]" style={{ color: "var(--text-muted)" }}>No CAPAs yet</p></div> : (
-              <table className="w-full text-[12px]"><tbody>{sourceBreakdown.map((s) => (
-                <tr key={s.source} className="border-b" style={{ borderColor: "var(--bg-border)" }}>
-                  <td className="py-3 px-4" style={{ color: "var(--text-secondary)" }}>{s.source}</td>
-                  <td className="py-3 px-2"><Badge variant="gray">{s.count}</Badge></td>
-                  <td className="py-3 px-4 w-32"><div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--bg-border)" }}><div className="h-full bg-[#0ea5e9] rounded-full transition-all duration-300" style={{ width: `${(s.count / maxSrcCount) * 100}%` }} /></div></td>
-                </tr>
-              ))}</tbody></table>
+              <DataTable
+                ariaLabel="CAPAs by source"
+                variant="bare"
+                headerless
+                data={sourceBreakdown}
+                rowKey={(s) => s.source}
+                rowClassName={() => "border-b"}
+                rowStyle={() => ({ borderColor: "var(--bg-border)" })}
+                columns={[
+                  { key: "source", header: "Source", cellClassName: "py-3 px-4 text-(--text-secondary)", render: (s) => s.source },
+                  { key: "count", header: "Count", cellClassName: "py-3 px-2", render: (s) => <Badge variant="gray">{s.count}</Badge> },
+                  { key: "bar", header: "Share", srOnly: true, cellClassName: "py-3 px-4 w-32", render: (s) => <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--bg-border)" }}><div className="h-full bg-[#0ea5e9] rounded-full transition-all duration-300" style={{ width: `${(s.count / maxSrcCount) * 100}%` }} /></div> },
+                ]}
+              />
             )}
           </div>
         </section>

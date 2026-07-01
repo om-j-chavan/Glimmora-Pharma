@@ -18,6 +18,7 @@ export const ROLE_LABELS: Record<string, string> = {
   superadmin: "Platform Admin",
   customer_admin: "Customer Admin",
   qa_head: "QA Head",
+  qa: "Quality Assurance",
   qc_lab_director: "QC / Lab Director",
   regulatory_affairs: "Regulatory Affairs",
   csv_val_lead: "CSV / Val Lead",

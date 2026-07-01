@@ -6,6 +6,7 @@ import { ArrowLeft, RefreshCw, Plus, Trash2, AlertTriangle, CheckCircle2, Send, 
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { DataTable, type Column } from "@/components/shared";
 import {
   capaCreate, capaStatus,
   rcaByCapa, rcaStatus, rcaSubmit,
@@ -730,27 +731,16 @@ function ActionPlanView({ data }: { data: unknown }) {
       )}
       {actions.length > 0 ? (
         <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th scope="col">Action</th>
-                <th scope="col">Responsible</th>
-                <th scope="col">Due date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {actions.map((a, i) => {
-                const o = (a && typeof a === "object" ? a : {}) as Record<string, unknown>;
-                return (
-                  <tr key={i}>
-                    <td>{asString(o.action_description)}</td>
-                    <td>{asString(o.responsible_person)}</td>
-                    <td>{formatDate(o.due_date)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable
+            ariaLabel="Action plan actions"
+            data={actions.map((a, i) => ({ i, o: (a && typeof a === "object" ? a : {}) as Record<string, unknown> }))}
+            rowKey={(row) => String(row.i)}
+            columns={[
+              { key: "action", header: "Action", render: ({ o }) => asString(o.action_description) },
+              { key: "responsible", header: "Responsible", render: ({ o }) => asString(o.responsible_person) },
+              { key: "due", header: "Due date", render: ({ o }) => formatDate(o.due_date) },
+            ] satisfies Column<{ i: number; o: Record<string, unknown> }>[]}
+          />
         </div>
       ) : (
         <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No actions recorded.</p>
@@ -774,28 +764,23 @@ function MonitoringView({ data }: { data: unknown }) {
       </div>
       {updates.length > 0 ? (
         <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th scope="col">Action</th>
-                <th scope="col">Status</th>
-                <th scope="col">Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              {updates.map((u, i) => {
-                const o = (u && typeof u === "object" ? u : {}) as Record<string, unknown>;
-                const s = asString(o.status);
-                return (
-                  <tr key={i}>
-                    <td>{asString(o.action_description)}</td>
-                    <td>{s !== "—" ? <Pill tone={statusTone(s)}>{s}</Pill> : "—"}</td>
-                    <td>{asString(o.progress_note)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable
+            ariaLabel="Monitoring action updates"
+            data={updates.map((u, i) => ({ i, o: (u && typeof u === "object" ? u : {}) as Record<string, unknown> }))}
+            rowKey={(row) => String(row.i)}
+            columns={[
+              { key: "action", header: "Action", render: ({ o }) => asString(o.action_description) },
+              {
+                key: "status",
+                header: "Status",
+                render: ({ o }) => {
+                  const s = asString(o.status);
+                  return s !== "—" ? <Pill tone={statusTone(s)}>{s}</Pill> : "—";
+                },
+              },
+              { key: "note", header: "Note", render: ({ o }) => asString(o.progress_note) },
+            ] satisfies Column<{ i: number; o: Record<string, unknown> }>[]}
+          />
         </div>
       ) : (
         <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No progress updates recorded.</p>
@@ -831,29 +816,17 @@ function EffectivenessView({ data }: { data: unknown }) {
         <div>
           <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Evidence</p>
           <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Action</th>
-                  <th scope="col">Completed</th>
-                  <th scope="col">Evidence</th>
-                  <th scope="col">Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {evidence.map((ev, i) => {
-                  const o = (ev && typeof ev === "object" ? ev : {}) as Record<string, unknown>;
-                  return (
-                    <tr key={i}>
-                      <td>{asString(o.action_description)}</td>
-                      <td>{o.completed ? <Pill tone="green">Yes</Pill> : <Pill tone="gray">No</Pill>}</td>
-                      <td>{o.evidence_attached ? <Pill tone="green">Attached</Pill> : <Pill tone="amber">Missing</Pill>}</td>
-                      <td>{asString(o.evidence_note)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <DataTable
+              ariaLabel="Effectiveness evidence"
+              data={evidence.map((ev, i) => ({ i, o: (ev && typeof ev === "object" ? ev : {}) as Record<string, unknown> }))}
+              rowKey={(row) => String(row.i)}
+              columns={[
+                { key: "action", header: "Action", render: ({ o }) => asString(o.action_description) },
+                { key: "completed", header: "Completed", render: ({ o }) => o.completed ? <Pill tone="green">Yes</Pill> : <Pill tone="gray">No</Pill> },
+                { key: "evidence", header: "Evidence", render: ({ o }) => o.evidence_attached ? <Pill tone="green">Attached</Pill> : <Pill tone="amber">Missing</Pill> },
+                { key: "note", header: "Note", render: ({ o }) => asString(o.evidence_note) },
+              ] satisfies Column<{ i: number; o: Record<string, unknown> }>[]}
+            />
           </div>
         </div>
       )}
@@ -861,29 +834,17 @@ function EffectivenessView({ data }: { data: unknown }) {
         <div>
           <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Trend metrics</p>
           <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Metric</th>
-                  <th scope="col">Before</th>
-                  <th scope="col">After</th>
-                  <th scope="col">Unit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trend.map((t, i) => {
-                  const o = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
-                  return (
-                    <tr key={i}>
-                      <td>{asString(o.metric_name)}</td>
-                      <td>{asString(o.before_capa)}</td>
-                      <td>{asString(o.after_capa)}</td>
-                      <td>{asString(o.unit)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <DataTable
+              ariaLabel="Effectiveness trend metrics"
+              data={trend.map((t, i) => ({ i, o: (t && typeof t === "object" ? t : {}) as Record<string, unknown> }))}
+              rowKey={(row) => String(row.i)}
+              columns={[
+                { key: "metric", header: "Metric", render: ({ o }) => asString(o.metric_name) },
+                { key: "before", header: "Before", render: ({ o }) => asString(o.before_capa) },
+                { key: "after", header: "After", render: ({ o }) => asString(o.after_capa) },
+                { key: "unit", header: "Unit", render: ({ o }) => asString(o.unit) },
+              ] satisfies Column<{ i: number; o: Record<string, unknown> }>[]}
+            />
           </div>
         </div>
       )}

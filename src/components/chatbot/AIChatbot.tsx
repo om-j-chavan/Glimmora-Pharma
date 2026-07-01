@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Bot, Send, Mic, Square, X, Volume2, RefreshCw, Trash2, Settings, Edit3, FileText, Ticket, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 // Type-only import — the actual classes extend AudioWorkletNode (a
 // browser-only global) and crash at module-evaluation time on the SSR
 // server. We dynamically import() the runtime inside startRecording so
@@ -45,18 +46,21 @@ type UiMessage = ChatMessage & { meta?: HelpMeta };
 /**
  * Floating AI chatbot.
  *
- *  - Left-click the bubble to toggle the panel.
- *  - Right-click + drag the bubble to move it. Position is cached per-session
- *    in localStorage. (Right-click was specifically requested over left-click
- *    drag so the bubble stays "click to open" with no long-press gymnastics.)
+ *  - Click the bubble to toggle the panel. The bubble is pinned to the
+ *    bottom-right corner with a fixed CSS offset so it stays put when the
+ *    browser is zoomed (it is no longer draggable).
  *  - Voice: hold-to-talk records audio, posts to /api/ai/voice/chat, and
  *    auto-plays the audio reply.
  *  - History is in-memory only (cleared on logout / refresh).
  */
 
-const STORAGE_KEY = "glimmora-chatbot-pos";
 const SUPPRESSION_KEY = "glimmora-chatbot-suppression";
 const BUBBLE_SIZE = 56;
+// Fixed distance from the bottom-right corner for the launcher bubble. Using a
+// CSS offset (not a computed pixel coordinate) keeps the bubble pinned to the
+// corner regardless of browser zoom — the layout viewport's CSS-pixel size
+// changes when zoomed, so any stored left/top pixel position would drift.
+const BUBBLE_OFFSET = 24;
 // Focus-mode drawer dimensions (used when the panel is open). The panel docks
 // to the right as an elevated drawer over a dimming + blurred backdrop, so the
 // user's attention stays on the conversation. Width is responsive; height fills
@@ -87,38 +91,6 @@ function loadSuppressionLevel(): number {
   }
 }
 
-interface Position { x: number; y: number }
-
-function clampToViewport(p: Position, w: number, h: number): Position {
-  if (typeof window === "undefined") return p;
-  const margin = 8;
-  return {
-    x: Math.min(Math.max(margin, p.x), window.innerWidth - w - margin),
-    y: Math.min(Math.max(margin, p.y), window.innerHeight - h - margin),
-  };
-}
-
-function loadPosition(): Position | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as Position;
-    if (typeof p.x !== "number" || typeof p.y !== "number") return null;
-    return p;
-  } catch {
-    return null;
-  }
-}
-
-function savePosition(p: Position) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
-  } catch {
-    /* ignore */
-  }
-}
-
 export function AIChatbot() {
   // Token from logged-in user record (set by app login flow). Prefer the
   // token on auth.user (always populated by refreshAiToken) and fall back
@@ -135,7 +107,6 @@ export function AIChatbot() {
   });
 
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<Position>(() => ({ x: 24, y: 24 })); // fallback; replaced after mount
   const [mounted, setMounted] = useState(false);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
@@ -163,9 +134,6 @@ export function AIChatbot() {
   const [raisePrefill, setRaisePrefill] = useState<RaiseTicketPrefill | undefined>(undefined);
   const [raiseTranscript, setRaiseTranscript] = useState<string | undefined>(undefined);
 
-  const dragState = useRef<{ active: boolean; offsetX: number; offsetY: number; moved: boolean }>({
-    active: false, offsetX: 0, offsetY: 0, moved: false,
-  });
   const recRef = useRef<MediaRecorder | null>(null);
   const recChunks = useRef<Blob[]>([]);
   const recStreamRef = useRef<MediaStream | null>(null);
@@ -190,16 +158,9 @@ export function AIChatbot() {
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  // Bottom-right default position once we know the viewport. Restore from
-  // localStorage if the user has dragged before.
+  // Defer the first render to the client so the localStorage-derived state
+  // (suppression level) doesn't trip a hydration mismatch.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = loadPosition();
-    const initial: Position = stored ?? {
-      x: window.innerWidth - BUBBLE_SIZE - 24,
-      y: window.innerHeight - BUBBLE_SIZE - 24,
-    };
-    setPos(clampToViewport(initial, BUBBLE_SIZE, BUBBLE_SIZE));
     setMounted(true);
   }, []);
 
@@ -226,49 +187,6 @@ export function AIChatbot() {
       window.clearTimeout(t);
     };
   }, [open, voiceState]);
-
-  /* ── Drag handlers (right-click) ─────────────────────────────── */
-
-  function handleContextMenu(e: React.MouseEvent) {
-    // Right-click toggles drag mode AND suppresses the browser context menu.
-    e.preventDefault();
-  }
-
-  function handleMouseDown(e: React.MouseEvent) {
-    if (e.button !== 2) return; // only right button starts drag
-    e.preventDefault();
-    dragState.current = {
-      active: true,
-      offsetX: e.clientX - pos.x,
-      offsetY: e.clientY - pos.y,
-      moved: false,
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-  }
-
-  function handleMouseMove(e: MouseEvent) {
-    if (!dragState.current.active) return;
-    const next = clampToViewport(
-      { x: e.clientX - dragState.current.offsetX, y: e.clientY - dragState.current.offsetY },
-      BUBBLE_SIZE,
-      BUBBLE_SIZE,
-    );
-    dragState.current.moved = true;
-    setPos(next);
-  }
-
-  function handleMouseUp() {
-    if (!dragState.current.active) return;
-    dragState.current.active = false;
-    window.removeEventListener("mousemove", handleMouseMove);
-    window.removeEventListener("mouseup", handleMouseUp);
-    // Persist the new position.
-    setPos((p) => {
-      savePosition(p);
-      return p;
-    });
-  }
 
   /* ── Chat ────────────────────────────────────────────────────── */
 
@@ -813,28 +731,19 @@ export function AIChatbot() {
       <button
         type="button"
         aria-label="Open AI assistant"
-        onClick={() => {
-          if (dragState.current.moved) {
-            // Don't toggle if this was the end of a drag gesture.
-            dragState.current.moved = false;
-            return;
-          }
-          setOpen((v) => !v);
-        }}
-        onMouseDown={handleMouseDown}
-        onContextMenu={handleContextMenu}
-        title="Click to open · Right-click and drag to move"
+        onClick={() => setOpen((v) => !v)}
+        title="Click to open"
         style={{
           position: "fixed",
-          left: pos.x,
-          top: pos.y,
+          right: BUBBLE_OFFSET,
+          bottom: BUBBLE_OFFSET,
           width: BUBBLE_SIZE,
           height: BUBBLE_SIZE,
           borderRadius: "50%",
           background: "var(--brand)",
           color: "#fff",
           border: "none",
-          cursor: dragState.current.active ? "grabbing" : "pointer",
+          cursor: "pointer",
           boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
           display: "flex",
           alignItems: "center",
@@ -934,24 +843,22 @@ export function AIChatbot() {
               >
                 <Settings className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
+                icon={RefreshCw}
                 aria-label="Clear conversation"
                 onClick={handleClear}
-                className="p-1 rounded transition-colors bg-transparent border-0 cursor-pointer"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <button
+              />
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
+                icon={X}
                 aria-label="Close"
                 onClick={() => setOpen(false)}
-                className="p-1 rounded transition-colors bg-transparent border-0 cursor-pointer"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <X className="w-4 h-4" aria-hidden="true" />
-              </button>
+              />
             </div>
           </div>
 
@@ -1151,15 +1058,15 @@ export function AIChatbot() {
                       )}
 
                       {m.meta.suggestTicket && (
-                        <button
+                        <Button
                           type="button"
+                          variant="primary"
+                          size="xs"
+                          icon={Ticket}
                           onClick={() => handleCreateTicket(m.meta!)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border-0 cursor-pointer"
-                          style={{ background: "var(--brand)", color: "#fff" }}
                         >
-                          <Ticket className="w-3 h-3" aria-hidden="true" />
                           Create a ticket
-                        </button>
+                        </Button>
                       )}
                     </div>
                   )}
@@ -1199,29 +1106,27 @@ export function AIChatbot() {
             {voiceState === "idle" && (
               <>
                 {/* Record voice (round-trip — STT + chat + TTS reply) */}
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="md"
+                  icon={Mic}
                   aria-label="Record voice message (assistant replies aloud)"
                   title="Record voice message — assistant replies aloud"
                   onClick={() => { setVoiceMode("round-trip"); void startRecording(); }}
                   disabled={busy}
-                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}
-                >
-                  <Mic className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                />
                 {/* Dictate (STT-only — text drops into the input box) */}
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="md"
+                  icon={Edit3}
                   aria-label="Dictate to text input"
                   title="Dictate — transcribe to the text input, then edit before sending"
                   onClick={() => { setVoiceMode("dictate"); void startRecording(); }}
                   disabled={busy}
-                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}
-                >
-                  <Edit3 className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                />
                 <input
                   ref={inputRef}
                   type="text"
@@ -1232,31 +1137,29 @@ export function AIChatbot() {
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
                   disabled={busy}
                 />
-                <button
+                <Button
                   type="button"
+                  variant="primary"
+                  size="md"
+                  icon={Send}
                   aria-label="Send"
                   onClick={handleSend}
                   disabled={busy || !input.trim()}
-                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: "var(--brand)", color: "#fff" }}
-                >
-                  <Send className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                />
               </>
             )}
 
             {voiceState === "recording" && (
               <>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="md"
+                  icon={Trash2}
                   aria-label="Cancel recording"
                   onClick={cancelRecording}
-                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer"
-                  style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}
                   title="Discard"
-                >
-                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                />
 
                 <VoiceMeter level={audioLevel} />
 
@@ -1282,17 +1185,16 @@ export function AIChatbot() {
 
             {voiceState === "preview" && recordedUrl && (
               <>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="md"
+                  icon={Trash2}
                   aria-label="Discard recording"
                   onClick={cancelRecording}
                   disabled={busy}
-                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}
                   title="Discard"
-                >
-                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                />
 
                 <audio
                   src={recordedUrl}
@@ -1301,29 +1203,27 @@ export function AIChatbot() {
                   style={{ maxWidth: "100%" }}
                 />
 
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="md"
+                  icon={RefreshCw}
                   aria-label="Re-record"
                   onClick={rerecord}
                   disabled={busy}
-                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" }}
                   title="Re-record"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                />
 
-                <button
+                <Button
                   type="button"
+                  variant="primary"
+                  size="md"
+                  icon={Send}
                   aria-label="Send voice message"
                   onClick={sendRecorded}
                   disabled={busy}
-                  className="p-2 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: "var(--brand)", color: "#fff" }}
                   title="Send"
-                >
-                  <Send className="w-3.5 h-3.5" aria-hidden="true" />
-                </button>
+                />
               </>
             )}
           </div>

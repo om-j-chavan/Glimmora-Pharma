@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
-import { NoSitesPopup, TabBar, PageHeader } from "@/components/shared";
+import { NoSitesPopup, TabBar, PageHeader, DataTable, type Column } from "@/components/shared";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
@@ -363,25 +363,52 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
       {showArchive ? (
         <div className="card overflow-hidden">
           <div className="card-header"><div className="flex items-center gap-2"><Archive className="w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><span className="card-title">Archived systems ({props.deletedSystems.length})</span></div></div>
-          <div className="overflow-x-auto">
-            <table className="data-table" aria-label="Archived systems">
-              <thead><tr><th scope="col">Reference</th><th scope="col">System</th><th scope="col">Archived</th><th scope="col">By</th><th scope="col">Reason</th><th scope="col"><span className="sr-only">Restore</span></th></tr></thead>
-              <tbody>
-                {props.deletedSystems.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-6 text-[12px]" style={{ color: "var(--text-muted)" }}>No archived systems.</td></tr>
-                ) : props.deletedSystems.map((s) => (
-                  <tr key={s.id}>
-                    <td className="font-mono text-[11px] font-semibold" style={{ color: "var(--brand)" }}>{s.reference ?? s.id.slice(0, 8)}</td>
-                    <td className="text-[12px]" style={{ color: "var(--text-primary)" }}>{s.name}</td>
-                    <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{s.deletedAt ? dayjs.utc(s.deletedAt).tz(timezone).format(dateFormat) : "—"}</td>
-                    <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{resolveUserName(s.deletedById)}</td>
-                    <td className="text-[11px] max-w-[280px]" style={{ color: "var(--text-secondary)" }}>{s.deletionReason ?? "—"}</td>
-                    <td><Button variant="ghost" size="xs" icon={RotateCcw} onClick={() => { setRestoreTarget(s.id); setRestoreReason(""); setRestoreError(null); }}>Restore</Button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            ariaLabel="Archived systems"
+            data={props.deletedSystems}
+            rowKey={(s) => s.id}
+            emptyState={
+              <p className="text-center py-6 text-[12px]" style={{ color: "var(--text-muted)" }}>No archived systems.</p>
+            }
+            columns={[
+              {
+                key: "reference",
+                header: "Reference",
+                cellClassName: "font-mono text-[11px] font-semibold",
+                render: (s) => <span style={{ color: "var(--brand)" }}>{s.reference ?? s.id.slice(0, 8)}</span>,
+              },
+              {
+                key: "system",
+                header: "System",
+                cellClassName: "text-[12px]",
+                render: (s) => <span style={{ color: "var(--text-primary)" }}>{s.name}</span>,
+              },
+              {
+                key: "archived",
+                header: "Archived",
+                cellClassName: "text-[11px]",
+                render: (s) => <span style={{ color: "var(--text-secondary)" }}>{s.deletedAt ? dayjs.utc(s.deletedAt).tz(timezone).format(dateFormat) : "—"}</span>,
+              },
+              {
+                key: "by",
+                header: "By",
+                cellClassName: "text-[11px]",
+                render: (s) => <span style={{ color: "var(--text-secondary)" }}>{resolveUserName(s.deletedById)}</span>,
+              },
+              {
+                key: "reason",
+                header: "Reason",
+                cellClassName: "text-[11px] max-w-[280px]",
+                render: (s) => <span style={{ color: "var(--text-secondary)" }}>{s.deletionReason ?? "—"}</span>,
+              },
+              {
+                key: "restore",
+                header: "Restore",
+                srOnly: true,
+                render: (s) => <Button variant="ghost" size="xs" icon={RotateCcw} onClick={() => { setRestoreTarget(s.id); setRestoreReason(""); setRestoreError(null); }}>Restore</Button>,
+              },
+            ] satisfies Column<PrismaSystemWithRelations>[]}
+          />
         </div>
       ) : (
       <>

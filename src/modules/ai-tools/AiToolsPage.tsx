@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { Search, Send, Sparkles, Activity, Database, ShieldCheck, Wrench, CheckCircle2, XCircle, AlertTriangle, Info, FileText } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { Button } from "@/components/ui/Button";
+import { DataTable, type Column } from "@/components/shared";
 import {
   rcaStatus,
   actionPlanStatus,
@@ -414,23 +415,16 @@ function ActionPlanSummary({ data }: { data: unknown }) {
       </div>
       {actions.length > 0 && (
         <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-          <table className="data-table">
-            <thead>
-              <tr><th scope="col">Action</th><th scope="col">Responsible</th><th scope="col">Due</th></tr>
-            </thead>
-            <tbody>
-              {actions.map((a, i) => {
-                const o = (a && typeof a === "object" ? a : {}) as Record<string, unknown>;
-                return (
-                  <tr key={i}>
-                    <td>{asString(o.action_description)}</td>
-                    <td>{asString(o.responsible_person)}</td>
-                    <td>{formatDate(o.due_date)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable
+            ariaLabel="Action plan actions"
+            data={actions.map((a, i) => ({ i, o: (a && typeof a === "object" ? a : {}) as Record<string, unknown> }))}
+            rowKey={(row) => String(row.i)}
+            columns={[
+              { key: "action", header: "Action", render: ({ o }) => asString(o.action_description) },
+              { key: "responsible", header: "Responsible", render: ({ o }) => asString(o.responsible_person) },
+              { key: "due", header: "Due", render: ({ o }) => formatDate(o.due_date) },
+            ] satisfies Column<{ i: number; o: Record<string, unknown> }>[]}
+          />
         </div>
       )}
     </div>
@@ -455,24 +449,25 @@ function MonitoringSummary({ data }: { data: unknown }) {
       </div>
       {updates.length > 0 && (
         <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-          <table className="data-table">
-            <thead><tr><th scope="col">Action</th><th scope="col">Status</th><th scope="col">Note</th></tr></thead>
-            <tbody>
-              {updates.map((u, i) => {
-                const o = (u && typeof u === "object" ? u : {}) as Record<string, unknown>;
-                const s = asString(o.status);
-                const stone: "green" | "amber" | "red" | "blue" | "gray" =
-                  /complet/i.test(s) ? "green" : /delay|overdue/i.test(s) ? "red" : /track|progress/i.test(s) ? "blue" : "gray";
-                return (
-                  <tr key={i}>
-                    <td>{asString(o.action_description)}</td>
-                    <td>{s !== "—" ? <Pill tone={stone}>{s}</Pill> : "—"}</td>
-                    <td>{asString(o.progress_note)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable
+            ariaLabel="Monitoring action updates"
+            data={updates.map((u, i) => ({ i, o: (u && typeof u === "object" ? u : {}) as Record<string, unknown> }))}
+            rowKey={(row) => String(row.i)}
+            columns={[
+              { key: "action", header: "Action", render: ({ o }) => asString(o.action_description) },
+              {
+                key: "status",
+                header: "Status",
+                render: ({ o }) => {
+                  const s = asString(o.status);
+                  const stone: "green" | "amber" | "red" | "blue" | "gray" =
+                    /complet/i.test(s) ? "green" : /delay|overdue/i.test(s) ? "red" : /track|progress/i.test(s) ? "blue" : "gray";
+                  return s !== "—" ? <Pill tone={stone}>{s}</Pill> : "—";
+                },
+              },
+              { key: "note", header: "Note", render: ({ o }) => asString(o.progress_note) },
+            ] satisfies Column<{ i: number; o: Record<string, unknown> }>[]}
+          />
         </div>
       )}
     </div>
@@ -531,21 +526,16 @@ function AuditSummary({ data }: { data: unknown }) {
       <StatusBanner tone="success" icon={<FileText className="w-4 h-4" />} title={`Audit trail retrieved`} body={`${total} entr${total === 1 ? "y" : "ies"} for record ${asString(getField(data, "record_id"))}`} />
       {logs.length > 0 && (
         <div className="rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-          <table className="data-table">
-            <thead><tr><th scope="col">Action</th><th scope="col">User</th><th scope="col">When</th></tr></thead>
-            <tbody>
-              {logs.map((l, i) => {
-                const o = (l && typeof l === "object" ? l : {}) as Record<string, unknown>;
-                return (
-                  <tr key={i}>
-                    <td><span className="font-mono text-[11px]">{asString(o.action_type ?? o.feature_id)}</span></td>
-                    <td>{asString(o.username)}</td>
-                    <td>{formatDate(o.created_at ?? o.timestamp)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <DataTable
+            ariaLabel="Audit trail"
+            data={logs.map((l, i) => ({ i, o: (l && typeof l === "object" ? l : {}) as Record<string, unknown> }))}
+            rowKey={(row) => String(row.i)}
+            columns={[
+              { key: "action", header: "Action", render: ({ o }) => <span className="font-mono text-[11px]">{asString(o.action_type ?? o.feature_id)}</span> },
+              { key: "user", header: "User", render: ({ o }) => asString(o.username) },
+              { key: "when", header: "When", render: ({ o }) => formatDate(o.created_at ?? o.timestamp) },
+            ] satisfies Column<{ i: number; o: Record<string, unknown> }>[]}
+          />
         </div>
       )}
     </div>

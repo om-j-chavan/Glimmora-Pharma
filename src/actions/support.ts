@@ -244,6 +244,90 @@ export async function createTicket(
   }
 }
 
+/* ── suggestTriage — Smart Triage (suggestion-only, never auto-fills) ────
+   Calls the FastAPI AI backend to recommend a category + priority for a new
+   ticket. Server-to-server (same BACKEND_URL the ai-proxy uses) so the modal
+   never needs an AI access token. Auth-gated. On any failure returns an error
+   ActionResult — the UI simply shows nothing rather than blocking ticket
+   creation. This realises the "suggestTriage()" SMART ROUTING seam noted on
+   createTicket: it only SUGGESTS; creation still lands Unassigned and the user
+   may override every field. */
+
+const TriageInputSchema = z.object({
+  subject: z.string().optional(),
+  description: z.string().optional(),
+});
+
+export interface TriageSuggestion {
+  category: TicketCategory;
+  priority: TicketPriority;
+  rationale: string;
+  confidence: number;
+}
+
+type TicketCategory = (typeof TICKET_CATEGORIES)[number];
+
+/** Resolve the AI backend base URL — mirrors app/api/ai-proxy resolution. */
+function aiBackendBase(): string {
+  return (
+    process.env.BACKEND_URL ??
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/api$/, "") ??
+    "http://localhost:8000"
+  );
+}
+
+export async function suggestTriage(
+  input: z.input<typeof TriageInputSchema>,
+): Promise<ActionResult<TriageSuggestion>> {
+  await requireAuth();
+  const parsed = TriageInputSchema.safeParse(input);
+  if (!parsed.success) return { success: false, error: "Invalid input" };
+  const { subject = "", description = "" } = parsed.data;
+  if (!subject.trim() && !description.trim()) {
+    return { success: false, error: "Nothing to analyse yet." };
+  }
+  try {
+    const res = await fetch(`${aiBackendBase()}/api/v1/support-triage/classify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, description }),
+      // Triage must never hang the modal — bail fast and let the user pick.
+      signal: AbortSignal.timeout(15_000),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      return { success: false, error: `Triage unavailable (${res.status})` };
+    }
+    // Backend contract (support_triage_router): { category, priority, rationale,
+    // confidence: 0-100, source }. Confidence is normalised to a 0-1 fraction here.
+    const data = (await res.json()) as Record<string, unknown>;
+    // Defensive: only accept values that match our unions; the backend already
+    // constrains these, but never trust a remote shape blindly.
+    const rawCategory = typeof data.category === "string" ? data.category : "";
+    const rawPriority = typeof data.priority === "string" ? data.priority : "";
+    const category = (TICKET_CATEGORIES as readonly string[]).includes(rawCategory)
+      ? (rawCategory as TicketCategory)
+      : "Other";
+    const priority = (TICKET_PRIORITIES as readonly string[]).includes(rawPriority)
+      ? (rawPriority as TicketPriority)
+      : "Medium";
+    const rawConfidence = typeof data.confidence === "number" ? data.confidence : 0;
+    return {
+      success: true,
+      data: {
+        category,
+        priority,
+        rationale: typeof data.rationale === "string" ? data.rationale : "",
+        // Backend sends 0-100; the UI renders a 0-1 fraction (× 100).
+        confidence: Math.max(0, Math.min(1, rawConfidence / 100)),
+      },
+    };
+  } catch (err) {
+    console.error("[action] suggestTriage failed:", err);
+    return { success: false, error: "Could not reach the triage service." };
+  }
+}
+
 /* ── addTicketMessage — public reply or admin internal note ──────────── */
 
 const MessageSchema = z.object({

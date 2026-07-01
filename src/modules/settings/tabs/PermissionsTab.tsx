@@ -12,8 +12,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
 
-const ROLES: RoleKey[] = ["super_admin", "customer_admin", "qa_head", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head", "viewer"];
-const ROLE_LABELS: Record<string, string> = { super_admin: "Super Admin", customer_admin: "Customer Admin", qa_head: "QA Head", qc_lab_director: "QC / Lab Director", regulatory_affairs: "Regulatory Affairs", csv_val_lead: "CSV / Val Lead", it_cdo: "IT / CDO", operations_head: "Operations Head", viewer: "Viewer" };
+const ROLES: RoleKey[] = ["super_admin", "customer_admin", "qa_head", "qa", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head", "viewer"];
+const ROLE_LABELS: Record<string, string> = { super_admin: "Super Admin", customer_admin: "Customer Admin", qa_head: "QA Head", qa: "Quality Assurance", qc_lab_director: "QC / Lab Director", regulatory_affairs: "Regulatory Affairs", csv_val_lead: "CSV / Val Lead", it_cdo: "IT / CDO", operations_head: "Operations Head", viewer: "Viewer" };
 const MODULES: { key: ModuleKey; label: string }[] = [
   { key: "dashboard", label: "Dashboard" }, { key: "gap", label: "Gap Assessment" }, { key: "capa", label: "CAPA" },
   { key: "csv", label: "CSV/CSA" }, { key: "fda483", label: "FDA 483" }, { key: "evidence", label: "Evidence" },
@@ -66,6 +66,10 @@ export function PermissionsTab() {
       </div>
 
       {/* Matrix */}
+      {/* NOTE: intentionally NOT migrated to the shared <DataTable>. This is a
+          role×module permissions MATRIX (dynamic module columns + an
+          interactive access-level toggle button in every cell), not a record
+          list — DataTable's row-per-record model doesn't fit it. */}
       <div className="card overflow-hidden"><div className="overflow-x-auto">
         <table className="w-full" aria-label="Role permissions matrix"><caption className="sr-only">Role-based access levels \u2014 click to edit</caption>
           <thead><tr className="border-b border-(--bg-border)">

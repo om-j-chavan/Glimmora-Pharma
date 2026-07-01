@@ -3,6 +3,7 @@ import {
   CheckCircle2, X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
 
 type LucideIcon = React.ComponentType<{ className?: string; style?: React.CSSProperties; "aria-hidden"?: boolean | "true" | "false" }>;
 
@@ -32,27 +33,36 @@ export function IntendedUseTab({
   return (
     <>
       <p className="text-[13px] leading-relaxed mb-4" style={{ color: "var(--text-secondary)" }}>This table defines the intended use and operational boundaries of each AGI agent in Pharma Glimmora, aligned with 21 CFR Part 11 and emerging AI governance expectations for GxP environments.</p>
-      <div className="card overflow-hidden mb-4"><div className="overflow-x-auto">
-        <table className="data-table" aria-label="AGI intended use and boundaries">
-          <caption className="sr-only">AGI agent functions with allowed and prohibited actions</caption>
-          <thead><tr><th scope="col">Agent</th><th scope="col">GxP category</th><th scope="col">Mode</th><th scope="col">Active</th><th scope="col">Allowed actions</th><th scope="col">Prohibited scope</th></tr></thead>
-          <tbody>
-            {AGI_FUNCTIONS.map((fn) => {
-              const AgIcon = AGENT_ICONS[fn.agent]; const color = AGENT_COLORS[fn.agent]; const isOn = !isManualMode && agiAgents[fn.agent as keyof typeof agiAgents];
-              return (
-                <tr key={fn.agent}>
-                  <th scope="row"><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: color + "18" }}>{AgIcon && <AgIcon className="w-3.5 h-3.5" style={{ color }} aria-hidden="true" />}</div><span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{fn.name}</span></div></th>
-                  <td><Badge variant="gray">{fn.gxpCategory}</Badge></td>
-                  <td><Badge variant={fn.mode === "Autonomous" ? "purple" : "blue"}>{fn.mode}</Badge></td>
-                  <td>{isOn ? <CheckCircle2 className="w-4 h-4 text-[#10b981]" aria-label="Active" /> : <X className="w-4 h-4 text-[#64748b]" aria-label="Inactive" />}</td>
-                  <td><p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)", maxWidth: 280 }}>{fn.allowed}</p></td>
-                  <td><p className="text-[11px] leading-relaxed text-[#ef4444]" style={{ maxWidth: 240 }}>{fn.prohibited}</p></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div></div>
+      <div className="card overflow-hidden mb-4">
+        <DataTable
+          ariaLabel="AGI intended use and boundaries"
+          caption="AGI agent functions with allowed and prohibited actions"
+          data={AGI_FUNCTIONS}
+          rowKey={(fn) => fn.agent}
+          columns={[
+            {
+              key: "agent",
+              header: "Agent",
+              render: (fn) => {
+                const AgIcon = AGENT_ICONS[fn.agent]; const color = AGENT_COLORS[fn.agent];
+                return <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: color + "18" }}>{AgIcon && <AgIcon className="w-3.5 h-3.5" style={{ color }} aria-hidden="true" />}</div><span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{fn.name}</span></div>;
+              },
+            },
+            { key: "gxpCategory", header: "GxP category", render: (fn) => <Badge variant="gray">{fn.gxpCategory}</Badge> },
+            { key: "mode", header: "Mode", render: (fn) => <Badge variant={fn.mode === "Autonomous" ? "purple" : "blue"}>{fn.mode}</Badge> },
+            {
+              key: "active",
+              header: "Active",
+              render: (fn) => {
+                const isOn = !isManualMode && agiAgents[fn.agent as keyof typeof agiAgents];
+                return isOn ? <CheckCircle2 className="w-4 h-4 text-[#10b981]" aria-label="Active" /> : <X className="w-4 h-4 text-[#64748b]" aria-label="Inactive" />;
+              },
+            },
+            { key: "allowed", header: "Allowed actions", render: (fn) => <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)", maxWidth: 280 }}>{fn.allowed}</p> },
+            { key: "prohibited", header: "Prohibited scope", render: (fn) => <p className="text-[11px] leading-relaxed text-[#ef4444]" style={{ maxWidth: 240 }}>{fn.prohibited}</p> },
+          ] satisfies Column<(typeof AGI_FUNCTIONS)[number]>[]}
+        />
+      </div>
       <div className="card p-4"><div className="flex items-center justify-between"><div><p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>Confidence threshold</p><p className="text-[11px]" style={{ color: "var(--text-muted)" }}>AGI outputs below this threshold are flagged for human review</p></div><div className="text-right"><p className="text-[24px] font-bold text-[#6366f1]">{confidence}%</p><button onClick={onNavigateSettings} className="text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer">Change in Settings &rarr;</button></div></div></div>
     </>
   );
