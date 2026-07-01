@@ -10,6 +10,12 @@ const STAGE_INCLUDE = {
     where: { deletedAt: null },
     orderBy: { uploadedAt: "desc" as const },
   },
+  // CSV/CSA stage rework tasks — active (non-cancelled/deleted) only, oldest
+  // first so the rework list reads in the order it was raised.
+  reworkTasks: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: "asc" as const },
+  },
 };
 
 // RUNG 2 — minimal selects for the cross-module FK relations surfaced in the

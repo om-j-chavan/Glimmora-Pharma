@@ -38,6 +38,7 @@ import { Popup } from "@/components/ui/Popup";
 import { DataTable, type Column } from "@/components/shared";
 import { displayUserName } from "@/lib/identity-display";
 import { getDocumentReview, type DocumentReviewResult, type DocumentReviewSeverity } from "@/lib/ai";
+import { StageReworkTasks } from "./StageReworkTasks";
 import { selectAiToken } from "@/lib/aiBackend";
 import { friendlyAiError } from "@/lib/friendlyError";
 
@@ -834,6 +835,17 @@ export function ValidationPanel({
                   <p style={{ color: "var(--text-secondary)" }}>{s.rejectionReason}</p>
                 </div>
               )}
+
+              {/* Stage rework tasks — reject → AI-suggest → delegate → fix →
+                  review → resubmit. Optional: renders only when there are tasks
+                  or the stage was returned by QA. */}
+              <StageReworkTasks
+                stage={s}
+                users={users}
+                role={role}
+                sessionUserId={sessionUserId}
+                isDark={isDark}
+              />
 
               {/* QA REVIEW PANEL — stage is Under Review. Evidence (docs +
                   notes) is shown read-only above; uploads are locked. QA

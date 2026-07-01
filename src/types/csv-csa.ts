@@ -16,6 +16,7 @@ import type {
   RTMEntry as PrismaRTMEntry,
   RoadmapActivity as PrismaRoadmapActivity,
   StageDocument as PrismaStageDocument,
+  ValidationStageTask as PrismaValidationStageTask,
 } from "@prisma/client";
 
 /* ══════════════════════════════════════
@@ -101,6 +102,27 @@ export interface StageDocument {
   isLocked: boolean;
 }
 
+/** A lightweight, assignable rework task raised against a (rejected) stage and
+ *  delegated to operational staff. Mirrors the Prisma ValidationStageTask. */
+export interface StageReworkTask {
+  id: string;
+  stageKey: ValidationStageKey;
+  systemId: string;
+  assignee: string;
+  assigneeId?: string;
+  message: string;
+  findingRef?: string;
+  status: "pending" | "in_progress" | "submitted" | "closed" | "rework" | "cancelled";
+  completionNotes?: string;
+  reworkReason?: string;
+  dueDate?: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  closedAt?: string;
+  createdById?: string;
+  createdAt: string;
+}
+
 export interface ValidationStage {
   key: ValidationStageKey;
   status: ValidationStageStatus;
@@ -108,6 +130,7 @@ export interface ValidationStage {
   targetDate?: string;
   documentName?: string;
   documents?: StageDocument[];
+  reworkTasks?: StageReworkTask[];
   notes?: string;
   submittedBy?: string;
   // RUNG 2.8 — stable submitter principal id (for the self-approval SoD hint).
@@ -262,6 +285,7 @@ export interface RTMEntry {
  *  src/lib/queries/systems.ts filters out soft-deleted rows. */
 type ValidationStageWithDocs = PrismaValidationStage & {
   documents: PrismaStageDocument[];
+  reworkTasks: PrismaValidationStageTask[];
 };
 
 /** RUNG 2 — compact ref to a linked Finding/CAPA (matches the query selects). */
@@ -385,7 +409,29 @@ function adaptPrismaStage(s: ValidationStageWithDocs): ValidationStage {
     rejectedDate: s.rejectedDate ? s.rejectedDate.toISOString() : undefined,
     rejectionReason: s.rejectionReason ?? undefined,
     documents: s.documents.map((d) => adaptPrismaStageDocument(d, isLocked)),
+    reworkTasks: (s.reworkTasks ?? []).map((t) => adaptPrismaStageTask(t, s.stageName as ValidationStageKey)),
     prismaId: s.id,
+  };
+}
+
+function adaptPrismaStageTask(t: PrismaValidationStageTask, stageKey: ValidationStageKey): StageReworkTask {
+  return {
+    id: t.id,
+    stageKey,
+    systemId: t.systemId,
+    assignee: t.assignee,
+    assigneeId: t.assigneeId ?? undefined,
+    message: t.message,
+    findingRef: t.findingRef ?? undefined,
+    status: t.status as StageReworkTask["status"],
+    completionNotes: t.completionNotes ?? undefined,
+    reworkReason: t.reworkReason ?? undefined,
+    dueDate: t.dueDate ? t.dueDate.toISOString() : undefined,
+    submittedAt: t.submittedAt ? t.submittedAt.toISOString() : undefined,
+    reviewedAt: t.reviewedAt ? t.reviewedAt.toISOString() : undefined,
+    closedAt: t.closedAt ? t.closedAt.toISOString() : undefined,
+    createdById: t.createdById ?? undefined,
+    createdAt: t.createdAt.toISOString(),
   };
 }
 

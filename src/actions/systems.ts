@@ -119,6 +119,23 @@ function toSystemData(d: Partial<z.infer<typeof SystemWritableSchema>>) {
 
 const STANDARD_STAGES = ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"] as const;
 
+// CSA risk-based stage templates (Computer Software Assurance, FDA 2022). The
+// stages a given GAMP 5 category must ACTIVELY validate. Stages not listed are
+// still created — so the full V-model stays on record for an inspector — but
+// auto-set to "skipped" with a documented rationale, so only the applicable
+// stages need work. Tune a category's scope by editing its list here.
+const STAGE_TEMPLATES: Record<string, readonly string[]> = {
+  "1": ["IQ"],                                        // Infrastructure — install verification only
+  "3": ["URS", "IQ", "OQ"],                           // Non-configured COTS — leverage supplier FS/DS
+  "4": ["URS", "FS", "IQ", "OQ", "PQ"],               // Configured — DS via vendor config (auto-skipped)
+  "5": ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"],  // Custom/bespoke — full V-model
+};
+// Unknown/missing category falls back to the full set (never under-scope by
+// accident — over-validating is safe, under-validating is a compliance gap).
+function applicableStagesFor(gamp5Category: string | undefined): ReadonlySet<string> {
+  return new Set(STAGE_TEMPLATES[gamp5Category ?? ""] ?? STAGE_TEMPLATES["5"]);
+}
+
 // Role-sets now live in the shared role-set module so the client UI mirrors the
 // exact same gates. Aliased to the local names so the rest of this file is
 // unchanged. (Submit is open to all compliance roles; only viewers are blocked
@@ -171,7 +188,11 @@ function deriveValidationStatus(stages: { status: string }[]): string {
   if (approved + skipped === statuses.length && approved >= 1) return "Validated";
   if (statuses.some((s) => s === "rejected")) return "Validation Failed";
   if (statuses.some((s) => s === "in_review")) return "Under Review";
-  if (approved + skipped >= 1) return "In Progress";
+  // Real progress = at least one stage APPROVED, or a stage actively worked
+  // (in_progress/draft). Auto-skipped stages from the CSA category template are
+  // NOT progress on their own — a freshly created system whose inapplicable
+  // stages are pre-skipped must still read "Not Started" until real work begins.
+  if (approved >= 1) return "In Progress";
   // RUNG 2.8 — a stage carrying evidence (status "in_progress", set on first
   // document upload) is honestly In Progress, never "Not Started".
   if (statuses.some((s) => s === "in_progress" || s === "draft")) return "In Progress";
@@ -288,12 +309,26 @@ export async function createSystem(
               createdBy: session.user.name,
             },
           });
+          // CSA risk-based scoping — only the stages applicable to this GAMP
+          // category start as "not_started"; the rest are created pre-"skipped"
+          // with a documented rationale (full V-model stays on record).
+          const applicable = applicableStagesFor(parsed.data.gamp5Category);
+          const catLabel = parsed.data.gamp5Category ? `GAMP Category ${parsed.data.gamp5Category}` : "this system";
+          const skipReason = `Auto-skipped at creation — not in the CSA risk-based scope for ${catLabel}. Re-open if the validation plan requires it.`;
           await tx.validationStage.createMany({
-            data: STANDARD_STAGES.map((stageName) => ({
-              systemId: created.id,
-              stageName,
-              status: "not_started",
-            })),
+            data: STANDARD_STAGES.map((stageName) => {
+              const isApplicable = applicable.has(stageName);
+              return isApplicable
+                ? { systemId: created.id, stageName, status: "not_started" }
+                : {
+                    systemId: created.id,
+                    stageName,
+                    status: "skipped",
+                    notes: skipReason,
+                    approvedBy: "System · CSA template",
+                    approvedDate: new Date(),
+                  };
+            }),
           });
           await tx.auditLog.create({
             data: {
@@ -395,6 +430,15 @@ export async function submitStageForReview(stageId: string): Promise<ActionResul
   // blocks re-submitting one that is already under review or approved/skipped.
   if (!SUBMITTABLE_STAGE_STATUSES.includes(stage0.status)) {
     return { success: false, error: "This stage cannot be submitted — it is already under review or completed." };
+  }
+  // Resubmit guard (stage rework tasks) — a stage with open rework tasks
+  // delegated to staff cannot go back to QA until every task is closed. Half-
+  // finished rework must not reach the QA reviewer.
+  const openReworkTasks = await prisma.validationStageTask.count({
+    where: { validationStageId: stageId, deletedAt: null, status: { in: ["pending", "in_progress", "submitted", "rework"] } },
+  });
+  if (openReworkTasks > 0) {
+    return { success: false, error: `Resolve the ${openReworkTasks} open rework task${openReworkTasks === 1 ? "" : "s"} on this stage before resubmitting for QA review.` };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {

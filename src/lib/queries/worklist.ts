@@ -102,11 +102,31 @@ export interface WorklistDeviationTask {
   messages: WorklistTaskMessage[];
 }
 
+/** CSV/CSA stage rework task assigned to the user (UNION source alongside the
+ *  CAPA groups and deviation tasks). Surfaces the Validation Lead's delegated
+ *  fix-item; the worker acts on it here or on the system's Execute tab. */
+export interface WorklistStageTask {
+  id: string;
+  systemId: string;
+  systemName: string;
+  systemReference: string | null;
+  stageName: string;
+  message: string;
+  findingRef: string | null;
+  status: string;
+  completionNotes: string | null;
+  reworkReason: string | null;
+  dueDate: string | null;
+  assignedAt: string;
+}
+
 export interface Worklist {
   groups: WorklistGroup[];
   /** Stage 4 — low-priority deviation tasks assigned to the user (UNION source
    *  alongside the CAPA groups above). */
   deviationTasks: WorklistDeviationTask[];
+  /** CSV/CSA stage rework tasks assigned to the user (UNION source). */
+  stageTasks: WorklistStageTask[];
   openCount: number;
   reworkCount: number;
 }
@@ -117,7 +137,7 @@ const OPEN_ITEM_STATUSES = new Set(["pending", "in_progress", "rework"]);
 const DEV_TASK_ACTIVE_STATUSES = ["pending", "in_progress", "submitted", "rework"];
 
 export const getWorklist = cache(async (userId: string, tenantId: string): Promise<Worklist> => {
-  const [items, drivenCapas, devTasks] = await Promise.all([
+  const [items, drivenCapas, devTasks, stageTaskRows] = await Promise.all([
     prisma.cAPAActionItem.findMany({
       // Exclude soft-deleted items and items whose parent CAPA was soft-deleted.
       where: { ownerId: userId, tenantId, deletedAt: null, capa: { deletedAt: null } },
@@ -153,6 +173,18 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         } },
         // Stage 5 — flat append-only QA↔worker conversation (oldest first).
         messages: { orderBy: { createdAt: "asc" }, select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true } },
+      },
+    }),
+    // CSV/CSA stage rework tasks assigned to this user (UNION source). Excludes
+    // soft-deleted/cancelled tasks; closed ones drop off the worklist.
+    prisma.validationStageTask.findMany({
+      where: {
+        assigneeId: userId, tenantId, deletedAt: null,
+        status: { in: DEV_TASK_ACTIVE_STATUSES },
+      },
+      orderBy: { dueDate: "asc" },
+      include: {
+        validationStage: { select: { stageName: true, system: { select: { name: true, reference: true } } } },
       },
     }),
   ]);
@@ -308,18 +340,37 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     })),
   }));
 
+  // CSV/CSA stage rework tasks → serialise (additive UNION source).
+  const stageTasks: WorklistStageTask[] = stageTaskRows.map((t) => ({
+    id: t.id,
+    systemId: t.systemId,
+    systemName: t.validationStage.system.name,
+    systemReference: t.validationStage.system.reference,
+    stageName: t.validationStage.stageName,
+    message: t.message,
+    findingRef: t.findingRef,
+    status: t.status,
+    completionNotes: t.completionNotes,
+    reworkReason: t.reworkReason,
+    dueDate: t.dueDate ? t.dueDate.toISOString() : null,
+    assignedAt: t.createdAt.toISOString(),
+  }));
+
   const openItems = items.filter((i) => OPEN_ITEM_STATUSES.has(i.status));
   // Open deviation tasks count toward the worklist totals (submitted ones are
   // awaiting QA, so they're excluded from "open" like complete CAPA items).
   const openDevTasks = deviationTasks.filter((t) => OPEN_ITEM_STATUSES.has(t.status));
+  const openStageTasks = stageTasks.filter((t) => OPEN_ITEM_STATUSES.has(t.status));
   const reworkCount =
     items.filter((i) => i.status === "rework").length +
-    deviationTasks.filter((t) => t.status === "rework").length;
+    deviationTasks.filter((t) => t.status === "rework").length +
+    stageTasks.filter((t) => t.status === "rework").length;
 
   return {
     groups,
     deviationTasks,
-    openCount: openItems.length + openDevTasks.length,
+    stageTasks,
+    openCount: openItems.length + openDevTasks.length + openStageTasks.length,
     reworkCount,
   };
 });

@@ -13,6 +13,16 @@ import { Modal } from "@/components/ui/Modal";
 
 const SYSTEM_TYPES: SystemType[] = ["QMS", "LIMS", "ERP", "CDS", "SCADA", "MES", "CMMS", "Other"];
 
+// CSA risk-based stage preview — mirrors STAGE_TEMPLATES in src/actions/systems.ts.
+// Shows which validation stages will start active vs auto-skipped for the picked
+// GAMP category, so the scope is clear before the system is created.
+const STAGE_PREVIEW: Record<string, string[]> = {
+  "1": ["IQ"],
+  "3": ["URS", "IQ", "OQ"],
+  "4": ["URS", "FS", "IQ", "OQ", "PQ"],
+  "5": ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"],
+};
+
 /* ── Schema ──
  *
  * Add System asks only the 8 ESSENTIAL fields. Everything else — risk
@@ -54,7 +64,10 @@ export function AddSystemModal({ open, sites, users, onSave, onClose, lockedSite
     },
   });
 
-  const { register, control, handleSubmit, formState: { errors, isSubmitting } } = form;
+  const { register, control, handleSubmit, watch, formState: { errors, isSubmitting } } = form;
+  const selectedCat = watch("gamp5Category");
+  const activeStages = STAGE_PREVIEW[selectedCat] ?? STAGE_PREVIEW["5"];
+  const skippedStages = STAGE_PREVIEW["5"].filter((s) => !activeStages.includes(s));
   const activeSites = sites.filter((s) => s.status === "Active");
   const activeUsers = users.filter((u) => u.status === "Active");
 
@@ -115,7 +128,16 @@ export function AddSystemModal({ open, sites, users, onSave, onClose, lockedSite
           <div>
             <label className={lbl} style={{ color: "var(--text-muted)" }}>GAMP 5 category *</label>
             <Controller name="gamp5Category" control={control} render={({ field }) => (<Dropdown value={field.value} onChange={field.onChange} width="w-full" options={GAMP5_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))} />)} />
-            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Cat 5 requires full IQ/OQ/PQ</p>
+            <div className="mt-1.5 space-y-0.5">
+              <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                <span className="font-semibold" style={{ color: "var(--brand)" }}>Validates:</span> {activeStages.join(" · ")}
+              </p>
+              {skippedStages.length > 0 && (
+                <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                  <span className="font-semibold">Auto-skipped:</span> {skippedStages.join(" · ")} <span className="italic">(CSA risk-based)</span>
+                </p>
+              )}
+            </div>
           </div>
         </div>
 

@@ -47,6 +47,8 @@ model Tenant {
   capaActionItems CAPAActionItem[]
   // Stage 1 (deviation redesign) — reverse for DeviationTask.tenantId.
   deviationTasks  DeviationTask[]
+  // CSV/CSA stage rework — reverse for ValidationStageTask.tenantId.
+  validationStageTasks ValidationStageTask[]
   // Stage 5 — reverse for DeviationTaskMessage.tenantId.
   deviationTaskMessages DeviationTaskMessage[]
 }
@@ -145,6 +147,11 @@ model User {
   submittedDeviationTasks       DeviationTask[] @relation("DeviationTaskSubmittedBy")
   reviewedDeviationTasks        DeviationTask[] @relation("DeviationTaskReviewedBy")
   reworkRequestedDeviationTasks DeviationTask[] @relation("DeviationTaskReworkBy")
+  // CSV/CSA stage rework — reverse relations for ValidationStageTask actor FKs
+  // (mirrors the DeviationTask actor-FK pattern above).
+  assignedStageTasks  ValidationStageTask[] @relation("ValidationStageTaskAssignee")
+  submittedStageTasks ValidationStageTask[] @relation("ValidationStageTaskSubmittedBy")
+  reviewedStageTasks  ValidationStageTask[] @relation("ValidationStageTaskReviewedBy")
   // SME Section 1, Stage 4 (FULL) — virtual reverse fields for the
   // CAPAActionItem.ownerId / completedById FKs.
   ownedCAPAActionItems     CAPAActionItem[] @relation("CAPAActionItemOwner")
@@ -954,6 +961,65 @@ model ValidationStage {
 
   system    GxPSystem       @relation(fields: [systemId], references: [id], onDelete: Cascade)
   documents StageDocument[]
+  // CSV/CSA stage rework — lightweight, assignable fix-tasks raised after a QA
+  // rejection (mirrors the low-priority DeviationTask pattern).
+  reworkTasks ValidationStageTask[]
+}
+
+// CSV/CSA stage rework task — a lightweight, assignable fix-task the Validation
+// Lead raises against a REJECTED stage and delegates to operational staff.
+// 1:1 mirror of DeviationTask (assignable worker-task lifecycle) scoped to a
+// ValidationStage instead of a Deviation. The stage's own QA approve/reject is
+// untouched; these tasks just break a rejection's rework into trackable items
+// and surface in the assignee's Worklist. Part 11 soft-delete; SoD enforced at
+// the action layer (reviewer != assignee).
+model ValidationStageTask {
+  id                String          @id @default(cuid())
+  tenantId          String
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  validationStageId String
+  validationStage   ValidationStage @relation(fields: [validationStageId], references: [id], onDelete: Cascade)
+  // Denormalised system id so the Worklist can deep-link without joining up the
+  // stage → system chain on every read.
+  systemId          String
+  // Assignee — the Worklist key. Display-name cache + nullable userId FK, the
+  // same dual-write pattern as DeviationTask.assignee/assigneeId.
+  assignee          String
+  assigneeId        String?
+  assigneeUser      User?           @relation("ValidationStageTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  // The Val Lead's instruction to the assignee (one rework item).
+  message           String
+  // Finding-link (improvement #3) — the AI Document Review rubric item this
+  // task traces back to, or the rejection point. Free text, optional.
+  findingRef        String?
+  dueDate           DateTime?
+  // "pending" | "in_progress" | "submitted" | "closed" | "rework" | "cancelled"
+  // Stored as String (SQLite has no enums), validated at the app layer.
+  status            String          @default("pending")
+  // Assignee submission.
+  completionNotes   String?
+  submittedAt       DateTime?
+  submittedById     String?
+  submittedByUser   User?           @relation("ValidationStageTaskSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  // Review (Val Lead closes or sends back — SoD: reviewer != assignee).
+  reviewedAt        DateTime?
+  reviewedById      String?
+  reviewedByUser    User?           @relation("ValidationStageTaskReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reworkReason      String?
+  closedAt          DateTime?
+  createdAt         DateTime        @default(now())
+  createdById       String?
+  updatedAt         DateTime        @updatedAt
+  // Soft-delete (Part 11 retention) — CAPA-family convention.
+  deletedAt         DateTime?
+  deletedById       String?
+  deletedByName     String?
+  deletionReason    String?
+
+  @@index([tenantId, validationStageId])
+  @@index([assigneeId])
+  @@index([systemId])
+  @@index([deletedAt])
 }
 
 // CSV/CSA stage documents — Part 11 immutable, soft-delete only. Mirrors

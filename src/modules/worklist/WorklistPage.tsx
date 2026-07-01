@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AlertTriangle, CheckCircle2, ChevronRight, ChevronDown, Send, Wrench, LayoutGrid, List, X, Search, Clock, ListChecks, CalendarClock } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
@@ -13,7 +14,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
 import { submitForReview } from "@/actions/capas";
-import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask } from "@/lib/queries/worklist";
+import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask, WorklistStageTask } from "@/lib/queries/worklist";
 import { EvidenceCollectionPanel } from "@/modules/capa/tabs/EvidenceCollectionPanel";
 import { TaskPanel } from "./TaskPanel";
 import { DeviationTaskPanel } from "./DeviationTaskPanel";
@@ -512,6 +513,34 @@ export function WorklistPage({
                 {t.dueDate && <span className="text-[11px] shrink-0" style={{ color: "var(--text-muted)" }}>{dayjs.utc(t.dueDate).format("DD MMM")}</span>}
                 <Badge variant={t.status === "submitted" ? "purple" : t.status === "rework" ? "red" : "amber"}>{DEV_TASK_ROW_LABEL[t.status] ?? t.status}</Badge>
               </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* CSV/CSA stage rework tasks — read-only here; the worker acts on the
+          system's Execute tab (deep-linked) where the stage context lives. */}
+      {worklist.stageTasks.length > 0 && (
+        <section className="mb-3 rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
+          <div className="px-4 py-2.5 flex items-center gap-1.5" style={{ borderBottom: "1px solid var(--card-border)" }}>
+            <Wrench className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+            <h2 className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Validation rework tasks ({worklist.stageTasks.length})</h2>
+          </div>
+          <div>
+            {worklist.stageTasks.map((t: WorklistStageTask) => (
+              <Link
+                key={t.id}
+                href={`/csv-csa/systems/${t.systemReference ?? t.systemId}?tab=execute`}
+                className="w-full text-left flex items-center gap-3 p-3 no-underline hover:bg-(--bg-hover)"
+                style={{ borderBottom: "1px solid var(--bg-border)" }}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{t.systemReference ?? t.systemName} · {t.stageName} stage</p>
+                  <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>{t.message}</p>
+                </div>
+                {t.dueDate && <span className="text-[11px] shrink-0" style={{ color: "var(--text-muted)" }}>{dayjs.utc(t.dueDate).format("DD MMM")}</span>}
+                <Badge variant={t.status === "submitted" ? "purple" : t.status === "rework" ? "red" : "amber"}>{t.status === "in_progress" ? "In Progress" : t.status === "submitted" ? "Submitted" : t.status === "rework" ? "Rework" : "Pending"}</Badge>
+              </Link>
             ))}
           </div>
         </section>
