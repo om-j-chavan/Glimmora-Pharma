@@ -1,6 +1,6 @@
 # SCHEMA — Prisma data model
 
-> Source of truth: `prisma/schema.prisma`. Provider: **SQLite** (all environments). 43 models. Verified against the schema this session.
+> Source of truth: `prisma/schema.prisma`. Provider: **SQLite** (all environments). **46 models** (was 43; +`DeviationTask`, +`DeviationTaskMessage`, +`FindingMessage`). Verified against the schema this session.
 
 ## How the database is managed (read this first)
 
@@ -30,9 +30,11 @@ Records that need Segregation of Duties carry **userId FK columns** that get com
 ### Denormalized name caches
 Many records store both `createdById` (authoritative FK) and `createdBy` (display-name cache) so list reads avoid joins. The **FK is authoritative**; the name is display-only.
 
-## The full model list (43)
+## The full model list (46)
 
-`AuditLog`, `CAPA`, `CAPAActionItem`, `CAPAApproval`, `CAPAChangeControlLink`, `CAPAComment`, `CAPADocument`, `CAPAEffectivenessCriterion`, `ChangeControl`, `Deviation`, `Document`, `EmailOTP`, `EvidenceFile`, `EvidenceItem`, `EvidenceNoteVersion`, `FDA483Commitment`, `FDA483CommitmentDocument`, `FDA483Document`, `FDA483Event`, `FDA483Observation`, `Finding`, `FindingEdit`, `GxPSystem`, `Inspection`, `Notification`, `Plan`, `Playbook`, `RAIDItem`, `RTMEntry`, `ReadinessAction`, `ReadinessCard`, `RoadmapActivity`, `SignedRecord`, `Simulation`, `Site`, `StageDocument`, `Tenant`, `Ticket`, `TicketActivity`, `TicketMessage`, `TrainingRecord`, `User`, `ValidationStage`.
+`AuditLog`, `CAPA`, `CAPAActionItem`, `CAPAApproval`, `CAPAChangeControlLink`, `CAPAComment`, `CAPADocument`, `CAPAEffectivenessCriterion`, `ChangeControl`, `Deviation`, **`DeviationTask`**, **`DeviationTaskMessage`**, `Document`, `EmailOTP`, `EvidenceFile`, `EvidenceItem`, `EvidenceNoteVersion`, `FDA483Commitment`, `FDA483CommitmentDocument`, `FDA483Document`, `FDA483Event`, `FDA483Observation`, `Finding`, `FindingEdit`, **`FindingMessage`**, `GxPSystem`, `Inspection`, `Notification`, `Plan`, `Playbook`, `RAIDItem`, `RTMEntry`, `ReadinessAction`, `ReadinessCard`, `RoadmapActivity`, `SignedRecord`, `Simulation`, `Site`, `StageDocument`, `Tenant`, `Ticket`, `TicketActivity`, `TicketMessage`, `TrainingRecord`, `User`, `ValidationStage`.
+
+> The three **bold** models were added across the deviation-redesign + gap-finding-workflow work (see [MODULES.md](./MODULES.md) and the "Work-loop models" section below).
 
 ## Core models
 
@@ -68,10 +70,10 @@ Append-only audit trail. Fields (from `auditLog.create` calls): `tenantId`, `use
 ## Compliance domain models (summaries)
 
 ### Finding (Gap Assessment)
-A compliance gap. Key: `tenantId`, `siteId`, `area`, `requirement`, `severity` (generic taxonomy), `status` (`Open|In Progress|Closed`), `owner`, `targetDate`, `capaId?` (link to a CAPA), `createdById`, soft-delete. `FindingEdit` records edit history. Closing a CAPA cascades the linked Finding → `closed` (`src/actions/capas/closure.ts`).
+A compliance gap. Key: `tenantId`, `siteId`, `area`, `requirement`, `severity` (generic taxonomy), `status` (now **`Open | In Progress | Submitted | Rework | Closed`** — the work loop, default `"Open"`), **`owner String`** (a **userId, NOT a User FK** — resolved client-side from the users list; this is why finding→CAPA carryover must re-resolve it to a real `User`), `targetDate`, `capaId?` / `linkedCAPAId?` (link to a CAPA), `createdById`, soft-delete. Work-loop fields: **`completionNotes String?`** (assignee's work notes), `submittedAt`/`submittedById`, `reworkReason` (current "ask"), and `messages FindingMessage[]` (the QA↔assignee thread). `FindingEdit` records edit history. Closing a CAPA cascades the linked Finding → `closed` (`src/actions/capas/closure.ts`).
 
 ### CAPA + family
-`CAPA` (the corrective/preventive action) with `deviationId @unique` (authoritative FK to its source Deviation, relation `CAPADeviationSource`), `status` (`open → in_progress → pending_qa_review → pending_verification → closed`, + `rejected`), `ownerId` (drives worklist), `risk`, `createdById`, soft-delete. Children/links:
+`CAPA` (the corrective/preventive action) with `deviationId @unique` (authoritative FK to its source Deviation, relation `CAPADeviationSource`), **`findingId @unique`** (FK to a source Finding, the gap-finding carryover), `status`, `ownerId` (the single **assignee** — drives worklist), `risk`, `createdById`, soft-delete. **Status note:** the `CAPAStatus` union (`src/types/capa.ts`) still lists `pending_verification`, but it is **legacy-only** — independent verification was removed and closure now runs directly from `pending_qa_review` (one approval → signed close). See [MODULES.md](./MODULES.md#capa--complete-reshaped--one-approval-closure-independent-verification-removed) + the per-env backfill `scripts/backfill-capa-retire-verification.ts`. Children/links:
 - `CAPAActionItem` — the assignable task: `ownerId` (worklist key), `description`, `dueDate`, `status` (`pending|in_progress|complete|skipped|rework`), `completedById/At/completionNotes`, `reworkReason/RequestedById/At`.
 - `CAPAApproval` — tiered approval ledger (`approverId`, `revokedAt?`).
 - `CAPAEffectivenessCriterion` — 90-day effectiveness review.
@@ -79,8 +81,16 @@ A compliance gap. Key: `tenantId`, `siteId`, `area`, `requirement`, `severity` (
 - `CAPADocument`, `CAPAChangeControlLink` — links.
 See [FLOWS.md](./FLOWS.md#capa-lifecycle).
 
-### Deviation (mid-redesign — see STATUS-AND-BACKLOG.md)
-A quality deviation. Notable current fields: `severity` (FDA: `Critical|Major|Minor`), `status` (`open → under_investigation → pending_qa_review → closed|rejected`), `owner String` (a **userId**, currently required), RCA fields (`rootCause`, `rcaMethod`, `rcaData`, `investigationCompletedAt/ById`), CAPA-decision fields (`capaDecisionMade/Required/Reason/At/ById`), `linkedCAPAId String?` (legacy link; the authoritative side is `CAPA.deviationId`), `previousCAPAId?` (recurrence), `closureSignatureId @unique`, SoD FKs, soft-delete. **The current single-track investigation flow is being replaced** — see the deviation redesign in [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md#the-deviation-redesign-mid-design--resumable). New schema the redesign needs: a `priority` field, a `capa_pending` status, and a new **`DeviationTask`** child model.
+### Deviation (redesign BUILT — see STATUS-AND-BACKLOG.md)
+A quality deviation. Notable fields: `severity` (FDA: `Critical|Major|Minor`), **`priority String?`** (`Low|Medium|High`, QA-set, prefilled from severity — added by the redesign, nullable so legacy rows are unaffected), `status` (now **`open → under_investigation → pending_qa_review → capa_pending → closed|rejected`**), `owner String` (a userId), RCA fields (`rootCause`, `rcaMethod`, `rcaData`, `investigationCompletedAt/ById`), CAPA-decision fields, `linkedCAPAId String?` (legacy link; authoritative side is `CAPA.deviationId`), `previousCAPAId?` (recurrence), `closureSignatureId @unique`, `tasks DeviationTask[]`, SoD FKs, soft-delete. The priority-split flow is now implemented (see "Work-loop models" below + [FLOWS.md](./FLOWS.md#deviation-flow-priority-split)).
+
+### Work-loop models (DeviationTask, DeviationTaskMessage, FindingMessage) — NEW
+The shared "assign → work → submit → QA review → rework" loop, mirrored across deviations and findings:
+- **`DeviationTask`** (low-priority deviation work; mirrors `CAPAActionItem`): `tenantId`, `deviationId` (FK, `onDelete: Cascade`), **`assigneeId` (the Worklist key) + `assignee` name cache**, `message` (QA instruction), `dueDate?`, `status` (default `pending`; values `pending | in_progress | submitted | rework | closed | cancelled` — `cancelled` is set when a CAPA escalation supersedes the task), submission (`completionNotes`, `submittedAt/ById`), review (`reviewedById/At`, `reworkReason`, `reworkRequestedById/At`), `messages DeviationTaskMessage[]`, `createdBy/ById`, soft-delete quartet. Task documents are `Document` rows with `linkedModule: "Deviation Task"` + a GxP **`category`**.
+- **`DeviationTaskMessage`** — flat (no threading) QA↔worker conversation: `tenantId`, `deviationTaskId` (FK Cascade), `authorId?`, `authorName`, `authorRole`, `body`, `createdAt`.
+- **`FindingMessage`** — the finding equivalent: `tenantId`, `findingId` (FK Cascade), `authorId?`, `authorName`, `authorRole`, `body`, `createdAt`, `@@index([tenantId, findingId])`.
+
+> **`Document.category`** is now used to bucket task/finding evidence into the 7 GxP `EVIDENCE_CATEGORIES` (`src/lib/queries/evidence.ts`); on carryover those map 1:1 to CAPA `EvidenceItem` categories.
 
 ### FDA 483 family
 `FDA483Event` (an inspection observation event) + `FDA483Observation`, `FDA483Document`, `FDA483Commitment`, `FDA483CommitmentDocument`. Response submission is Part 11-signed (`FDA483_RESPONSE`).
@@ -108,9 +118,11 @@ One-time passcodes for MFA login (generated/verified during the email-OTP MFA fl
 ```
 Tenant 1───1 Plan
 Tenant 1───* User, Site, Finding, CAPA, Deviation, Document, AuditLog, SignedRecord, ...
-Deviation 1───1 CAPA        (CAPA.deviationId @unique, "CADeviationSource"; legacy Deviation.linkedCAPAId mirrors it)
-Finding   *───1 CAPA        (Finding.capaId; CAPA close cascades Finding→closed)
-CAPA      1───* CAPAActionItem, CAPAApproval, CAPAEffectivenessCriterion, CAPAComment
+Deviation 1───1 CAPA        (CAPA.deviationId @unique, "CAPADeviationSource"; legacy Deviation.linkedCAPAId mirrors it)
+Deviation 1───* DeviationTask ───* DeviationTaskMessage   (low-priority work loop)
+Finding   1───1 CAPA        (CAPA.findingId @unique; gap-finding carryover. Also Finding.capaId; CAPA close cascades Finding→closed)
+Finding   1───* FindingMessage                            (finding QA↔assignee thread)
+CAPA      1───* CAPAActionItem, CAPAApproval, CAPAEffectivenessCriterion, CAPAComment, EvidenceItem
 GxPSystem 1───* ValidationStage, RTMEntry, RoadmapActivity
 FDA483Event 1───* FDA483Observation, FDA483Document, FDA483Commitment
 * compliance close/approve/sign events ───1 SignedRecord (recordType + recordId + contentHash)

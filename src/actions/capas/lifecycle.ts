@@ -180,34 +180,38 @@ function buildDeviationCarryDescription(dev: {
   return parts.join("").slice(0, 4000);
 }
 
-/** Piece 2 — convert a deviation's CATEGORIZED task documents into real CAPA
+/** Carryover helper — convert CATEGORIZED source documents into real CAPA
  *  EvidenceFiles under the matching GxP category, on raise-CAPA. POST-tx + fully
  *  fault-isolated: a failure for one doc (or the whole pass) logs and is swallowed
  *  so it can NEVER fail CAPA creation. Reuses addEvidenceFileToCategory's
  *  idempotent (capaId, category) upsert + the addEvidenceFile create shape.
- *  Guards: only task docs with a storageKey AND a category in EVIDENCE_CATEGORIES;
- *  uncategorized / null-storage docs stay as reference links (getCAPADeviationDocs). */
-async function convertCategorizedTaskDocsToEvidence(
+ *
+ *  SOURCE-AGNOSTIC: the caller passes the linkedModule + the linked record ids
+ *  (a deviation's task ids, or a finding id) + the audit source labels — so it
+ *  serves BOTH the deviation→CAPA and finding→CAPA carryovers identically. The
+ *  deviation caller resolves its task ids and passes ("Deviation Task", taskIds,
+ *  …, source "deviation_task_carryover" / key "deviationId"), reproducing the
+ *  previous behavior exactly.
+ *  Guards: only docs with a storageKey AND a category in EVIDENCE_CATEGORIES;
+ *  uncategorized / null-storage docs stay as reference links. */
+async function convertCategorizedDocsToEvidence(
   capaId: string,
   tenantId: string,
-  deviationId: string,
+  linkedModule: string,
+  linkedRecordIds: string[],
   createdByName: string,
   audit: { userId: string | null; userName: string; userRole: string },
+  auditSource: { source: string; key: string; value: string },
 ): Promise<number> {
   let converted = 0;
   try {
-    const tasks = await prisma.deviationTask.findMany({
-      where: { deviationId, tenantId },
-      select: { id: true },
-    });
-    const taskIds = tasks.map((t) => t.id);
-    if (taskIds.length === 0) return 0;
+    if (linkedRecordIds.length === 0) return 0;
 
     const docs = await prisma.document.findMany({
       where: {
         tenantId,
-        linkedModule: "Deviation Task",
-        linkedRecordId: { in: taskIds },
+        linkedModule,
+        linkedRecordId: { in: linkedRecordIds },
         deletedAt: null,
         storageKey: { not: null },
         category: { in: [...EVIDENCE_CATEGORIES] },
@@ -283,21 +287,94 @@ async function convertCategorizedTaskDocsToEvidence(
               fileSize: created.fileSize,
               contentHashSha256,
               category,
-              source: "deviation_task_carryover",
+              source: auditSource.source,
               sourceDocumentId: doc.id,
-              deviationId,
+              [auditSource.key]: auditSource.value,
             }),
           },
         });
         converted += 1;
       } catch (err) {
-        console.error(`[carryover] failed to convert task doc ${doc.id} -> evidence:`, err);
+        console.error(`[carryover] failed to convert doc ${doc.id} -> evidence:`, err);
       }
     }
   } catch (err) {
-    console.error("[carryover] convertCategorizedTaskDocsToEvidence failed:", err);
+    console.error("[carryover] convertCategorizedDocsToEvidence failed:", err);
   }
   return converted;
+}
+
+/** Finding→CAPA carryover — copy the finding's conversation (the FindingMessage
+ *  thread) into the CAPA as CAPA-level CAPAComments so it's visible to CAPA
+ *  reviewers in the Discussion section. REAL records (mirrors how categorized docs
+ *  become real EvidenceFiles + RCA text becomes CAPA.rca), attributed to the
+ *  ORIGINAL authors with the original timestamps preserved (thread chronology),
+ *  each tagged with the source finding. POST-tx + fault-isolated: never throws, so
+ *  a copy failure can't fail the CAPA. Returns the count carried.
+ *  NOTE: finding-only by design — the deviation carryover deliberately does NOT
+ *  carry its task conversation (it stays on the deviation, reachable via the link). */
+async function convertFindingMessagesToComments(
+  capaId: string,
+  tenantId: string,
+  findingId: string,
+  findingRef: string,
+  audit: { userId: string | null; userName: string; userRole: string },
+): Promise<number> {
+  try {
+    const messages = await prisma.findingMessage.findMany({
+      where: { findingId, tenantId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true },
+    });
+    if (messages.length === 0) return 0;
+    await prisma.cAPAComment.createMany({
+      data: messages.map((m) => ({
+        tenantId,
+        capaId,
+        parentId: null,
+        actionItemId: null,
+        // Provenance tag so reviewers see these are carried from the finding.
+        body: `(from finding ${findingRef}) ${m.body}`,
+        isConcern: false,
+        // CAPAComment.authorId is non-null (and NOT a User FK) — keep the original
+        // author id when present, else empty. Display attribution is preserved via
+        // authorName/authorRole regardless.
+        authorId: m.authorId ?? "",
+        authorName: m.authorName,
+        authorRole: m.authorRole,
+        // Preserve the original time so the carried thread keeps its chronology.
+        createdAt: m.createdAt,
+      })),
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: audit.userId, userName: audit.userName, userRole: audit.userRole,
+        module: "CAPA",
+        action: "CAPA_COMMENTS_CARRIED_FROM_FINDING",
+        recordId: capaId,
+        recordTitle: findingRef,
+        newValue: JSON.stringify({ findingId, carriedCount: messages.length }),
+      },
+    });
+    return messages.length;
+  } catch (err) {
+    console.error("[carryover] convertFindingMessagesToComments failed:", err);
+    return 0;
+  }
+}
+
+/** Finding→CAPA carryover (Step 5) — a contextual CAPA description from the
+ *  originating finding (mirrors buildDeviationCarryDescription). Plain text only;
+ *  the structured RCA method/JSON is intentionally left for the CAPA author. */
+function buildFindingCarryDescription(f: {
+  id: string; reference: string | null; requirement: string; framework: string | null;
+}): string {
+  const parts = [
+    `Raised from gap finding ${f.reference ?? f.id} — ${f.requirement}.`,
+  ];
+  if (f.framework) parts.push(`\n\nFramework: ${f.framework}`);
+  return parts.join("").slice(0, 4000);
 }
 
 export async function createCAPA(
@@ -360,6 +437,8 @@ export async function createCAPA(
       activeTaskId: string | null;
       rcaCarried: boolean;
       actionItemInfo: { id: string; assignee: string } | null;
+      // For the post-tx comment carryover's provenance tag (finding→CAPA).
+      findingRef: string | null;
     };
     let capa: CapaTxResult | null = null;
     let lastErr: unknown = null;
@@ -385,16 +464,38 @@ export async function createCAPA(
                 select: { id: true, assignee: true, assigneeId: true },
               })
             : null;
+          // Step 5 — read the originating finding UP FRONT (mirrors sourceDev) so
+          // we can carry its owner, root-cause text, and a contextual description.
+          const sourceFinding = linkedFindingId
+            ? await tx.finding.findFirst({
+                where: { id: linkedFindingId, tenantId: session.user.tenantId },
+                select: { id: true, reference: true, requirement: true, framework: true, owner: true, rootCause: true },
+              })
+            : null;
+          // Resolve the finding owner to a REAL User. finding.owner is a raw
+          // userId string (Step 1) that may NOT correspond to a User row (e.g. a
+          // finding created by an admin whose session id has no User record), so
+          // it must NOT be written straight into CAPA.ownerId (a User FK) — that
+          // throws P2003 "foreign key constraint failed". We use the RESOLVED
+          // User's id (guaranteed valid), else fall back to the raising QA.
+          const findingOwnerUser = sourceFinding?.owner
+            ? await tx.user.findFirst({ where: { id: sourceFinding.owner, tenantId: session.user.tenantId }, select: { id: true, name: true } })
+            : null;
 
-          // Step 3 — the single assigned worker for CAPA.ownerId. Deviation-
-          // raised: the deviation WORKER (activeTask.assigneeId) when an active
-          // task existed, else the raising QA. Manual: the QA-picked owner input.
+          // Step 3/5 — the single assigned worker for CAPA.ownerId. Deviation-
+          // raised: the deviation WORKER (activeTask.assigneeId). Finding-raised:
+          // the finding's OWNER (the assigned worker). Else (manual): the
+          // QA-picked owner input. Each falls back to the raising QA.
           const ownerId = linkedDeviationId
             ? (activeTask?.assigneeId ?? actor.userId)
-            : ownerIdInput;
+            : linkedFindingId
+              ? (findingOwnerUser?.id ?? actor.userId)
+              : ownerIdInput;
           const ownerName = linkedDeviationId
             ? (activeTask?.assignee ?? actor.displayName)
-            : (rest.owner ?? "");
+            : linkedFindingId
+              ? (findingOwnerUser?.name ?? actor.displayName)
+              : (rest.owner ?? "");
 
           // SME Section 1 (last rung) â€” site-scoped reference prefix.
           // Format is now "CAPA-{siteCode}-{year}-{NNN}". Site code is
@@ -448,7 +549,9 @@ export async function createCAPA(
               // detail are NOT copied (deviation rcaData JSON ≠ CAPA rcaDetail).
               ...(sourceDev
                 ? { rca: sourceDev.rootCause ?? rest.rca ?? null, description: buildDeviationCarryDescription(sourceDev) }
-                : {}),
+                : sourceFinding
+                  ? { rca: sourceFinding.rootCause ?? rest.rca ?? null, description: buildFindingCarryDescription(sourceFinding) }
+                  : {}),
               reference,
               tenantId: session.user.tenantId,
               status: "open",
@@ -508,8 +611,10 @@ export async function createCAPA(
           return {
             created,
             activeTaskId: activeTask?.id ?? null,
-            rcaCarried: !!sourceDev?.rootCause,
+            rcaCarried: !!(sourceDev?.rootCause || sourceFinding?.rootCause),
             actionItemInfo,
+            // For the post-tx comment carryover's provenance tag.
+            findingRef: sourceFinding?.reference ?? null,
           };
         });
         break;
@@ -558,12 +663,20 @@ export async function createCAPA(
       // the helper never throws, so a copy failure can't fail the CAPA. The
       // converted docs are then excluded from the reference block by
       // getCAPADeviationDocs (no double-listing).
-      const convertedEvidenceCount = await convertCategorizedTaskDocsToEvidence(
+      // The helper is now source-agnostic — resolve the deviation's task ids here
+      // and convert their "Deviation Task" docs (identical result to before).
+      const taskIds = (await prisma.deviationTask.findMany({
+        where: { deviationId: linkedDeviationId, tenantId: session.user.tenantId },
+        select: { id: true },
+      })).map((t) => t.id);
+      const convertedEvidenceCount = await convertCategorizedDocsToEvidence(
         capa.created.id,
         session.user.tenantId,
-        linkedDeviationId,
+        "Deviation Task",
+        taskIds,
         session.user.name,
         { userId: actor.userId, userName: actor.displayName, userRole: actor.role },
+        { source: "deviation_task_carryover", key: "deviationId", value: linkedDeviationId },
       );
 
       const [deviationDocCount, taskDocCount] = await Promise.all([
@@ -591,9 +704,63 @@ export async function createCAPA(
         },
       };
     }
+    if (linkedFindingId) {
+      // Step 5 — convert the finding's CATEGORIZED docs ("Gap Assessment",
+      // linkedRecordId = findingId) into real CAPA EvidenceFiles via the SAME
+      // shared helper + fault-isolation as the deviation path. No reference-block
+      // dedup needed: the CAPA UI has no "raised from finding" doc list, so a
+      // converted doc only appears once (as evidence).
+      const convertedEvidenceCount = await convertCategorizedDocsToEvidence(
+        capa.created.id,
+        session.user.tenantId,
+        "Gap Assessment",
+        [linkedFindingId],
+        session.user.name,
+        { userId: actor.userId, userName: actor.displayName, userRole: actor.role },
+        { source: "gap_finding_carryover", key: "findingId", value: linkedFindingId },
+      );
+      // Carry the finding's conversation (FindingMessage thread) into the CAPA as
+      // CAPA-level comments. Same POST-tx + fault-isolated shape as the doc→evidence
+      // conversion above — never fails the CAPA.
+      const carriedCommentCount = await convertFindingMessagesToComments(
+        capa.created.id,
+        session.user.tenantId,
+        linkedFindingId,
+        capa.findingRef ?? linkedFindingId.slice(0, 8),
+        { userId: actor.userId, userName: actor.displayName, userRole: actor.role },
+      );
+      if (convertedEvidenceCount > 0 || carriedCommentCount > 0) {
+        revalidatePath(`/capa/${capa.created.id}`);
+      }
+      return {
+        success: true,
+        data: {
+          ...capa.created,
+          findingCarryover: {
+            fromFindingId: linkedFindingId,
+            rcaCarried: capa.rcaCarried,
+            ownerId: capa.created.ownerId,
+            convertedEvidenceCount,
+            carriedCommentCount,
+          },
+        },
+      };
+    }
     return { success: true, data: capa.created };
   } catch (err) {
-    console.error("[action] createCAPA failed:", err);
+    // Surface the Prisma code + meta (WHICH field/relation) so a DB-constraint
+    // failure is diagnosable from BOTH the server log AND the UI — e.g.
+    // P2003 + the FK relation that was violated — instead of the opaque
+    // "This action conflicts with related records".
+    const code = (err as { code?: string })?.code;
+    const meta = (err as { meta?: { field_name?: string; target?: string[]; modelName?: string } })?.meta;
+    console.error(`[action] createCAPA failed${code ? ` (${code} ${JSON.stringify(meta)})` : ""}:`, err);
+    // For the known constraint codes, append the code + offending field/relation
+    // to the user-facing error so a future failure names the exact constraint.
+    if (code === "P2002" || code === "P2003" || code === "P2014" || code === "P2025") {
+      const where = meta?.field_name ?? meta?.target?.join(", ") ?? meta?.modelName ?? "";
+      return { success: false, error: `${sanitizeServerError(err, "Failed to create CAPA")} [${code}${where ? ` · ${where}` : ""}]` };
+    }
     return { success: false, error: sanitizeServerError(err, "Failed to create CAPA") };
   }
 }

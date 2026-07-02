@@ -120,6 +120,28 @@ export interface WorklistStageTask {
   assignedAt: string;
 }
 
+/** A gap-assessment Finding assigned to the user (Finding.owner == userId). UNION
+ *  source alongside the CAPA groups + deviation tasks. */
+export interface WorklistFinding {
+  id: string;
+  reference: string | null;
+  requirement: string;
+  framework: string | null;
+  area: string;
+  severity: string;
+  status: string;
+  targetDate: string | null;
+  /** Gap Step 3 — the assignee's work/completion notes. */
+  completionNotes: string | null;
+  /** Gap Step 3 — the finding's evidence docs (Document, linkedModule
+   *  "Gap Assessment"), grouped by GxP category in the panel. */
+  docs: WorklistDoc[];
+  /** Gap Step 4 — QA's current rework "ask" (banner); history is in messages. */
+  reworkReason: string | null;
+  /** Gap Step 4 — the flat QA↔assignee conversation. */
+  messages: WorklistTaskMessage[];
+}
+
 export interface Worklist {
   groups: WorklistGroup[];
   /** Stage 4 — low-priority deviation tasks assigned to the user (UNION source
@@ -127,6 +149,8 @@ export interface Worklist {
   deviationTasks: WorklistDeviationTask[];
   /** CSV/CSA stage rework tasks assigned to the user (UNION source). */
   stageTasks: WorklistStageTask[];
+  /** Gap Step 2 — gap-assessment findings assigned to the user (owner == userId). */
+  assignedFindings: WorklistFinding[];
   openCount: number;
   reworkCount: number;
 }
@@ -135,9 +159,12 @@ const ACTIVE_STATUSES = ["open", "in_progress", "pending_qa_review", "pending_ve
 const OPEN_ITEM_STATUSES = new Set(["pending", "in_progress", "rework"]);
 // Stage 4 — DeviationTask statuses that still need worklist attention.
 const DEV_TASK_ACTIVE_STATUSES = ["pending", "in_progress", "submitted", "rework"];
+// Gap Step 2/4 — Finding statuses that still need worklist attention (includes
+// the Step-4 loop states; "Submitted" stays visible while it awaits QA review).
+const FINDING_ACTIVE_STATUSES = ["Open", "In Progress", "Submitted", "Rework"];
 
 export const getWorklist = cache(async (userId: string, tenantId: string): Promise<Worklist> => {
-  const [items, drivenCapas, devTasks, stageTaskRows] = await Promise.all([
+  const [items, drivenCapas, devTasks, stageTaskRows, assignedFindingRows] = await Promise.all([
     prisma.cAPAActionItem.findMany({
       // Exclude soft-deleted items and items whose parent CAPA was soft-deleted.
       where: { ownerId: userId, tenantId, deletedAt: null, capa: { deletedAt: null } },
@@ -185,6 +212,18 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
       orderBy: { dueDate: "asc" },
       include: {
         validationStage: { select: { stageName: true, system: { select: { name: true, reference: true } } } },
+      },
+    }),
+    // Gap findings assigned to this user (Finding.owner holds a userId). UNION
+    // source; mirrors the deviation-task block above. Active statuses only
+    // (FINDING_ACTIVE_STATUSES); "Closed" drops off.
+    prisma.finding.findMany({
+      where: { owner: userId, tenantId, deletedAt: null, status: { in: FINDING_ACTIVE_STATUSES } },
+      orderBy: { targetDate: "asc" },
+      select: {
+        id: true, reference: true, requirement: true, framework: true, area: true, severity: true,
+        status: true, targetDate: true, completionNotes: true, reworkReason: true,
+        messages: { orderBy: { createdAt: "asc" }, select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true } },
       },
     }),
   ]);
@@ -356,21 +395,78 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     assignedAt: t.createdAt.toISOString(),
   }));
 
+  // Gap Step 2 — serialise the findings union (Dates → ISO). Every returned
+  // finding is active ("Open" / "In Progress"), so all of them are open work.
+  // Gap Step 3 — each assigned finding's own evidence documents (linkedModule
+  // "Gap Assessment"), with category, so the panel shows them grouped (reusing
+  // GroupedTaskDocs). ONE tenant-scoped query; serialised to the WorklistDoc shape.
+  const findingIds = assignedFindingRows.map((f) => f.id);
+  const findingDocsByFinding = new Map<string, WorklistDoc[]>();
+  if (findingIds.length > 0) {
+    const findingDocs = await prisma.document.findMany({
+      where: { tenantId, linkedModule: "Gap Assessment", linkedRecordId: { in: findingIds }, deletedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true, fileName: true, originalFileName: true, fileType: true, fileExtension: true,
+        fileSize: true, uploadedBy: true, uploadedAt: true, createdAt: true, category: true, linkedRecordId: true,
+      },
+    });
+    for (const d of findingDocs) {
+      if (!d.linkedRecordId) continue;
+      const row: WorklistDoc = {
+        id: d.id,
+        fileName: d.originalFileName ?? d.fileName,
+        fileType: d.fileType,
+        fileExtension: d.fileExtension,
+        fileSize: d.fileSize,
+        uploadedBy: d.uploadedBy,
+        uploadedAt: (d.uploadedAt ?? d.createdAt).toISOString(),
+        category: d.category,
+      };
+      const arr = findingDocsByFinding.get(d.linkedRecordId) ?? [];
+      arr.push(row);
+      findingDocsByFinding.set(d.linkedRecordId, arr);
+    }
+  }
+
+  const assignedFindings: WorklistFinding[] = assignedFindingRows.map((f) => ({
+    id: f.id,
+    reference: f.reference,
+    requirement: f.requirement,
+    framework: f.framework,
+    area: f.area,
+    severity: f.severity,
+    status: f.status,
+    targetDate: f.targetDate ? f.targetDate.toISOString() : null,
+    completionNotes: f.completionNotes,
+    docs: findingDocsByFinding.get(f.id) ?? [],
+    reworkReason: f.reworkReason,
+    messages: f.messages.map((m) => ({
+      id: m.id, authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole,
+      body: m.body, createdAt: m.createdAt.toISOString(),
+    })),
+  }));
+
   const openItems = items.filter((i) => OPEN_ITEM_STATUSES.has(i.status));
   // Open deviation tasks count toward the worklist totals (submitted ones are
   // awaiting QA, so they're excluded from "open" like complete CAPA items).
   const openDevTasks = deviationTasks.filter((t) => OPEN_ITEM_STATUSES.has(t.status));
   const openStageTasks = stageTasks.filter((t) => OPEN_ITEM_STATUSES.has(t.status));
+  // Gap Step 4 — open finding work = Open / In Progress / Rework. "Submitted" is
+  // awaiting QA (excluded from "open", like a submitted deviation task).
+  const openFindings = assignedFindings.filter((f) => f.status !== "Submitted" && f.status !== "Closed");
   const reworkCount =
     items.filter((i) => i.status === "rework").length +
     deviationTasks.filter((t) => t.status === "rework").length +
-    stageTasks.filter((t) => t.status === "rework").length;
+    stageTasks.filter((t) => t.status === "rework").length +
+    assignedFindings.filter((f) => f.status === "Rework").length;
 
   return {
     groups,
     deviationTasks,
     stageTasks,
-    openCount: openItems.length + openDevTasks.length + openStageTasks.length,
+    assignedFindings,
+    openCount: openItems.length + openDevTasks.length + openStageTasks.length + openFindings.length,
     reworkCount,
   };
 });

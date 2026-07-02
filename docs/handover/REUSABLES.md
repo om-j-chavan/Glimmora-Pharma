@@ -42,7 +42,10 @@ Props quoted from the real TS interfaces. All under `src/components/` unless not
 | **PageHeader** | `shared/PageHeader.tsx` | `title`, `subtitle?`, `actions?`, `icon?` | a module page header |
 | **EmptyState** | `shared/EmptyState.tsx` | `icon`, `title`, `description`, `actionLabel?`, `onAction?`, `readOnly?` | an empty list/zero-state with a CTA |
 | **TabBar** | `shared/TabBar.tsx` | `tabs: Tab[]`, `activeTab`, `onChange:(id)=>void`, `ariaLabel` | tabbed module sections |
-| **DocumentUpload** ⭐ | `shared/DocumentUpload.tsx` | `recordId`, `recordTitle`, `module`, `existingDocs: LinkedDocument[]`, `onUpload:(doc)=>void`, `onDelete?`, `onApprove?`, `readOnly?` | **the one generic uploader** — drag-drop + versioning + list + approve/delete; max 25MB; pdf/doc/xls/jpg/png/txt. **Reuse for the deviation task document.** |
+| **DocumentUpload** ⭐ | `shared/DocumentUpload.tsx` | `recordId`, `recordTitle`, `module`, `existingDocs: LinkedDocument[]`, `onUpload:(doc)=>void`, `onDelete?`, `onApprove?`, `readOnly?` | the generic drag-drop uploader (versioning + approve/delete; max 25MB). **Note:** the newer deviation-task / gap-finding panels do **not** use this — they use a categorized `Dropdown` + file input + **`DocList`/`GroupedTaskDocs`** (next rows). |
+| **DocList / DocItemView** ⭐ | `shared/DocList.tsx` | `docs: DocItemView[]` (`{id, fileName, downloadHref, uploadedBy, uploadedAt}`), `onRemove?:(id)=>void`, `busyId?`, `emptyText?` | **model-agnostic doc list** with optional per-row remove. Used by the deviation/finding work panels + the gap detail modal. |
+| **GroupedTaskDocs** | `src/modules/worklist/DeviationTaskPanel.tsx` (exported) | `docs: WorklistDoc[]`, `emptyText`, `onRemove?`, `busyId?` | groups task/finding docs by the 7 GxP `EVIDENCE_CATEGORIES` and renders a labelled `DocList` per group. |
+| **TaskThread** | `src/modules/worklist/DeviationTaskPanel.tsx` (exported) | `messages`, `currentUserId?`, `fmt:(iso)=>string` | the flat QA↔worker conversation renderer; shared by deviation tasks + gap findings (drives `DeviationTaskMessage`/`FindingMessage`). |
 | (plan popups) | `shared/{NoSitesPopup,PlanLimitPopup,PlanLimitUsageBar,SubscriptionPlansPopup}.tsx` | **(unverified detail)** | plan-limit / subscription surfaces |
 
 ## `layout/`, `errors/`, `search/`, `chatbot/`
@@ -197,12 +200,14 @@ Conventions: `cache()` for per-request memo; **always** `where:{ tenantId, delet
 | **Plan caps / expiry** | `src/lib/plans.ts` — `resolvePlanCaps(tier, custom?)` (:72), `resolveExpiry(startISO, months)` (:114) | freeze caps; derive a date from start + months |
 | **File storage** | `src/lib/fileStorage.ts` — singleton `fileStorage` (:145): `save(key,Buffer,mime)`, `read(key)`, `delete` (no-op — soft-delete only), `exists(key)` | persist/read uploaded bytes (local FS or DO Spaces by env) |
 | **Notifications** | `src/lib/notify.ts` — `notify(input)` (:53), `notifyMany(inputs)` (:86) | one in-app Notification row; fault-isolated (never throws); skips null/self recipient. Call **after** the write commits |
+| **GxP evidence categories** | `src/lib/queries/evidence.ts` — `EVIDENCE_CATEGORIES` (the 7 ALCOA+ buckets), `EVIDENCE_CATEGORY_LABEL`, `EvidenceCategory` type | the shared category set for `Document.category` on task/finding docs + CAPA `EvidenceItem` categories |
+| **Categorized docs → CAPA evidence** | `convertCategorizedDocsToEvidence(...)` — module-private in `src/actions/capas/lifecycle.ts` (~:197) | **generalized** carryover: converts a deviation's OR a finding's categorized `Document`s into real CAPA `EvidenceItem`+`EvidenceFile` rows (idempotent on `(capaId, category)`, fault-isolated). Pass `linkedModule` + `linkedRecordId`(s). Not exported — call site is `createCAPA`. |
 
 ---
 
-# PART D — FOR THE DEVIATION REBUILD (the payoff)
+# PART D — THE DEVIATION REBUILD (BUILT — now a reuse map for the *next* task)
 
-Every piece the rebuild needs, mapped to an existing reusable (or "build new"). See the build stages in [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md#the-deviation-redesign-mid-design--resumable).
+> ⚠️ **The deviation rebuild is DONE** (see [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md#deviation-redesign--built)). This part is now **history + a reuse map**: it records which existing pieces were reused vs built-new, and it's the template the **gap-finding workflow** then cloned (`DeviationTask`→`Finding` loop, `DeviationTaskMessage`→`FindingMessage`, `deviation-tasks.ts`→the finding actions in `findings.ts`). What shipped: the `DeviationTask` + `DeviationTaskMessage` models, `src/actions/deviation-tasks.ts`, `src/modules/worklist/DeviationTaskPanel.tsx` (exports `GroupedTaskDocs`/`TaskThread`), the `getWorklist` union, and the `capa_pending` coupling. Read below for what each piece reused.
 
 ## UI
 | Rebuild needs | Reuse / build | Exactly what |

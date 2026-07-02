@@ -105,8 +105,7 @@ export async function initializeEvidenceForCAPA(
 
   // Audit follow-up FIX 1 — was requireAuth-only (any authenticated non-viewer
   // could seed evidence rows). Gate it like the other driver grants: an author
-  // role OR the CAPA's driver (ownerId). The driver path is what the Worklist
-  // "Set up evidence categories" affordance needs for a non-author driver.
+  // role OR the CAPA's driver (ownerId).
   const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
   const isDriver = isAssignedToTask(session, { ownerId: capa.ownerId });
   if (!isAuthorRole && !isDriver) {

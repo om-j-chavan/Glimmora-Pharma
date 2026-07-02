@@ -29,6 +29,9 @@ export interface StatusDef {
 export const FINDING_STATUSES: Record<string, StatusDef> = {
   Open: { value: "Open", label: "Open", color: "#1D4ED8", bg: "#EFF6FF", description: "Finding identified, no action taken yet", nextActions: ["Raise CAPA", "Assign owner"] },
   "In Progress": { value: "In Progress", label: "In Progress", color: "#B45309", bg: "#FEF9EC", description: "CAPA raised and corrective actions ongoing", nextActions: ["Monitor CAPA progress"] },
+  // Gap Step 4 — submit → QA review → rework loop states (mirror the deviation task).
+  Submitted: { value: "Submitted", label: "Submitted", color: "#6D28D9", bg: "#F5F3FF", description: "Assignee submitted the work for QA review", nextActions: ["Accept & close", "Send for rework"] },
+  Rework: { value: "Rework", label: "Rework", color: "#B91C1C", bg: "#FEF2F2", description: "QA returned the finding for rework", nextActions: ["Address feedback", "Resubmit"] },
   Closed: { value: "Closed", label: "Closed", color: "#0F6E56", bg: "#E8F5F1", description: "Finding resolved and verified by QA Head", nextActions: [] },
 };
 

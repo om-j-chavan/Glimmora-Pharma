@@ -1,7 +1,7 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 export type FindingSeverity = "Critical" | "High" | "Medium" | "Low";
-export type FindingStatus = "Open" | "In Progress" | "Closed";
+export type FindingStatus = "Open" | "In Progress" | "Submitted" | "Rework" | "Closed";
 
 export interface EditHistoryEntry {
   editedBy: string;

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, ChevronRight, ChevronDown, Send, Wrench, LayoutGrid, List, X, Search, Clock, ListChecks, CalendarClock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, ChevronDown, Send, Wrench, LayoutGrid, List, X, Search, Clock, ListChecks, CalendarClock, ClipboardList } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Badge } from "@/components/ui/Badge";
@@ -14,10 +14,11 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
 import { submitForReview } from "@/actions/capas";
-import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask, WorklistStageTask } from "@/lib/queries/worklist";
+import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask, WorklistStageTask, WorklistFinding } from "@/lib/queries/worklist";
 import { EvidenceCollectionPanel } from "@/modules/capa/tabs/EvidenceCollectionPanel";
 import { TaskPanel } from "./TaskPanel";
 import { DeviationTaskPanel } from "./DeviationTaskPanel";
+import { FindingWorkPanel } from "./FindingWorkPanel";
 import { StatusPill, ACTION_STATUS_TOKEN } from "@/modules/capa/lib/statusTokens";
 
 const ITEM_STATUS_LABEL: Record<string, string> = {
@@ -85,6 +86,8 @@ export function WorklistPage({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // Stage 4 (deviation redesign) — open low-priority deviation-task panel.
   const [selectedDevTaskId, setSelectedDevTaskId] = useState<string | null>(null);
+  // Gap Step 3 — open the assigned-finding work panel.
+  const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [busyCapa, setBusyCapa] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
@@ -155,13 +158,56 @@ export function WorklistPage({
     return true;
   };
 
+  // Gap finding filter — mirrors devTaskMatches so the search box, the
+  // status/priority/dueBy dropdowns, and the quick-filters all reach the gap
+  // findings section too (not an island). The PRIORITY dropdown filters findings
+  // by SEVERITY (same Critical/High/Medium/Low value set); the STATUS dropdown
+  // maps pending→Open, in_progress→In Progress (findings have no rework yet).
+  const findingActionStatus = (f: WorklistFinding): string => {
+    switch (f.status) {
+      case "In Progress": return "in_progress";
+      case "Submitted": return "submitted"; // awaiting QA — not actionable/open
+      case "Rework": return "rework";
+      default: return "pending"; // Open
+    }
+  };
+  const findingMatchesQuick = (f: WorklistFinding): boolean => {
+    switch (quickFilter) {
+      case "open": return f.status === "Open" || f.status === "In Progress";
+      case "rework": return f.status === "Rework";
+      case "dueSoon": return isDueSoonEntry(findingActionStatus(f), f.targetDate);
+      case "overdue": return isOverdueEntry(findingActionStatus(f), f.targetDate);
+      default: return true;
+    }
+  };
+  const findingMatches = (f: WorklistFinding): boolean => {
+    if (priorityFilter && f.severity !== priorityFilter) return false;
+    if (statusFilter) {
+      const wanted = statusFilter === "in_progress" ? "In Progress" : statusFilter === "pending" ? "Open" : statusFilter === "rework" ? "Rework" : null;
+      if (wanted === null || f.status !== wanted) return false;
+    }
+    if (dueByFilter && f.targetDate && dayjs.utc(f.targetDate).isAfter(dayjs.utc(dueByFilter).endOf("day"))) return false;
+    if (!findingMatchesQuick(f)) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const hit = f.requirement.toLowerCase().includes(q)
+        || (f.reference ?? "").toLowerCase().includes(q)
+        || (f.framework ?? "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  };
+
   // Summary counts — SINGLE SOURCE OF TRUTH: all four derive from ONE combined
-  // set (CAPA action items + deviation tasks), over the full worklist (pre-
-  // filter), so the cards always agree and include deviation tasks.
+  // set (CAPA action items + deviation tasks + gap findings), over the full
+  // worklist (pre-filter), so the cards always agree and include every source.
   const allItems = worklist.groups.flatMap((g) => g.items);
   const countEntries: { status: string; dueDate: string | null }[] = [
     ...allItems.map((i) => ({ status: i.status, dueDate: i.dueDate })),
     ...worklist.deviationTasks.map((t) => ({ status: t.status, dueDate: t.dueDate })),
+    // Findings map to the action-status vocabulary so they count as open +
+    // due-soon/overdue (by targetDate), and never as rework.
+    ...worklist.assignedFindings.map((f) => ({ status: findingActionStatus(f), dueDate: f.targetDate })),
   ];
   const openCount = countEntries.filter((e) => ACTIONABLE_STATUSES.has(e.status)).length;
   const reworkCount = countEntries.filter((e) => e.status === "rework").length;
@@ -177,9 +223,14 @@ export function WorklistPage({
   // Deviation rework tasks join the "Needs rework" section (CAPA rework already
   // shows in both that section AND its group, so this mirrors that).
   const reworkDevTasks = worklist.deviationTasks.filter((t) => t.status === "rework" && devTaskMatches(t));
-  const reworkTotal = reworkItems.length + reworkDevTasks.length;
+  // Rework findings join the same section (mirrors the deviation rework tasks) so
+  // the "Needs rework" card count and this list agree.
+  const reworkFindings = worklist.assignedFindings.filter((f) => f.status === "Rework" && findingMatches(f));
+  const reworkTotal = reworkItems.length + reworkDevTasks.length + reworkFindings.length;
   // Deviation-tasks section respects the active search + filters.
   const visibleDevTasks = worklist.deviationTasks.filter(devTaskMatches);
+  // Gap-findings section respects the active search + filters too.
+  const visibleFindings = worklist.assignedFindings.filter(findingMatches);
 
   async function handleSubmit(capaId: string) {
     setBusyCapa(capaId);
@@ -296,14 +347,14 @@ export function WorklistPage({
         </div>
       )}
 
-      {worklist.groups.length === 0 && worklist.deviationTasks.length === 0 && (
+      {worklist.groups.length === 0 && worklist.deviationTasks.length === 0 && worklist.assignedFindings.length === 0 && (
         <div className="card p-8 text-center">
           <CheckCircle2 className="w-10 h-10 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
           <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>Nothing assigned to you right now.</p>
         </div>
       )}
 
-      {/* ── NEEDS REWORK (across all CAPAs + deviation tasks) ── */}
+      {/* ── NEEDS REWORK (across CAPAs + deviation tasks + gap findings) ── */}
       {reworkTotal > 0 && (
         <section className="mb-6" aria-labelledby="rework-heading">
           <h2 id="rework-heading" className="text-[12px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: "var(--status-blocked)" }}>
@@ -348,6 +399,28 @@ export function WorklistPage({
                   </p>
                   {t.reworkReason && (
                     <p className="text-[11px] mt-0.5" style={{ color: "var(--status-blocked)" }}>Returned: {t.reworkReason}</p>
+                  )}
+                </div>
+                <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              </button>
+            ))}
+            {/* Findings returned for rework — open the finding work panel. */}
+            {reworkFindings.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setSelectedFindingId(f.id)}
+                className="w-full text-left flex items-start gap-3 p-3 border-none cursor-pointer"
+                style={{ background: "var(--status-blocked-bg)", borderBottom: "1px solid var(--bg-border)" }}
+              >
+                <Wrench className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--status-blocked)" }} aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{f.requirement}</p>
+                  <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                    {f.reference ?? f.id.slice(0, 8)} · gap finding{f.targetDate ? ` · target ${dayjs.utc(f.targetDate).format(dateFormat)}` : ""}
+                  </p>
+                  {f.reworkReason && (
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--status-blocked)" }}>Returned: {f.reworkReason}</p>
                   )}
                 </div>
                 <ChevronRight className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -546,6 +619,34 @@ export function WorklistPage({
         </section>
       )}
 
+      {/* Gap-assessment findings assigned to the user (UNION source). Click a row
+          to open FindingWorkPanel. Filter-aware, mirroring the deviation-tasks section. */}
+      {visibleFindings.length > 0 && (
+        <section className="mb-3 rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
+          <div className="px-4 py-2.5 flex items-center gap-1.5" style={{ borderBottom: "1px solid var(--card-border)" }}>
+            <ClipboardList className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+            <h2 className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Gap findings ({visibleFindings.length})</h2>
+          </div>
+          <div>
+            {visibleFindings.map((f) => (
+              <button key={f.id} type="button" onClick={() => setSelectedFindingId(f.id)} className="w-full text-left flex items-center gap-3 p-3 border-none cursor-pointer bg-transparent hover:bg-(--bg-hover)" style={{ borderBottom: "1px solid var(--bg-border)" }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>
+                    {f.reference ?? f.id.slice(0, 8)} · {f.requirement}
+                  </p>
+                  <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>
+                    {[f.framework, f.area].filter(Boolean).join(" · ")}
+                    {f.targetDate ? ` · target ${dayjs.utc(f.targetDate).format(dateFormat)}` : ""}
+                  </p>
+                </div>
+                <Badge variant={getSeverityVariant(f.severity, "generic")}>{f.severity}</Badge>
+                <Badge variant={f.status === "Submitted" ? "purple" : f.status === "Rework" ? "red" : f.status === "In Progress" ? "amber" : "blue"}>{f.status}</Badge>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Task panel */}
       {selectedTaskId && (
         <TaskPanel
@@ -563,6 +664,14 @@ export function WorklistPage({
         const t = worklist.deviationTasks.find((d) => d.id === selectedDevTaskId);
         return t ? (
           <DeviationTaskPanel task={t} onClose={() => setSelectedDevTaskId(null)} onChanged={() => router.refresh()} />
+        ) : null;
+      })()}
+
+      {/* Gap Step 3 — assigned-finding work panel (categorized doc upload + notes). */}
+      {selectedFindingId && (() => {
+        const f = worklist.assignedFindings.find((x) => x.id === selectedFindingId);
+        return f ? (
+          <FindingWorkPanel finding={f} onClose={() => setSelectedFindingId(null)} onChanged={() => router.refresh()} />
         ) : null;
       })()}
 

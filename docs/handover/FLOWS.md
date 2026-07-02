@@ -97,24 +97,56 @@ user clicks a consequential action (e.g. "Sign & Close CAPA") + enters PASSWORD
 ```
 create (COMPLIANCE_AUTHOR_ROLES + GxP) ──▶ open
    │  optionally createCAPA({ linkedDeviationId })  ← links Deviation (both sides, in a tx)
+   │  or          createCAPA({ linkedFindingId })   ← links Finding + carries docs/owner/RCA (gap escalation)
    ▼
 in_progress ── RCA review ── action items assigned (CAPAActionItem.ownerId → Worklist)
-   │             (rca-review.ts)        (action-items.ts; assignee submits w/ completionNotes + evidence)
+   │             (rca-review.ts)   the single ASSIGNEE (CAPA.ownerId) uploads per-category
+   │                               evidence in the Worklist; QA can reject PER CATEGORY
+   │                               (rejectEvidenceCategory) → that category reworks
    ▼
-submitForReview (driver/author; readiness checklist) ──▶ pending_qa_review
+submitForReview (assignee/author; readiness checklist) ──▶ pending_qa_review
    │  rejectCAPA (qa_head) → back to in_progress, flag items status="rework" (+reworkReason) → Worklist band
    ▼
-tiered APPROVAL (capa-approvals.ts; qa_head all tiers, + regulatory_affairs for Critical) [SIGNED]
+tiered APPROVAL (approvals.ts; qa_head all tiers, + regulatory_affairs for Critical) [SIGNED]
    ▼
-independent VERIFICATION (verification.ts) ──▶ pending_verification   [SIGNED]
-   │  SoD: verifier ≠ creator AND ≠ every approver (ID-based)
-   ▼
-signAndCloseCAPA (closure.ts) ──▶ closed   [SIGNED: CAPA_CLOSURE]
+signAndCloseCAPA (closure.ts) ──▶ closed   [SIGNED: CAPA_CLOSURE]   ← ONE approval is enough
    │  cascades linked Finding → "closed"
    ▼
 90-day EFFECTIVENESS review (effectiveness.ts; verdict effective|ineffective|partial) [SIGNED]
 ```
+- **Independent verification was REMOVED this work.** One QA approval → signed close directly from `pending_qa_review` (`closure.ts:110-115`). `verifyCAPA`/`pending_verification` are **legacy-only**: closure still *accepts* a CAPA parked in `pending_verification` (and normalizes it), and `scripts/backfill-capa-retire-verification.ts` migrates legacy rows (**run per-env**).
 - Module access (`/capa`) = qa_head + customer_admin; other roles work items via the Worklist.
+
+## Deviation flow (priority split — BUILT)
+
+The investigation-first / priority-split flow (`src/actions/deviations.ts` + `src/actions/deviation-tasks.ts`; worker UI `src/modules/worklist/DeviationTaskPanel.tsx`):
+```
+create (any non-viewer) ──▶ open ── (investigation as needed) ──▶ pending_qa_review
+   │  QA sets priority (Low|Medium|High; prefilled from FDA severity, overridable)
+   ├── LOW ──▶ assign a DeviationTask (assigneeId + message + notify) ──▶ Worklist
+   │            assignee: categorized docs (7 GxP cats) + completion notes + submit
+   │            QA review → Close [SIGNED: DEVIATION_CLOSURE]  | Rework (reason → DeviationTaskMessage thread)
+   │            "Raise CAPA" escalation → CANCELS the open task, routes to ↓
+   └── HIGH/MED ──▶ createCAPA({ linkedDeviationId }) ; deviation → capa_pending (stays open + linked)
+                    when the CAPA closes → deviation UNBLOCKS → QA SIGN-closes (no auto-close)
+```
+- SoD: task reviewer ≠ assignee (ID-based). Low-priority QA close **is** Part 11-signed too.
+
+## Gap Assessment finding flow (clones the deviation loop — BUILT)
+
+`src/actions/findings.ts` + `src/modules/gap-assessment/tabs/GapRegisterTab.tsx` (disposition) + `src/modules/worklist/FindingWorkPanel.tsx` (worker):
+```
+create finding ──▶ Open   (owner auto = creator; owner is a String userId)
+   │  Disposition is SEVERITY-GATED:
+   ├── LOW ──▶ "Assign person" (assignFinding → Open flips to In Progress) [+ Raise CAPA optional]
+   │            assignee (Worklist): categorized docs (mandatory category, multi, remove-before-submit)
+   │                                 + completion notes + submit-to-QA confirm
+   │            submitFinding ──▶ Submitted ── QA: reviewFinding → Closed | reworkFinding → Rework
+   │            FindingMessage thread (rework reason auto-posted; reviewer ≠ owner SoD)
+   └── HIGH/MED/CRITICAL ──▶ "Raise CAPA" → createCAPA({ linkedFindingId })
+                             carries: categorized docs → CAPA EvidenceFiles, owner → CAPA assignee, RCA text
+                             (comments NOT carried — see #22c in STATUS-AND-BACKLOG.md)
+```
 
 ## Plan / subscription flow (all built this session)
 

@@ -3,7 +3,31 @@
 > The honest current state of branch `devAI`, what changed this session, what's verified vs needs eyes, known debt, and the **deviation redesign** (agreed but not built — fully captured here so it's resumable from this doc alone).
 
 ## Overall state
-The app is **broadly COMPLETE and functional** across compliance modules (see [MODULES.md](./MODULES.md)). The platform/admin + plan-subscription area was heavily worked this session and is solid. The notable **not-done** items: the deviation redesign (designed, not built), client-side MFA, a few mocked/stubbed surfaces (agi-console drift persistence, governance KPIs, regulatory-intelligence data, inspection UI, platform MFA default).
+The app is **broadly COMPLETE and functional** across compliance modules (see [MODULES.md](./MODULES.md)). The platform/admin + plan-subscription area is solid. Since these docs were first written, three large pieces **landed** (deviation redesign, CAPA one-approval reshape, gap-assessment finding workflow) — see the next section. The notable **not-done / risk** items: **the new deviation + finding flows are largely UNTESTED in a browser** (audited-correct, not click-tested end-to-end), client-side MFA, finding comments don't carry to CAPA (#22c), and a few mocked/stubbed surfaces (agi-console drift persistence, governance KPIs, regulatory-intelligence data, inspection UI, platform MFA default).
+
+## Major work landed since these docs were written
+
+> Built across multiple commits on `devAI`. Code-verified for this update; **end-to-end browser testing is still outstanding** for the deviation + finding flows.
+
+### Deviation redesign — BUILT
+The priority-split / investigation-first flow described in "THE DEVIATION REDESIGN" (further below — kept as the design reference) is **implemented**: `Deviation.priority` (`Low|Medium|High`, nullable, QA-set from severity), the `capa_pending` status (`src/store/deviation.slice.ts`, `src/constants/statusTaxonomy.ts`), the `DeviationTask` + `DeviationTaskMessage` models, `src/actions/deviation-tasks.ts` (assign → start → submit → review → rework, with the flat message thread + categorized task docs), the CAPA escalation that cancels the open task, the CAPA-close → `capa_pending` unblock, and the Worklist union. Worker UI: `src/modules/worklist/DeviationTaskPanel.tsx`.
+
+### CAPA reshape — BUILT
+- **One-approval closure:** independent verification removed; `signAndCloseCAPA` runs from `pending_qa_review` (`closure.ts:110-115`). `verifyCAPA`/`pending_verification` are **legacy-only** (closure still accepts + normalizes a parked `pending_verification`). ⚠️ **`scripts/backfill-capa-retire-verification.ts` MUST be run per-environment** to move any legacy `pending_verification` rows to `pending_qa_review`.
+- **Driver → single assignee** (`CAPA.ownerId`); the Worklist assignee evidence panel does **per-category** evidence upload + **per-category rework** (`rejectEvidenceCategory`, `src/actions/evidence.ts`).
+- **Carryover generalized** — `convertCategorizedDocsToEvidence` (in `src/actions/capas/lifecycle.ts`) converts a deviation's OR a finding's categorized docs into real CAPA `EvidenceFile`s; one shared helper, fault-isolated.
+
+### Gap Assessment finding workflow — BUILT (clones the deviation loop)
+`assignFinding` (Open → In Progress), findings as the **4th `getWorklist` source**, categorized finding docs + notes (`FindingWorkPanel.tsx`), submit/review/rework loop with `FindingMessage`, and `createCAPA({ linkedFindingId })` carryover. Severity-gated disposition (LOW → Assign + Raise CAPA; HIGH/MED/CRIT → Raise CAPA). Round-4 cosmetic polish on the create/detail/edit modals also landed. See [MODULES.md](./MODULES.md#gap-assessment-findings--complete-finding-workflow-added--largely-untested-in-a-browser).
+
+### Worklist — now 4 sources
+`getWorklist` unions CAPA action items + CAPA assignee + `DeviationTask` + gap `Finding` (`worklist.ts:148-189`), all in the combined count/filter/empty-state machinery.
+
+### Outstanding / unverified (from the recent gap-assessment audit)
+- **#22c — finding comments do NOT carry to the CAPA** on escalation. Docs, owner, and RCA carry; the `FindingMessage` thread is not copied/linked. (Intentional today; flagged if you want it.)
+- **Shared-component coverage is PARTIAL** in the finding create form — single-line text → `Input`, selects → `Dropdown`, date → `DatePicker`, but the **Purpose `<textarea>`** and the **file `<input type="file">`** remain raw (no shared Textarea/file component exists).
+- **Browser testing** — the deviation-task loop, the finding loop, the per-category CAPA evidence rework, and the carryovers are **audited-correct but not click-tested end-to-end**. Treat as "needs eyes."
+- **Backfill** — `backfill-capa-retire-verification.ts` must be run on each environment's DB.
 
 ## Bugs fixed this session
 
@@ -46,9 +70,9 @@ All in `src/lib/plans.ts` (rules) + `src/actions/tenants.ts` (`assignPlan`) + th
 
 ---
 
-# THE DEVIATION REDESIGN (mid-design — resumable)
+# DEVIATION REDESIGN — BUILT (design reference, was: mid-design)
 
-**Status: agreed design, NOT built.** The current Deviation module works (single-track investigation machine) but is being **replaced** by a priority-split flow. Everything needed to build it is below. Supporting investigation: this captures the conclusions of a full read-only audit of roles, the deviation flow, the worklist, the CAPA link, and SoD.
+**Status: BUILT** (see "Deviation redesign — BUILT" above). This section is **kept as the design reference** — the agreed plan that was implemented. The schema (`Deviation.priority`, `capa_pending`, `DeviationTask` + `DeviationTaskMessage`), the actions (`src/actions/deviation-tasks.ts`), the worklist union, and the worker/QA UI all exist now. Read it for the rationale + SoD/compliance rules; the "Build plan — 4 stages" and "Open questions" below are **historical** (resolved during the build). Anything where the shipped code might differ from this plan is marked **(verify against code)**.
 
 ## Why / what changes
 The current flow assumes **every deviation is investigated** (`open → under_investigation → pending_qa_review → closed|rejected`, with an RCA step + a CAPA-decision step, all on the deviation). The new flow **splits by priority**: trivial deviations become a lightweight assigned task; serious ones escalate to a CAPA (where the RCA properly lives) while the deviation stays open and linked.

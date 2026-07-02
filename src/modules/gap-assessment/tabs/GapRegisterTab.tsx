@@ -2,17 +2,28 @@ import { useState, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import {
-  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, History, Paperclip,
+  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, History, Paperclip, Send, Wrench, CheckCircle2,
 } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { formatReference } from "@/lib/reference";
 import { ExportMenu } from "@/components/ui/ExportMenu";
 import type { Finding, FindingSeverity, FindingStatus } from "@/store/findings.slice";
-import { updateFinding as updateFindingAction } from "@/actions/findings";
+import {
+  updateFinding as updateFindingAction,
+  assignFinding as assignFindingAction,
+  reviewFinding as reviewFindingAction,
+  reworkFinding as reworkFindingAction,
+  postFindingMessage as postFindingMessageAction,
+  loadFindingReview as loadFindingReviewAction,
+  loadFindingDocuments as loadFindingDocumentsAction,
+} from "@/actions/findings";
+import { TaskThread, GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
+import type { WorklistTaskMessage, WorklistDoc } from "@/lib/queries/worklist";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import type { UserConfig } from "@/store/settings.slice";
@@ -121,6 +132,96 @@ export function GapRegisterTab({
   // Capability mirrors of the server (exclude super_admin from authoring).
   const gapCan = usePermissions("gap");
   const capaCan = usePermissions("capa");
+  // Gap Step 1 — QA assigns the finding to the person who will work it.
+  const { isQAHead } = usePermissions();
+  const complianceUsers = useComplianceUsers();
+  const [assignTo, setAssignTo] = useState("");
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  async function handleAssignFinding() {
+    if (!selectedFinding || !assignTo) return;
+    setAssignBusy(true); setAssignError(null);
+    const res = await assignFindingAction(selectedFinding.id, { assigneeId: assignTo });
+    setAssignBusy(false);
+    if (!res.success) { setAssignError(res.error || "Failed to assign finding."); return; }
+    setAssignTo("");
+    router.refresh();
+  }
+
+  // Gap Step 4 — QA review (accept / rework) + the conversation thread. Loaded
+  // separately (the store Finding doesn't carry notes/messages).
+  type FindingReview = { status: string; completionNotes: string | null; reworkReason: string | null; messages: WorklistTaskMessage[] };
+  const [review, setReview] = useState<FindingReview | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reworkOpen, setReworkOpen] = useState(false);
+  const [reworkReasonInput, setReworkReasonInput] = useState("");
+  const [reviewMsg, setReviewMsg] = useState("");
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  // Round 4 — the finding's uploaded evidence docs (read-only in the modal) +
+  // the collapsible Audit Trail open state (collapsed by default).
+  const [findingDocs, setFindingDocs] = useState<WorklistDoc[]>([]);
+  const [auditOpen, setAuditOpen] = useState(false);
+
+  useEffect(() => {
+    const id = selectedFinding?.id;
+    if (!id) { setReview(null); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await loadFindingReviewAction(id);
+      if (!cancelled) setReview(res.success ? (res.data as FindingReview) : null);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedFinding?.id]);
+
+  // Round 4 (#11) — load the finding's uploaded evidence docs so existing docs
+  // are visible in the detail/edit modal (previously only surfaced in the worklist).
+  useEffect(() => {
+    const id = selectedFinding?.id;
+    if (!id) { setFindingDocs([]); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await loadFindingDocumentsAction(id);
+      if (!cancelled) setFindingDocs(res.success ? (res.data as WorklistDoc[]) : []);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedFinding?.id]);
+
+  async function refreshReview() {
+    if (!selectedFinding) return;
+    const res = await loadFindingReviewAction(selectedFinding.id);
+    if (res.success) setReview(res.data as FindingReview);
+  }
+  async function handleReviewAccept() {
+    if (!selectedFinding) return;
+    setReviewBusy(true); setReviewError(null);
+    const res = await reviewFindingAction(selectedFinding.id);
+    setReviewBusy(false);
+    if (!res.success) { setReviewError(res.error || "Failed to accept."); return; }
+    // Refresh the SEPARATE review state too (not just the store via router.refresh)
+    // so the block reflects the new status (Closed) immediately — the Accept/rework
+    // buttons are gated on review.status === "Submitted", so they clear at once.
+    router.refresh();
+    await refreshReview();
+  }
+  async function handleReworkSubmit() {
+    if (!selectedFinding || reworkReasonInput.trim().length < 5) { setReviewError("Add a rework reason (at least 5 characters)."); return; }
+    setReviewBusy(true); setReviewError(null);
+    const res = await reworkFindingAction(selectedFinding.id, { reason: reworkReasonInput.trim() });
+    setReviewBusy(false);
+    if (!res.success) { setReviewError(res.error || "Failed to send for rework."); return; }
+    setReworkOpen(false); setReworkReasonInput("");
+    // Refresh the review state (status → Rework) so the Accept/rework buttons clear
+    // and the auto-posted rework message appears in the thread without a reopen.
+    router.refresh();
+    await refreshReview();
+  }
+  async function handlePostReviewMsg() {
+    if (!selectedFinding || reviewMsg.trim().length === 0) return;
+    const res = await postFindingMessageAction(selectedFinding.id, { body: reviewMsg.trim() });
+    if (!res.success) { setReviewError(res.error || "Failed to post message."); return; }
+    setReviewMsg(""); await refreshReview();
+  }
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { sites: accessibleSites } = useTenantConfig();
   const showSiteColumn = !selectedSiteId && accessibleSites.length > 1;
@@ -179,6 +280,7 @@ export function GapRegisterTab({
     setIsEditing(false);
     setEditReason("");
     setSaveError("");
+    setAuditOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFinding?.id]);
 
@@ -492,6 +594,7 @@ export function GapRegisterTab({
                 title={findingRef(selectedFinding)}
                 recordId={selectedFinding.id}
                 module="finding"
+                buttonLabel="Summary"
                 content={[
                   `Requirement: ${selectedFinding.requirement}`,
                   selectedFinding.purpose ? `Purpose: ${selectedFinding.purpose}` : "",
@@ -570,13 +673,14 @@ export function GapRegisterTab({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <h3 className={LABEL}>Owner</h3>
-                {/* Owner is auto-assigned to the creator and read-only (both
-                    view and edit) — no longer a selectable field. */}
                 <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
                   {ownerName(selectedFinding.owner)}
+                  {selectedFinding.owner === user?.id ? " (You)" : ""}
                   {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` (${roleLabel(u.role)})` : ""; })()}
                 </p>
-                {isEditing && <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>Set to the creator — not editable.</p>}
+                {/* Assign moved to the severity-gated Disposition block below (LOW →
+                    assign a person; HIGH/MEDIUM/CRITICAL → Raise CAPA), mirroring the
+                    deviation priority disposition. */}
               </div>
 
               {/* ── Target date ── */}
@@ -603,6 +707,53 @@ export function GapRegisterTab({
                 )}
               </div>
             </div>
+
+            {/* Gap Step 4 — QA review (accept / rework) + the conversation thread.
+                Shown once the finding has entered the submit/rework loop. */}
+            {review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0) && (
+              <div className="rounded-lg border p-3 mt-3" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className={LABEL} style={{ margin: 0 }}>QA review</h3>
+                  <Badge variant={review.status === "Submitted" ? "purple" : review.status === "Rework" ? "red" : review.status === "Closed" ? "green" : "amber"}>{review.status}</Badge>
+                </div>
+                {review.completionNotes && (
+                  <p className="text-[12px] mt-1.5" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {review.completionNotes}</p>
+                )}
+                {/* The rework reason renders ONCE — in the Conversation thread
+                    below, where reworkFinding auto-posts it as a durable, attributed
+                    FindingMessage. A separate "Returned:" banner here repeated the
+                    exact same text (the duplicate-Rework render). */}
+                {isQAHead && review.status === "Submitted" && (
+                  <div className="flex gap-2 mt-2">
+                    <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>
+                    <Button variant="secondary" size="sm" icon={Wrench} disabled={reviewBusy} onClick={() => { setReviewError(null); setReworkReasonInput(""); setReworkOpen(true); }}>Send for rework</Button>
+                  </div>
+                )}
+                <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
+                  <TaskThread messages={review.messages} currentUserId={user?.id} fmt={(iso) => dayjs.utc(iso).tz(timezone).format(`${dateFormat} HH:mm`)} />
+                  {review.status !== "Closed" && (
+                    <div className="flex items-end gap-2 mt-2">
+                      <textarea className="input text-[12px] w-full min-h-14" placeholder="Message the assignee…" value={reviewMsg} onChange={(e) => setReviewMsg(e.target.value)} maxLength={2000} />
+                      <Button variant="secondary" size="sm" icon={Send} disabled={reviewMsg.trim().length === 0} onClick={() => void handlePostReviewMsg()}>Send</Button>
+                    </div>
+                  )}
+                </div>
+                {reviewError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{reviewError}</p>}
+              </div>
+            )}
+
+            {reworkOpen && (
+              <Modal open onClose={() => { if (!reviewBusy) setReworkOpen(false); }} title="Send finding for rework">
+                <p className="text-[12px] mb-2" style={{ color: "var(--text-secondary)" }}>Return this finding to the assignee with a reason. It reappears in their worklist and is recorded in the conversation.</p>
+                <textarea className="input text-[12px] w-full min-h-20" value={reworkReasonInput} onChange={(e) => setReworkReasonInput(e.target.value)} maxLength={2000} placeholder="What needs to change? (≥ 5 characters)" />
+                {reviewError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{reviewError}</p>}
+                <div className="flex justify-end gap-2 mt-3">
+                  <Button variant="secondary" size="sm" disabled={reviewBusy} onClick={() => setReworkOpen(false)}>Cancel</Button>
+                  <Button variant="danger" size="sm" disabled={reviewBusy || reworkReasonInput.trim().length < 5} loading={reviewBusy} onClick={() => void handleReworkSubmit()}>Send for rework</Button>
+                </div>
+              </Modal>
+            )}
 
             {/* ── Evidence link ── */}
             {isEditing ? (
@@ -713,17 +864,83 @@ export function GapRegisterTab({
                   {linkedCapa?.status === "closed" && <p className="text-[11px] mt-2 p-2 rounded-lg" style={{ background: "var(--success-bg)", color: "var(--success)" }}>CAPA closed. This finding has been automatically closed.</p>}
                 </div>
               ) : (
-                !isViewOnly && selectedFinding.status !== "Closed" && capaCan.canCreate && (
-                  <Button variant="secondary" icon={Plus} fullWidth onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>
+                // Disposition by SEVERITY (mirrors the deviation priority disposition):
+                // LOW → assign a person who works it in the worklist (assign → submit
+                // → QA review), with Raise CAPA as a secondary option; HIGH / MEDIUM /
+                // CRITICAL → Raise CAPA. Shown on a non-closed finding that isn't yet
+                // linked to a CAPA (findings have no investigation gate, so this is the
+                // initial disposition moment).
+                !isViewOnly && selectedFinding.status !== "Closed" && (
+                  <div>
+                    <h3 className={LABEL}>Disposition</h3>
+                    {selectedFinding.severity === "Low" ? (
+                      <>
+                        <p className="text-[11px] mt-0.5 mb-1.5" style={{ color: "var(--text-secondary)" }}>
+                          Low-severity gaps are worked as a lightweight assigned task (assign → submit → QA review), or raise a CAPA if systematic correction is needed.
+                        </p>
+                        {selectedFinding.status === "Open" ? (
+                          // Not yet assigned — QA picks who works it (or raises a CAPA).
+                          isQAHead ? (
+                            <>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Dropdown placeholder="Assign to…" value={assignTo} onChange={setAssignTo} width="w-56" size="sm" options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))} />
+                                <Button variant="primary" size="sm" icon={Plus} disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign person</Button>
+                                {capaCan.canCreate && <Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>}
+                              </div>
+                              {assignError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{assignError}</p>}
+                            </>
+                          ) : (
+                            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Awaiting QA to assign an owner.</p>
+                          )
+                        ) : (
+                          // Already assigned (in the work loop) — show the assignee
+                          // read-only and hide the dropdown so it doesn't look
+                          // re-assignable (mirrors the deviation "Assigned to X" task
+                          // display). Raise CAPA stays available to escalate.
+                          <>
+                            <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                              Assigned to <strong style={{ color: "var(--text-primary)" }}>{ownerName(selectedFinding.owner)}</strong>
+                              {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` · ${roleLabel(u.role)}` : ""; })()}
+                            </p>
+                            {capaCan.canCreate && (
+                              <div className="mt-2"><Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button></div>
+                            )}
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      capaCan.canCreate ? (
+                        <Button variant="secondary" icon={Plus} fullWidth onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>
+                      ) : null
+                    )}
+                  </div>
                 )
               );
             })()}
 
-            {/* ── Timeline ── */}
+            {/* ── Documents (read-only) — the finding's uploaded evidence, shown
+                in view + edit so existing docs are visible here (Round 4 #11). ── */}
+            <div className="pt-4 border-t border-(--bg-border)">
+              <h3 className={LABEL}>Documents</h3>
+              <GroupedTaskDocs docs={findingDocs} emptyText="No documents uploaded to this finding." />
+            </div>
+
+            {/* ── Created (always visible, #8) + Audit Trail (collapsible, collapsed
+                by default) — the former "Timeline", renamed (Round 4 #7+#9). ── */}
             {!isEditing && (
               <div className="pt-4 border-t border-(--bg-border)">
-                <p className={LABEL}>Timeline</p>
-                <div className="space-y-2.5 text-[11px]">
+                {selectedFinding.createdAt && (
+                  <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
+                    Created {dayjs.utc(selectedFinding.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
+                  </p>
+                )}
+                <button type="button" onClick={() => setAuditOpen((v) => !v)} aria-expanded={auditOpen}
+                  className="flex items-center gap-1.5 bg-transparent border-none cursor-pointer p-0">
+                  <ChevronRight className={clsx("w-3.5 h-3.5 transition-transform", auditOpen && "rotate-90")} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                  <span className={LABEL} style={{ marginBottom: 0 }}>Audit Trail</span>
+                </button>
+                {auditOpen && (
+                <div className="space-y-2.5 text-[11px] mt-2">
                   {selectedFinding.createdAt && (
                     <div className="flex items-start gap-2">
                       <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "var(--brand)" }} />
@@ -763,14 +980,12 @@ export function GapRegisterTab({
                       </div>
                     );
                   })()}
-                  {!selectedFinding.createdAt && !selectedFinding.editHistory?.length && (
-                    <p style={{ color: "var(--text-muted)" }}>&mdash;</p>
+                  {selectedFinding.linkedSystemName && (
+                    <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
+                      Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
+                    </p>
                   )}
                 </div>
-                {selectedFinding.linkedSystemName && (
-                  <p className="text-[11px] mt-3" style={{ color: "var(--text-muted)" }}>
-                    Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
-                  </p>
                 )}
               </div>
             )}

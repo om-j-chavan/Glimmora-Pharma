@@ -12,22 +12,36 @@ Every product page follows the same shape: `app/(app)/<route>/page.tsx` is a Ser
 - **Flow:** page fetches 6 queries in parallel (`getDashboardStats`, `getOverallReadiness`, `getFindings`, `getCAPAs`, `getDeviations`, `getSystems`) and seeds the Redux data slices on mount; widgets render from those slices.
 - **Note:** **Bug 17** (heatmap) and the empty-on-load issue (**Bug 15**, prior) were fixed this session — the page now seeds findings/CAPAs/deviations/**systems** itself. `systems` slice was re-introduced this session.
 
-### Gap Assessment (Findings) — COMPLETE
-- **Files:** `app/(app)/gap-assessment/page.tsx`, `src/modules/gap-assessment/GapPage.tsx`, `src/actions/findings.ts`, `src/lib/queries/findings.ts`.
-- **What:** logs regulatory gaps/findings with severity, area, owner, target date, evidence, RCA, and CAPA linkage.
-- **Flow:** create/update/close/restore findings (Zod-validated, audited); attach evidence via the shared document pipeline; closing a linked CAPA cascades the Finding → closed.
+### Gap Assessment (Findings) — COMPLETE (finding workflow added — **largely untested in a browser**)
+- **Files:** `app/(app)/gap-assessment/page.tsx`, `src/modules/gap-assessment/{GapPage.tsx,modals/AddFindingModal.tsx,tabs/GapRegisterTab.tsx}`, `src/actions/findings.ts`, `src/lib/queries/findings.ts`, plus the worker surface `src/modules/worklist/FindingWorkPanel.tsx`.
+- **What:** logs regulatory gaps/findings with severity, area, owner, target date, evidence, RCA, CAPA linkage — **now with a full deviation-style work loop cloned onto findings** (added across several sessions).
+- **The finding work loop (mirrors the DeviationTask subsystem):**
+  - **Disposition is severity-gated** (`GapRegisterTab.tsx`): **LOW → "Assign person"** (`assignFinding` → the assignee works it in the Worklist) **+ Raise CAPA** as a secondary option; **HIGH/MEDIUM/CRITICAL → "Raise CAPA"**. Once assigned, the assign dropdown is hidden and the assignee is shown read-only.
+  - **Assign** (`assignFinding`, `findings.ts`) — QA assigns to an active tenant user; an Open finding flips to **In Progress** (the "assigned" signal). The finding then surfaces in the assignee's **Worklist** (4th source — see Worklist below).
+  - **Work** (`FindingWorkPanel.tsx`) — categorized evidence upload (the 7 GxP `EVIDENCE_CATEGORIES`, mandatory category, multiple files, remove-before-submit via `removeFindingEvidence`), completion notes, a flat QA↔assignee thread (`FindingMessage`), and a submit-to-QA confirm.
+  - **Review** (`reviewFinding`/`reworkFinding`/`postFindingMessage`/`loadFindingReview`) — QA accepts (→ Closed) or sends back for rework (→ Rework, reason auto-posted to the thread); SoD: reviewer ≠ owner.
+  - **Escalate** — `Raise CAPA` from a finding → `createCAPA({ linkedFindingId })` with carryover (categorized docs → real CAPA `EvidenceFile`s, owner → CAPA assignee, RCA text). See [FLOWS.md](./FLOWS.md#gap-assessment-finding-flow).
+- **Status union (`src/store/findings.slice.ts`):** `Open | In Progress | Submitted | Rework | Closed`. `Finding.owner` is a **String userId (NOT a User FK)** — resolve via `users` list client-side; this is why the finding→CAPA carryover must re-resolve the owner to a real User (see Bug #25 in [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md)).
+- **Base ops:** create/update/close/restore findings (Zod-validated, audited); closing a linked CAPA cascades the Finding → closed.
 
-### CAPA — COMPLETE
-- **Files:** `app/(app)/capa/page.tsx` + `capa/[id]/page.tsx`, `src/modules/capa/*`, `src/actions/capas/*` (8 domain files: `lifecycle`, `closure`, `approvals`, `verification`, `rca-review`, `alignment`, `action-items`, `effectiveness`), `src/lib/queries/capas.ts`.
-- **What:** full CAPA lifecycle — RCA review, tiered approval, independent verification, action items, 90-day effectiveness, Part 11 signed closure.
-- **State machine:** `open → in_progress → pending_qa_review → pending_verification → closed` (+ `rejected` which bounces back to `in_progress`).
+### CAPA — COMPLETE (reshaped — **ONE-approval closure; independent verification removed**)
+- **Files:** `app/(app)/capa/page.tsx` + `capa/[id]/page.tsx`, `src/modules/capa/*`, `src/actions/capas/*` (`lifecycle`, `closure`, `approvals`, `verification` *(legacy)*, `rca-review`, `alignment`, `action-items`, `effectiveness`), `src/lib/queries/capas.ts`.
+- **What:** full CAPA lifecycle — RCA review, tiered approval, action items, 90-day effectiveness, Part 11 signed closure.
+- **State machine (now):** `open → in_progress → pending_qa_review → closed` (+ `rejected` → `in_progress`). **Independent verification was REMOVED:** one QA approval → Part 11 signed close directly from `pending_qa_review` (`closure.ts:110-115`). `pending_verification` still exists in the `CAPAStatus` union (`src/types/capa.ts`) and `verifyCAPA` still exists in `verification.ts`, but both are **legacy-only** — closure accepts a CAPA parked in `pending_verification` and normalizes it. A per-environment backfill **`scripts/backfill-capa-retire-verification.ts`** moves legacy `pending_verification` rows to `pending_qa_review` (**must be run per-env** — see [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md)).
+- **Driver → single assignee:** the old "driver" concept is gone; a CAPA now has one **assignee** (`CAPA.ownerId`). The Worklist shows the assignee an **evidence panel** with **per-category evidence upload + per-category rework** (`rejectEvidenceCategory` in `src/actions/evidence.ts`).
+- **Deviation/Finding → CAPA carryover:** raising a CAPA from a deviation or finding carries the worker → CAPA assignee, RCA text, and **categorized docs → real `EvidenceFile`s** (`convertCategorizedDocsToEvidence`, generalized in `lifecycle.ts`). Comments are **not** carried (see #22c in [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md)).
 - **Access:** the CAPA *module* (nav + `/capa`) is locked to `qa_head` + `customer_admin`; everyone else reaches their CAPA work via the **Worklist**. See [FLOWS.md](./FLOWS.md#capa-lifecycle).
 
-### Deviation — COMPLETE today, **MID-REDESIGN**
-- **Files:** `app/(app)/deviation/page.tsx`, `src/modules/deviation/{DeviationPage,DeviationInvestigation,DeviationIntelligencePanel}.tsx`, `src/actions/deviations.ts`, `src/lib/queries/deviations.ts`.
-- **What (current):** single-track investigation flow — `open → under_investigation → pending_qa_review → closed|rejected`; reporter≠investigator≠CAPA-decider SoD; Part 11 signed close; raise-CAPA button (`createCAPA` with `linkedDeviationId`).
-- ⚠️ **The whole flow is being redesigned** into a priority split (low = lightweight task, high/med = raise-CAPA-and-stay-open). **Not yet built.** Full agreed design + 4-stage build plan in [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md#the-deviation-redesign-mid-design--resumable).
-- One roadmap TODO: AI-suggestion button in `DeviationInvestigation.tsx` (non-blocking).
+### Deviation — COMPLETE (**redesign BUILT** — priority split + DeviationTask subsystem; **largely untested in a browser**)
+- **Files:** `app/(app)/deviation/page.tsx`, `src/modules/deviation/{DeviationPage,DeviationInvestigation,DeviationIntelligencePanel}.tsx`, `src/actions/deviations.ts`, `src/actions/deviation-tasks.ts`, `src/lib/queries/deviations.ts`, plus the worker surface `src/modules/worklist/DeviationTaskPanel.tsx`.
+- **What (now built):** the priority-split / investigation-first flow that was previously only *designed* is **implemented**:
+  - **QA sets `priority`** (`Deviation.priority` — `Low | Medium | High`, prefilled from FDA `severity`, overridable). Drives the disposition.
+  - **LOW → lightweight `DeviationTask`:** QA assigns to a user with a message → assignee works it in the **Worklist** (categorized task docs via the 7 GxP categories, completion notes, submit) → QA **reviews → Close (signed) or Rework**; a flat `DeviationTaskMessage` QA↔worker thread; "Raise CAPA" escalation **cancels** the open task.
+  - **HIGH/MEDIUM → raise a CAPA:** `createCAPA({ linkedDeviationId })`; deviation → **`capa_pending`** (new status), stays open + linked until the CAPA closes; QA still **sign-closes** (no auto-close).
+  - Phase-gated detail modal (disposition surfaces only at the right phase); Part 11 signed close throughout (`DEVIATION_CLOSURE`).
+- **Status union (now):** `open → under_investigation → pending_qa_review → capa_pending → closed | rejected` (`src/store/deviation.slice.ts`).
+- See [FLOWS.md](./FLOWS.md#deviation-flow-priority-split) and the build record in [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md#deviation-redesign--built).
+- One roadmap TODO: AI-suggestion button in `DeviationInvestigation.tsx` (non-blocking). *(unverified whether still present after the rebuild.)*
 
 ### FDA 483 — COMPLETE (AI draft mocked)
 - **Files:** `app/(app)/fda-483/page.tsx`, `src/modules/fda-483/*`, `src/actions/fda483.ts`, `src/lib/queries/fda483.ts`.
@@ -64,10 +78,15 @@ Every product page follows the same shape: `app/(app)/<route>/page.tsx` is a Ser
 - **What:** immutable event log (actor id/name/role, module, action, recordId, old/new JSON) with filters.
 - **Note:** a content-hash/tamper-evidence chain is noted as **future** (the current schema has actor+timestamp+tenant scoping, not a hash chain).
 
-### Worklist — COMPLETE
-- **Files:** `app/(app)/worklist/page.tsx`, `src/modules/worklist/{WorklistPage,TaskPanel}.tsx`, `src/lib/queries/worklist.ts`, `src/actions/worklist.ts`.
-- **What:** the fixer/owner surface. **Computed aggregation (no table)** — unions `CAPAActionItem` where `ownerId==you` + `CAPA` where `ownerId==you` (drivers see their whole CAPA group). Assignee completes items with notes + evidence; rework surfaces in a "Needs rework" band.
-- **Key fact for the deviation redesign:** the worklist only reads CAPA records — a deviation task needs a new `DeviationTask` model unioned in here (see [STATUS-AND-BACKLOG.md](./STATUS-AND-BACKLOG.md)).
+### Worklist — COMPLETE (**now unions 4 sources**)
+- **Files:** `app/(app)/worklist/page.tsx`, `src/modules/worklist/{WorklistPage,TaskPanel,DeviationTaskPanel,FindingWorkPanel}.tsx`, `src/lib/queries/worklist.ts`, `src/actions/worklist.ts`.
+- **What:** the fixer/owner/assignee surface. **Computed aggregation (no table)** — `getWorklist` now unions **four** sources (`worklist.ts:148-189`):
+  1. `CAPAActionItem` where `ownerId == you`,
+  2. `CAPA` where `ownerId == you` (the CAPA assignee),
+  3. `DeviationTask` where `assigneeId == you` (`deviationTasks`),
+  4. `Finding` where `owner == you` and status ∈ `FINDING_ACTIVE_STATUSES` (`Open|In Progress|Submitted|Rework`) (`assignedFindings`).
+- All four feed the **combined count / filter / empty-state** machinery and the "Needs rework" band (`WorklistPage.tsx`). Deviation tasks render via `DeviationTaskPanel`, gap findings via `FindingWorkPanel`.
+- Return shape (`Worklist`, `worklist.ts:127`): `{ groups, deviationTasks, assignedFindings, openCount, reworkCount, ... }`.
 
 ## Platform & config
 

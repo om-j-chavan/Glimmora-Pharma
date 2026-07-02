@@ -38,9 +38,12 @@ interface Props {
   module?: string;
   /** Optional: render compact (button only until clicked). Default true. */
   className?: string;
+  /** Collapsed-state button label. Defaults to "Summarize"; some hosts prefer
+   *  "Summary" (e.g. the gap finding detail). */
+  buttonLabel?: string;
 }
 
-export function DocumentSummaryPanel({ content, title = "", recordId = "-", module = "-", className }: Props) {
+export function DocumentSummaryPanel({ content, title = "", recordId = "-", module = "-", className, buttonLabel = "Summarize" }: Props) {
   const aiToken = useAppSelector((s) => {
     const u = s.auth.user;
     if (!u) return "anonymous";
@@ -95,7 +98,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
   if (!open) {
     return (
       <Button type="button" variant="primary" size="sm" icon={Sparkles} onClick={() => run(length, lens)} className={className}>
-        Summarize
+        {buttonLabel}
       </Button>
     );
   }
