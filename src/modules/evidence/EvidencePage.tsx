@@ -13,6 +13,7 @@ import type { getCAPAEvidenceFiles } from "@/lib/queries/governance";
 import dayjs from "@/lib/dayjs";
 import { escapeHtml } from "@/lib/escapeHtml";
 import { displayUserName } from "@/lib/identity-display";
+import { roleLabel } from "@/lib/labels/roles";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
@@ -890,7 +891,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
                     width="w-full"
                     options={users
                       .filter((u) => u.status === "Active")
-                      .map((u) => ({ value: u.id, label: u.name }))}
+                      .map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
                   />
                 )}
               />

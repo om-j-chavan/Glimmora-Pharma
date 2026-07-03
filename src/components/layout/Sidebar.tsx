@@ -59,7 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
       { path: "capa", label: "CAPA Tracker", icon: ClipboardList },
       { path: "worklist", label: "Worklist", icon: ListChecks },
       { path: "csv-csa", label: "CSV/CSA Validation", icon: Monitor },
-      { path: "fda-483", label: "FDA 483 & Regulatory", icon: Building2 },
+      { path: "fda-483", label: "Inspections & Regulatory", icon: Building2 },
       { path: "evidence", label: "Evidence & Documents", icon: FileText },
     ],
   },

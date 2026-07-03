@@ -8,6 +8,7 @@ import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
+import { roleLabel } from "@/lib/labels/roles";
 
 /* ── Constants ── */
 
@@ -113,7 +114,7 @@ export function AddSystemModal({ open, sites, users, onSave, onClose, lockedSite
           )}
           <div>
             <label className={lbl} style={{ color: "var(--text-muted)" }}>System owner *</label>
-            <Controller name="owner" control={control} render={({ field }) => (<Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={activeUsers.map((u) => ({ value: u.id, label: u.name }))} />)} />
+            <Controller name="owner" control={control} render={({ field }) => (<Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={activeUsers.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />)} />
             {errors.owner && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{errors.owner.message}</p>}
           </div>
         </div>

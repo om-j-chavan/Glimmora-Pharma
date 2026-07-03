@@ -40,6 +40,7 @@ import { StatCard } from "@/components/shared";
 import {
   computeReadinessRows,
   daysUntil,
+  isEventLocked,
   type ReadinessRow,
 } from "../_shared";
 import type { DetailTab } from "../useEventDetailUrlState";
@@ -84,8 +85,7 @@ function ReadinessCard({
   dateFormat,
   onNavigate,
 }: ReadinessCardProps) {
-  const submitted =
-    event.status === "Response Submitted" || event.status === "Closed";
+  const submitted = isEventLocked(event.status);
 
   if (submitted) {
     return (
@@ -599,9 +599,7 @@ export function OverviewTab({
   onEditCommitment,
   onCompleteCommitment,
 }: OverviewTabProps) {
-  const fullyLocked =
-    liveEvent.status === "Response Submitted" ||
-    liveEvent.status === "Closed";
+  const fullyLocked = isEventLocked(liveEvent.status);
 
   return (
     <div className="space-y-4">

@@ -29,6 +29,7 @@ import { IntendedUseTab } from "./tabs/IntendedUseTab";
 import { OversightTab } from "./tabs/OversightTab";
 import { DriftMonitoringTab } from "./tabs/DriftMonitoringTab";
 import { displayUserName } from "@/lib/identity-display";
+import { roleLabel } from "@/lib/labels/roles";
 
 /* ── Types & constants ── */
 
@@ -177,7 +178,7 @@ export function AGIPage({ activityLogs: _activityLogs = [] }: AGIPageProps = {})
             <div><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Severity *</label><Controller name="severity" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />} /></div>
             <div><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Agent *</label><Controller name="agent" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select agent" width="w-full" options={Object.entries(AGENT_ICONS).map(([k]) => ({ value: k, label: k }))} />} /></div>
             <div className="col-span-2"><label htmlFor="alert-desc" className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Description *</label><textarea id="alert-desc" rows={3} className="input text-[12px] resize-none" placeholder="Describe the drift event..." {...alertForm.register("description")} />{alertForm.formState.errors.description && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{alertForm.formState.errors.description.message}</p>}</div>
-            <div className="col-span-2"><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} /></div>
+            <div className="col-span-2"><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />} /></div>
           </div>
           <div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => setAddAlertOpen(false)}>Cancel</Button><Button variant="primary" type="submit" loading={alertForm.formState.isSubmitting}>Log alert</Button></div>
         </form>

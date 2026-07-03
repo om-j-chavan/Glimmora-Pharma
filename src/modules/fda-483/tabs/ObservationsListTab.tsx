@@ -32,6 +32,7 @@ import {
   Check,
   CircleDashed,
   Loader2,
+  FileUp,
 } from "lucide-react";
 import type { FDA483Event, Observation } from "@/types/fda483";
 import type { CAPA } from "@/store/capa.slice";
@@ -44,6 +45,7 @@ import {
   observationSeverityBadge,
   observationStatusBadge,
   getRcaStepStatus,
+  isEventLocked,
 } from "../_shared";
 
 interface Site {
@@ -77,6 +79,9 @@ export interface ObservationsListTabProps {
   /** Opens the AddObservationModal in "create" mode (parent owns the
    *  modal state). */
   onAddObservation: () => void;
+  /** Opens the ImportObservationsModal (Feature M — extract observations from
+   *  an uploaded 483 PDF). Parent owns the modal state. */
+  onImportFromPdf: () => void;
   /** Opens the AddObservationModal in "edit" mode with the supplied
    *  observation pre-loaded. */
   onEditObservation: (obs: Observation) => void;
@@ -143,6 +148,7 @@ export function ObservationsListTab({
   selectedObsId,
   onSelectObs,
   onAddObservation,
+  onImportFromPdf,
   onEditObservation,
   onNavigateToInvestigation,
 }: ObservationsListTabProps) {
@@ -150,7 +156,7 @@ export function ObservationsListTab({
   const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
   const fullyLocked =
-    liveEvent.status === "Response Submitted" || liveEvent.status === "Closed";
+    isEventLocked(liveEvent.status);
 
   // Capability mirror of the server (excludes super_admin from authoring).
   const fdaCan = usePermissions("fda483");
@@ -192,15 +198,24 @@ export function ObservationsListTab({
             </span>
           </div>
           {canAct && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              className="ml-auto"
-              onClick={onAddObservation}
-            >
-              Add observation
-            </Button>
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={FileUp}
+                onClick={onImportFromPdf}
+              >
+                Import from 483 PDF
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Plus}
+                onClick={onAddObservation}
+              >
+                Add observation
+              </Button>
+            </div>
           )}
         </div>
 
@@ -261,14 +276,24 @@ export function ObservationsListTab({
                 investigation workflow.
               </p>
               {canAct && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon={Plus}
-                  onClick={onAddObservation}
-                >
-                  Add observation
-                </Button>
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={Plus}
+                    onClick={onAddObservation}
+                  >
+                    Add observation
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={FileUp}
+                    onClick={onImportFromPdf}
+                  >
+                    Import from 483 PDF
+                  </Button>
+                </div>
               )}
             </div>
           </div>

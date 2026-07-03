@@ -24,7 +24,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "/deviation": "Deviation Management",
   "/capa": "QMS & CAPA Tracker",
   "/csv-csa": "CSV/CSA Validation",
-  "/fda-483": "FDA 483 & Regulatory Events",
+  "/fda-483": "Inspections & Regulatory",
   "/evidence": "Evidence & Documents",
   "/governance": "Governance & KPIs",
   "/readiness": "Inspection Readiness",

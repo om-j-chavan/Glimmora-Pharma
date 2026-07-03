@@ -778,6 +778,17 @@ model FDA483Event {
   submittedBy      String?
   signatureMeaning String?
   closedAt         DateTime?
+  // Role-based workflow pointer (orthogonal to `status`): intake →
+  // investigation → response → outcome → closed. Owner is a fixed role
+  // mapping (see STAGE_CONFIG in src/modules/fda-483/_shared.ts). Legacy
+  // rows default to "intake"; soft handoff (does not lock editing).
+  currentStage     String    @default("intake")
+  // FDA outcome capture (Record Outcome step, Part 11 signed). Null until
+  // recordFDA483Outcome runs. outcomeType ∈ Acknowledged | Closed |
+  // Warning Letter | Follow-up Requested.
+  outcomeType        String?
+  outcomeNote        String?
+  outcomeSignatureId String? @unique
   // Substage 5.4 — Part 11 e-signature link for the response submission
   // event. Null until signSubmitFDA483Response mints a SignedRecord.
   // Legacy submissions (predating this column) remain null.

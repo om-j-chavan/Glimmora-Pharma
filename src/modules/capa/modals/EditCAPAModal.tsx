@@ -12,6 +12,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Toggle } from "@/components/ui/Toggle";
 import { Modal } from "@/components/ui/Modal";
 import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
+import { roleLabel } from "@/lib/labels/roles";
 import { RcaMethodFields, parseRcaDetail, rcaDetailToText, type RcaDetail } from "./components/RcaMethodFields";
 import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
 
@@ -139,7 +140,7 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users }: EditCAPA
           </div>
           <div>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Assigned to <span className="text-(--danger)">*</span></p>
-            <Controller name="owner" control={form.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select assignee" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} />
+            <Controller name="owner" control={form.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select assignee" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />} />
             {form.formState.errors.owner && <p role="alert" className="text-[11px] text-(--danger) mt-1">{form.formState.errors.owner.message}</p>}
           </div>
           <div>
@@ -167,7 +168,7 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users }: EditCAPA
               <div>
                 <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Reviewed by <span className="text-(--danger)">*</span></p>
                 <Controller name="diGateReviewedBy" control={form.control} render={({ field }) => (
-                  <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select reviewer..." width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />
+                  <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select reviewer..." width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />
                 )} />
                 {form.formState.errors.diGateReviewedBy && <p role="alert" className="text-[11px] text-(--danger) mt-1">{form.formState.errors.diGateReviewedBy.message}</p>}
               </div>

@@ -9,7 +9,7 @@ import {
 } from "@/lib/queries";
 
 export const metadata = {
-  title: "FDA 483 & Regulatory — Pharma Glimmora",
+  title: "Inspections & Regulatory — Pharma Glimmora",
 };
 
 interface PageProps {

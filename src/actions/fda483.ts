@@ -17,7 +17,8 @@ import { buildReferencePrefix, generateReference, isReferenceConflict } from "@/
 import { GENERIC_SEVERITY } from "@/lib/severity";
 import { sanitizeServerError } from "@/lib/errors";
 import { createCAPA } from "@/actions/capas/lifecycle";
-import { FDA483_AUDIT_MODULE } from "@/modules/fda-483/_shared";
+import { FDA483_AUDIT_MODULE, getNextStage, REFERENCE_PREFIX_BY_EVENT_TYPE } from "@/modules/fda-483/_shared";
+import type { WorkflowStage } from "@/types/fda483";
 
 type ActionResult<T = unknown> =
   | { success: true; data: T }
@@ -40,13 +41,20 @@ const AGENCY_BY_EVENT_TYPE: Record<string, string> = {
   "EMA Inspection": "EMA",
   "MHRA Inspection": "MHRA",
   "WHO Inspection": "WHO",
+  "Health Canada Inspection": "Health Canada",
+  "TGA Inspection": "TGA",
+  "PMDA Inspection": "PMDA",
+  "CDSCO Inspection": "CDSCO",
+  "ANVISA Inspection": "ANVISA",
+  "Other Inspection": "Other",
 };
 function deriveAgencyServer(eventType: string): string {
   return AGENCY_BY_EVENT_TYPE[eventType] ?? "Other";
 }
 
 const CreateEventSchema = z.object({
-  referenceNumber: z.string().min(1),
+  // Optional — the server auto-generates a unique code when blank (see below).
+  referenceNumber: z.string().optional(),
   eventType: z.string().min(1),
   siteId: z.string().min(1),
   inspectionDate: z.string().min(1),
@@ -112,10 +120,38 @@ export async function createFDA483Event(
       where: { id: d.internalOwnerId },
       select: { name: true },
     });
+
+    // Reference: honour a user-typed value (e.g. a real Warning Letter number);
+    // otherwise auto-generate a UNIQUE code `<prefix>-<siteCode>-<year>-<NNN>`
+    // (same scheme as observations + seed) so events never collide. This is the
+    // fix for FEI-as-reference duplicates — one facility has many 483s.
+    let referenceNumber = (d.referenceNumber ?? "").trim();
+    if (!referenceNumber) {
+      const site = await prisma.site.findUnique({
+        where: { id: d.siteId },
+        select: { code: true },
+      });
+      const prefix = buildReferencePrefix(
+        REFERENCE_PREFIX_BY_EVENT_TYPE[d.eventType] ?? "INS",
+        site?.code ?? null,
+      );
+      referenceNumber = await generateReference(prefix, new Date(), async (p, year) => {
+        const row = await prisma.fDA483Event.findFirst({
+          where: {
+            tenantId: session.user.tenantId,
+            referenceNumber: { startsWith: `${p}-${year}-` },
+          },
+          orderBy: { referenceNumber: "desc" },
+          select: { referenceNumber: true },
+        });
+        return row?.referenceNumber ?? null;
+      });
+    }
+
     const event = await prisma.fDA483Event.create({
       data: {
         tenantId: session.user.tenantId,
-        referenceNumber: d.referenceNumber,
+        referenceNumber,
         eventType: d.eventType,
         agency: deriveAgencyServer(d.eventType),
         siteId: d.siteId,
@@ -137,7 +173,7 @@ export async function createFDA483Event(
         module: FDA483_AUDIT_MODULE,
         action: "FDA483_EVENT_CREATED",
         recordId: event.id,
-        recordTitle: d.referenceNumber,
+        recordTitle: referenceNumber,
         newValue: owner?.name ? `Internal owner: ${owner.name}` : undefined,
       },
     });
@@ -290,6 +326,205 @@ export async function addObservation(
     console.error("[action] addObservation post-create steps failed:", err);
     return { success: false, error: "Failed to add observation" };
   }
+}
+
+/* ── Bulk import observations from a 483 PDF extraction ────────────────
+ * Companion to addObservation, for Feature M (FDA 483 PDF auto-extraction).
+ * Takes the user-reviewed rows from ImportObservationsModal and creates them
+ * in one call. Every row reuses the SAME atomic reference-allocation +
+ * per-observation audit as addObservation; a summary
+ * OBSERVATIONS_IMPORTED_FROM_PDF audit row carries the source-text provenance
+ * (page + confidence + snippet) so the import is traceable with no schema
+ * migration. The original PDF is retained via a `483_source` FDA483Document. */
+const BulkImportObservationSchema = z.object({
+  text: z.string().min(10),
+  area: z.string().optional(),
+  regulation: z.string().optional(),
+  severity: z.enum(GENERIC_SEVERITY),
+  sourcePage: z.number().int().nonnegative().optional(),
+  confidence: z.number().int().min(0).max(100).optional(),
+  /** The observation number as printed on the 483 — kept for the audit trail
+   *  only; the stored `number` is re-sequenced to avoid collisions. */
+  originalNumber: z.number().int().optional(),
+});
+
+const BulkImportSchema = z.object({
+  eventId: z.string().min(1),
+  observations: z.array(BulkImportObservationSchema).min(1, "No observations to import"),
+  sourceFile: z
+    .object({
+      fileName: z.string().min(1),
+      fileUrl: z.string().min(1),
+      fileType: z.string().optional(),
+      fileSize: z.string().optional(),
+    })
+    .optional(),
+});
+
+export async function bulkAddObservationsFromExtraction(
+  input: z.input<typeof BulkImportSchema>,
+): Promise<ActionResult<{ created: number }>> {
+  const session = await requireAuth();
+  const parsed = BulkImportSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const parent = await assertTenantOwnsParent<{
+    id: string;
+    tenantId: string;
+    referenceNumber: string;
+    siteId: string | null;
+  }>(session, "fda483Event", parsed.data.eventId, {
+    referenceNumber: true,
+    siteId: true,
+  });
+  if (!parent) return { success: false, error: "FORBIDDEN" };
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot perform this action." };
+  }
+
+  // Site-scoped reference prefix (same derivation as addObservation).
+  let siteCodeForRef: string | null = null;
+  if (parent.siteId) {
+    const site = await prisma.site.findUnique({
+      where: { id: parent.siteId },
+      select: { code: true },
+    });
+    siteCodeForRef = site?.code ?? null;
+  }
+  const referencePrefix = buildReferencePrefix("483", siteCodeForRef);
+
+  // Continue numbering after any observations the event already has.
+  const existingCount = await prisma.fDA483Observation.count({
+    where: { eventId: parsed.data.eventId },
+  });
+
+  const MAX_REF_RETRIES = 5;
+  const created: { id: string; number: number; reference: string | null }[] = [];
+  const provenance: { number: number; originalNumber?: number; sourcePage?: number; confidence?: number; snippet: string }[] = [];
+
+  for (let i = 0; i < parsed.data.observations.length; i++) {
+    const row = parsed.data.observations[i];
+    const number = existingCount + i + 1;
+    let obs: Awaited<ReturnType<typeof prisma.fDA483Observation.create>> | null = null;
+    let lastRefErr: unknown = null;
+    for (let attempt = 0; attempt < MAX_REF_RETRIES; attempt++) {
+      try {
+        obs = await prisma.$transaction(async (tx) => {
+          const reference = await generateReference(
+            referencePrefix,
+            new Date(),
+            async (prefix, year) => {
+              const r = await tx.fDA483Observation.findFirst({
+                where: { reference: { startsWith: `${prefix}-${year}-` } },
+                orderBy: { reference: "desc" },
+                select: { reference: true },
+              });
+              return r?.reference ?? null;
+            },
+          );
+          return tx.fDA483Observation.create({
+            data: {
+              eventId: parsed.data.eventId,
+              number,
+              text: row.text,
+              area: row.area ?? "",
+              regulation: row.regulation ?? "",
+              severity: row.severity,
+              reference,
+              status: "Open",
+            },
+          });
+        });
+        break;
+      } catch (err) {
+        lastRefErr = err;
+        if (!isReferenceConflict(err)) throw err;
+      }
+    }
+    if (!obs) {
+      console.error("[action] bulkAddObservationsFromExtraction reference retries exhausted:", lastRefErr);
+      // Partial success: report how many landed so the user isn't left guessing.
+      if (created.length > 0) break;
+      return { success: false, error: sanitizeServerError(lastRefErr, "Failed to allocate observation reference") };
+    }
+    created.push({ id: obs.id, number: obs.number, reference: obs.reference });
+    provenance.push({
+      number,
+      originalNumber: row.originalNumber,
+      sourcePage: row.sourcePage,
+      confidence: row.confidence,
+      snippet: row.text.slice(0, 160),
+    });
+  }
+
+  try {
+    // Per-observation audit rows (mirrors addObservation) …
+    await prisma.auditLog.createMany({
+      data: created.map((c) => ({
+        tenantId: parent.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: FDA483_AUDIT_MODULE,
+        action: "OBSERVATION_ADDED",
+        recordId: parsed.data.eventId,
+        recordTitle: c.reference ?? parent.referenceNumber,
+        newValue: `Observation #${c.number} (imported from 483 PDF)`,
+      })),
+    });
+    // … plus a single import-summary row carrying the source-text provenance.
+    await prisma.auditLog.create({
+      data: {
+        tenantId: parent.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: FDA483_AUDIT_MODULE,
+        action: "OBSERVATIONS_IMPORTED_FROM_PDF",
+        recordId: parsed.data.eventId,
+        recordTitle: parsed.data.sourceFile?.fileName ?? parent.referenceNumber,
+        newValue: JSON.stringify({
+          fileName: parsed.data.sourceFile?.fileName ?? null,
+          count: created.length,
+          perObs: provenance,
+        }),
+      },
+    });
+  } catch (err) {
+    console.error("[action] bulkAddObservationsFromExtraction audit failed:", err);
+    // Observations already committed; don't fail the whole import on audit-only error.
+  }
+
+  // Retain the original PDF so the extraction is traceable to its source.
+  if (parsed.data.sourceFile) {
+    try {
+      await prisma.fDA483Document.create({
+        data: {
+          eventId: parsed.data.eventId,
+          fileName: parsed.data.sourceFile.fileName,
+          fileUrl: parsed.data.sourceFile.fileUrl,
+          fileType: parsed.data.sourceFile.fileType ?? null,
+          fileSize: parsed.data.sourceFile.fileSize ?? null,
+          type: "483_source",
+          uploadedBy: session.user.name,
+        },
+      });
+    } catch (err) {
+      console.error("[action] bulkAddObservationsFromExtraction source-doc save failed:", err);
+    }
+  }
+
+  revalidatePath("/fda-483");
+  return { success: true, data: { created: created.length } };
 }
 
 // NOTE — actor identity: never write `session.user.id` into a User FK column.
@@ -567,7 +802,7 @@ export async function signSubmitFDA483Response(
     };
   }
   if (!FDA483_SIGN_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Only QA Head can sign and submit FDA 483 response" };
+    return { success: false, error: "Only QA Head or Regulatory Affairs can sign and submit the FDA 483 response" };
   }
 
   const existing = await prisma.fDA483Event.findFirst({
@@ -649,6 +884,9 @@ export async function signSubmitFDA483Response(
         where: { id: eventId, tenantId: session.user.tenantId },
         data: {
           status: "Response Submitted",
+          // Advance the workflow pointer to the Outcome stage (RA records the
+          // FDA reply next). Soft — does not lock anything.
+          currentStage: "outcome",
           responseDraft: draft,
           submittedAt,
           submittedBy: session.user.name,
@@ -696,6 +934,260 @@ export async function signSubmitFDA483Response(
   } catch (err) {
     console.error("[action] signSubmitFDA483Response failed:", err);
     return { success: false, error: "Failed to submit response" };
+  }
+}
+
+/* ══════════════════════════════════════════════════
+ * WORKFLOW — soft stage handoff (role ownership)
+ * ══════════════════════════════════════════════════ */
+
+/**
+ * Advance the event's `currentStage` pointer to the next stage and notify the
+ * next owner (via the client notification engine, which reads currentStage).
+ * SOFT: this does not lock editing — it's an ownership convenience. Only the
+ * legal next transition is allowed (validated against getNextStage). Any
+ * non-viewer GxP author may hand off; the UI shows the button to the stage
+ * owner. The signed transitions (response→outcome, outcome→closed) go through
+ * signSubmitFDA483Response / recordFDA483Outcome, NOT this action.
+ */
+const HandoffSchema = z.object({
+  eventId: z.string().min(1),
+  toStage: z.enum(["investigation", "response"]),
+});
+
+export async function handoffFDA483Stage(
+  input: z.input<typeof HandoffSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = HandoffSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot perform this action." };
+  }
+
+  const existing = await prisma.fDA483Event.findFirst({
+    where: { id: parsed.data.eventId, tenantId: session.user.tenantId },
+    select: { id: true, referenceNumber: true, currentStage: true },
+  });
+  if (!existing) return { success: false, error: "FDA 483 event not found" };
+
+  const from = (existing.currentStage ?? "intake") as WorkflowStage;
+  const expectedNext = getNextStage(from);
+  if (expectedNext !== parsed.data.toStage) {
+    return { success: false, error: `Cannot hand off from "${from}" to "${parsed.data.toStage}".` };
+  }
+
+  try {
+    const event = await prisma.fDA483Event.update({
+      where: { id: parsed.data.eventId, tenantId: session.user.tenantId },
+      data: { currentStage: parsed.data.toStage },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: FDA483_AUDIT_MODULE,
+        action: "STAGE_HANDED_OFF",
+        recordId: parsed.data.eventId,
+        recordTitle: existing.referenceNumber,
+        oldValue: from,
+        newValue: parsed.data.toStage,
+      },
+    });
+    revalidatePath("/fda-483");
+    return { success: true, data: event };
+  } catch (err) {
+    console.error("[action] handoffFDA483Stage failed:", err);
+    return { success: false, error: "Failed to hand off the event" };
+  }
+}
+
+/* ══════════════════════════════════════════════════
+ * OUTCOME — record FDA's reply (Part 11 signed) → close
+ * ══════════════════════════════════════════════════ */
+
+const RecordOutcomeSchema = z.object({
+  eventId: z.string().min(1),
+  outcomeType: z.enum(["Acknowledged", "Closed", "Warning Letter", "Follow-up Requested"]),
+  note: z.string().optional(),
+  password: z.string().min(1, "Password is required to sign"),
+  signatureMeaning: z.string().min(1, "Signature meaning is required"),
+  // Optional FDA letter attachment (base64 data URL, mirrors addResponseDocument).
+  document: z
+    .object({
+      fileName: z.string().min(1),
+      fileUrl: z.string().min(1),
+      fileType: z.string().optional(),
+      fileSize: z.string().optional(),
+    })
+    .optional(),
+});
+
+// outcomeType → { event status, is-terminal, next stage }. "Follow-up
+// Requested" reopens the Response stage so RA can revise + resubmit; the
+// others close the loop.
+const OUTCOME_STATUS: Record<string, { status: string; terminal: boolean; stage: WorkflowStage }> = {
+  Acknowledged: { status: "FDA Acknowledged", terminal: true, stage: "closed" },
+  Closed: { status: "Closed", terminal: true, stage: "closed" },
+  "Warning Letter": { status: "Warning Letter", terminal: true, stage: "closed" },
+  "Follow-up Requested": { status: "Response Drafted", terminal: false, stage: "response" },
+};
+
+export async function recordFDA483Outcome(
+  input: z.input<typeof RecordOutcomeSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = RecordOutcomeSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  if (!FDA483_SIGN_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head or Regulatory Affairs can record the FDA outcome" };
+  }
+
+  const existing = await prisma.fDA483Event.findFirst({
+    where: { id: parsed.data.eventId, tenantId: session.user.tenantId },
+    select: { id: true, referenceNumber: true, status: true },
+  });
+  if (!existing) return { success: false, error: "FDA 483 event not found" };
+  if (existing.status !== "Response Submitted" && existing.status !== "FDA Acknowledged") {
+    return { success: false, error: "Record the outcome only after the response has been submitted." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  // §11.200(a)(1)(ii) — re-authenticate at the moment of signing.
+  const passwordOk = await verifyPasswordForSigning(session.user.id, parsed.data.password);
+  if (!passwordOk) {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: SIGNING_AUDIT_MODULE,
+        action: "SIGNING_PASSWORD_FAILED",
+        recordId: parsed.data.eventId,
+        recordTitle: existing.referenceNumber,
+        newValue: JSON.stringify({ recordType: "FDA483_OUTCOME", attempt_at: new Date().toISOString() }),
+      },
+    });
+    return { success: false, error: "Password verification failed. Please try again." };
+  }
+
+  const map = OUTCOME_STATUS[parsed.data.outcomeType];
+  try {
+    const recordedAt = new Date();
+    const canonical = JSON.stringify({
+      recordType: "FDA483_OUTCOME",
+      eventId: existing.id,
+      referenceNumber: existing.referenceNumber,
+      outcomeType: parsed.data.outcomeType,
+      note: parsed.data.note ?? "",
+      signatureMeaning: parsed.data.signatureMeaning,
+      recordedAt: recordedAt.toISOString(),
+    });
+    const contentHash = computeContentHash(canonical);
+    const contentSummary = `FDA 483 ${existing.referenceNumber} outcome "${parsed.data.outcomeType}" recorded by ${session.user.name} (${session.user.role}) — meaning: ${parsed.data.signatureMeaning}`;
+    const provenance = await readSigningProvenance();
+
+    const { event, signedRecord } = await prisma.$transaction(async (tx) => {
+      const sig = await tx.signedRecord.create({
+        data: {
+          tenantId: session.user.tenantId,
+          recordType: "FDA483_OUTCOME",
+          recordId: existing.id,
+          signerId: session.user.id,
+          signerName: session.user.name,
+          signerRole: session.user.role,
+          signerEmail: session.user.email,
+          signatureMeaning: parsed.data.signatureMeaning,
+          contentHash,
+          contentSummary,
+          passwordVerifiedAt: recordedAt,
+          ipAddress: provenance.ipAddress,
+          userAgent: provenance.userAgent,
+        },
+      });
+      const updated = await tx.fDA483Event.update({
+        where: { id: parsed.data.eventId, tenantId: session.user.tenantId },
+        data: {
+          status: map.status,
+          currentStage: map.stage,
+          outcomeType: parsed.data.outcomeType,
+          outcomeNote: parsed.data.note ?? null,
+          outcomeSignatureId: sig.id,
+          closedAt: map.terminal ? recordedAt : null,
+        },
+      });
+      if (parsed.data.document) {
+        await tx.fDA483Document.create({
+          data: {
+            eventId: parsed.data.eventId,
+            fileName: parsed.data.document.fileName,
+            fileUrl: parsed.data.document.fileUrl,
+            fileType: parsed.data.document.fileType ?? null,
+            fileSize: parsed.data.document.fileSize ?? null,
+            type: "fda_outcome",
+            uploadedBy: session.user.name,
+          },
+        });
+      }
+      return { event: updated, signedRecord: sig };
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: FDA483_AUDIT_MODULE,
+        action: "FDA483_OUTCOME_RECORDED",
+        recordId: parsed.data.eventId,
+        recordTitle: existing.referenceNumber,
+        newValue: JSON.stringify({ outcomeType: parsed.data.outcomeType, status: map.status }),
+      },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: SIGNING_AUDIT_MODULE,
+        action: "FDA483_OUTCOME_SIGNED",
+        recordId: signedRecord.id,
+        recordTitle: existing.referenceNumber,
+        newValue: JSON.stringify({
+          signerId: session.user.id,
+          contentHashPrefix: contentHash.slice(0, 16),
+          outcomeType: parsed.data.outcomeType,
+          eventId: existing.id,
+        }),
+      },
+    });
+    revalidatePath("/fda-483");
+    revalidatePath("/");
+    return { success: true, data: event };
+  } catch (err) {
+    console.error("[action] recordFDA483Outcome failed:", err);
+    return { success: false, error: "Failed to record the outcome" };
   }
 }
 

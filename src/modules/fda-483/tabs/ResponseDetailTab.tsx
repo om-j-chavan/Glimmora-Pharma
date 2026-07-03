@@ -39,7 +39,9 @@ import {
   ArrowRight,
   Paperclip,
   AlertCircle,
+  Download,
 } from "lucide-react";
+import { downloadPDF, downloadLetterPDF, type Cell } from "@/lib/exportTable";
 import dayjs from "@/lib/dayjs";
 import { addResponseDocument, removeResponseDocument } from "@/actions/fda483";
 import { DocumentUpload } from "@/components/shared";
@@ -51,7 +53,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
-import { computeReadinessRows, getEffectiveEventStatus, FDA483_AUDIT_MODULE } from "../_shared";
+import { computeReadinessRows, getEffectiveEventStatus, isEventLocked, FDA483_AUDIT_MODULE } from "../_shared";
 import type { DetailTab } from "../useEventDetailUrlState";
 
 export interface ResponseDetailTabProps {
@@ -196,14 +198,12 @@ export function ResponseDetailTab({
 
   /* ── Derived state ── */
 
-  const isSubmitted =
-    liveEvent.status === "Response Submitted" || liveEvent.status === "Closed";
+  const isSubmitted = isEventLocked(liveEvent.status);
   const effectiveStatus = getEffectiveEventStatus(
     liveEvent.status,
     liveEvent.responseDeadline,
   );
-  const isTerminal =
-    effectiveStatus === "Closed" || effectiveStatus === "Response Submitted";
+  const isTerminal = isEventLocked(effectiveStatus);
 
   // Linked CAPAs for the submitted-success card.
   const linkedCapas = liveEvent.observations
@@ -302,8 +302,66 @@ export function ResponseDetailTab({
 
   /* ════════════ Render ════════════ */
 
+  function exportResponsePackage() {
+    const headers = ["#", "Observation", "Severity", "Area", "Regulation", "Root cause", "CAPA"];
+    const rows: Cell[][] = liveEvent.observations.map((o) => {
+      const capa = o.capaId ? capas.find((c) => c.id === o.capaId) : undefined;
+      return [
+        o.number,
+        o.text,
+        o.severity,
+        o.area || "—",
+        o.regulation || "—",
+        o.rootCause || "—",
+        capa?.reference ?? (o.capaId ? o.capaId.slice(0, 8) : "—"),
+      ];
+    });
+    downloadPDF(`response-package-${liveEvent.referenceNumber}`, headers, rows, {
+      title: `FDA 483 ${liveEvent.referenceNumber} — Response Package`,
+      subtitle: `${liveEvent.observations.length} observation${liveEvent.observations.length === 1 ? "" : "s"} · status: ${liveEvent.status}`,
+    });
+  }
+
+  // The actual response LETTER (the drafted narrative) as a formal PDF the user
+  // sends to the agency. Distinct from the observations "package" table above.
+  function exportResponseLetter() {
+    downloadLetterPDF(
+      `response-letter-${liveEvent.referenceNumber}`,
+      `${liveEvent.agency} ${liveEvent.referenceNumber} — Response Letter`,
+      draftText,
+      {
+        reference: liveEvent.referenceNumber,
+        agency: liveEvent.agency,
+        date: dayjs().tz(timezone).format(dateFormat),
+      },
+    );
+  }
+
   return (
     <div className="space-y-4">
+      {/* ── Export toolbar ── */}
+      <div className="flex justify-end gap-2 flex-wrap">
+        <Button
+          variant="primary"
+          size="sm"
+          icon={Download}
+          onClick={exportResponseLetter}
+          disabled={!draftText}
+          title={draftText ? "Download the response letter as a PDF to send to the agency" : "Write or generate the response draft first"}
+        >
+          Download response letter (PDF)
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={Download}
+          onClick={exportResponsePackage}
+          disabled={liveEvent.observations.length === 0}
+        >
+          Export observations (PDF)
+        </Button>
+      </div>
+
       {/* ── Submitted success card (only when terminal) ── */}
       {isSubmitted && (
         <div

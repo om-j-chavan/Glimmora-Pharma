@@ -12,6 +12,7 @@ import {
   DEADLINE_FORMULA_BY_EVENT_TYPE,
   REFERENCE_LABEL_BY_EVENT_TYPE,
 } from "../_shared";
+import { roleLabel } from "@/lib/labels/roles";
 
 const eventSchema = z.object({
   type: z.enum([
@@ -20,8 +21,15 @@ const eventSchema = z.object({
     "EMA Inspection",
     "MHRA Inspection",
     "WHO Inspection",
+    "Health Canada Inspection",
+    "TGA Inspection",
+    "PMDA Inspection",
+    "CDSCO Inspection",
+    "ANVISA Inspection",
+    "Other Inspection",
   ]),
-  referenceNumber: z.string().min(1, "Reference required"),
+  // Optional — auto-generated server-side when left blank.
+  referenceNumber: z.string().optional(),
   siteId: z.string().min(1, "Site required"),
   inspectionDate: z.string().min(1, "Inspection start date required"),
   inspectionEndDate: z.string().optional(),
@@ -52,6 +60,7 @@ interface Site {
 interface User {
   id: string;
   name: string;
+  role: string;
 }
 
 export interface AddEventModalProps {
@@ -180,6 +189,12 @@ export function AddEventModal({
                     "EMA Inspection",
                     "MHRA Inspection",
                     "WHO Inspection",
+                    "Health Canada Inspection",
+                    "TGA Inspection",
+                    "PMDA Inspection",
+                    "CDSCO Inspection",
+                    "ANVISA Inspection",
+                    "Other Inspection",
                   ].map((t) => ({ value: t, label: t }))}
                 />
               )}
@@ -215,15 +230,20 @@ export function AddEventModal({
               className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
               style={{ color: "var(--text-muted)" }}
             >
-              {refLabel.label} <span className="text-(--danger)" aria-hidden="true">*</span>
+              {refLabel.label}{" "}
+              <span className="text-[10px] normal-case" style={{ color: "var(--text-muted)" }}>
+                (optional)
+              </span>
             </label>
             <input
               id="ev-ref"
               className="input text-[12px]"
               placeholder={refLabel.placeholder}
-              aria-required="true"
               {...form.register("referenceNumber")}
             />
+            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+              Leave blank to auto-generate a unique code (e.g. 483-MUM-2026-004).
+            </p>
             {form.formState.errors.referenceNumber && (
               <p role="alert" className="text-[11px] text-[#ef4444] mt-1">
                 {form.formState.errors.referenceNumber.message}
@@ -368,7 +388,7 @@ export function AddEventModal({
                   onChange={field.onChange}
                   placeholder="Select QA owner"
                   width="w-full"
-                  options={users.map((u) => ({ value: u.id, label: u.name }))}
+                  options={users.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
                 />
               )}
             />

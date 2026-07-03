@@ -112,7 +112,10 @@ export function canWriteDeviation(role: string): boolean {
  *   qa_head/super_admin; delete = qa_head/customer_admin (Phase-6 cleanup
  *   FIX 4 — tightened from "any non-viewer via requireGxPAuthor" to the app's
  *   established admin-delete pattern; super_admin stays excluded by the wall). ── */
-export const FDA483_SIGN_ROLES: readonly string[] = ["qa_head", "super_admin"];
+// Sign & submit the FDA 483 response + record the FDA outcome. Regulatory
+// Affairs owns external regulator communication (Response + Sign-off + Outcome
+// stages), so it signs alongside QA Head. RA seed users are gxpSignatory.
+export const FDA483_SIGN_ROLES: readonly string[] = ["qa_head", "regulatory_affairs", "super_admin"];
 export const FDA483_DELETE_ROLES: readonly string[] = ["qa_head", "customer_admin"];
 
 /* ── CAPA module surface (Phase-6 cleanup FIX 1) ── The CAPA module (nav +

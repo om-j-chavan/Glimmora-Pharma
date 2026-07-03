@@ -13,6 +13,9 @@ import {
   History,
   ArrowLeft,
   Clock,
+  ArrowRightCircle,
+  Gavel,
+  CheckCircle2,
 } from "lucide-react";
 import type {
   FDA483Event as PrismaFDA483Event,
@@ -36,7 +39,8 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import { displayUserName } from "@/lib/identity-display";
 import type { FDA483Event, EventStatus, Observation, Commitment } from "@/types/fda483";
-import { daysUntil, eventStatusBadge, getEffectiveEventStatus, FDA483_AUDIT_MODULE } from "./_shared";
+import { daysUntil, eventStatusBadge, getEffectiveEventStatus, isEventLocked, FDA483_AUDIT_MODULE, STAGE_CONFIG } from "./_shared";
+import { FDA483_SIGN_ROLES } from "@/lib/permissions/roleSets";
 import {
   createFDA483Event,
   addObservation as addObservationServer,
@@ -47,6 +51,9 @@ import {
   saveAGIDraft as saveAGIDraftServer,
   signSubmitFDA483Response,
   raiseCAPAFromObservation,
+  bulkAddObservationsFromExtraction,
+  handoffFDA483Stage,
+  recordFDA483Outcome,
 } from "@/actions/fda483";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -66,6 +73,8 @@ import { AddObservationModal, type ObsFormData } from "./modals/AddObservationMo
 import { AddCommitmentModal, type CommitFormData } from "./modals/AddCommitmentModal";
 import { CommitmentDetailModal } from "./modals/CommitmentDetailModal";
 import { SignSubmitModal } from "./modals/SignSubmitModal";
+import { ImportObservationsModal, type ImportObservationsPayload } from "./modals/ImportObservationsModal";
+import { OutcomeModal, type OutcomePayload } from "./modals/OutcomeModal";
 import { DocumentSummaryPanel } from "@/components/search/DocumentSummaryPanel";
 
 /* ── Helpers ── */
@@ -83,7 +92,7 @@ function getEffectiveStatus(e: FDA483Event): EventStatus {
 
 export function computeReadiness(e: FDA483Event): number {
   // New step order: Event (20) → Observations (40) → RCA (60) → Response draft (80) → Submitted (100)
-  if (e.status === "Response Submitted" || e.status === "Closed") return 100;
+  if (isEventLocked(e.status)) return 100;
   const hasObs = e.observations.length > 0;
   const allRca = hasObs && e.observations.every((o) => !!o.rootCause?.trim());
   const allCapa = hasObs && e.observations.every((o) => !!o.capaId);
@@ -172,6 +181,9 @@ function adaptEvent(p: PrismaEventWithRelations): FDA483Event {
       : undefined,
     responseDeadline: p.responseDeadline.toISOString(),
     status: p.status as EventStatus,
+    currentStage: (p.currentStage ?? "intake") as FDA483Event["currentStage"],
+    outcomeType: (p.outcomeType ?? undefined) as FDA483Event["outcomeType"],
+    outcomeNote: p.outcomeNote ?? undefined,
     leadInvestigator: p.leadInvestigator ?? undefined,
     internalOwnerId: p.internalOwnerId ?? undefined,
     observations: p.observations.map((o) => ({
@@ -276,8 +288,7 @@ function EventHeader({
   const stat = eventStatusBadge(event.status);
   const siteName =
     sites.find((s) => s.id === event.siteId)?.name ?? event.siteId;
-  const isTerminal =
-    event.status === "Response Submitted" || event.status === "Closed";
+  const isTerminal = isEventLocked(event.status);
   const days = daysUntil(event.responseDeadline);
 
   // Days chip — same tone thresholds as the list-view deadline alert /
@@ -361,6 +372,85 @@ function EventHeader({
   );
 }
 
+/**
+ * StageBanner — the role-based ownership pointer. Shows the current stage +
+ * owning role + next-step hint, and a single contextual action:
+ *   - intake / investigation → a soft "Hand off" button (owner role only)
+ *   - outcome → "Record FDA Outcome" (sign roles only)
+ *   - closed → the recorded outcome, no action.
+ * Soft: it never blocks editing — it's an ownership convenience.
+ */
+function StageBanner({
+  event,
+  role,
+  onHandoff,
+  onRecordOutcome,
+}: {
+  event: FDA483Event;
+  role: string;
+  onHandoff: (toStage: "investigation" | "response") => void;
+  onRecordOutcome: () => void;
+}) {
+  const stage = event.currentStage ?? "intake";
+  const cfg = STAGE_CONFIG[stage];
+  if (!cfg) return null;
+  const isOwner = role === cfg.ownerRole;
+  const canSignOutcome = FDA483_SIGN_ROLES.includes(role);
+  const isClosed = stage === "closed";
+
+  return (
+    <div
+      className="card"
+      style={{
+        borderLeft: `3px solid ${isClosed ? "var(--success)" : "var(--brand)"}`,
+      }}
+    >
+      <div className="card-body flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+              Stage
+            </span>
+            <Badge variant={isClosed ? "green" : "blue"}>{cfg.label}</Badge>
+            {!isClosed && (
+              <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                Owner: <strong>{cfg.ownerLabel}</strong>
+              </span>
+            )}
+            {isClosed && event.outcomeType && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium" style={{ color: "var(--success)" }}>
+                <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> FDA outcome: {event.outcomeType}
+              </span>
+            )}
+          </div>
+          {!isClosed && (
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              Next: {cfg.nextHint}
+            </p>
+          )}
+        </div>
+
+        {/* Contextual action */}
+        {!isClosed && cfg.nextActionLabel && cfg.nextStage && isOwner && (
+          <Button
+            variant="primary"
+            size="sm"
+            icon={ArrowRightCircle}
+            onClick={() => onHandoff(cfg.nextStage as "investigation" | "response")}
+          >
+            {cfg.nextActionLabel}
+          </Button>
+        )}
+        {stage === "outcome" && canSignOutcome && (
+          <Button variant="primary" size="sm" icon={Gavel} onClick={onRecordOutcome}>
+            Record FDA Outcome
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function FDA483Page({
   events: prismaEvents,
   stats: _stats,
@@ -412,6 +502,8 @@ export function FDA483Page({
   const [siteFilter, setSiteFilter] = useState("");
   const [addEventOpen, setAddEventOpen] = useState(false);
   const [addObsOpen, setAddObsOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [outcomeOpen, setOutcomeOpen] = useState(false);
   const [editingObs, setEditingObs] = useState<Observation | null>(null);
   const [addCommitOpen, setAddCommitOpen] = useState(false);
   // Edit / complete a single commitment (CommitmentDetailModal).
@@ -492,8 +584,7 @@ export function FDA483Page({
   const hasObservations = !!liveEvent && liveEvent.observations.length > 0;
   const hasRcaAndCapa = hasObservations
     && liveEvent.observations.every((o) => o.rootCause?.trim() && !!o.capaId);
-  const hasSubmitted = !!liveEvent
-    && (liveEvent.status === "Response Submitted" || liveEvent.status === "Closed");
+  const hasSubmitted = !!liveEvent && isEventLocked(liveEvent.status);
   const canSubmitResponse = hasRcaAndCapa;
 
   /* ── Handlers ── */
@@ -606,7 +697,7 @@ export function FDA483Page({
       {!liveEvent && (
         <>
           <PageHeader
-            title="FDA 483 &amp; Regulatory"
+            title="Inspections &amp; Regulatory"
             subtitle={
               events.length === 0
                 ? "No regulatory events logged yet"
@@ -743,6 +834,20 @@ export function FDA483Page({
               dateFormat={dateFormat}
               ownerName={(id) => displayUserName(id, users)}
             />
+            <StageBanner
+              event={liveEvent}
+              role={role}
+              onHandoff={async (toStage) => {
+                const result = await handoffFDA483Stage({ eventId: liveEvent.id, toStage });
+                if (!result.success) {
+                  toast.error(`Could not complete action: ${result.error || "Failed to hand off. Please try again."}`);
+                  return;
+                }
+                toast.success(toStage === "investigation" ? "Handed to QA for investigation." : "Handed back to RA for response.");
+                router.refresh();
+              }}
+              onRecordOutcome={() => setOutcomeOpen(true)}
+            />
             <TabBar
               tabs={DETAIL_TABS}
               activeTab={urlState.tab}
@@ -785,6 +890,7 @@ export function FDA483Page({
                     urlState.setObsIndex(idx >= 0 ? idx : null);
                   }}
                   onAddObservation={() => { setEditingObs(null); setAddObsOpen(true); }}
+                  onImportFromPdf={() => setImportOpen(true)}
                   onEditObservation={(obs) => { setEditingObs(obs); setAddObsOpen(true); }}
                   onAddCommitment={() => setAddCommitOpen(true)}
                   onNavigateToInvestigation={(obsIndex) => urlState.navigate({ tab: "investigation", obsIndex })}
@@ -821,7 +927,7 @@ export function FDA483Page({
                   }}
                   onSave5Why={async () => {
                     if (!selectedObs) return;
-                    if (liveEvent.status === "Response Submitted" || liveEvent.status === "Closed") return;
+                    if (isEventLocked(liveEvent.status)) return;
                     const text = whyAnswers.filter((w) => w.trim()).map((w, i) => `Why ${i + 1}: ${w}`).join("\n");
                     const result = await updateObservationServer(selectedObs.id, {
                       rootCause: text,
@@ -841,7 +947,7 @@ export function FDA483Page({
                   }}
                   onSaveFishbone={async () => {
                     if (!selectedObs) return;
-                    if (liveEvent.status === "Response Submitted" || liveEvent.status === "Closed") return;
+                    if (isEventLocked(liveEvent.status)) return;
                     const text = Object.entries(fishboneAnswers).filter(([, v]) => v.trim()).map(([k, v]) => `${k}: ${v}`).join("\n") + `\n\nRoot cause: ${fishboneRoot}`;
                     const result = await updateObservationServer(selectedObs.id, {
                       rootCause: text,
@@ -861,7 +967,7 @@ export function FDA483Page({
                   }}
                   onSaveFreeform={async () => {
                     if (!selectedObs) return;
-                    if (liveEvent.status === "Response Submitted" || liveEvent.status === "Closed") return;
+                    if (isEventLocked(liveEvent.status)) return;
                     const result = await updateObservationServer(selectedObs.id, {
                       rootCause: freeformRCA.trim(),
                     });
@@ -1114,6 +1220,54 @@ export function FDA483Page({
           // Stay on the current event so the user sees the submitted success view
         }}
       />
+
+      {liveEvent && (
+        <ImportObservationsModal
+          open={importOpen}
+          onClose={() => setImportOpen(false)}
+          inspectionReference={liveEvent.referenceNumber}
+          facility={sites.find((s) => s.id === liveEvent.siteId)?.name ?? liveEvent.siteId}
+          onImport={async (payload: ImportObservationsPayload) => {
+            const result = await bulkAddObservationsFromExtraction({
+              eventId: liveEvent.id,
+              observations: payload.observations,
+              sourceFile: payload.sourceFile,
+            });
+            if (!result.success) {
+              toast.error(`Could not complete action: ${result.error || "Failed to import observations. Please try again."}`);
+              throw new Error(result.error || "import failed");
+            }
+            setImportOpen(false);
+            toast.success(`${result.data.created} observation${result.data.created === 1 ? "" : "s"} imported.`);
+            router.refresh();
+          }}
+        />
+      )}
+
+      {liveEvent && (
+        <OutcomeModal
+          open={outcomeOpen}
+          onClose={() => setOutcomeOpen(false)}
+          referenceNumber={liveEvent.referenceNumber}
+          onSubmit={async (payload: OutcomePayload) => {
+            const result = await recordFDA483Outcome({
+              eventId: liveEvent.id,
+              outcomeType: payload.outcomeType,
+              note: payload.note,
+              password: payload.password,
+              signatureMeaning: payload.signatureMeaning,
+              document: payload.document,
+            });
+            if (!result.success) {
+              // Keep the modal open so the user can correct (e.g. wrong password).
+              throw new Error(result.error || "Failed to record outcome");
+            }
+            setOutcomeOpen(false);
+            toast.success(`FDA outcome "${payload.outcomeType}" recorded.`);
+            router.refresh();
+          }}
+        />
+      )}
 
       <NoSitesPopup isOpen={noSitesOpen} onClose={() => setNoSitesOpen(false)} feature="FDA 483 events" />
     </main>

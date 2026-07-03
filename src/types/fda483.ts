@@ -23,7 +23,13 @@ export type EventType =
   | "Warning Letter"
   | "EMA Inspection"
   | "MHRA Inspection"
-  | "WHO Inspection";
+  | "WHO Inspection"
+  | "Health Canada Inspection"
+  | "TGA Inspection"
+  | "PMDA Inspection"
+  | "CDSCO Inspection"
+  | "ANVISA Inspection"
+  | "Other Inspection";
 
 export type EventStatus =
   | "Open"
@@ -37,6 +43,23 @@ export type EventStatus =
   | "Warning Letter";
 
 export type ObservationSeverity = "Critical" | "High" | "Medium" | "Low";
+
+/** Role-based workflow pointer (orthogonal to EventStatus). Drives the
+ *  stage-owner banner + handoff. Owner mapping lives in STAGE_CONFIG
+ *  (src/modules/fda-483/_shared.ts). */
+export type WorkflowStage =
+  | "intake"
+  | "investigation"
+  | "response"
+  | "outcome"
+  | "closed";
+
+/** FDA reply captured at the Outcome step. */
+export type OutcomeType =
+  | "Acknowledged"
+  | "Closed"
+  | "Warning Letter"
+  | "Follow-up Requested";
 
 export type ObservationStatus =
   | "Open"
@@ -123,6 +146,11 @@ export interface FDA483Event {
   inspectionEndDate?: string;
   responseDeadline: string;
   status: EventStatus;
+  /** Role-based workflow pointer; defaults to "intake" on legacy rows. */
+  currentStage: WorkflowStage;
+  /** FDA outcome capture (Record Outcome step); absent until recorded. */
+  outcomeType?: OutcomeType;
+  outcomeNote?: string;
   /** FDA inspector named on the form (extended capture); optional. */
   leadInvestigator?: string;
   /** Internal QA owner user id (extended capture); optional on legacy rows. */

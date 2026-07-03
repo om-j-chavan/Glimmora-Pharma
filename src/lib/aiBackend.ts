@@ -430,6 +430,52 @@ export async function scanStageDocument(
 }
 
 /* ══════════════════════════════════════════════════════════════ */
+/* FDA 483 Extraction (upload a 483 PDF → structured observations) */
+/* ══════════════════════════════════════════════════════════════ */
+
+/** One extracted observation as returned by the backend (snake_case DTO). */
+export interface Fda483ObservationDTO {
+  number: number;
+  text: string;
+  regulation?: string | null;
+  area?: string | null;
+  severity: string;
+  source_page?: number | null;
+  confidence?: number | null;
+}
+
+export interface Fda483ExtractionResponse {
+  inspection_reference: string;
+  file_name: string;
+  page_count: number;
+  prompt_version: string;
+  observations: Fda483ObservationDTO[];
+  /** Non-null when nothing extractable was found (e.g. a scanned PDF). */
+  note?: string | null;
+  extracted_at: string;
+}
+
+/**
+ * Extract inspectional observations from an uploaded FDA 483 PDF. Used by the
+ * mock-first gateway's getFda483Extraction() when AI_MOCK.fda483Extraction is
+ * false. The file is sent as multipart so the backend can extract its text.
+ */
+export async function scanFda483Document(
+  input: { file: File; inspectionReference: string; facility: string },
+  token: string,
+): Promise<Fda483ExtractionResponse> {
+  const fd = new FormData();
+  fd.append("file", input.file);
+  fd.append("inspection_reference", input.inspectionReference);
+  fd.append("facility", input.facility);
+  return request<Fda483ExtractionResponse>("/api/v1/fda483-extraction/scan", {
+    method: "POST",
+    formBody: fd,
+    token,
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════ */
 /* AGI agents (Regulatory / Deviation / Batch / Drift)            */
 /* ══════════════════════════════════════════════════════════════ */
 /**

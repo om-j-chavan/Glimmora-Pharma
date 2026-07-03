@@ -11,6 +11,7 @@ import { Toggle } from "@/components/ui/Toggle";
 import { Modal } from "@/components/ui/Modal";
 import { RcaMethodFields, rcaDetailToText, type RcaDetail } from "./components/RcaMethodFields";
 import type { LinkableRecord } from "@/lib/queries/capas";
+import { roleLabel } from "@/lib/labels/roles";
 import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
 
 // Phase A field set + Batch 2 method-driven RCA (optional at creation).
@@ -153,7 +154,7 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSite
           {!lockedSiteId && (
             <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p><Controller name="siteId" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select site" width="w-full" options={sites.filter((s) => s.status === "Active").map((s) => ({ value: s.id, label: s.name }))} />} />{errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}</div>
           )}
-          <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Assigned to</p><Controller name="owner" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select assignee (optional)" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} />{errors.owner && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.owner.message}</p>}</div>
+          <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Assigned to</p><Controller name="owner" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select assignee (optional)" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />} />{errors.owner && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.owner.message}</p>}</div>
           <div><label htmlFor="capa-due" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Due date <span className="text-(--danger)">*</span></label><input id="capa-due" type="date" className="input text-[12px]" {...reg("dueDate")} />{errors.dueDate && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.dueDate.message}</p>}</div>
 
           <div className={clsx("col-span-2 flex items-center justify-between p-3 rounded-lg border", "bg-(--bg-surface) border-(--bg-border)")}>

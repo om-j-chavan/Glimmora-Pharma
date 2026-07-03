@@ -167,7 +167,7 @@ export function AuditTrailPage({ rows, totalCount, truncated, limit }: AuditTrai
           value={filters.userId}
           onChange={(v) => setFilter("userId", v)}
           width="w-44"
-          options={[{ value: "all", label: "All users" }, ...users.map((u) => ({ value: u.id, label: u.name }))]}
+          options={[{ value: "all", label: "All users" }, ...users.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))]}
         />
         <DatePicker
           id="audit-date-from"

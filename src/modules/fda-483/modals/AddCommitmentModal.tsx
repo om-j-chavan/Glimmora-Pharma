@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { roleLabel } from "@/lib/labels/roles";
 
 // Internal form shape. linkType drives which (optional) source id applies;
 // the refinements make the matching id required.
@@ -41,6 +42,7 @@ interface User {
   id: string;
   name: string;
   status: string;
+  role: string;
 }
 
 export interface CommitObservationOption {
@@ -196,7 +198,7 @@ export function AddCommitmentModal({ open, onClose, onSave, users, observations,
                   onChange={field.onChange}
                   placeholder="Select owner"
                   width="w-full"
-                  options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))}
+                  options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
                 />
               )}
             />

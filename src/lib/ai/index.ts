@@ -26,6 +26,7 @@ import {
   mockFindingTriage,
   mockApprovalBrief,
   mockReadinessGuidance,
+  mockFda483Extraction,
 } from "./mockData";
 import {
   scanStageDocument,
@@ -38,6 +39,7 @@ import {
   fetchFindingTriage,
   fetchApprovalBrief,
   fetchReadinessGuidance,
+  scanFda483Document,
 } from "../aiBackend";
 import type { DriftAlert } from "@/types/agi";
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
@@ -64,6 +66,7 @@ export const AI_MOCK = {
   findingTriage: false, // Feature I — POST /api/v1/finding-triage/classify
   approvalBrief: false, // Feature J — POST /api/v1/capa-approval-brief/generate
   readinessGuidance: false, // Feature K — POST /api/v1/capa-readiness-guidance/generate
+  fda483Extraction: true, // Feature M — POST /api/v1/fda483-extraction/scan (no real backend flip until tested)
 } as const;
 
 /**
@@ -755,5 +758,118 @@ export async function getReadinessGuidance(
       err,
     );
     return mockReadinessGuidance(input);
+  }
+}
+
+/* ── Feature M — FDA 483 PDF Auto-Extraction ─────────────────────────
+ * Upload a digital (text-selectable) FDA 483 PDF → the agent extracts each
+ * inspectional observation VERBATIM + a suggested severity/area/regulation,
+ * so QA reviews + bulk-imports instead of typing each observation by hand.
+ *
+ * CAN DO: read the PDF, extract observation text, suggest severity/area, flag
+ * a confidence + source page. CANNOT DO: create the observations itself, lock a
+ * severity, or raise a CAPA — every field is a suggestion the human reviews and
+ * edits before the human-confirmed bulk create (which is Part 11 audited).
+ *
+ * Real backend: POST /api/v1/fda483-extraction/scan (pypdf text → gpt-4o). On
+ * any backend error this falls back to the deterministic mock, badged
+ * `source: "mock"`. Scanned/image PDFs yield no text in Phase 1 → empty list +
+ * a `note` (OCR is a Phase-2 addition). */
+
+/** Severity the extraction UI + CreateObservationSchema accept. */
+export type ExtractedSeverity = "Critical" | "High" | "Medium" | "Low";
+
+export interface ExtractedObservation {
+  /** Observation number as printed on the 483 (1, 2, 3, …). */
+  number: number;
+  /** Verbatim observation wording. */
+  text: string;
+  regulation: string;
+  area: string;
+  severity: ExtractedSeverity;
+  /** 1-based page the observation was found on (0 when unknown). */
+  sourcePage: number;
+  /** 0–100 extraction confidence. */
+  confidence: number;
+}
+
+export interface Fda483ExtractionResult {
+  observations: ExtractedObservation[];
+  fileName: string;
+  pageCount: number;
+  /** Non-null when nothing extractable was found (e.g. a scanned PDF). */
+  note: string | null;
+  extractedAt: string;
+  source: "mock" | "backend";
+}
+
+export interface Fda483ExtractionInput {
+  /** The uploaded PDF. Required for the real backend (it extracts text); the
+   *  mock ignores the bytes and returns deterministic sample observations. */
+  file?: File | null;
+  fileName: string;
+  inspectionReference: string;
+  facility: string;
+  /** AI access token for the real backend; ignored by the mock. */
+  token?: string | null;
+}
+
+function normalizeExtractedSeverity(s: string | null | undefined): ExtractedSeverity {
+  const v = (s || "").toLowerCase();
+  if (v.startsWith("crit")) return "Critical";
+  if (v === "high" || v === "major") return "High";
+  if (v === "low" || v === "minor") return "Low";
+  return "Medium";
+}
+
+export async function getFda483Extraction(
+  input: Fda483ExtractionInput,
+): Promise<Fda483ExtractionResult> {
+  if (AI_MOCK.fda483Extraction) {
+    logMockUsage("getFda483Extraction");
+    // ~1.6s shim so the "Extracting observations…" state is visible.
+    await delay(1600);
+    return mockFda483Extraction(input.fileName);
+  }
+
+  // Real backend: extract text server-side + structure with the LLM. Identical
+  // return shape to the mock so flipping AI_MOCK.fda483Extraction is the only
+  // change required.
+  if (!input.file) {
+    throw new Error("FDA 483 extraction requires the uploaded file to scan.");
+  }
+  try {
+    const dto = await scanFda483Document(
+      {
+        file: input.file,
+        inspectionReference: input.inspectionReference,
+        facility: input.facility,
+      },
+      input.token ?? "",
+    );
+    return {
+      fileName: dto.file_name ?? input.fileName,
+      pageCount: typeof dto.page_count === "number" ? dto.page_count : 0,
+      note: dto.note ?? null,
+      extractedAt: dto.extracted_at ?? new Date().toISOString(),
+      source: "backend",
+      observations: (dto.observations ?? []).map((o, i) => ({
+        number: typeof o.number === "number" && o.number > 0 ? o.number : i + 1,
+        text: o.text ?? "",
+        regulation: o.regulation ?? "",
+        area: o.area ?? "",
+        severity: normalizeExtractedSeverity(o.severity),
+        sourcePage:
+          typeof o.source_page === "number" && o.source_page > 0 ? o.source_page : 0,
+        confidence:
+          typeof o.confidence === "number" ? Math.max(0, Math.min(100, o.confidence)) : 0,
+      })),
+    };
+  } catch (err) {
+    console.error(
+      "[ai] getFda483Extraction: backend failed, falling back to mock.",
+      err,
+    );
+    return mockFda483Extraction(input.fileName);
   }
 }

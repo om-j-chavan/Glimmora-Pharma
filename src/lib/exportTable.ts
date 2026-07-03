@@ -140,3 +140,77 @@ export function downloadPDF(
   const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
   triggerDownload(blob, filename.endsWith(".html") ? filename : `${filename}.html`);
 }
+
+/* ── Letter / prose PDF (for the FDA 483 response letter) ──────────────
+ * downloadPDF above is table-shaped; a formal response LETTER is prose. This
+ * renders a clean A4 letter (letterhead + reference block + the draft body as
+ * paragraphs) and opens the browser print dialog so the user can Save as PDF
+ * and send it to the agency. Same popup-blocked → .html fallback. */
+
+export interface LetterMeta {
+  reference?: string;
+  agency?: string;
+  site?: string;
+  /** Pre-formatted date string (caller controls the format/timezone). */
+  date?: string;
+  org?: string;
+}
+
+function buildLetterHtml(title: string, body: string, meta: LetterMeta): string {
+  const paragraphs = body
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const bodyHtml = paragraphs.length
+    ? paragraphs
+        .map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br/>")}</p>`)
+        .join("")
+    : `<p class="empty">No response draft to export.</p>`;
+  const metaLines = [
+    meta.reference ? `Reference: ${escapeHtml(meta.reference)}` : "",
+    meta.agency ? `Agency: ${escapeHtml(meta.agency)}` : "",
+    meta.site ? `Site: ${escapeHtml(meta.site)}` : "",
+    meta.date ? `Date: ${escapeHtml(meta.date)}` : "",
+  ].filter(Boolean);
+  const org = escapeHtml(meta.org ?? "Pharma Glimmora International");
+  return (
+    `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>` +
+    `@page{size:A4;margin:22mm}` +
+    `*{box-sizing:border-box}` +
+    `body{font-family:Georgia,'Times New Roman',serif;color:#1e293b;font-size:12px;line-height:1.6;margin:0}` +
+    `header{border-bottom:2px solid #0a1f38;padding-bottom:10px;margin-bottom:16px}` +
+    `header .org{font-size:16px;font-weight:700;color:#0a1f38;letter-spacing:.01em}` +
+    `header h1{font-size:13px;font-weight:600;margin:6px 0 0;color:#334155}` +
+    `.meta{margin:0 0 18px;font-size:11px;color:#475569}` +
+    `.meta div{margin:1px 0}` +
+    `p{margin:0 0 11px;text-align:justify;white-space:pre-wrap}` +
+    `p.empty{color:#94a3b8;font-style:italic;text-align:center;padding:24px}` +
+    `footer{margin-top:26px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8}` +
+    `@media print{body{padding:0}}` +
+    `</style></head><body>` +
+    `<header><div class="org">${org}</div><h1>${escapeHtml(title)}</h1></header>` +
+    (metaLines.length ? `<div class="meta">${metaLines.map((l) => `<div>${l}</div>`).join("")}</div>` : "") +
+    bodyHtml +
+    `<footer>Generated from ${org} · Review before submission to the agency.</footer>` +
+    `<script>window.onload=function(){window.focus();window.print();};window.onafterprint=function(){window.close();};</script>` +
+    `</body></html>`
+  );
+}
+
+export function downloadLetterPDF(
+  filename: string,
+  title: string,
+  body: string,
+  meta: LetterMeta = {},
+): void {
+  const html = buildLetterHtml(title, body, meta);
+  const win = window.open("", "_blank", "width=1024,height=768");
+  if (win && win.document) {
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    return;
+  }
+  const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+  triggerDownload(blob, filename.endsWith(".html") ? filename : `${filename}.html`);
+}

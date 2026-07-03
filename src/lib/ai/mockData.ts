@@ -26,6 +26,7 @@ import type {
   ApprovalBriefResult,
   ReadinessGuidanceInput,
   ReadinessGuidanceResult,
+  Fda483ExtractionResult,
 } from "./index";
 import type { DriftAlert } from "@/types/agi";
 
@@ -1576,6 +1577,95 @@ export function mockReadinessGuidance(
     priorityOrder,
     items,
     generatedAt: MOCK_BRIEF_GENERATED_AT,
+    source: "mock",
+  };
+}
+
+/* ── Feature M — FDA 483 PDF Auto-Extraction ─────────────────────────
+ * Deterministic sample extraction so the upload → review → import flow is
+ * fully demoable with AI_MOCK.fda483Extraction = true (no backend needed).
+ * The bytes are ignored; a fixed, realistic 5-observation 483 is returned so
+ * the same upload always yields the same review screen. */
+
+const MOCK_483_OBSERVATIONS: {
+  number: number;
+  text: string;
+  regulation: string;
+  area: string;
+  severity: "Critical" | "High" | "Medium" | "Low";
+  sourcePage: number;
+  confidence: number;
+}[] = [
+  {
+    number: 1,
+    text:
+      "Your firm failed to establish and follow an adequate written testing program " +
+      "designed to assess the stability characteristics of drug products. Specifically, " +
+      "stability samples for Product Lot 2025-114 were not tested at the 6-month station.",
+    regulation: "21 CFR 211.166(a)",
+    area: "Quality Control",
+    severity: "Critical",
+    sourcePage: 1,
+    confidence: 94,
+  },
+  {
+    number: 2,
+    text:
+      "Laboratory records do not include a complete record of all data secured in the " +
+      "course of each test. Chromatographic integration parameters were altered without " +
+      "documented justification or second-person review.",
+    regulation: "21 CFR 211.194(a)",
+    area: "Quality Control / Data Integrity",
+    severity: "Critical",
+    sourcePage: 1,
+    confidence: 91,
+  },
+  {
+    number: 3,
+    text:
+      "Equipment used in the manufacture, processing, and packing of drug product is not " +
+      "cleaned and maintained at appropriate intervals. Cleaning log for Granulator GR-04 " +
+      "showed a gap between 12 and 27 March 2026.",
+    regulation: "21 CFR 211.67(a)",
+    area: "Manufacturing",
+    severity: "High",
+    sourcePage: 2,
+    confidence: 88,
+  },
+  {
+    number: 4,
+    text:
+      "Employees engaged in the manufacture of a drug product lack the training required to " +
+      "perform their assigned functions. Two operators performing aseptic filling had no " +
+      "current gowning qualification on file.",
+    regulation: "21 CFR 211.25(a)",
+    area: "Training / Human Resources",
+    severity: "High",
+    sourcePage: 2,
+    confidence: 86,
+  },
+  {
+    number: 5,
+    text:
+      "Written procedures are not established for the cleaning and maintenance of the " +
+      "environmental monitoring program in the controlled areas. SOP EM-018 was overdue " +
+      "for its scheduled periodic review.",
+    regulation: "21 CFR 211.56(b)",
+    area: "Quality Assurance",
+    severity: "Medium",
+    sourcePage: 3,
+    confidence: 79,
+  },
+];
+
+export function mockFda483Extraction(fileName: string): Fda483ExtractionResult {
+  return {
+    observations: MOCK_483_OBSERVATIONS.map((o) => ({ ...o })),
+    fileName: fileName || "form-483.pdf",
+    pageCount: 3,
+    note: null,
+    // Fixed timestamp so the mock is fully deterministic (no Date.now()).
+    extractedAt: MOCK_BRIEF_GENERATED_AT,
     source: "mock",
   };
 }

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
+import { roleLabel } from "@/lib/labels/roles";
 import { usePermissions } from "@/hooks/usePermissions";
 import { StatusPill, CAPA_STATUS_TOKEN } from "../lib/statusTokens";
 
@@ -106,7 +107,10 @@ export function CAPATrackerTab({
 
   // Phase 6 — distinct CAPA owners (drivers) for the "assigned" filter dropdown.
   const assignedOptions = Array.from(new Set(capas.map((c) => c.owner).filter(Boolean)))
-    .map((uid) => ({ value: uid, label: ownerName(uid, users) }))
+    .map((uid) => {
+      const role = users.find((u) => u.id === uid)?.role;
+      return { value: uid, label: role ? `${ownerName(uid, users)} (${roleLabel(role)})` : ownerName(uid, users) };
+    })
     .sort((a, b) => a.label.localeCompare(b.label));
 
   /* ── Phase 6 queues (role-aware) ── */

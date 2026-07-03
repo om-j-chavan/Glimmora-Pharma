@@ -18,6 +18,7 @@ import {
   daysUntil,
   getEffectiveEventStatus,
   eventStatusBadge,
+  isEventLocked,
 } from "../_shared";
 
 /* ── Helpers ── */
@@ -186,7 +187,7 @@ export function EventsTab({
             rowKey={(ev) => ev.id}
             onRowClick={onOpenEvent}
             rowStyle={(ev) =>
-              (getEffectiveStatus(ev) === "Closed" || getEffectiveStatus(ev) === "Response Submitted")
+              isEventLocked(getEffectiveStatus(ev))
                 ? { opacity: 0.6 }
                 : undefined
             }
@@ -257,7 +258,7 @@ export function EventsTab({
                 render: (ev) => {
                   const days = daysLeft(ev.responseDeadline);
                   const effectiveStatus = getEffectiveStatus(ev);
-                  const isClosed = effectiveStatus === "Closed" || effectiveStatus === "Response Submitted";
+                  const isClosed = isEventLocked(effectiveStatus);
                   return isClosed ? (
                     "—"
                   ) : (

@@ -18,6 +18,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DocumentUpload, type LinkedDocument } from "@/components/shared/DocumentUpload";
+import { roleLabel } from "@/lib/labels/roles";
 import type { Commitment } from "@/types/fda483";
 import {
   updateCommitment as updateCommitmentServer,
@@ -28,7 +29,7 @@ export interface CommitmentDetailModalProps {
   open: boolean;
   mode: "edit" | "complete";
   commitment: Commitment | null;
-  users: { id: string; name: string; status: string }[];
+  users: { id: string; name: string; status: string; role: string }[];
   onClose: () => void;
   onChanged: (msg: string) => void;
   onError: (msg: string) => void;
@@ -129,7 +130,7 @@ export function CommitmentDetailModal({ open, mode, commitment, users, onClose, 
                 onChange={setOwner}
                 placeholder="Select owner"
                 width="w-full"
-                options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))}
+                options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
               />
             </div>
             <div>

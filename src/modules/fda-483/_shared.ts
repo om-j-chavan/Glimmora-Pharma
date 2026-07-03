@@ -23,6 +23,7 @@ import type {
   ObservationSeverity,
   FDA483Event,
   Observation,
+  WorkflowStage,
 } from "@/types/fda483";
 import {
   getSeverityVariant,
@@ -31,7 +32,86 @@ import {
 
 /* ── Re-export narrow types for convenient single-import in consumers ── */
 
-export type { EventStatus, EventType, ObservationStatus, ObservationSeverity };
+export type { EventStatus, EventType, ObservationStatus, ObservationSeverity, WorkflowStage };
+
+/* ── Role-based workflow stages (the ownership handoff model) ──────────
+ *
+ * `currentStage` is a lightweight pointer stored on FDA483Event, ORTHOGONAL
+ * to `status` (which stays the data/urgency state). Each stage maps to a
+ * fixed OWNER ROLE — no per-user assignment. The banner in EventHeader reads
+ * this; the server action (fda483.ts) imports the role mapping for its guard.
+ *
+ * Handoff is SOFT: the two "hand off" buttons (intake→investigation,
+ * investigation→response) only advance the pointer + notify — they do not
+ * lock editing. The response→outcome and outcome→closed transitions happen
+ * via Sign & Submit and Record Outcome respectively (not a handoff button),
+ * so those stages carry `nextActionLabel: null`. */
+
+export interface StageConfig {
+  label: string;
+  /** Role KEY that owns this stage (matches session.user.role). */
+  ownerRole: string;
+  /** Human label for the owning role. */
+  ownerLabel: string;
+  /** One-line "what to do next" hint shown in the banner. */
+  nextHint: string;
+  /** The stage a handoff advances to (null = terminal / advanced elsewhere). */
+  nextStage: WorkflowStage | null;
+  /** Handoff button text — null when this stage advances via a signed action
+   *  (Sign & Submit / Record Outcome) rather than a plain handoff. */
+  nextActionLabel: string | null;
+}
+
+export const STAGE_CONFIG: Record<WorkflowStage, StageConfig> = {
+  intake: {
+    label: "Intake",
+    ownerRole: "regulatory_affairs",
+    ownerLabel: "Regulatory Affairs",
+    nextHint: "Add the observations, then hand to QA for investigation.",
+    nextStage: "investigation",
+    nextActionLabel: "Hand to QA",
+  },
+  investigation: {
+    label: "Investigation",
+    ownerRole: "qa_head",
+    ownerLabel: "QA Head",
+    nextHint: "Complete RCA + raise a CAPA for each observation, then hand back to RA.",
+    nextStage: "response",
+    nextActionLabel: "Hand to RA",
+  },
+  response: {
+    label: "Response & Sign-off",
+    ownerRole: "regulatory_affairs",
+    ownerLabel: "Regulatory Affairs",
+    nextHint: "Draft the response, then Sign & Submit.",
+    nextStage: "outcome",
+    nextActionLabel: null, // advances via Sign & Submit
+  },
+  outcome: {
+    label: "Outcome",
+    ownerRole: "regulatory_affairs",
+    ownerLabel: "Regulatory Affairs",
+    nextHint: "Record FDA's reply to close the event.",
+    nextStage: "closed",
+    nextActionLabel: null, // advances via Record Outcome
+  },
+  closed: {
+    label: "Closed",
+    ownerRole: "",
+    ownerLabel: "—",
+    nextHint: "No further action required.",
+    nextStage: null,
+    nextActionLabel: null,
+  },
+};
+
+export function getStageOwnerRole(stage: WorkflowStage): string {
+  return STAGE_CONFIG[stage]?.ownerRole ?? "";
+}
+
+export function getNextStage(stage: WorkflowStage): WorkflowStage | null {
+  return STAGE_CONFIG[stage]?.nextStage ?? null;
+}
 
 /** Canonical audit-log module string for the FDA 483 module — the single
  *  source of truth shared by server actions (fda483.ts) and the response-tab
@@ -59,6 +139,12 @@ export const FDA483_EVENT_TYPE_VARIANT: Record<EventType, BadgeVariant> = {
   "EMA Inspection": "amber",
   "MHRA Inspection": "amber",
   "WHO Inspection": "blue",
+  "Health Canada Inspection": "blue",
+  "TGA Inspection": "blue",
+  "PMDA Inspection": "blue",
+  "CDSCO Inspection": "blue",
+  "ANVISA Inspection": "blue",
+  "Other Inspection": "gray",
 };
 
 export const FDA483_OBSERVATION_STATUS_VARIANT: Record<ObservationStatus, BadgeVariant> = {
@@ -121,6 +207,12 @@ export const AGENCY_BY_EVENT_TYPE: Record<string, string> = {
   "EMA Inspection": "EMA",
   "MHRA Inspection": "MHRA",
   "WHO Inspection": "WHO",
+  "Health Canada Inspection": "Health Canada",
+  "TGA Inspection": "TGA",
+  "PMDA Inspection": "PMDA",
+  "CDSCO Inspection": "CDSCO",
+  "ANVISA Inspection": "ANVISA",
+  "Other Inspection": "Other",
 };
 
 export function deriveAgency(eventType: string): string {
@@ -136,6 +228,12 @@ export const DEADLINE_FORMULA_BY_EVENT_TYPE: Record<
   "EMA Inspection": { workingDays: null, calendarDays: 30, hintText: "EMA: 30 calendar days from inspection" },
   "MHRA Inspection": { workingDays: 30, calendarDays: null, hintText: "MHRA: 30 working days from inspection" },
   "WHO Inspection": { workingDays: null, calendarDays: 30, hintText: "WHO: 30 calendar days from inspection" },
+  "Health Canada Inspection": { workingDays: null, calendarDays: 30, hintText: "Health Canada: 30 calendar days from inspection (adjust as needed)" },
+  "TGA Inspection": { workingDays: null, calendarDays: 30, hintText: "TGA: 30 calendar days from inspection (adjust as needed)" },
+  "PMDA Inspection": { workingDays: null, calendarDays: 30, hintText: "PMDA: 30 calendar days from inspection (adjust as needed)" },
+  "CDSCO Inspection": { workingDays: null, calendarDays: 30, hintText: "CDSCO: 30 calendar days from inspection (adjust as needed)" },
+  "ANVISA Inspection": { workingDays: null, calendarDays: 30, hintText: "ANVISA: 30 calendar days from inspection (adjust as needed)" },
+  "Other Inspection": { workingDays: null, calendarDays: 30, hintText: "Default: 30 calendar days — override if the agency differs" },
 };
 
 /**
@@ -176,23 +274,67 @@ export const REFERENCE_LABEL_BY_EVENT_TYPE: Record<
   string,
   { label: string; placeholder: string }
 > = {
-  "FDA 483": { label: "Facility Identifier (FEI)", placeholder: "e.g. 3004795103" },
+  "FDA 483": { label: "Event reference", placeholder: "e.g. 483-MUM-2026-004 (auto if blank)" },
   "Warning Letter": { label: "Letter Reference", placeholder: "e.g. WL-2026-CDR-0042" },
   "EMA Inspection": { label: "Inspection ID", placeholder: "e.g. INS/GMP/2026/0123" },
   "MHRA Inspection": { label: "MHRA Reference", placeholder: "e.g. INSP-MHRA-2026-045" },
   "WHO Inspection": { label: "WHO Reference", placeholder: "e.g. WHO-PREQ-2026-008" },
+  "Health Canada Inspection": { label: "Inspection Reference", placeholder: "e.g. HC-INS-2026-0123" },
+  "TGA Inspection": { label: "TGA Reference", placeholder: "e.g. TGA-2026-000123" },
+  "PMDA Inspection": { label: "PMDA Reference", placeholder: "e.g. PMDA-2026-0123" },
+  "CDSCO Inspection": { label: "CDSCO Reference", placeholder: "e.g. CDSCO-2026-0123" },
+  "ANVISA Inspection": { label: "ANVISA Reference", placeholder: "e.g. ANVISA-2026-0123" },
+  "Other Inspection": { label: "Reference number", placeholder: "e.g. INSP-2026-0123" },
+};
+
+/** Reference-code prefix per event type. When the user leaves the reference
+ *  blank, the server auto-generates a UNIQUE code `<prefix>-<siteCode>-<year>-<NNN>`
+ *  (same scheme as observations + seed data) so events never collide — this is
+ *  why an FDA 483's reference must NOT be the facility FEI (one facility has
+ *  many 483s). A real, unique agency reference (e.g. a Warning Letter number)
+ *  typed by the user is honoured as-is. */
+export const REFERENCE_PREFIX_BY_EVENT_TYPE: Record<string, string> = {
+  "FDA 483": "483",
+  "Warning Letter": "WL",
+  "EMA Inspection": "EMA",
+  "MHRA Inspection": "MHRA",
+  "WHO Inspection": "WHO",
+  "Health Canada Inspection": "HC",
+  "TGA Inspection": "TGA",
+  "PMDA Inspection": "PMDA",
+  "CDSCO Inspection": "CDSCO",
+  "ANVISA Inspection": "ANVISA",
+  "Other Inspection": "INS",
 };
 
 /** Promote the stored event status to "Response Due" when the deadline
  *  is within 15 days, unless the event is already in a terminal-or-late
  *  state (Closed / Response Submitted) where the deadline override is
  *  no longer meaningful. The stored status in the DB is unchanged. */
+/** Statuses at/after response submission where the event is LOCKED — no more
+ *  editing of observations / RCA / response, and no deadline "Response Due"
+ *  overlay. Includes the FDA-outcome terminals set by recordFDA483Outcome
+ *  (FDA Acknowledged / Warning Letter) plus the pre-existing Response Submitted
+ *  / Closed. "Follow-up Requested" is intentionally EXCLUDED — it reopens the
+ *  Response stage (status returns to Response Drafted) so editing resumes. */
+export const LOCKED_EVENT_STATUSES: readonly string[] = [
+  "Response Submitted",
+  "FDA Acknowledged",
+  "Closed",
+  "Warning Letter",
+];
+
+export function isEventLocked(status: EventStatus | string): boolean {
+  return (LOCKED_EVENT_STATUSES as readonly string[]).includes(status);
+}
+
 export function getEffectiveEventStatus(
   status: EventStatus | string,
   deadline: string | Date | null | undefined,
 ): EventStatus {
-  if (status === "Closed") return "Closed";
-  if (status === "Response Submitted") return "Response Submitted";
+  // Once locked (submitted or any FDA outcome), the stored status is
+  // authoritative — never overlay a deadline-driven "Response Due".
+  if (isEventLocked(status)) return status as EventStatus;
   const days = daysUntil(deadline);
   if (days !== null && days <= 15) return "Response Due";
   return status as EventStatus;

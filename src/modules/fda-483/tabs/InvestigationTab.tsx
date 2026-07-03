@@ -56,6 +56,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { normalizeSeverityForDisplay } from "@/lib/severity";
+import { roleLabel } from "@/lib/labels/roles";
 import dayjs from "@/lib/dayjs";
 import {
   getRcaSuggestions,
@@ -69,6 +70,7 @@ import {
   observationStatusBadge,
   getRcaStepStatus,
   getCapaStepStatus,
+  isEventLocked,
 } from "../_shared";
 
 export interface SessionUserInfo {
@@ -98,7 +100,7 @@ export interface InvestigationTabProps {
    *  owner field. */
   user: SessionUserInfo;
   /** Active compliance users — populates the RaiseCAPAModal owner picker. */
-  users: { id: string; name: string }[];
+  users: { id: string; name: string; role: string }[];
   /** Tenant sites — resolves siteId to a readable name in the modal. */
   sites?: { id: string; name: string }[];
   /** 5 Why input buffer (one string per Why level, length 5). */
@@ -402,7 +404,7 @@ interface RaiseCAPAModalProps {
   observation: Observation;
   event: FDA483Event;
   /** Active compliance users — populates the Owner picker. */
-  users: { id: string; name: string }[];
+  users: { id: string; name: string; role: string }[];
   /** Tenant sites — resolves event.siteId to a readable site name. */
   sites?: { id: string; name: string }[];
   /** Submit handler — receives the full edited form payload so the parent
@@ -609,7 +611,7 @@ function RaiseCAPAModal({
               onChange={setOwner}
               width="w-full"
               placeholder="Select owner"
-              options={users.map((u) => ({ value: u.id, label: u.name }))}
+              options={users.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
             />
           </div>
           <div>
@@ -1400,6 +1402,17 @@ export function InvestigationTab({
         : -1;
   const selectedObs = effectiveIdx >= 0 ? observations[effectiveIdx] : null;
 
+  // Sync the URL/parent obsIndex when we defaulted to the first observation.
+  // The tab shows observation #1 even when the URL carries no obsIndex, but the
+  // PARENT derives its own `selectedObs` from urlState.obsIndex — if that's null
+  // every RCA/CAPA handler no-ops (`if (!selectedObs) return`). Pushing the
+  // default index up keeps both in sync so the method buttons actually work.
+  useEffect(() => {
+    if (selectedObsIndex === null && hasObservations) {
+      onObsIndexChange(0);
+    }
+  }, [selectedObsIndex, hasObservations, onObsIndexChange]);
+
   // Track most-recent successful save timestamp per-observation (UI hint).
   const [lastSavedAt, setLastSavedAt] = useState<Record<string, string>>({});
   // Drives the "Edit RCA" affordance for a completed RCA.
@@ -1472,8 +1485,7 @@ export function InvestigationTab({
   const fdaCan = usePermissions("fda483");
   const writable = role !== "viewer"
     && fdaCan.canEdit
-    && liveEvent.status !== "Response Submitted"
-    && liveEvent.status !== "Closed";
+    && !isEventLocked(liveEvent.status);
 
   /* ── Empty states ─────────────────────────────────────────────── */
 
