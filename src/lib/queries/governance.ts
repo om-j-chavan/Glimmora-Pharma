@@ -71,6 +71,51 @@ export const getCAPAEvidenceFiles = cache(async (tenantId: string) => {
   });
 });
 
+/**
+ * Surface real CSV/CSA validation stage documents into the global Evidence &
+ * Documents library. These are genuine uploaded files living on ValidationStage
+ * records; the Evidence workspace is the app's single evidence shelf, so it
+ * should gather them alongside standalone Documents and CAPA evidence. Tenant
+ * scope is enforced through the stage's parent system (StageDocument →
+ * ValidationStage → GxPSystem.tenantId). Read-only mirror — managed in CSV/CSA.
+ */
+export const getValidationStageDocuments = cache(async (tenantId: string) => {
+  return prisma.stageDocument.findMany({
+    where: {
+      deletedAt: null,
+      validationStage: { system: { tenantId } },
+    },
+    include: {
+      validationStage: {
+        select: {
+          stageName: true,
+          status: true,
+          system: { select: { id: true, name: true, reference: true } },
+        },
+      },
+    },
+    orderBy: { uploadedAt: "desc" },
+  });
+});
+
+/**
+ * Surface real FDA 483 documents (response packages, uploaded artefacts) into
+ * the global Evidence library. These live on FDA483Document rows keyed to an
+ * FDA483Event; `useTenantData().fda483Events` is hardcoded `[]` in the
+ * server-first architecture, so the page-level client aggregation could never
+ * see them. Tenant scope via the parent event. Read-only mirror — managed in
+ * the FDA 483 module.
+ */
+export const getFDA483EvidenceDocuments = cache(async (tenantId: string) => {
+  return prisma.fDA483Document.findMany({
+    where: { event: { tenantId } },
+    include: {
+      event: { select: { referenceNumber: true, tenantId: true, status: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+});
+
 export const getDocumentStats = cache(async (tenantId: string) => {
   const docs = await getDocuments(tenantId);
   return {

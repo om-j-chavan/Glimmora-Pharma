@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,7 +9,8 @@ import { Package, Plus, Download, Upload, FileText, X } from "lucide-react";
 import type { Document as PrismaDocument } from "@prisma/client";
 // Type-only import — band-aid for the global view to surface CAPA Evidence
 // files. Phase 4 of the document-store unification removes this.
-import type { getCAPAEvidenceFiles } from "@/lib/queries/governance";
+import type { getCAPAEvidenceFiles, getValidationStageDocuments, getFDA483EvidenceDocuments } from "@/lib/queries/governance";
+import type { getFindings } from "@/lib/queries/findings";
 import dayjs from "@/lib/dayjs";
 import { escapeHtml } from "@/lib/escapeHtml";
 import { displayUserName } from "@/lib/identity-display";
@@ -37,7 +38,8 @@ import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 import { DatePicker } from "@/components/ui/DatePicker";
 
-import { DocumentLibraryTab } from "./tabs/DocumentLibraryTab";
+import { DocumentLibraryTab, docSource, documentReviewState } from "./tabs/DocumentLibraryTab";
+import { DocumentDetailDrawer } from "./modals/DocumentDetailDrawer";
 
 /* ── Props (Server Component data) ── */
 
@@ -52,11 +54,21 @@ export interface EvidencePageStats {
 // Derived directly from getCAPAEvidenceFiles' include shape — keeps this
 // type in sync with the query without duplicating the include literal.
 type CAPAEvidenceFileRow = Awaited<ReturnType<typeof getCAPAEvidenceFiles>>[number];
+// Real CSV/CSA validation stage documents surfaced into the global library.
+type ValidationStageDocRow = Awaited<ReturnType<typeof getValidationStageDocuments>>[number];
+// Real FDA 483 documents (response packages etc.) surfaced server-side —
+// useTenantData().fda483Events is hardcoded [] so the client path never sees them.
+type FDA483DocRow = Awaited<ReturnType<typeof getFDA483EvidenceDocuments>>[number];
+// Server-fetched findings — reliable regardless of client Redux hydration.
+type FindingRow = Awaited<ReturnType<typeof getFindings>>[number];
 
 export interface EvidencePageProps {
   docs: PrismaDocument[];
   stats: EvidencePageStats;
   capaEvidenceFiles: CAPAEvidenceFileRow[];
+  validationStageDocs: ValidationStageDocRow[];
+  fda483EvidenceDocs: FDA483DocRow[];
+  findings: FindingRow[];
 }
 
 /**
@@ -85,12 +97,16 @@ function adaptPrismaDoc(d: PrismaDocument): EvidenceDocument {
     reference: typeof meta.reference === "string" ? meta.reference : (d.linkedRecordId ?? d.fileName),
     type: (typeof meta.type === "string" ? meta.type : "Other") as DocType,
     area: (typeof meta.area === "string" ? meta.area : (d.linkedModule ?? "QMS")) as DocArea,
-    version: d.version,
+    // Prefer the user-entered version from meta; fall back to the column value
+    // (stripping the stored "v" prefix so the UI's own `v{version}` doesn't
+    // double it to "vv1.0").
+    version: typeof meta.version === "string" ? meta.version : d.version.replace(/^v/, ""),
     status,
     author: d.uploadedBy,
     reviewedBy: d.approvedBy ?? undefined,
     effectiveDate: typeof meta.effectiveDate === "string" ? meta.effectiveDate : d.createdAt.toISOString(),
     expiryDate: typeof meta.expiryDate === "string" ? meta.expiryDate : undefined,
+    nextReviewDate: typeof meta.nextReviewDate === "string" ? meta.nextReviewDate : undefined,
     tags: Array.isArray(meta.tags) ? meta.tags as string[] : [],
     // Prefer the authenticated download route when a file was actually stored
     // (via fileStorage); fall back to an external URL for link-only documents.
@@ -98,6 +114,9 @@ function adaptPrismaDoc(d: PrismaDocument): EvidenceDocument {
     sizeKb: undefined,
     complianceTags: Array.isArray(meta.complianceTags) ? meta.complianceTags as string[] : [],
     createdAt: d.createdAt.toISOString(),
+    // Standalone Document row — the approve / reject / delete lifecycle applies.
+    isNative: true,
+    rawStatus: d.status,
   };
 }
 
@@ -165,6 +184,7 @@ const docSchema = z.object({
   author: z.string().min(1, "Author required"),
   effectiveDate: z.string().min(1, "Effective date required"),
   expiryDate: z.string().optional(),
+  nextReviewDate: z.string().optional(),
   systemId: z.string().optional(),
   findingId: z.string().optional(),
   capaId: z.string().optional(),
@@ -175,16 +195,17 @@ type DocForm = z.infer<typeof docSchema>;
 
 /* ══════════════════════════════════════ */
 
-export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePageProps) {
+export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles, validationStageDocs, fda483EvidenceDocs, findings }: EvidencePageProps) {
   // `stats` prop is accepted by EvidencePageProps but not destructured here —
   // the page derives richer counts (currentCount/missingCount) from the full
   // cross-module aggregation, so the standalone Prisma stats would be misleading.
   const router = useRouter();
   const dispatch = useAppDispatch();
+  // findings + FDA-483 documents now arrive as server-fetched props (reliable
+  // regardless of client Redux hydration); useTenantData's fda483Events is
+  // hardcoded [] in the server-first architecture, so we no longer read it here.
   const {
-    findings,
     systems,
-    fda483Events,
     deviations,
     evidencePacks,
     tenantId,
@@ -219,10 +240,12 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
           version: "1.0",
           status: f.status === "Closed" ? "Current" : "Under Review",
           author: f.owner,
-          effectiveDate: f.createdAt,
-          tags: [f.framework, f.severity].filter(Boolean),
-          complianceTags: [f.framework],
-          createdAt: f.createdAt,
+          // Server Finding.createdAt is a Date — normalise to ISO string.
+          effectiveDate: f.createdAt.toISOString(),
+          // framework / severity are nullable on the DB row — drop nulls.
+          tags: [f.framework, f.severity].filter((x): x is string => Boolean(x)),
+          complianceTags: f.framework ? [f.framework] : [],
+          createdAt: f.createdAt.toISOString(),
           tenantId: f.tenantId ?? "",
           siteId: "",
         });
@@ -234,29 +257,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
      // model. The forEach blocks that read `c.evidenceLinks` and
      // `c.documents` were removed; their iterations were always empty after
      // 3.2 shipped.
-    fda483Events.forEach((e) => {
-      if (e.responseDraft?.trim() && !docs.find((d) => d.eventId === e.id)) {
-        docs.push({
-          id: `event-${e.id}`,
-          title: `${e.referenceNumber} \u2014 Response Draft`,
-          reference: e.referenceNumber,
-          type: "Record",
-          area: "Regulatory",
-          eventId: e.id,
-          version: "1.0",
-          status: e.status === "Response Submitted" ? "Current" : "Draft",
-          author: "",
-          effectiveDate: e.createdAt,
-          tags: [e.type, e.agency],
-          complianceTags: [e.type],
-          createdAt: e.createdAt,
-          tenantId: e.tenantId ?? "",
-          siteId: "",
-        });
-      }
-    });
-
-    /* \u2500\u2500 Aggregate uploaded files (LinkedDocument) from CAPA / Deviation / FDA-483 \u2500\u2500 */
+    /* \u2500\u2500 Aggregate uploaded files (LinkedDocument) from Deviation \u2500\u2500 */
     const mapStatus = (s: string): DocStatus => {
       const v = s.trim().toLowerCase();
       return v === "approved" || v === "current" ? "Current"
@@ -348,6 +349,42 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
       });
     });
 
+    /* ── CSV/CSA validation stage documents (server-fetched, real data) ──
+       Genuine uploaded files on ValidationStage records. Surfaced read-only
+       so the global library is the true single evidence shelf. Inspection
+       readiness follows the stage's own review state (approved → Current). */
+    const mapStageStatus = (s: string): DocStatus => {
+      switch (s.trim().toLowerCase()) {
+        case "approved": return "Current";
+        case "submitted":
+        case "in_progress": return "Under Review";
+        // not_started / rejected / anything unconfirmed → safe non-current default.
+        default: return "Draft";
+      }
+    };
+    validationStageDocs.forEach((sd) => {
+      const sys = sd.validationStage.system;
+      const sysRef = sys.reference ?? sys.name;
+      docs.push({
+        id: `stagedoc-${sd.id}`,
+        title: sd.originalFileName,
+        reference: `${sysRef} · ${sd.validationStage.stageName}`,
+        type: "Validation",
+        area: "CSV/IT",
+        systemId: sys.id,
+        version: "1.0",
+        status: mapStageStatus(sd.validationStage.status),
+        author: sd.uploadedByName,
+        effectiveDate: sd.uploadedAt.toISOString(),
+        tags: [sd.fileType.toUpperCase(), sd.validationStage.stageName],
+        complianceTags: ["Part 11", "GAMP 5"],
+        createdAt: sd.uploadedAt.toISOString(),
+        tenantId: tenantId ?? "",
+        siteId: "",
+        sizeKb: Math.round(sd.fileSize / 1024),
+      });
+    });
+
     deviations.forEach((d) => {
       (d.documents ?? []).forEach((doc) =>
         pushUploaded(doc, {
@@ -362,44 +399,34 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
       );
     });
 
-    fda483Events.forEach((e) => {
-      (e.documents ?? []).forEach((doc) =>
-        pushUploaded(doc, {
-          sourcePrefix: "483-doc",
-          recordId: e.id,
-          recordTitle: e.referenceNumber,
-          area: "Regulatory",
-          complianceTags: [e.type, e.agency],
-          tenantId: e.tenantId ?? "",
-          siteId: e.siteId ?? "",
-          eventId: e.id,
-        }),
-      );
-      (e.responseDocuments ?? []).forEach((doc) =>
-        pushUploaded(doc, {
-          sourcePrefix: "483-resp",
-          recordId: e.id,
-          recordTitle: `${e.referenceNumber} Response`,
-          area: "Regulatory",
-          complianceTags: [e.type, "Response"],
-          tenantId: e.tenantId ?? "",
-          siteId: e.siteId ?? "",
-          eventId: e.id,
-        }),
-      );
-      (e.observations ?? []).forEach((obs) => {
-        (obs.documents ?? []).forEach((doc) =>
-          pushUploaded(doc, {
-            sourcePrefix: "483-obs",
-            recordId: `${e.id}-O${obs.number}`,
-            recordTitle: `${e.referenceNumber} Obs ${obs.number}`,
-            area: "Regulatory",
-            complianceTags: [e.type, obs.severity],
-            tenantId: e.tenantId ?? "",
-            siteId: e.siteId ?? "",
-            eventId: e.id,
-          }),
-        );
+    /* ── FDA 483 documents (server-fetched, real data) ──
+       Response packages and uploaded artefacts on FDA483Document rows. The
+       client path could never see these — useTenantData().fda483Events is
+       hardcoded [] in the server-first architecture — so they are fetched
+       directly (getFDA483EvidenceDocuments) and surfaced read-only. Inspection
+       readiness follows the parent event's response state. */
+    const mapFDAStatus = (s: string): DocStatus => {
+      const v = s.trim().toLowerCase();
+      return v === "response submitted" || v === "closed" ? "Current" : "Under Review";
+    };
+    fda483EvidenceDocs.forEach((fd) => {
+      const isResponse = fd.type === "response";
+      docs.push({
+        id: `483doc-${fd.id}`,
+        title: fd.fileName,
+        reference: `${fd.event.referenceNumber} · ${isResponse ? "Response" : "Document"}`,
+        type: "Record",
+        area: "Regulatory",
+        eventId: fd.eventId,
+        version: "1.0",
+        status: mapFDAStatus(fd.event.status),
+        author: fd.uploadedBy,
+        effectiveDate: fd.createdAt.toISOString(),
+        tags: [(fd.fileType ?? "FILE").toUpperCase(), fd.event.referenceNumber],
+        complianceTags: ["FDA 483", isResponse ? "Response" : "Document"],
+        createdAt: fd.createdAt.toISOString(),
+        tenantId: fd.event.tenantId,
+        siteId: "",
       });
     });
 
@@ -419,11 +446,19 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
   const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
   const [addDocOpen, setAddDocOpen] = useState(false);
   const [addedPopup, setAddedPopup] = useState(false);
+  // Which success message the shared popup should show — decoupled from the
+  // selection set (clearing selection on export used to flip the title wrongly).
+  const [popupKind, setPopupKind] = useState<"doc" | "pack">("doc");
+  // Document open in the detail drawer (null = closed).
+  const [detailDoc, setDetailDoc] = useState<EvidenceDocument | null>(null);
   // Optional file attached in the Add Document modal — uploaded via the shared
   // fileStorage pipeline (createDocument FormData), not base64.
   const [docFile, setDocFile] = useState<File | null>(null);
 
-  const allDocs = getAllDocuments();
+  // Aggregation touches five sources — memoize so it doesn't re-run on every
+  // keystroke/filter change. Recomputes only when a source dataset changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const allDocs = useMemo(() => getAllDocuments(), [prismaDocs, findings, fda483EvidenceDocs, deviations, capaEvidenceFiles, validationStageDocs]);
 
   function ownerName(id: string) {
     return displayUserName(id, users);
@@ -485,7 +520,8 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
   }
 
   const currentCount = allDocs.filter((d) => d.status === "Current").length;
-  const missingCount = allDocs.filter((d) => d.status === "Missing").length;
+  const reviewDueCount = allDocs.filter((d) => documentReviewState(d) === "due").length;
+  const overdueCount = allDocs.filter((d) => documentReviewState(d) === "overdue").length;
   const anyFilter = !!(
     search ||
     areaFilter ||
@@ -515,7 +551,12 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
     if (areaFilter && d.area !== areaFilter) return false;
     if (typeFilter && d.type !== typeFilter) return false;
     if (systemFilter && d.systemId !== systemFilter) return false;
-    if (statusFilter && d.status !== statusFilter) return false;
+    // Review-lifecycle sentinels filter by derived review state, not DocStatus.
+    if (statusFilter === "__review_due") {
+      if (documentReviewState(d) !== "due") return false;
+    } else if (statusFilter === "__overdue") {
+      if (documentReviewState(d) !== "overdue") return false;
+    } else if (statusFilter && d.status !== statusFilter) return false;
     if (
       dateFrom &&
       d.effectiveDate &&
@@ -525,7 +566,9 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
     if (
       dateTo &&
       d.effectiveDate &&
-      dayjs(d.effectiveDate).isAfter(dayjs(dateTo))
+      // Compare against END of the "To" day, not midnight — otherwise a doc
+      // effective later on the same day is wrongly excluded.
+      dayjs(d.effectiveDate).isAfter(dayjs(dateTo).endOf("day"))
     )
       return false;
     return true;
@@ -576,6 +619,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
       author: data.author,
       effectiveDate: dayjs(data.effectiveDate).utc().toISOString(),
       expiryDate: data.expiryDate ? dayjs(data.expiryDate).utc().toISOString() : undefined,
+      nextReviewDate: data.nextReviewDate ? dayjs(data.nextReviewDate).utc().toISOString() : undefined,
       tags: tagsList,
       complianceTags,
       url: data.url || undefined,
@@ -599,6 +643,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
     }
 
     setAddDocOpen(false);
+    setPopupKind("doc");
     setAddedPopup(true);
     setDocFile(null);
     docForm.reset();
@@ -622,7 +667,12 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
           <p className="page-subtitle mt-1">
             {allDocs.length === 0
               ? "No documents yet"
-              : `${allDocs.length} documents \u00b7 ${currentCount} current \u00b7 ${missingCount} missing`}
+              : [
+                  `${allDocs.length} documents`,
+                  `${currentCount} current`,
+                  ...(reviewDueCount > 0 ? [`${reviewDueCount} review due`] : []),
+                  ...(overdueCount > 0 ? [`${overdueCount} overdue`] : []),
+                ].join(" \u00b7 ")}
           </p>
         </div>
         <div className="flex gap-2">
@@ -669,6 +719,26 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
         dateFormat={dateFormat}
         onAddDocOpen={() => setAddDocOpen(true)}
         onNavigate={(path: string) => router.push(path)}
+        onOpenDoc={(doc) => setDetailDoc(doc)}
+      />
+
+      {/* Document detail drawer — metadata + Part 11 approve / reject / delete */}
+      <DocumentDetailDrawer
+        doc={detailDoc}
+        open={detailDoc !== null}
+        sourceLabel={detailDoc ? docSource(detailDoc).label : ""}
+        readOnly={detailDoc ? docSource(detailDoc).readOnly : true}
+        can={{
+          canApprove: evCan.canApprove,
+          canSign: evCan.canSign,
+          canReview: evCan.canReview,
+          canDelete: evCan.canDelete,
+        }}
+        timezone={timezone}
+        dateFormat={dateFormat}
+        onClose={() => setDetailDoc(null)}
+        onChanged={() => { setDetailDoc(null); router.refresh(); }}
+        onNavigate={(path) => { setDetailDoc(null); router.push(path); }}
       />
 
       {/* Floating selection bar */}
@@ -733,6 +803,7 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
               });
               setSelectedDocs(new Set());
               setPackNameInput("");
+              setPopupKind("pack");
               setAddedPopup(true);
             }}
           >
@@ -940,6 +1011,25 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
             </div>
             <div>
               <label className={lbl} style={{ color: "var(--text-muted)" }}>
+                Next review date
+              </label>
+              <Controller
+                name="nextReviewDate"
+                control={docForm.control}
+                render={({ field }) => (
+                  <DatePicker
+                    id="doc-review"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    min={docForm.watch("effectiveDate") || undefined}
+                    placeholder="Select date"
+                    className="w-full"
+                  />
+                )}
+              />
+            </div>
+            <div>
+              <label className={lbl} style={{ color: "var(--text-muted)" }}>
                 Linked system
               </label>
               <Controller
@@ -1043,11 +1133,9 @@ export function EvidencePage({ docs: prismaDocs, capaEvidenceFiles }: EvidencePa
       <Popup
         isOpen={addedPopup}
         variant="success"
-        title={
-          selectedDocs.size === 0 ? "Document added" : "Evidence pack exported"
-        }
+        title={popupKind === "doc" ? "Document added" : "Evidence pack exported"}
         description={
-          selectedDocs.size === 0
+          popupKind === "doc"
             ? "Added to the evidence library."
             : "Pack exported successfully."
         }

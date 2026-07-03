@@ -22,11 +22,22 @@ export interface EvidenceDocument {
   reviewedBy?: string;
   effectiveDate: string;
   expiryDate?: string;
+  // GxP periodic-review date (e.g. biennial SOP review). Drives the
+  // "Review due / Overdue" lifecycle. ISO string; only native documents carry it.
+  nextReviewDate?: string;
   tags: string[];
   url?: string;
   sizeKb?: number;
   complianceTags: string[];
   createdAt: string;
+  // True only for standalone `Document` rows (the approve / reject / delete
+  // lifecycle applies). Evidence aggregated from CAPA / Deviation / FDA-483 /
+  // findings is a read-only mirror here — managed in its source module.
+  isNative?: boolean;
+  // Raw Prisma `Document.status` (draft | under_review | approved | rejected)
+  // for native docs, so the detail drawer can gate lifecycle actions precisely
+  // rather than inferring from the display-only DocStatus.
+  rawStatus?: string;
 }
 
 export interface EvidencePack {
