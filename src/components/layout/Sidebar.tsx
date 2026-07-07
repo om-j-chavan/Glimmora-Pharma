@@ -30,8 +30,8 @@ import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useActiveSite } from "@/hooks/useActiveSite";
 import { logout } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
-import { Modal } from "@/components/ui/Modal";
-import { Button } from "@/components/ui/Button";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { logoutMessage } from "@/lib/labels/logout";
 import { useToast } from "@/components/ui/Toast";
 
 interface NavItem {
@@ -369,41 +369,21 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
     </aside>
 
-    {/* Sign-out confirmation — reuses the shared Modal + Button. `persistent`
-        keeps an accidental backdrop/Escape press from dismissing mid sign-out. */}
-    <Modal
+    {/* Sign-out confirmation — the shared square ConfirmModal (matches the admin
+        console). While signing out the modal blocks backdrop/Escape dismissal
+        (ConfirmModal disables both when `loading`). The message is role-aware,
+        passed in via props. */}
+    <ConfirmModal
       open={confirmSignOut}
       onClose={() => { if (!signingOut) setConfirmSignOut(false); }}
-      title="Sign out?"
-      persistent={signingOut}
-      className="max-w-[420px]"
-      footer={
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setConfirmSignOut(false)}
-            disabled={signingOut}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            icon={LogOut}
-            loading={signingOut}
-            onClick={handleLogout}
-          >
-            Sign Out
-          </Button>
-        </div>
-      }
-    >
-      <p className="text-[13px] leading-relaxed text-(--text-secondary)">
-        You&apos;ll be returned to the login screen and will need to sign in
-        again to continue.
-      </p>
-    </Modal>
+      onConfirm={handleLogout}
+      title="Log out?"
+      message={logoutMessage(role)}
+      confirmLabel="Log out"
+      variant="danger"
+      icon={LogOut}
+      loading={signingOut}
+    />
     </>
   );
 }

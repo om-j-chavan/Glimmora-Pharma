@@ -15,14 +15,12 @@ import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
 import { RcaMethodFields, rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
 import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
+import { frameworkLabel } from "@/constants/frameworks";
 
 const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
 
-const FRAMEWORK_LABELS: Record<string, string> = {
-  p210: "21 CFR 210/211", p11: "Part 11", annex11: "Annex 11",
-  annex15: "Annex 15", ichq9: "ICH Q9", ichq10: "ICH Q10",
-  gamp5: "GAMP 5", who: "WHO GMP", mhra: "MHRA",
-};
+/** Today (YYYY-MM-DD) for the target-date min. */
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 const findingSchema = z.object({
   siteId: z.string().min(1, "Site required"),
@@ -31,7 +29,8 @@ const findingSchema = z.object({
   purpose: z.string().optional(),
   framework: z.string().min(1, "Framework required"),
   severity: z.enum(["Critical", "High", "Medium", "Low"]),
-  targetDate: z.string().min(1, "Target date required"),
+  // Block past dates (client) — the server re-validates in createFinding.
+  targetDate: z.string().min(1, "Target date required").refine((v) => v >= todayISO(), "Target date can't be in the past"),
   evidenceLink: z.string().optional(),
   rootCause: z.string().optional(),
   rcaMethod: z.enum(CAPA_RCA_METHODS).optional(),
@@ -234,7 +233,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
             <div>
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Framework <span className="text-(--danger)">*</span></p>
               <Dropdown placeholder="Select framework..." value={watch("framework") ?? ""} onChange={(v) => setValue("framework", v, { shouldValidate: true })} width="w-full"
-                options={activeFrameworks.map((k) => ({ value: k, label: FRAMEWORK_LABELS[k] ?? k }))} />
+                options={activeFrameworks.map((k) => ({ value: k, label: frameworkLabel(k) }))} />
               {errors.framework && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.framework.message}</p>}
             </div>
             <div>
@@ -315,7 +314,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
           {/* Target date (Owner field removed — owner is auto-assigned to the
               creator server-side). */}
           <div>
-            <DatePicker id="f-target" label="Target date" required
+            <DatePicker id="f-target" label="Target date" required min={todayISO()}
               value={watch("targetDate") ?? ""}
               onChange={(v) => setValue("targetDate", v, { shouldValidate: true })}
               error={errors.targetDate?.message} />
@@ -370,8 +369,12 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               rcaDetail (JSON) on save. */}
           <div className="col-span-2">
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Root Cause Analysis <span className="text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span></p>
-            <Dropdown placeholder="Select method..." value={watch("rcaMethod") ?? ""} onChange={(v) => setValue("rcaMethod", v as FindingForm["rcaMethod"])} width="w-full"
-              options={rcaMethodOptions(CAPA_RCA_METHODS)} />
+            {/* Deselectable: "— None" clears an accidental method and resets the
+                structured detail (incl. any AI-drafted content). */}
+            <Dropdown placeholder="Select method..." value={watch("rcaMethod") ?? ""}
+              onChange={(v) => { setValue("rcaMethod", (v || undefined) as FindingForm["rcaMethod"]); if (!v) setDetail({}); }}
+              width="w-full"
+              options={[{ value: "", label: "— None" }, ...rcaMethodOptions(CAPA_RCA_METHODS)]} />
             <div className="mt-2">
               {/* AI Draft helper — same component the CAPA modals use. Passing
                   draftContext (Requirement + Purpose) turns on the "AI Draft"

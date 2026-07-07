@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CheckCircle, AlertCircle, Info, X } from "lucide-react";
 
 export type ToastKind = "success" | "error" | "info";
@@ -99,19 +100,32 @@ export function useToast(): ToastContextValue {
 
 /* ── Viewport: stacked fixed top-center ───────────────────────────
    Centered horizontally just below the top edge of the viewport. Stacks
-   downward so the newest toast slides in above the older ones. */
+   downward so the newest toast slides in above the older ones.
+
+   Rendered via a PORTAL into <body> (like Modal/ConfirmModal) so the fixed
+   position always resolves against the viewport and can never be trapped or
+   clipped by an ancestor stacking context/overflow in a given shell. z-[100]
+   sits ABOVE the modal layer (z-50), so a success/error toast is visible even
+   while a confirmation modal is open. This is what makes toasts show reliably
+   across every shell, including the Super Admin console. */
 
 function ToastViewport({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: string) => void }) {
-  if (toasts.length === 0) return null;
-  return (
+  // Portal target is client-only — defer the first render so we never call
+  // createPortal during SSR (document is undefined there).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted || toasts.length === 0) return null;
+
+  return createPortal(
     <div
-      className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] flex flex-col gap-2 items-center w-auto max-w-[90vw] sm:max-w-md pointer-events-none"
+      className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 items-center w-auto max-w-[90vw] sm:max-w-md pointer-events-none"
       aria-label="Notifications"
     >
       {toasts.map((t) => (
         <Toast key={t.id} toast={t} onDismiss={() => onDismiss(t.id)} />
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

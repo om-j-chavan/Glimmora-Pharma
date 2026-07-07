@@ -56,17 +56,17 @@ export function useTenantConfig() {
 
   const maxUsers = plan?.maxUsers ?? 0;
   const maxSites = plan?.maxSites ?? 0;
-  // Seats consumed = ACTIVE site users only. Mirrors the authoritative server
-  // cap (assertCanAddUser → prisma.user.count where tenantId + isActive). Two
-  // exclusions, both deliberate:
+  // Seats consumed = ALL site users (active + inactive). Mirrors the
+  // authoritative server cap (assertCanAddUser → prisma.user.count where
+  // tenantId, no isActive filter). One exclusion, deliberate:
   //   • super_admin / customer_admin are Tenant rows, not User seats — the
   //     synthetic customer_admin entry in config.users must NOT count (this is
   //     why a fresh tenant showed "1 of N accounts used" with zero users made).
-  //   • Inactive users free their seat (deactivate = soft-delete equivalent).
-  // Keeping this in lockstep with planCaps.ts makes the meter hit 100% exactly
-  // when the server starts blocking — no off-by-one early block.
+  // Inactive users STILL count — they retain data / occupy storage. Keeping this
+  // in lockstep with planCaps.ts makes the meter hit 100% exactly when the
+  // server starts blocking — no off-by-one early block.
   const usedAccounts = users.filter(
-    (u) => u.role !== "super_admin" && u.role !== "customer_admin" && u.status === "Active",
+    (u) => u.role !== "super_admin" && u.role !== "customer_admin",
   ).length;
   const usedSites = allSitesIncludingInactive.length;
 

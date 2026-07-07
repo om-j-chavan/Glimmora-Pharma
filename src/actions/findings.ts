@@ -46,7 +46,8 @@ const CreateFindingSchema = z.object({
   // Owner is server-stamped to the creator (session) — accepted but ignored if
   // sent, so it can't be spoofed from the client. Optional for that reason.
   owner: z.string().optional(),
-  targetDate: z.string().min(1, "Target date is required"),
+  // Block past dates server-side too (mirrors the client DatePicker min).
+  targetDate: z.string().min(1, "Target date is required").refine((v) => v >= new Date().toISOString().slice(0, 10), "Target date can't be in the past"),
   siteId: z.string().optional(),
   evidenceLink: z.string().optional(),
   // Gap RCA (Batch B) — structured method + JSON detail; rootCause is the
@@ -359,11 +360,19 @@ export async function assignFinding(
   // UI pool.
   const assignee = await prisma.user.findFirst({
     where: { id: parsed.data.assigneeId, tenantId: session.user.tenantId, isActive: true },
-    select: { id: true, name: true, role: true },
+    select: { id: true, name: true, role: true, siteId: true },
   });
   if (!assignee) return { success: false, error: "Assignee must be an active user in your organisation." };
   if (["super_admin", "customer_admin", "viewer"].includes(assignee.role)) {
     return { success: false, error: "Findings can only be assigned to operational staff, not platform or admin roles." };
+  }
+  // SITE boundary (re-enforced server-side, mirrors getFindingAssignees): a
+  // site-bound assigner may assign ONLY within their own site; a tenant-level
+  // admin with no siteId assigns tenant-wide.
+  const me = await prisma.user.findFirst({ where: { id: session.user.id, tenantId: session.user.tenantId }, select: { siteId: true } });
+  const assignerSiteId = me?.siteId ?? null;
+  if (assignerSiteId && assignee.siteId !== assignerSiteId) {
+    return { success: false, error: "You can only assign findings to users at your own site." };
   }
   if (finding.owner === assignee.id) {
     return { success: false, error: "This finding is already assigned to that user." };

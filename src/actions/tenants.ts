@@ -10,6 +10,7 @@ import { getTenants } from "@/lib/queries/tenants";
 import type { Tenant as ReduxTenant } from "@/store/auth.slice";
 import { sanitizeServerError } from "@/lib/errors";
 import { resolvePlanCaps, validateTailoredCaps, resolveExpiry, MIN_TAILORED_RETENTION_YEARS, type PlanTier } from "@/lib/plans";
+import { generateReference } from "@/lib/reference";
 
 export async function listTenants(): Promise<ReduxTenant[]> {
   const session = await requireAuth();
@@ -24,13 +25,24 @@ type ActionResult<T = unknown> =
   | { success: false; error: string; fieldErrors?: Record<string, string[]> };
 
 const CreateTenantSchema = z.object({
+  // Optional client-supplied primary key. When present it becomes the Tenant
+  // row's id so the id shown in the UI/Redux matches the DB row — otherwise the
+  // client keeps a `tenant-<timestamp>` id that Prisma never persisted, and a
+  // later edit hits P2025 ("No record found for an update"). Omit → Prisma cuid.
+  id: z.string().min(1).optional(),
   name: z.string().min(2),
   email: z.string().email(),
   username: z.string().min(2),
-  customerCode: z.string().min(2),
+  // customerCode is no longer accepted from the client — it's the human-readable
+  // Tenant ID (TEN-YYYY-NNNN), allocated server-side at creation (see below).
   password: z.string().min(8, "Password must be at least 8 characters"),
   language: z.string().default("en"),
   timezone: z.string().default("Asia/Kolkata"),
+  // Regulatory region — super_admin owned, chosen from the central ACTIVE-region
+  // lookup. REQUIRED on create (Stage 5) — a tenant must have a region so its
+  // effective frameworks resolve. UpdateTenantSchema.partial() keeps it optional
+  // on edit (never forces a region onto a legacy null tenant mid-edit).
+  regulatoryRegion: z.string().min(1, "Regulatory Region is required"),
   isActive: z.boolean().default(true),
 });
 
@@ -73,22 +85,75 @@ export async function createTenant(
       fieldErrors: parsed.error.flatten().fieldErrors,
     };
   }
+
+  // Uniqueness pre-check (case-insensitive) BEFORE the create, so we can return
+  // field-specific messages the modal surfaces inline on the right input. The
+  // DB @@unique on email + username is the race backstop (handled in the catch
+  // below). NOTE: Prisma `mode: "insensitive"` is unsupported on SQLite (this
+  // app's local DB), so we compare in JS over the small tenant set.
+  {
+    const emailLc = parsed.data.email.toLowerCase();
+    const unameLc = parsed.data.username.toLowerCase();
+    const existing = await prisma.tenant.findMany({ select: { email: true, username: true } });
+    const dupFields: Record<string, string[]> = {};
+    if (existing.some((t) => t.username.toLowerCase() === unameLc)) {
+      dupFields.username = ["This username is already taken."];
+    }
+    if (existing.some((t) => t.email.toLowerCase() === emailLc)) {
+      dupFields.email = ["This email address is already registered."];
+    }
+    if (Object.keys(dupFields).length > 0) {
+      return { success: false, error: "This account already exists.", fieldErrors: dupFields };
+    }
+  }
+
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     const passwordHash = await bcrypt.hash(parsed.data.password, BCRYPT_COST);
-    const tenant = await prisma.tenant.create({
-      data: {
-        name: parsed.data.name,
-        email: parsed.data.email.toLowerCase(),
-        username: parsed.data.username,
-        customerCode: parsed.data.customerCode,
-        passwordHash,
-        role: "customer_admin",
-        language: parsed.data.language,
-        timezone: parsed.data.timezone,
-        isActive: parsed.data.isActive,
-      },
-    });
+
+    // Allocate the human-readable Tenant ID (customerCode) server-side:
+    // TEN-<year>-<NNNN>, unique per year. The customerCode column is @unique,
+    // so a concurrent create can collide on the same number — retry (bumping
+    // the sequence) on that specific conflict; any other P2002 (email/username)
+    // is a real user error and falls through to the catch below.
+    let tenant: Awaited<ReturnType<typeof prisma.tenant.create>> | null = null;
+    const MAX_CODE_RETRIES = 5;
+    for (let attempt = 0; attempt < MAX_CODE_RETRIES; attempt++) {
+      const customerCode = await generateReference("TEN", new Date(), async (p, year) => {
+        const row = await prisma.tenant.findFirst({
+          where: { customerCode: { startsWith: `${p}-${year}-` } },
+          orderBy: { customerCode: "desc" },
+          select: { customerCode: true },
+        });
+        return row?.customerCode ?? null;
+      }, 4);
+      try {
+        tenant = await prisma.tenant.create({
+          data: {
+            ...(parsed.data.id ? { id: parsed.data.id } : {}),
+            name: parsed.data.name,
+            email: parsed.data.email.toLowerCase(),
+            username: parsed.data.username,
+            customerCode,
+            passwordHash,
+            role: "customer_admin",
+            language: parsed.data.language,
+            timezone: parsed.data.timezone,
+            regulatoryRegion: parsed.data.regulatoryRegion?.trim() || null,
+            isActive: parsed.data.isActive,
+          },
+        });
+        break;
+      } catch (err) {
+        const meta = (err as { code?: string; meta?: { target?: string[] } });
+        const codeCollision = meta.code === "P2002" && (meta.meta?.target?.includes("customerCode") ?? false);
+        if (codeCollision && attempt < MAX_CODE_RETRIES - 1) continue;
+        throw err;
+      }
+    }
+    if (!tenant) {
+      return { success: false, error: "Could not allocate a Tenant ID. Please retry." };
+    }
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,
@@ -105,7 +170,17 @@ export async function createTenant(
     return { success: true, data: tenant };
   } catch (err) {
     if ((err as { code?: string }).code === "P2002") {
-      return { success: false, error: "Email, username, or code already exists" };
+      // Race backstop for the pre-check above: map the violated unique column
+      // to the same field-specific inline message.
+      const target = (err as { meta?: { target?: string[] } }).meta?.target ?? [];
+      const dupFields: Record<string, string[]> = {};
+      if (target.includes("username")) dupFields.username = ["This username is already taken."];
+      if (target.includes("email")) dupFields.email = ["This email address is already registered."];
+      return {
+        success: false,
+        error: "This account already exists.",
+        fieldErrors: Object.keys(dupFields).length ? dupFields : undefined,
+      };
     }
     console.error("[action] createTenant failed:", err);
     return { success: false, error: sanitizeServerError(err, "Failed to create account") };
@@ -130,6 +205,8 @@ export async function updateTenant(
     const data: Record<string, unknown> = { ...rest };
     if (rest.email) data.email = rest.email.toLowerCase();
     if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+    // Regulatory region: empty string clears it (null); otherwise store trimmed.
+    if (rest.regulatoryRegion !== undefined) data.regulatoryRegion = rest.regulatoryRegion?.trim() || null;
 
     // Prefer the specific lifecycle event over the generic TENANT_UPDATED when
     // this edit actually flips isActive — "Account suspended/reactivated" reads
@@ -163,6 +240,53 @@ export async function updateTenant(
   } catch (err) {
     console.error("[action] updateTenant failed:", err);
     return { success: false, error: "Failed to update account" };
+  }
+}
+
+/**
+ * Set (or clear with null) a tenant's logo. Super admin only. The logo is
+ * stored as a data URL on Tenant.logoUrl — self-contained (no object storage),
+ * which suits the local SQLite setup and keeps the cropped avatar small.
+ */
+const MAX_LOGO_DATAURL_LEN = 400 * 1024; // ~400 KB — a cropped avatar is far smaller
+export async function updateTenantLogo(id: string, logoUrl: string | null): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (session.user.role !== "super_admin") {
+    return { success: false, error: "Access denied" };
+  }
+  if (logoUrl !== null) {
+    if (!/^data:image\/(png|jpeg|webp);base64,/.test(logoUrl)) {
+      return { success: false, error: "Logo must be a PNG, JPEG, or WebP image." };
+    }
+    if (logoUrl.length > MAX_LOGO_DATAURL_LEN) {
+      return { success: false, error: "Logo image is too large — crop a smaller area." };
+    }
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    const existing = await prisma.tenant.findUnique({ where: { id }, select: { name: true } });
+    if (!existing) {
+      return { success: false, error: "Tenant not found" };
+    }
+    const tenant = await prisma.tenant.update({ where: { id }, data: { logoUrl } });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Admin",
+        action: "TENANT_UPDATED",
+        recordId: id,
+        recordTitle: existing.name,
+        newValue: logoUrl ? "logo updated" : "logo removed",
+      },
+    });
+    revalidatePath("/admin");
+    return { success: true, data: tenant };
+  } catch (err) {
+    console.error("[action] updateTenantLogo failed:", err);
+    return { success: false, error: "Failed to update logo" };
   }
 }
 
@@ -224,6 +348,127 @@ export async function toggleTenantMFA(
   }
 }
 
+/**
+ * Tenant lifecycle transitions (super_admin only). Three states share one
+ * guard/audit shape:
+ *   - suspendTenant   → SUSPENDED (isActive=false, deletedAt=null)
+ *   - softDeleteTenant→ DELETED   (isActive=false, deletedAt=now) — recoverable
+ *   - restoreTenant   → ACTIVE    (isActive=true,  deletedAt=null)
+ * SUSPEND and DELETE also bump sessionsValidAfter so any live sessions for the
+ * tenant / its users die on the next request. Login is blocked server-side in
+ * the NextAuth authorize() guard (isActive=false OR deletedAt set). Every
+ * transition is audited. A permanent purge is deleteTenant (below).
+ */
+type Lifecycle = "suspend" | "delete" | "restore";
+const LIFECYCLE_META: Record<Lifecycle, { action: string; killSessions: boolean; data: { isActive: boolean; deletedAt: Date | null } }> = {
+  suspend: { action: "TENANT_SUSPENDED", killSessions: true, data: { isActive: false, deletedAt: null } },
+  delete: { action: "TENANT_DELETED", killSessions: true, data: { isActive: false, deletedAt: new Date(0) } }, // deletedAt replaced with now() at call time
+  restore: { action: "TENANT_RESTORED", killSessions: false, data: { isActive: true, deletedAt: null } },
+};
+
+async function transitionTenant(id: string, kind: Lifecycle): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (session.user.role !== "super_admin") {
+    return { success: false, error: "Access denied" };
+  }
+  if (id === session.user.tenantId) {
+    return { success: false, error: "You cannot change your own account status" };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    const existing = await prisma.tenant.findUnique({ where: { id }, select: { name: true, role: true } });
+    if (!existing) {
+      return { success: false, error: "Tenant not found" };
+    }
+    if (existing.role === "super_admin") {
+      return { success: false, error: "Platform super-admin accounts cannot be changed" };
+    }
+    const meta = LIFECYCLE_META[kind];
+    const tenant = await prisma.tenant.update({
+      where: { id },
+      data: {
+        isActive: meta.data.isActive,
+        deletedAt: kind === "delete" ? new Date() : meta.data.deletedAt,
+        ...(meta.killSessions ? { sessionsValidAfter: new Date() } : {}),
+      },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Admin",
+        action: meta.action,
+        recordId: id,
+        recordTitle: existing.name,
+      },
+    });
+    revalidatePath("/admin");
+    return { success: true, data: tenant };
+  } catch (err) {
+    console.error(`[action] transitionTenant(${kind}) failed:`, err);
+    return { success: false, error: "Failed to update account status" };
+  }
+}
+
+export async function suspendTenant(id: string) {
+  return transitionTenant(id, "suspend");
+}
+export async function softDeleteTenant(id: string) {
+  return transitionTenant(id, "delete");
+}
+export async function restoreTenant(id: string) {
+  return transitionTenant(id, "restore");
+}
+
+/**
+ * Part 11-safe purge core (module-local). Destroys the tenant's OPERATIONAL +
+ * PII data via the schema `onDelete: Cascade` (users, sites, findings, CAPAs,
+ * deviations, evidence, …) but FIRST relocates the immutable AuditLog and
+ * SignedRecord trails onto the acting super_admin's (platform) tenant so the
+ * `onDelete: Cascade` on AuditLog can NOT wipe them.
+ *
+ * 21 CFR Part 11: the audit + e-signature ledgers are under retention and must
+ * survive a tenant purge. AuditLog has a cascading tenant FK (it WOULD be
+ * destroyed); SignedRecord has only a scoping `tenantId` column (no FK, so no
+ * cascade) — both are re-parented here so the archived trail stays together and
+ * queryable under the platform tenant. The TENANT_PURGED audit is written to
+ * the platform tenant BEFORE the delete so the record of the purge itself is
+ * never on the row being removed.
+ */
+async function purgeTenantRetainingAudit(
+  id: string,
+  archiveTenantId: string,
+  actor: Awaited<ReturnType<typeof resolveUserFk>>,
+  recordTitle: string | undefined,
+): Promise<void> {
+  await prisma.auditLog.create({
+    data: {
+      tenantId: archiveTenantId,
+      userId: actor.userId,
+      userName: actor.displayName,
+      userRole: actor.role,
+      module: "Admin",
+      action: "TENANT_PURGED",
+      recordId: id,
+      recordTitle,
+    },
+  });
+  // Re-parent the immutable trails off the doomed row (retain, don't destroy).
+  await prisma.auditLog.updateMany({ where: { tenantId: id }, data: { tenantId: archiveTenantId } });
+  await prisma.signedRecord.updateMany({ where: { tenantId: id }, data: { tenantId: archiveTenantId } });
+  // Cascade-delete operational + PII child data via the tenant row removal.
+  await prisma.tenant.delete({ where: { id } });
+}
+
+/**
+ * PERMANENT delete (purge) — super admin only; irreversible. Destroys the
+ * tenant's operational + PII data while RETAINING its audit/signature trail
+ * (see purgeTenantRetainingAudit). Prefer deleteTenantWithPassword for the
+ * user-facing flow (adds the Part 11 identity re-check); this ungated entry
+ * point is kept for internal/back-compat callers.
+ */
 export async function deleteTenant(id: string): Promise<ActionResult> {
   const session = await requireAuth();
   if (session.user.role !== "super_admin") {
@@ -236,7 +481,7 @@ export async function deleteTenant(id: string): Promise<ActionResult> {
   try {
     const target = await prisma.tenant.findUnique({
       where: { id },
-      select: { role: true },
+      select: { role: true, name: true },
     });
     if (!target) {
       return { success: false, error: "Tenant not found" };
@@ -244,23 +489,75 @@ export async function deleteTenant(id: string): Promise<ActionResult> {
     if (target.role === "super_admin") {
       return { success: false, error: "Platform super-admin accounts cannot be deleted" };
     }
-    await prisma.tenant.delete({ where: { id } });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Admin",
-        action: "TENANT_DELETED",
-        recordId: id,
-      },
-    });
+    await purgeTenantRetainingAudit(id, session.user.tenantId, actor, target.name);
     revalidatePath("/admin");
     return { success: true, data: null };
   } catch (err) {
     console.error("[action] deleteTenant failed:", err);
     return { success: false, error: "Failed to delete account" };
+  }
+}
+
+/**
+ * PERMANENT delete, gated on the acting Super Admin re-entering THEIR OWN
+ * password. The password is verified SERVER-SIDE against the super_admin's real
+ * credential (never compared on the client): super_admin authenticates via the
+ * Tenant table (nextauth route Path 1), so session.user.id is their Tenant.id
+ * and the credential is Tenant.passwordHash — the same bcrypt check login uses.
+ * Only on success does it purge (retaining the audit/signature trail). A failed
+ * attempt is itself audited.
+ */
+export async function deleteTenantWithPassword(id: string, password: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (session.user.role !== "super_admin") {
+    return { success: false, error: "Access denied" };
+  }
+  if (id === session.user.tenantId) {
+    return { success: false, error: "You cannot delete your own account" };
+  }
+  if (!password) {
+    return { success: false, error: "Enter your password to confirm." };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    const target = await prisma.tenant.findUnique({
+      where: { id },
+      select: { role: true, name: true },
+    });
+    if (!target) {
+      return { success: false, error: "Tenant not found" };
+    }
+    if (target.role === "super_admin") {
+      return { success: false, error: "Platform super-admin accounts cannot be deleted" };
+    }
+    // Server-side identity re-check against the acting super_admin's own hash.
+    const me = await prisma.tenant.findUnique({
+      where: { id: session.user.id },
+      select: { passwordHash: true },
+    });
+    const valid = !!me && (await bcrypt.compare(password, me.passwordHash));
+    if (!valid) {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Admin",
+          action: "TENANT_PURGE_DENIED",
+          recordId: id,
+          recordTitle: target.name,
+          newValue: "wrong_password",
+        },
+      });
+      return { success: false, error: "Incorrect password. Permanent delete cancelled." };
+    }
+    await purgeTenantRetainingAudit(id, session.user.tenantId, actor, target.name);
+    revalidatePath("/admin");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] deleteTenantWithPassword failed:", err);
+    return { success: false, error: "Failed to permanently delete account" };
   }
 }
 

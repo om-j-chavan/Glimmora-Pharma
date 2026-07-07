@@ -7,12 +7,13 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import {
   addTenant,
   updateTenant,
+  removeTenant,
   setTenants,
   setTenantPlan,
   type Tenant,
 } from "@/store/auth.slice";
 import { fetchTenants, createTenantApi, updateTenantApi, TenantApiError } from "@/lib/tenantApi";
-import { toggleTenantMFA, assignPlan } from "@/actions/tenants";
+import { toggleTenantMFA, assignPlan, suspendTenant, softDeleteTenant, restoreTenant, updateTenantLogo } from "@/actions/tenants";
 import { resolvePlanCaps, resolveExpiry } from "@/lib/plans";
 import dayjs from "@/lib/dayjs";
 import { useToast } from "@/components/ui/Toast";
@@ -21,6 +22,7 @@ import {
   type AccountCardFilter,
   type AccountFilters,
   type PlanDraft,
+  type SaveResult,
   makeEmptyForm,
   makePlanDraft,
   planConfigToDraft,
@@ -35,6 +37,39 @@ import {
   hasNoPlan,
   isSuspendedTenant,
 } from "./helpers";
+
+/**
+ * Encode a chosen logo File → a square 256px JPEG data URL — the SAME format the
+ * dedicated LogoCropModal produces and updateTenantLogo validates
+ * (data:image/jpeg;base64,…, well under the 400 KB cap). Cover-fit + center-crop
+ * so any aspect ratio yields a clean square avatar. Browser-only (canvas); no
+ * new deps.
+ */
+const LOGO_SIZE = 256;
+async function encodeLogoDataUrl(file: File): Promise<string> {
+  const src = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = reject;
+    im.src = src;
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = LOGO_SIZE;
+  canvas.height = LOGO_SIZE;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not supported in this browser.");
+  const scale = Math.max(LOGO_SIZE / img.width, LOGO_SIZE / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  ctx.drawImage(img, (LOGO_SIZE - w) / 2, (LOGO_SIZE - h) / 2, w, h);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
 
 /**
  * Data hook for the Customer Accounts screen — owns all state, the tenant
@@ -66,6 +101,14 @@ export function useCustomerAccounts({
   // Suspend (replaces hard delete) — confirmation gate + in-flight flag.
   const [suspendingTenant, setSuspendingTenant] = useState<Tenant | null>(null);
   const [suspending, setSuspending] = useState(false);
+  // Table Suspend/Delete confirmation is action-backed (suspendTenant /
+  // softDeleteTenant server actions) — shared in-flight flag for its buttons.
+  const [tableActionBusy, setTableActionBusy] = useState(false);
+  // Restore list (all soft-deleted tenants) + per-row restore in-flight id, and
+  // the tenant currently queued for password-gated permanent delete.
+  const [restoreListOpen, setRestoreListOpen] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<Tenant | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   // Post-create subscription flow
@@ -144,8 +187,13 @@ export function useCustomerAccounts({
 
   const hasActiveFilters = filtersActive(filters) || cardFilter !== null || searchQuery.trim() !== "";
 
+  // Soft-deleted tenants belong in the Restore modal, NOT the active table —
+  // exclude them so the main list only shows ACTIVE + SUSPENDED accounts (whose
+  // row actions differ by status). deletedTenants (below) feeds the Restore modal.
+  const activeAndSuspended = tenants.filter((t) => !t.deletedAt);
+
   // Narrowing composes (AND): search → stat-card quick-filter → the five dropdowns.
-  const filtered = tenants
+  const filtered = activeAndSuspended
     .filter(
       (t) =>
         t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -169,7 +217,7 @@ export function useCustomerAccounts({
     setEditingTenant(null);
   };
 
-  const handleSave = async (data: AccountFormData) => {
+  const handleSave = async (data: AccountFormData): Promise<SaveResult> => {
     if (editingTenant) {
       // Update existing admin user in the tenant's user list
       const updatedUsers = editingTenant.config.users.map((u) =>
@@ -196,6 +244,7 @@ export function useCustomerAccounts({
             ...editingTenant.config.org,
             companyName: data.customerName,
             timezone: data.timezone,
+            regulatoryRegion: data.regulatoryRegion,
           },
           users: updatedUsers,
         },
@@ -225,7 +274,7 @@ export function useCustomerAccounts({
             // tell the user instead of falsely reporting success.
             dispatch(updateTenant({ id: editingTenant.id, patch: { plan: editingTenant.plan } }));
             toast.error(`${data.customerName} updated, but its plan could not be saved: ${planRes.error}`);
-            return;
+            return { ok: false };
           }
         }
         setSyncError(null);
@@ -234,7 +283,7 @@ export function useCustomerAccounts({
         console.error("[admin] failed to persist tenant update", err);
         setSyncError(null);
         toast.error(`Could not update ${data.customerName}: ${mapCustomerError(err)}`);
-        return;
+        return { ok: false };
       }
       // MFA changes route through toggleTenantMFA so the audit pair and
       // sessionsValidAfter bump fire. Don't include mfaEnabled in the
@@ -258,6 +307,29 @@ export function useCustomerAccounts({
           setSyncError(friendlyError(undefined));
         }
       }
+      // Logo (the Edit modal collects it as a File under `logoFile`). This was
+      // previously DROPPED — never encoded or persisted — so an upload showed
+      // only the modal's local object-URL preview and never reached
+      // Tenant.logoUrl, which the View header AND the accounts table both read.
+      // Encode → persist via the SAME updateTenantLogo action the dedicated crop
+      // modal uses (server writes Tenant.logoUrl + revalidatePath("/admin")),
+      // then reflect it in Redux so the View + table update immediately.
+      // Best-effort: a logo failure never undoes the (already-saved) account.
+      if (data.logoFile) {
+        try {
+          const logoUrl = await encodeLogoDataUrl(data.logoFile);
+          const logoRes = await updateTenantLogo(editingTenant.id, logoUrl);
+          if (logoRes.success) {
+            dispatch(updateTenant({ id: editingTenant.id, patch: { logoUrl } }));
+          } else {
+            toast.error(`${data.customerName} updated, but the logo could not be saved: ${logoRes.error}`);
+          }
+        } catch (err) {
+          console.error("[admin] logo encode/save failed", err);
+          toast.error(`${data.customerName} updated, but the logo could not be saved.`);
+        }
+      }
+      return { ok: true };
     } else {
       const tenantId = `tenant-${Date.now()}`;
       // Customer admin user id: reuse the tenant id so the admin record has a
@@ -270,13 +342,17 @@ export function useCustomerAccounts({
         adminEmail: data.email,
         active: data.active,
         mfaEnabled: data.mfaEnabled,
+        // Stamp createdAt on the optimistic row so the "Created" column renders
+        // immediately (the server default is now()); a later getTenants() reload
+        // replaces it with the authoritative value.
+        createdAt: new Date().toISOString(),
         plan: data.plan ? draftToPlanConfig(data.plan, `plan-${Date.now()}`) : null,
         config: {
           org: {
             companyName: data.customerName,
             timezone: data.timezone,
             dateFormat: "DD/MM/YYYY",
-            regulatoryRegion: "",
+            regulatoryRegion: data.regulatoryRegion,
           },
           sites: [],
           users: [
@@ -300,7 +376,10 @@ export function useCustomerAccounts({
       // that left the new customer unable to sign in (the DB lookup at
       // login would return nothing while Redux still showed the row).
       try {
-        await createTenantApi(newTenant);
+        const created = await createTenantApi(newTenant);
+        // Reflect the server-allocated Tenant ID (TEN-YYYY-NNNN) on the
+        // optimistic row so the detail View shows it immediately (no reload).
+        newTenant.customerCode = created.customerCode ?? undefined;
       } catch (err) {
         console.error("[admin] failed to persist new tenant", err);
         setSyncError(null);
@@ -312,10 +391,16 @@ export function useCustomerAccounts({
           // (see the create+assign atomicity note in tenantApi.ts).
           dispatch(addTenant({ ...newTenant, plan: null }));
           toast.error(`${data.customerName} created, but its plan could not be assigned: ${err.message}`);
-        } else {
-          toast.error(`Could not create ${data.customerName}: ${mapCustomerError(err)}`);
+          return { ok: false };
         }
-        return;
+        // Duplicate username/email (and other Zod field failures) carry a
+        // per-field error map — hand it back so the modal lights up the exact
+        // input inline and stays open, instead of only flashing a toast.
+        if (err instanceof TenantApiError && err.fieldErrors && Object.keys(err.fieldErrors).length > 0) {
+          return { ok: false, fieldErrors: err.fieldErrors };
+        }
+        toast.error(`Could not create ${data.customerName}: ${mapCustomerError(err)}`);
+        return { ok: false };
       }
       dispatch(addTenant(newTenant));
       setSyncError(null);
@@ -329,6 +414,7 @@ export function useCustomerAccounts({
       } else {
         setSavedPopup("Account and plan created");
       }
+      return { ok: true };
     }
   };
 
@@ -379,6 +465,55 @@ export function useCustomerAccounts({
     }
   };
 
+  // ── Table Suspend/Delete (from the shared 3-button confirmation) — routed
+  // through the dedicated server actions so the SUSPENDED vs soft-DELETED audit
+  // + sessionsValidAfter bump fire, and a soft-deleted tenant surfaces in the
+  // Restore list. Redux is mirrored so the row updates immediately. ──
+  const doTableSuspend = async () => {
+    if (!suspendingTenant) return;
+    const t = suspendingTenant;
+    setTableActionBusy(true);
+    const res = await suspendTenant(t.id);
+    setTableActionBusy(false);
+    if (!res.success) { toast.error(res.error); return; }
+    dispatch(updateTenant({ id: t.id, patch: { active: false, deletedAt: null } }));
+    toast.success(`${t.name} suspended.`);
+    setSuspendingTenant(null);
+  };
+
+  const doTableSoftDelete = async () => {
+    if (!suspendingTenant) return;
+    const t = suspendingTenant;
+    setTableActionBusy(true);
+    const res = await softDeleteTenant(t.id);
+    setTableActionBusy(false);
+    if (!res.success) { toast.error(res.error); return; }
+    dispatch(updateTenant({ id: t.id, patch: { active: false, deletedAt: new Date().toISOString() } }));
+    toast.success(`${t.name} deleted. Restore it from the Restore list.`);
+    setSuspendingTenant(null);
+  };
+
+  // ── Restore list (soft-deleted tenants) + password-gated permanent delete ──
+  const deletedTenants = tenants.filter((t) => !!t.deletedAt);
+  const openRestoreList = () => setRestoreListOpen(true);
+  const closeRestoreList = () => setRestoreListOpen(false);
+
+  const restoreFromList = async (t: Tenant) => {
+    setRestoringId(t.id);
+    const res = await restoreTenant(t.id);
+    setRestoringId(null);
+    if (!res.success) { toast.error(res.error); return; }
+    dispatch(updateTenant({ id: t.id, patch: { active: true, deletedAt: null } }));
+    toast.success(`${t.name} restored. The tenant and its users can log in again.`);
+  };
+
+  const requestPurge = (t: Tenant) => setPurgeTarget(t);
+  const closePurge = () => setPurgeTarget(null);
+  const onPurged = (id: string) => {
+    dispatch(removeTenant(id));
+    setPurgeTarget(null);
+  };
+
   const getFormData = (): AccountFormData => {
     if (!editingTenant) return makeEmptyForm();
     const admin = editingTenant.config.users.find(
@@ -390,6 +525,7 @@ export function useCustomerAccounts({
       email: editingTenant.adminEmail,
       language: "English, United States",
       timezone: editingTenant.config.org.timezone,
+      regulatoryRegion: editingTenant.config.org.regulatoryRegion ?? "",
       active: editingTenant.active,
       mfaEnabled: !!editingTenant.mfaEnabled,
       newPassword: "",
@@ -532,6 +668,21 @@ export function useCustomerAccounts({
     suspending,
     requestSuspend,
     confirmSuspend,
+    // table 3-button suspend/soft-delete (server-action backed)
+    tableActionBusy,
+    doTableSuspend,
+    doTableSoftDelete,
+    // restore list + password-gated permanent delete
+    deletedTenants,
+    restoreListOpen,
+    openRestoreList,
+    closeRestoreList,
+    restoringId,
+    restoreFromList,
+    purgeTarget,
+    requestPurge,
+    closePurge,
+    onPurged,
     // post-create plan
     postCreateSubOpen,
     postCreateTenantId,

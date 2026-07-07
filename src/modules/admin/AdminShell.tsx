@@ -8,6 +8,7 @@ import {
   SlidersHorizontal,
   ScrollText,
   LifeBuoy,
+  Globe,
   LogOut,
   Menu,
   Bell,
@@ -15,8 +16,13 @@ import {
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { logout, setCredentials, type UserRole } from "@/store/auth.slice";
+import { setRegions } from "@/store/regions.slice";
+import { loadRegions } from "@/actions/regions";
 import { logout as nextAuthLogout, fetchCurrentUser } from "@/lib/authClient";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { ColorThemePicker } from "@/components/ui/ColorThemePicker";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { logoutMessage } from "@/lib/labels/logout";
 import { useToast } from "@/components/ui/Toast";
 
 // `roles` gates link VISIBILITY only (hides dead-end links from users who'd be
@@ -31,6 +37,7 @@ const NAV_ITEMS: Array<{
 }> = [
   { path: "/admin", label: "Customer Accounts", icon: Users, end: true },
   { path: "/admin/settings", label: "Platform Settings", icon: SlidersHorizontal, end: false, roles: ["super_admin"] },
+  { path: "/admin/regions", label: "Regions & Frameworks", icon: Globe, end: false, roles: ["super_admin"] },
   { path: "/admin/audit", label: "Audit", icon: ScrollText, end: false, roles: ["super_admin"] },
   { path: "/admin/support", label: "Support", icon: LifeBuoy, end: false, roles: ["super_admin"] },
 ];
@@ -42,6 +49,7 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
   const toast = useToast();
   const user = useAppSelector((s) => s.auth.user);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [credentialsLoadError, setCredentialsLoadError] = useState<string | null>(null);
   // Bumped by [Retry] on the failure banner to refire the fetchCurrentUser
@@ -62,6 +70,19 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
 
     setMounted(true);
   }, []);
+
+  // DB-backed regions (Item #3, Stage 2). The (admin) layout is a client
+  // component, so — unlike (app) which seeds from the server layout — we hydrate
+  // the regions slice via a server action on mount. Until it resolves the slice
+  // keeps its constant-fallback initial state, so region dropdowns/labels (e.g.
+  // the Tenant Edit region picker) are correct on first render regardless.
+  useEffect(() => {
+    let live = true;
+    loadRegions()
+      .then((r) => { if (live) dispatch(setRegions(r)); })
+      .catch((err) => console.error("[AdminShell] loadRegions failed — keeping constant fallback:", err));
+    return () => { live = false; };
+  }, [dispatch]);
 
   // Track that we DID have an authenticated user at some point. This ref is
   // load-bearing for the session-expired toast below: when the auth effect
@@ -246,7 +267,7 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
             <div style={{ padding: "8px 8px 4px" }}>
               <button
                 type="button"
-                onClick={handleLogout}
+                onClick={() => setLogoutConfirmOpen(true)}
                 className="nav-item"
                 style={{ width: "100%" }}
                 aria-label="Sign out"
@@ -295,6 +316,7 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
 
             <div className="flex-1" />
 
+            <div className="hidden md:block"><ColorThemePicker /></div>
             <ThemeToggle />
 
             {/* Notifications */}
@@ -348,6 +370,19 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
           </main>
         </div>
       </div>
+      {/* Reusable logout confirmation (context copy passed in — the modal
+          itself hardcodes nothing). */}
+      <ConfirmModal
+        open={logoutConfirmOpen}
+        onClose={() => setLogoutConfirmOpen(false)}
+        onConfirm={() => { setLogoutConfirmOpen(false); handleLogout(); }}
+        title="Log out?"
+        message={logoutMessage("super_admin")}
+        confirmLabel="Log out"
+        variant="danger"
+        icon={LogOut}
+      />
+
       {/* The AI assistant is intentionally NOT mounted in the platform admin
           shell — the super_admin console manages tenant containers, not
           compliance work, so the chatbot stays scoped to the app shell. */}

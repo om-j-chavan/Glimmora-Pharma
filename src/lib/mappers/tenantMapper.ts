@@ -9,7 +9,10 @@ type PrismaTenantRow = {
   role: string;
   language: string;
   timezone: string;
+  logoUrl: string | null;
+  regulatoryRegion: string | null;
   isActive: boolean;
+  deletedAt: Date | null;
   mfaEnabled: boolean;
   createdAt: Date;
   plan?: {
@@ -107,15 +110,17 @@ export function mapTenantFromPrisma(row: PrismaTenantRow): Tenant {
     name: row.name,
     customerCode: row.customerCode,
     adminEmail: row.email,
+    logoUrl: row.logoUrl,
     createdAt: row.createdAt.toISOString(),
     active: row.isActive,
+    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
     mfaEnabled: row.mfaEnabled,
     config: {
       org: {
         companyName: row.name,
         timezone: row.timezone,
         dateFormat: "DD/MM/YYYY",
-        regulatoryRegion: "",
+        regulatoryRegion: row.regulatoryRegion ?? "",
       },
       sites: (row.sites ?? []).map(mapSite),
       users: allUsers,

@@ -41,7 +41,9 @@ export function SystemDetailPage({ system: prismaSystem, availableFindings, rece
   const { role, isViewOnly } = useRole();
   const { org, sites, users } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
-  const frameworks = useAppSelector((s) => s.settings.frameworks);
+  // Effective enabled frameworks for this tenant (server-resolved, non-persisted).
+  const frameworkList = useAppSelector((s) => s.frameworks.list);
+  const hasFramework = (key: string) => frameworkList.some((f) => f.key === key);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
 
   const system = useMemo(() => adaptPrismaSystem(prismaSystem), [prismaSystem]);
@@ -130,7 +132,7 @@ export function SystemDetailPage({ system: prismaSystem, availableFindings, rece
           <OverviewPanel system={system} sites={sites} users={users} role={role} onNavigateTab={(t) => goTab(t === "validation" ? "execute" : "assess")} />
           <ComplianceFindingsTab
             system={system} role={role}
-            showPart11={frameworks.p11} showAnnex11={frameworks.annex11} showGAMP5={frameworks.gamp5}
+            showPart11={hasFramework("p11")} showAnnex11={hasFramework("annex11")} showGAMP5={hasFramework("gamp5")}
             availableFindings={availableFindings} onError={setErrorMsg} onOk={setOkMsg} sections={["risk"]}
           />
         </div>
@@ -175,7 +177,7 @@ export function SystemDetailPage({ system: prismaSystem, availableFindings, rece
           />
           <ComplianceFindingsTab
             system={system} role={role}
-            showPart11={frameworks.p11} showAnnex11={frameworks.annex11} showGAMP5={frameworks.gamp5}
+            showPart11={hasFramework("p11")} showAnnex11={hasFramework("annex11")} showGAMP5={hasFramework("gamp5")}
             availableFindings={availableFindings} onError={setErrorMsg} onOk={setOkMsg} sections={["di", "remediation", "findings", "capas"]}
           />
           {/* Recent activity */}

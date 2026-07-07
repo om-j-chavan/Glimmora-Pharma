@@ -22,7 +22,10 @@ export type NotificationType =
   | "TICKET_ASSIGNED"
   | "TICKET_REPLY"
   | "TICKET_STATUS_CHANGED"
-  | "TICKET_RESOLVED";
+  | "TICKET_RESOLVED"
+  // Two-hop escalation (Phase B): a Customer Admin escalated a ticket to the SA
+  // tier. Routing change, not a status/assignment change — hence its own type.
+  | "TICKET_ESCALATED";
 
 export interface NotifyInput {
   tenantId: string;

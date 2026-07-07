@@ -3,7 +3,7 @@ import { useAppSelector } from "./useAppSelector";
 
 export function useSetupStatus() {
   const { sites, users } = useTenantConfig();
-  const frameworks = useAppSelector((s) => s.settings.frameworks);
+  const frameworkList = useAppSelector((s) => s.frameworks.list);
   const findings = useAppSelector((s) => s.findings.items);
 
   const steps = [
@@ -27,7 +27,7 @@ export function useSetupStatus() {
     },
     {
       key: "frameworks",
-      done: Object.values(frameworks).some((v) => v === true),
+      done: frameworkList.length > 0,
       label: "Enable compliance frameworks",
       desc: "Part 11, Annex 11, GAMP 5 etc.",
       action: "Settings \u2192 Frameworks",

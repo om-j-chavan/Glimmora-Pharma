@@ -21,11 +21,22 @@ const THEMES: { id: ColorTheme; label: string; color: string }[] = [
   { id: "slate-gray", label: "Slate Gray", color: "#6b7b8d" },
 ];
 
+// Server default — getInitialColorTheme() falls back to "emerald" when there is
+// no localStorage (i.e. during SSR). The swatch must render this on the first
+// client paint too, or the stored theme mismatches the server HTML at hydration.
+const DEFAULT_THEME = THEMES.find((t) => t.id === "emerald") ?? THEMES[0];
+
 export function ColorThemePicker() {
   const dispatch = useAppDispatch();
   const colorTheme = useAppSelector((s) => s.theme.colorTheme);
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Render the server-produced value ("emerald") on the first client render,
+  // then swap to the real (localStorage-backed) theme after mount — mirrors the
+  // ThemeToggle hydration guard, avoiding a swatch-colour hydration mismatch.
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -47,7 +58,7 @@ export function ColorThemePicker() {
     setOpen(false);
   };
 
-  const current = THEMES.find((t) => t.id === colorTheme) ?? THEMES[0];
+  const current = mounted ? (THEMES.find((t) => t.id === colorTheme) ?? DEFAULT_THEME) : DEFAULT_THEME;
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>

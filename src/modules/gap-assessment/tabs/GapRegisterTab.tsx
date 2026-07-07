@@ -2,14 +2,15 @@ import { useState, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import {
-  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, History, Paperclip, Send, Wrench, CheckCircle2,
+  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, Paperclip, Send, Wrench, CheckCircle2, Clock, X,
 } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
+import { frameworkLabel } from "@/constants/frameworks";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import type { FindingAssignee } from "@/lib/queries";
 import { formatReference } from "@/lib/reference";
 import { ExportMenu } from "@/components/ui/ExportMenu";
 import type { Finding, FindingSeverity, FindingStatus } from "@/store/findings.slice";
@@ -22,7 +23,9 @@ import {
   loadFindingReview as loadFindingReviewAction,
   loadFindingDocuments as loadFindingDocumentsAction,
 } from "@/actions/findings";
-import { TaskThread, GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
+import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
+import { DocumentCard } from "@/components/shared/DocumentCard";
+import { worklistDocToCardView } from "@/components/shared/documentCardAdapters";
 import type { WorklistTaskMessage, WorklistDoc } from "@/lib/queries/worklist";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
@@ -42,12 +45,6 @@ import { CAPA_RCA_METHODS, rcaMethodOptions, type CapaRCAMethod } from "@/consta
 import { DocumentSummaryPanel } from "@/components/search/DocumentSummaryPanel";
 
 /* ── Helpers ── */
-
-const FRAMEWORK_LABELS: Record<string, string> = {
-  p210: "21 CFR 210/211", p11: "Part 11", annex11: "Annex 11",
-  annex15: "Annex 15", ichq9: "ICH Q9", ichq10: "ICH Q10",
-  gamp5: "GAMP 5", who: "WHO GMP", mhra: "MHRA",
-};
 
 function severityBadge(s: FindingSeverity) {
   return <Badge variant={getSeverityVariant(s, "generic")}>{normalizeSeverityForDisplay(s, "generic") ?? s}</Badge>;
@@ -102,6 +99,9 @@ function seedRcaDetail(f: { rcaDetail?: string; rootCause?: string }): RcaDetail
 interface GapRegisterTabProps {
   filteredFindings: Finding[];
   findingsTotal: number;
+  /** SERVER-SCOPED assignee pool (tenant + assigner's site) — replaces the
+   *  client Redux user list so selection can't widen scope. */
+  assignees: FindingAssignee[];
   selectedFinding: Finding | null;
   onSelectFinding: (f: Finding | null) => void;
   isViewOnly: boolean;
@@ -121,7 +121,7 @@ interface GapRegisterTabProps {
 }
 
 export function GapRegisterTab({
-  filteredFindings, findingsTotal, selectedFinding, onSelectFinding,
+  filteredFindings, findingsTotal, assignees, selectedFinding, onSelectFinding,
   isViewOnly, users, timezone, dateFormat, capas,
   agiMode, agiCapa, isAnyFilterActive, renderFilters,
   onAddOpen, onRaiseCapa, onNavigateCapa, onManageEvidence,
@@ -134,7 +134,6 @@ export function GapRegisterTab({
   const capaCan = usePermissions("capa");
   // Gap Step 1 — QA assigns the finding to the person who will work it.
   const { isQAHead } = usePermissions();
-  const complianceUsers = useComplianceUsers();
   const [assignTo, setAssignTo] = useState("");
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
@@ -162,6 +161,8 @@ export function GapRegisterTab({
   // the collapsible Audit Trail open state (collapsed by default).
   const [findingDocs, setFindingDocs] = useState<WorklistDoc[]>([]);
   const [auditOpen, setAuditOpen] = useState(false);
+  // #13 — Clock icon in the modal header opens a scrollable Audit Trail modal.
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
 
   useEffect(() => {
     const id = selectedFinding?.id;
@@ -326,7 +327,7 @@ export function GapRegisterTab({
         f.area,
         f.requirement,
         f.purpose ?? "",
-        FRAMEWORK_LABELS[f.framework] ?? f.framework,
+        frameworkLabel(f.framework),
         f.severity,
         f.status,
         ownerName(f.owner),
@@ -485,17 +486,18 @@ export function GapRegisterTab({
               {
                 key: "requirement",
                 header: "Requirement",
-                render: (f) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }}>{f.requirement}</span>,
+                // Truncate long text with an ellipsis; full text on hover (title).
+                render: (f) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 200, color: "var(--text-primary)" }} title={f.requirement}>{f.requirement}</span>,
               },
               {
                 key: "purpose",
                 header: "Purpose",
-                render: (f) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 180, color: "var(--text-secondary)" }}>{f.purpose ? f.purpose : <span style={{ color: "var(--text-muted)" }}>&mdash;</span>}</span>,
+                render: (f) => <span className="text-[12px] line-clamp-2 block" style={{ maxWidth: 180, color: "var(--text-secondary)" }} title={f.purpose ?? undefined}>{f.purpose ? f.purpose : <span style={{ color: "var(--text-muted)" }}>&mdash;</span>}</span>,
               },
               {
                 key: "framework",
                 header: "Framework",
-                render: (f) => <span className="badge badge-blue text-[10px]">{FRAMEWORK_LABELS[f.framework] ?? f.framework}</span>,
+                render: (f) => <span className="badge badge-blue text-[10px]">{frameworkLabel(f.framework)}</span>,
               },
               {
                 key: "severity",
@@ -568,6 +570,22 @@ export function GapRegisterTab({
         open={!!selectedFinding}
         onClose={() => { setIsEditing(false); onSelectFinding(null); }}
         title={selectedFinding ? findingRef(selectedFinding) : "Finding Detail"}
+        header={
+          <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
+            <h2 className="text-[14px] font-semibold text-(--text-primary)">{selectedFinding ? findingRef(selectedFinding) : "Finding Detail"}</h2>
+            <div className="flex items-center gap-1">
+              {/* #13 — Clock opens the scrollable Audit Trail modal, before ✕. */}
+              <button type="button" onClick={() => setAuditModalOpen(true)} aria-label="Audit trail" title="Audit trail"
+                className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors">
+                <Clock className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+              </button>
+              <button type="button" onClick={() => { setIsEditing(false); onSelectFinding(null); }} aria-label="Close"
+                className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors">
+                <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        }
         footer={selectedFinding && isEditing ? (
           <div className="flex justify-end gap-2">
             {/* Edit-mode actions only; the modal's ✕ handles closing (no
@@ -583,27 +601,30 @@ export function GapRegisterTab({
                 right (header action; ✕ closes; Save/Cancel in footer on edit). */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex gap-2 flex-wrap">{severityBadge(selectedFinding.severity)}{statusBadge(selectedFinding.status)}</div>
-              {canEdit && !isEditing && (
-                <Button variant="secondary" size="sm" icon={Pencil} onClick={() => setIsEditing(true)}>Edit</Button>
+              {!isEditing && (
+                // Summarize FIRST, then Edit, on the same row (#8). If Edit is
+                // unavailable, Summarize simply takes the slot. Summarize opens a
+                // modal (DocumentSummaryPanel, #9).
+                <div className="flex items-center gap-2">
+                  <DocumentSummaryPanel
+                    title={findingRef(selectedFinding)}
+                    recordId={selectedFinding.id}
+                    module="finding"
+                    buttonLabel="Summarize"
+                    content={[
+                      `Requirement: ${selectedFinding.requirement}`,
+                      selectedFinding.purpose ? `Purpose: ${selectedFinding.purpose}` : "",
+                      `Framework: ${frameworkLabel(selectedFinding.framework)}; Area: ${selectedFinding.area}; Severity: ${selectedFinding.severity}`,
+                      selectedFinding.rootCause ? `Root cause: ${selectedFinding.rootCause}` : "",
+                      selectedFinding.agiSummary ? `AI summary: ${selectedFinding.agiSummary}` : "",
+                    ].filter(Boolean).join("\n\n")}
+                  />
+                  {canEdit && (
+                    <Button variant="secondary" size="sm" icon={Pencil} onClick={() => setIsEditing(true)}>Edit</Button>
+                  )}
+                </div>
               )}
             </div>
-
-            {/* Feature 3 — Document Summarizing (view mode only) */}
-            {!isEditing && (
-              <DocumentSummaryPanel
-                title={findingRef(selectedFinding)}
-                recordId={selectedFinding.id}
-                module="finding"
-                buttonLabel="Summary"
-                content={[
-                  `Requirement: ${selectedFinding.requirement}`,
-                  selectedFinding.purpose ? `Purpose: ${selectedFinding.purpose}` : "",
-                  `Framework: ${selectedFinding.framework}; Area: ${selectedFinding.area}; Severity: ${selectedFinding.severity}`,
-                  selectedFinding.rootCause ? `Root cause: ${selectedFinding.rootCause}` : "",
-                  selectedFinding.agiSummary ? `AI summary: ${selectedFinding.agiSummary}` : "",
-                ].filter(Boolean).join("\n\n")}
-              />
-            )}
 
             {/* ── Requirement ── */}
             {isEditing ? (
@@ -655,7 +676,7 @@ export function GapRegisterTab({
               <div>
                 <h3 className={LABEL}>Framework</h3>
                 <div className="flex items-center">
-                  <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{FRAMEWORK_LABELS[selectedFinding.framework] ?? selectedFinding.framework}</p>
+                  <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{frameworkLabel(selectedFinding.framework)}</p>
                   {isEditing && LOCKED_HINT}
                 </div>
               </div>
@@ -693,7 +714,7 @@ export function GapRegisterTab({
                       control={form.control}
                       rules={{ required: "Target date required" }}
                       render={({ field }) => (
-                        <DatePicker id="edit-target" value={field.value ?? ""} onChange={field.onChange}
+                        <DatePicker id="edit-target" value={field.value ?? ""} onChange={field.onChange} min={new Date().toISOString().slice(0, 10)}
                           error={form.formState.errors.targetDate?.message} />
                       )}
                     />
@@ -707,41 +728,6 @@ export function GapRegisterTab({
                 )}
               </div>
             </div>
-
-            {/* Gap Step 4 — QA review (accept / rework) + the conversation thread.
-                Shown once the finding has entered the submit/rework loop. */}
-            {review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0) && (
-              <div className="rounded-lg border p-3 mt-3" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <h3 className={LABEL} style={{ margin: 0 }}>QA review</h3>
-                  <Badge variant={review.status === "Submitted" ? "purple" : review.status === "Rework" ? "red" : review.status === "Closed" ? "green" : "amber"}>{review.status}</Badge>
-                </div>
-                {review.completionNotes && (
-                  <p className="text-[12px] mt-1.5" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {review.completionNotes}</p>
-                )}
-                {/* The rework reason renders ONCE — in the Conversation thread
-                    below, where reworkFinding auto-posts it as a durable, attributed
-                    FindingMessage. A separate "Returned:" banner here repeated the
-                    exact same text (the duplicate-Rework render). */}
-                {isQAHead && review.status === "Submitted" && (
-                  <div className="flex gap-2 mt-2">
-                    <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>
-                    <Button variant="secondary" size="sm" icon={Wrench} disabled={reviewBusy} onClick={() => { setReviewError(null); setReworkReasonInput(""); setReworkOpen(true); }}>Send for rework</Button>
-                  </div>
-                )}
-                <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
-                  <TaskThread messages={review.messages} currentUserId={user?.id} fmt={(iso) => dayjs.utc(iso).tz(timezone).format(`${dateFormat} HH:mm`)} />
-                  {review.status !== "Closed" && (
-                    <div className="flex items-end gap-2 mt-2">
-                      <textarea className="input text-[12px] w-full min-h-14" placeholder="Message the assignee…" value={reviewMsg} onChange={(e) => setReviewMsg(e.target.value)} maxLength={2000} />
-                      <Button variant="secondary" size="sm" icon={Send} disabled={reviewMsg.trim().length === 0} onClick={() => void handlePostReviewMsg()}>Send</Button>
-                    </div>
-                  )}
-                </div>
-                {reviewError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{reviewError}</p>}
-              </div>
-            )}
 
             {reworkOpen && (
               <Modal open onClose={() => { if (!reviewBusy) setReworkOpen(false); }} title="Send finding for rework">
@@ -790,7 +776,7 @@ export function GapRegisterTab({
                   name="rcaMethod"
                   control={form.control}
                   render={({ field }) => (
-                    <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select method..." width="w-full" options={rcaMethodOptions(CAPA_RCA_METHODS)} />
+                    <Dropdown value={field.value ?? ""} onChange={(v) => { field.onChange(v); if (!v) setDetail({}); }} placeholder="Select method..." width="w-full" options={[{ value: "", label: "— None" }, ...rcaMethodOptions(CAPA_RCA_METHODS)]} />
                   )}
                 />
                 <div className="mt-2">
@@ -883,7 +869,7 @@ export function GapRegisterTab({
                           isQAHead ? (
                             <>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <Dropdown placeholder="Assign to…" value={assignTo} onChange={setAssignTo} width="w-56" size="sm" options={complianceUsers.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))} />
+                                <Dropdown placeholder="Assign to…" value={assignTo} onChange={setAssignTo} width="w-56" size="sm" options={assignees.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))} />
                                 <Button variant="primary" size="sm" icon={Plus} disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign person</Button>
                                 {capaCan.canCreate && <Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>}
                               </div>
@@ -918,12 +904,71 @@ export function GapRegisterTab({
               );
             })()}
 
-            {/* ── Documents (read-only) — the finding's uploaded evidence, shown
-                in view + edit so existing docs are visible here (Round 4 #11). ── */}
-            <div className="pt-4 border-t border-(--bg-border)">
-              <h3 className={LABEL}>Documents</h3>
-              <GroupedTaskDocs docs={findingDocs} emptyText="No documents uploaded to this finding." />
-            </div>
+            {/* Gap Step 4 — QA review (accept / rework), the SUBMITTED EVIDENCE
+                bundle, and the conversation thread. Positioned BELOW Disposition
+                so QA reviews the whole submission (notes + evidence + thread) as
+                the final decision surface (#9/#10). Shown once the finding enters
+                the submit/rework loop. */}
+            {review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0) && (
+              <div className="rounded-lg border p-3 mt-3" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <h3 className={LABEL} style={{ margin: 0 }}>QA review</h3>
+                  <Badge variant={review.status === "Submitted" ? "purple" : review.status === "Rework" ? "red" : review.status === "Closed" ? "green" : "amber"}>{review.status}</Badge>
+                </div>
+                {review.completionNotes && (
+                  <p className="text-[12px] mt-1.5" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {review.completionNotes}</p>
+                )}
+                {/* Worker-uploaded evidence — the SAME shared <DocumentCard>, so QA
+                    sees the notes AND the attached documents together (#9). */}
+                {findingDocs.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Evidence submitted</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {findingDocs.map((d) => <DocumentCard key={d.id} doc={worklistDocToCardView(d)} />)}
+                    </div>
+                  </div>
+                )}
+                {/* The rework reason renders ONCE — in the Conversation thread
+                    below, where reworkFinding auto-posts it as a durable, attributed
+                    FindingMessage. A separate "Returned:" banner here repeated the
+                    exact same text (the duplicate-Rework render). */}
+                {isQAHead && review.status === "Submitted" && (
+                  <div className="flex gap-2 mt-2">
+                    <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>
+                    <Button variant="secondary" size="sm" icon={Wrench} disabled={reviewBusy} onClick={() => { setReviewError(null); setReworkReasonInput(""); setReworkOpen(true); }}>Send for rework</Button>
+                  </div>
+                )}
+                <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
+                  <TaskThread messages={review.messages} currentUserId={user?.id} fmt={(iso) => dayjs.utc(iso).tz(timezone).format(`${dateFormat} HH:mm`)} />
+                  {review.status !== "Closed" && (
+                    <div className="flex items-end gap-2 mt-2">
+                      <textarea className="input text-[12px] w-full min-h-14" placeholder="Message the assignee…" value={reviewMsg} onChange={(e) => setReviewMsg(e.target.value)} maxLength={2000} />
+                      <Button variant="secondary" size="sm" icon={Send} disabled={reviewMsg.trim().length === 0} onClick={() => void handlePostReviewMsg()}>Send</Button>
+                    </div>
+                  )}
+                </div>
+                {reviewError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{reviewError}</p>}
+              </div>
+            )}
+
+            {/* ── Documents — the finding's uploaded evidence, via the shared
+                <DocumentCard> (View + Download per card). Rendered here ONLY when
+                the QA-review card above is NOT shown (pre-submission / no review
+                loop); once submitted, the same docs surface inside that card as
+                the "Evidence submitted" bundle, so they never duplicate. ── */}
+            {!(review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0)) && (
+              <div className="pt-4 border-t border-(--bg-border)">
+                <h3 className={LABEL}>Documents</h3>
+                {findingDocs.length === 0 ? (
+                  <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>No documents uploaded to this finding.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {findingDocs.map((d) => <DocumentCard key={d.id} doc={worklistDocToCardView(d)} />)}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── Created (always visible, #8) + Audit Trail (collapsible, collapsed
                 by default) — the former "Timeline", renamed (Round 4 #7+#9). ── */}
@@ -966,20 +1011,25 @@ export function GapRegisterTab({
                       </div>
                     ) : null;
                   })()}
-                  {selectedFinding.editHistory && selectedFinding.editHistory.length > 0 && (() => {
-                    const last = selectedFinding.editHistory[selectedFinding.editHistory.length - 1];
-                    return (
-                      <div className="flex items-start gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#10b981" }} />
-                        <div>
-                          <p className="font-medium" style={{ color: "var(--text-primary)" }}>Last updated</p>
-                          <p style={{ color: "var(--text-muted)" }}>
-                            {displayName({ name: last.editedBy })} &mdash; {dayjs.utc(last.editedAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
+                  {/* Full edit history, folded into the unified Audit Trail
+                      (the separate "Edit history" view was a redundant filter of
+                      the SAME data and was removed — #11). Names are readable
+                      (#12: the adapter now uses editedByName, not the userId). */}
+                  {selectedFinding.editHistory && selectedFinding.editHistory.slice().reverse().map((edit) => (
+                    <div key={edit.editedAt} className="flex items-start gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#10b981" }} />
+                      <div>
+                        <p className="font-medium" style={{ color: "var(--text-primary)" }}>Edited by {displayName({ name: edit.editedBy })}</p>
+                        <p style={{ color: "var(--text-muted)" }}>{dayjs.utc(edit.editedAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}</p>
+                        {edit.reason && <p className="italic" style={{ color: "var(--text-secondary)" }}>&ldquo;{edit.reason}&rdquo;</p>}
+                        {edit.changes.map((c, ci) => (
+                          <p key={ci} style={{ color: "var(--text-secondary)" }}>
+                            {c.field}: <span style={{ color: "#ef4444" }}>{String(c.oldValue)}</span>{" → "}<span style={{ color: "#10b981" }}>{String(c.newValue)}</span>
                           </p>
-                        </div>
+                        ))}
                       </div>
-                    );
-                  })()}
+                    </div>
+                  ))}
                   {selectedFinding.linkedSystemName && (
                     <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
                       Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
@@ -990,37 +1040,42 @@ export function GapRegisterTab({
               </div>
             )}
 
-            {/* ── Edit history ── */}
-            {!isEditing && selectedFinding.editHistory && selectedFinding.editHistory.length > 0 && (
-              <div className="pt-4 border-t border-(--bg-border)">
-                <div className="flex items-center gap-2 mb-3">
-                  <History className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                  <p className={LABEL} style={{ marginBottom: 0 }}>Edit history</p>
-                </div>
-                {selectedFinding.editHistory.slice().reverse().map((edit, i) => (
-                  <div
-                    key={edit.editedAt}
-                    className={clsx("text-[11px] mb-2 pb-2", i < selectedFinding.editHistory!.length - 1 && "border-b border-(--bg-border)")}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium" style={{ color: "var(--text-primary)" }}>{displayName({ name: edit.editedBy })}</span>
-                      <span style={{ color: "var(--text-muted)" }}>{dayjs.utc(edit.editedAt).tz(timezone).format("DD MMM YYYY HH:mm")}</span>
-                    </div>
-                    {edit.reason && (
-                      <p className="italic mb-1" style={{ color: "var(--text-secondary)" }}>"{edit.reason}"</p>
-                    )}
-                    {edit.changes.map((c, ci) => (
-                      <p key={ci} style={{ color: "var(--text-secondary)" }}>
-                        {c.field}: <span style={{ color: "#ef4444" }}>{String(c.oldValue)}</span>{" → "}<span style={{ color: "#10b981" }}>{String(c.newValue)}</span>
-                      </p>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </Modal>
+
+      {/* #13 — scrollable Audit Trail modal (opened by the header Clock icon). */}
+      {auditModalOpen && selectedFinding && (
+        <Modal open onClose={() => setAuditModalOpen(false)} title={`Audit Trail — ${findingRef(selectedFinding)}`}>
+          <div className="max-h-[60vh] overflow-y-auto space-y-2.5 text-[11px] pr-1">
+            {selectedFinding.createdAt && (
+              <div className="flex items-start gap-2">
+                <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "var(--brand)" }} />
+                <div>
+                  <p className="font-medium" style={{ color: "var(--text-primary)" }}>Created</p>
+                  <p style={{ color: "var(--text-muted)" }}>{ownerName(selectedFinding.owner)} &mdash; {dayjs.utc(selectedFinding.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}</p>
+                </div>
+              </div>
+            )}
+            {selectedFinding.editHistory && selectedFinding.editHistory.slice().reverse().map((edit) => (
+              <div key={edit.editedAt} className="flex items-start gap-2">
+                <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#10b981" }} />
+                <div>
+                  <p className="font-medium" style={{ color: "var(--text-primary)" }}>Edited by {displayName({ name: edit.editedBy })}</p>
+                  <p style={{ color: "var(--text-muted)" }}>{dayjs.utc(edit.editedAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}</p>
+                  {edit.reason && <p className="italic" style={{ color: "var(--text-secondary)" }}>&ldquo;{edit.reason}&rdquo;</p>}
+                  {edit.changes.map((c, ci) => (
+                    <p key={ci} style={{ color: "var(--text-secondary)" }}>{c.field}: <span style={{ color: "#ef4444" }}>{String(c.oldValue)}</span>{" → "}<span style={{ color: "#10b981" }}>{String(c.newValue)}</span></p>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {(!selectedFinding.editHistory || selectedFinding.editHistory.length === 0) && (
+              <p style={{ color: "var(--text-muted)" }}>No edits recorded yet.</p>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {/* Save success popup */}
       <Popup isOpen={savedPopup} variant="success" title="Finding updated" description="Changes saved and recorded in audit trail." onDismiss={() => setSavedPopup(false)} />

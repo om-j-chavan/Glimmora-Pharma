@@ -10,6 +10,8 @@ import { useNotificationEngine } from "@/hooks/useNotificationEngine";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { logout, setCredentials, setTenants, type AuthUser, type Tenant } from "@/store/auth.slice";
+import { setEffectiveFrameworks, resetFrameworks, type FrameworkItem } from "@/store/frameworks.slice";
+import { setRegions, type RegionOption } from "@/store/regions.slice";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { Button } from "@/components/ui/Button";
@@ -31,9 +33,16 @@ interface AppShellProps {
    *  missing subscription as expired, and the gate fires "No active
    *  subscription" against a perfectly healthy DB row. */
   initialUser?: AuthUser | null;
+  /** Server-resolved effective frameworks for this tenant — seeds the
+   *  non-persisted frameworks slice synchronously on mount (see the (app)
+   *  layout). Guarantees framework-dependent UI is populated on first render. */
+  initialFrameworks?: FrameworkItem[];
+  /** Server-resolved regions (active options + value→label map incl. archived)
+   *  — seeds the non-persisted regions slice on mount (Item #3, Stage 2). */
+  initialRegions?: { active: RegionOption[]; labelMap: Record<string, string> };
 }
 
-export function AppShell({ children, initialTenant, initialUser }: AppShellProps) {
+export function AppShell({ children, initialTenant, initialUser, initialFrameworks, initialRegions }: AppShellProps) {
   // 🔒 Prevent hydration mismatch
   const [mounted, setMounted] = useState(false);
 
@@ -85,6 +94,25 @@ export function AppShell({ children, initialTenant, initialUser }: AppShellProps
     credentialsSeeded.current = true;
   }, [dispatch, initialUser, reduxUser, reduxCurrentTenant]);
 
+  // Per-tenant framework hydration (Phase 1, Item 4). Seeds the NON-persisted
+  // `frameworks` slice from the SERVER-resolved list passed by the (app) layout
+  // — populated on the first client render (no async round-trip), so the Gap
+  // dropdown / CSV columns never read an empty slice. The layout re-runs per
+  // request (per login), so a tenant switch always re-seeds from the server and
+  // one tenant's enablement can never leak to another. Resets on logout.
+  const fwUserId = reduxUser?.id ?? initialUser?.id ?? null;
+  useEffect(() => {
+    if (!fwUserId) { dispatch(resetFrameworks()); return; }
+    dispatch(setEffectiveFrameworks(initialFrameworks ?? []));
+  }, [dispatch, fwUserId, initialFrameworks]);
+
+  // DB-backed regions (Item #3, Stage 2) — seed from the server list. If absent
+  // the slice keeps its constant-fallback initial state, so dropdowns/labels
+  // still work (parity by construction).
+  useEffect(() => {
+    if (initialRegions) dispatch(setRegions(initialRegions));
+  }, [dispatch, initialRegions]);
+
   const { plan, tenantName, isExpired, isNearExpiry, daysRemaining } =
     useTenantConfig();
   const { isSuperAdmin, isViewOnly } = useRole();
@@ -92,7 +120,17 @@ export function AppShell({ children, initialTenant, initialUser }: AppShellProps
   // ⛔ Wait until client is ready
   if (!mounted) return null;
 
-  const isBlocked = isExpired && !isSuperAdmin;
+  // The plan gate must NOT evaluate during the logout transition. Logout
+  // dispatches `logout()` (nulling auth.user + currentTenant) but defers the
+  // /login navigation ~500ms, so this shell re-renders while still mounted with
+  // no session: useTenantConfig() then sees no tenant → plan=null → isExpired,
+  // and useRole() defaults to "viewer" → !isSuperAdmin — which previously
+  // flashed the "No plan assigned" blocked screen at every non-SA logout.
+  // Requiring a live session user (`reduxUser`) skips the gate whenever the
+  // session is clearing / absent, without touching the SA exemption
+  // (`!isSuperAdmin`) or a real authenticated plan-less/expired tenant (which
+  // always has a user, so it still sees the card in normal use).
+  const isBlocked = isExpired && !isSuperAdmin && !!reduxUser;
 
   // =========================
   // 🚫 BLOCKED SCREEN
@@ -191,6 +229,10 @@ export function AppShell({ children, initialTenant, initialUser }: AppShellProps
                   await nextAuthLogout();
                 } catch { /* ignore — fall through to local logout */ }
                 dispatch(logout());
+                // Clear per-tenant framework state on sign-out so nothing can
+                // carry into the next login in the same browser (belt-and-braces
+                // on top of the hard nav + non-persisted slice).
+                dispatch(resetFrameworks());
                 toast.success("Signed out.");
                 // Hard nav (this surface used window.location to defeat any
                 // stale SPA state). Slight delay so the toast renders.

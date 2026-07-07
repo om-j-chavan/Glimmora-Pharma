@@ -27,20 +27,31 @@ import {
   confirmResolution,
   reopenTicket,
   cancelTicket,
+  escalateTicket,
 } from "@/actions/support";
 import { statusBadge, priorityBadge, RELATED_MODULE_ROUTE } from "./_shared";
 
 interface Props {
   detail: { ticket: Ticket; messages: TicketMessage[]; activities: TicketActivity[] };
   attachments: TicketAttachment[];
+  /** canHandleTicket — reply-as-support / internal note / status / close (SA
+   *  cross-tenant; CA only on CA-routed in-tenant). */
   manage: boolean;
+  /** canManageSupport — ASSIGN only (SA, cross-tenant); CA never gets assign. */
+  canAssign: boolean;
+  /** canHandleFirstLine && routed-to-caller's-tier — the CA→SA escalate button. */
+  canEscalate: boolean;
+  /** The viewer's role — drives the tier badge (With me / Escalated / With CA). */
+  viewerRole: string;
+  /** Tenant name for the escalation trail (SA cross-tenant view). */
+  tenantLabel?: string;
   currentUserId: string;
   assigneeOptions: { id: string; name: string }[];
 }
 
 const STATUS_TARGETS: TicketStatus[] = ["Open", "In Progress", "Awaiting User"];
 
-export function TicketDetailView({ detail, attachments, manage, currentUserId, assigneeOptions }: Props) {
+export function TicketDetailView({ detail, attachments, manage, canAssign, canEscalate, viewerRole, tenantLabel, currentUserId, assigneeOptions }: Props) {
   const { ticket, messages, activities } = detail;
   const router = useRouter();
   const toast = useToast();
@@ -50,16 +61,29 @@ export function TicketDetailView({ detail, attachments, manage, currentUserId, a
   const status = ticket.status as TicketStatus;
   const isRequester = ticket.requesterId === currentUserId;
   const isTerminal = TERMINAL_STATUSES.has(status);
-  const backPath = manage ? "/admin/support" : "/support";
+  const handlerView = viewerRole === "customer_admin" || viewerRole === "super_admin";
+  const backPath = viewerRole === "super_admin" ? "/admin/support" : "/support";
+
+  // Routing tier badge — separate from the lifecycle status badge.
+  const viewerTier = viewerRole === "super_admin" ? "super_admin" : viewerRole === "customer_admin" ? "customer_admin" : null;
+  const tierBadge = !handlerView
+    ? (isTerminal ? null : <Badge variant="blue">With Support</Badge>)
+    : ticket.currentHandler === viewerTier
+      ? <Badge variant="green">With me</Badge>
+      : ticket.currentHandler === "super_admin"
+        ? <Badge variant="amber">Escalated</Badge>
+        : <Badge variant="gray">With CA</Badge>;
 
   // Which actions are available — drives whether the Actions card renders at all
   // (a terminal ticket like Cancelled has none, so the card is hidden rather
   // than shown empty).
   const showManagerControls = manage && !isTerminal;
+  const showAssign = canAssign && !isTerminal;
+  const canEscalateUi = canEscalate && !isTerminal;
   const canConfirm = status === "Resolved" && (isRequester || manage);
   const canReopenUi = (status === "Resolved" || status === "Closed") && (isRequester || manage);
   const canCancelUi = canTransition(status, "Cancelled") && (isRequester || manage);
-  const hasActions = showManagerControls || canConfirm || canReopenUi || canCancelUi;
+  const hasActions = showManagerControls || showAssign || canEscalateUi || canConfirm || canReopenUi || canCancelUi;
 
   const [reply, setReply] = useState("");
   const [internal, setInternal] = useState("");
@@ -68,8 +92,31 @@ export function TicketDetailView({ detail, attachments, manage, currentUserId, a
   const [showResolve, setShowResolve] = useState(false);
   const [resSummary, setResSummary] = useState("");
   const [resCategory, setResCategory] = useState<string>(RESOLUTION_CATEGORIES[0]);
+  const [showEscalate, setShowEscalate] = useState(false);
+  const [escNote, setEscNote] = useState("");
   const [reasonMode, setReasonMode] = useState<"reopen" | "cancel" | null>(null);
   const [reason, setReason] = useState("");
+
+  // Message + Close (option a): the closing message becomes the resolution
+  // summary; category required. Reuses the existing resolve → confirm chain.
+  async function messageAndClose() {
+    if (resSummary.trim().length < 5) return;
+    setBusy(true);
+    const r1 = await resolveTicket(ticket.id, { resolutionSummary: resSummary.trim(), resolutionCategory: resCategory as (typeof RESOLUTION_CATEGORIES)[number] });
+    if (!r1.success) { setBusy(false); toast.error(`Close: ${r1.error ?? "failed"}`); return; }
+    const r2 = await confirmResolution(ticket.id);
+    setBusy(false);
+    if (!r2.success) { toast.error(`Close: ${r2.error ?? "failed"}`); router.refresh(); return; }
+    toast.success("Ticket closed."); setShowResolve(false); setResSummary(""); router.refresh();
+  }
+
+  async function doEscalate() {
+    setBusy(true);
+    const res = await escalateTicket(ticket.id, escNote.trim() ? { note: escNote.trim() } : undefined);
+    setBusy(false);
+    if (!res.success) { toast.error(`Escalate: ${res.error ?? "failed"}`); return; }
+    toast.success("Escalated to platform support."); setShowEscalate(false); setEscNote(""); router.refresh();
+  }
 
   async function run(label: string, fn: () => Promise<{ success: boolean; error?: string }>) {
     setBusy(true);
@@ -93,6 +140,7 @@ export function TicketDetailView({ detail, attachments, manage, currentUserId, a
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-mono text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>{ticket.reference ?? ticket.id.slice(0, 8)}</span>
           {statusBadge(ticket.status)}
+          {tierBadge}
           {priorityBadge(ticket.priority)}
           {ticket.slaDueAt && !isTerminal && status !== "Resolved" && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium" style={{ background: slaOverdue ? "var(--danger-bg)" : "var(--bg-elevated)", color: slaOverdue ? "var(--danger)" : "var(--text-secondary)" }}>
@@ -103,6 +151,16 @@ export function TicketDetailView({ detail, attachments, manage, currentUserId, a
         </div>
         <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>{ticket.subject}</p>
       </div></div>
+
+      {/* Escalation trail — visible once a CA has escalated to the SA tier. */}
+      {ticket.escalatedAt && (
+        <div className="rounded-lg p-3 text-[12px]" style={{ background: "var(--warning-bg)", border: "1px solid var(--warning)" }}>
+          <span className="font-semibold" style={{ color: "var(--warning)" }}>Escalated to platform support</span>
+          <span style={{ color: "var(--text-primary)" }}> — by {ticket.escalatedByName ?? "Customer Admin"}</span>
+          {tenantLabel && <span style={{ color: "var(--text-secondary)" }}> · {tenantLabel}</span>}
+          <span style={{ color: "var(--text-muted)" }}> · {dayjs.utc(ticket.escalatedAt).tz(timezone).format(`${dateFormat} HH:mm`)}</span>
+        </div>
+      )}
 
       {/* Cancellation banner — keeps the canceled record fully visible. */}
       {status === "Cancelled" && (
@@ -164,38 +222,56 @@ export function TicketDetailView({ detail, attachments, manage, currentUserId, a
           so the canceled record shows read-only with no empty action card. */}
       {hasActions && (
       <div className="card"><div className="card-body space-y-3">
-        {/* Manager controls */}
-        {showManagerControls && (
+        {/* Handler controls (canHandleTicket) — status + Message+Close + Escalate.
+            Assign is SEPARATE (canManageSupport / SA only). */}
+        {(showManagerControls || showAssign || canEscalateUi) && (
           <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-(--bg-border)">
-            <Dropdown placeholder="Assign to…" value={assignee} onChange={setAssignee} width="w-48"
-              options={[{ value: "", label: "Unassigned" }, ...assigneeOptions.map((a) => ({ value: a.id, label: a.name }))]} />
-            <Button variant="secondary" size="sm" disabled={busy || !assignee || assignee === (ticket.assigneeId ?? "")}
-              onClick={() => run("Assign", () => assignTicket(ticket.id, { assigneeId: assignee, assigneeName: assigneeOptions.find((a) => a.id === assignee)?.name ?? assignee }))}>
-              Assign
-            </Button>
-            {STATUS_TARGETS.filter((s) => s !== status && canTransition(status, s)).map((s) => (
+            {showAssign && (
+              <>
+                <Dropdown placeholder="Assign to…" value={assignee} onChange={setAssignee} width="w-48"
+                  options={[{ value: "", label: "Unassigned" }, ...assigneeOptions.map((a) => ({ value: a.id, label: a.name }))]} />
+                <Button variant="secondary" size="sm" disabled={busy || !assignee || assignee === (ticket.assigneeId ?? "")}
+                  onClick={() => run("Assign", () => assignTicket(ticket.id, { assigneeId: assignee, assigneeName: assigneeOptions.find((a) => a.id === assignee)?.name ?? assignee }))}>
+                  Assign
+                </Button>
+              </>
+            )}
+            {showManagerControls && STATUS_TARGETS.filter((s) => s !== status && canTransition(status, s)).map((s) => (
               <Button key={s} variant="ghost" size="sm" disabled={busy} onClick={() => run("Status", () => updateTicketStatus(ticket.id, { status: s as "Open" | "In Progress" | "Awaiting User" }))}>
                 Mark {s}
               </Button>
             ))}
-            {canTransition(status, "Resolved") && (
-              <Button variant="primary" size="sm" disabled={busy} onClick={() => setShowResolve((v) => !v)}>Resolve…</Button>
+            {/* Escalate to Super Admin — CA first-line only, on a CA-routed ticket. */}
+            {canEscalateUi && (
+              <Button variant="secondary" size="sm" disabled={busy} onClick={() => { setShowEscalate((v) => !v); setShowResolve(false); }}>Escalate to Super Admin</Button>
+            )}
+            {showManagerControls && canTransition(status, "Resolved") && (
+              <Button variant="primary" size="sm" disabled={busy} onClick={() => { setShowResolve((v) => !v); setShowEscalate(false); }}>Message + Close</Button>
             )}
           </div>
         )}
 
-        {/* Resolve panel (manager) */}
+        {/* Escalate panel — optional note for the SA tier. */}
+        {canEscalateUi && showEscalate && (
+          <div className="rounded-lg p-3 space-y-2" style={{ background: "var(--warning-bg)", border: "1px dashed var(--warning)" }}>
+            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--warning)" }}>Escalate to platform support</p>
+            <textarea rows={2} className="input text-[12px] resize-none w-full" placeholder="Optional note for the platform team (internal)…" value={escNote} onChange={(e) => setEscNote(e.target.value)} />
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowEscalate(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" disabled={busy} onClick={doEscalate}>Escalate</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Message + Close panel (option a): closing message → resolution summary. */}
         {showManagerControls && showResolve && (
           <div className="rounded-lg p-3 space-y-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Resolve ticket</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Message + Close</p>
             <Dropdown value={resCategory} onChange={setResCategory} width="w-full" options={RESOLUTION_CATEGORIES.map((c) => ({ value: c, label: c }))} />
-            <textarea rows={3} className="input text-[12px] resize-none w-full" placeholder="Resolution summary (required)" value={resSummary} onChange={(e) => setResSummary(e.target.value)} />
+            <textarea rows={3} className="input text-[12px] resize-none w-full" placeholder="Closing message — becomes the resolution summary (required)" value={resSummary} onChange={(e) => setResSummary(e.target.value)} />
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setShowResolve(false)}>Cancel</Button>
-              <Button variant="primary" size="sm" disabled={busy || resSummary.trim().length < 5}
-                onClick={async () => { if (await run("Resolve", () => resolveTicket(ticket.id, { resolutionSummary: resSummary.trim(), resolutionCategory: resCategory as (typeof RESOLUTION_CATEGORIES)[number] }))) { setShowResolve(false); setResSummary(""); } }}>
-                Confirm resolve
-              </Button>
+              <Button variant="primary" size="sm" disabled={busy || resSummary.trim().length < 5} onClick={messageAndClose}>Close ticket</Button>
             </div>
           </div>
         )}

@@ -4,7 +4,10 @@ const STORAGE_KEY = "glimmora-state";
 const VERSION_KEY = "glimmora-version";
 // Bump this whenever PERSIST_SLICES or shape of any persisted slice changes —
 // older clients will discard their cached state on the next load.
-const CURRENT_VERSION = "45";
+// v46: framework enablement removed from the settings slice (Phase 1, Item 4) —
+// forces existing clients to drop any cached settings.frameworks so no stale
+// per-browser framework toggle can survive (the cross-tenant leak fix).
+const CURRENT_VERSION = "46";
 
 /**
  * Slices to persist to localStorage.

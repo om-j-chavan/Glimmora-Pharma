@@ -45,6 +45,32 @@ export function canAuthorGxP(role: string): boolean {
   return !isPlatformAdmin(role);
 }
 
+/* ── Tenant lifecycle access (single source of truth) ───────────────────────
+ * Answers "may this account access the app, given its tenant's lifecycle
+ * status?". super_admin (any PLATFORM_ADMIN_ROLES) is the PLATFORM account, not
+ * a tenant, and is exempt from ALL tenant-status checks — the role is evaluated
+ * BEFORE any isActive/deletedAt read, so a null / placeholder / non-active
+ * platform row can never block it. Real tenant roles are blocked when their
+ * tenant is SUSPENDED (isActive=false) or soft-DELETED (deletedAt set).
+ *
+ * Pure predicate: NO audit, NO throw, NO side effects — callers keep their own
+ * audit/redirect side-effects (e.g. the NextAuth authorize() LOGIN_ACCOUNT_
+ * SUSPENDED emit). Null-safe: a missing tenant is inaccessible for non-admins;
+ * callers that need a distinct "tenant not found" path should check that first. */
+export interface TenantLifecycleFields {
+  isActive: boolean;
+  deletedAt: Date | null;
+}
+export function isTenantAccessible(
+  tenant: TenantLifecycleFields | null | undefined,
+  role: string,
+): boolean {
+  // Role-based exemption FIRST — never read tenant status for a platform admin.
+  if (isPlatformAdmin(role)) return true;
+  if (!tenant) return false;
+  return tenant.isActive && !tenant.deletedAt;
+}
+
 /* ── Owner/assignee access path (Phase 3) ───────────────────────────────────
  * The narrow rule that lets a fixer work the tasks ADDRESSED to them without
  * being in COMPLIANCE_AUTHOR_ROLES. Strictly ID-based — NEVER a display-name

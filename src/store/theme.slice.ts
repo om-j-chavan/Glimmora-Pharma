@@ -41,12 +41,15 @@ function persistTheme(next: Theme) {
 }
 
 function getInitialColorTheme(): ColorTheme {
+  // Green (emerald) is the app-wide DEFAULT for a new / unset user. A user who
+  // has explicitly picked another colour keeps it — the stored value always
+  // wins; only the fallback changed.
   try {
     return (
-      (localStorage.getItem("glimmora-color-theme") as ColorTheme) ?? "coffee-brown"
+      (localStorage.getItem("glimmora-color-theme") as ColorTheme) ?? "emerald"
     );
   } catch {
-    return "coffee-brown";
+    return "emerald";
   }
 }
 

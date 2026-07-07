@@ -1,37 +1,28 @@
 import { requireAuth } from "@/lib/auth";
-import { getTickets } from "@/lib/queries";
-import { TicketQueue } from "@/modules/support/TicketQueue";
+import { getTickets, getTicketStats, toQueueRow } from "@/lib/queries/support";
+import { SupportQueue } from "@/modules/support/SupportQueue";
 import { ErrorBoundary } from "@/components/errors";
 
 export const metadata = { title: "Support — Pharma Glimmora" };
 
-interface PageProps {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-}
-
-const one = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
-
-export default async function Page({ searchParams }: PageProps) {
+export default async function Page() {
   const session = await requireAuth();
-  const sp = (await searchParams) ?? {};
-  const page = Math.max(1, Number.parseInt(one(sp.page) ?? "1", 10) || 1);
 
-  const result = await getTickets(session, {
-    page,
-    pageSize: 25,
-    filters: {
-      status: one(sp.status),
-      priority: one(sp.priority),
-      category: one(sp.category),
-      dateFrom: one(sp.dateFrom),
-      dateTo: one(sp.dateTo),
-      search: one(sp.search),
-    },
-  });
+  // Tenant-side queue. A customer_admin is the tenant's first-line HANDLER; every
+  // other tenant role is a requester. (super_admin uses /admin/support.) Scoping
+  // is enforced inside getTickets — a CA sees their whole tenant; a requester
+  // only their own tickets. The <DataTable> re-queries the server for filters /
+  // search / show-more; here we seed the unfiltered first page.
+  const view = session.user.role === "customer_admin" ? "ca" : "requester";
+  const [page1, stats] = await Promise.all([
+    getTickets(session, { page: 1, pageSize: 15 }),
+    getTicketStats(session),
+  ]);
+  const initialData = { rows: page1.rows.map(toQueueRow), total: page1.total };
 
   return (
     <ErrorBoundary moduleName="Support">
-      <TicketQueue result={result} admin={false} />
+      <SupportQueue view={view} initialData={initialData} stats={stats} />
     </ErrorBoundary>
   );
 }

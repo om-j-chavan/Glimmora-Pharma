@@ -4,17 +4,10 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 export type { TenantSiteConfig as SiteConfig } from "./auth.slice";
 export type { TenantUserConfig as UserConfig } from "./auth.slice";
 
-export interface FrameworkSettings {
-  p210: boolean;
-  p11: boolean;
-  annex11: boolean;
-  annex15: boolean;
-  ichq9: boolean;
-  ichq10: boolean;
-  gamp5: boolean;
-  who: boolean;
-  mhra: boolean;
-}
+// Framework enablement is NO LONGER stored here (Phase 1, Item 4). It moved to
+// the server (Framework / TenantFramework tables) and hydrates into the
+// NON-persisted `frameworks` slice per tenant — so it can never leak across
+// tenants via localStorage. This slice keeps only the AGI UI prefs.
 
 export interface AGISettings {
   mode: "autonomous" | "assisted" | "manual";
@@ -30,22 +23,10 @@ export interface AGISettings {
 }
 
 interface SettingsState {
-  frameworks: FrameworkSettings;
   agi: AGISettings;
 }
 
 const initialState: SettingsState = {
-  frameworks: {
-    p210: true,
-    p11: true,
-    annex11: true,
-    annex15: true,
-    ichq9: true,
-    ichq10: true,
-    gamp5: true,
-    who: true,
-    mhra: true,
-  },
   agi: {
     mode: "autonomous",
     confidence: 72,
@@ -64,12 +45,6 @@ const settingsSlice = createSlice({
   name: "settings",
   initialState,
   reducers: {
-    toggleFramework(
-      state,
-      { payload }: PayloadAction<keyof FrameworkSettings>,
-    ) {
-      state.frameworks[payload] = !state.frameworks[payload];
-    },
     updateAGI(
       state,
       { payload }: PayloadAction<Partial<Omit<AGISettings, "agents">>>,
@@ -86,7 +61,6 @@ const settingsSlice = createSlice({
 });
 
 export const {
-  toggleFramework,
   updateAGI,
   toggleAgent,
 } = settingsSlice.actions;

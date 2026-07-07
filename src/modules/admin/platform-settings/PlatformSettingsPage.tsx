@@ -12,6 +12,11 @@ import { PlanCatalogCard } from "./_components/PlanCatalogCard";
  *   3. Retention Policy (static, informational)
  * Cards 2 & 3 are small, so they stay inline (don't over-split).
  */
+// Hidden for now — no platform-wide MFA default is wired yet, so the card is
+// suppressed (code kept intact). Flip to true to bring it back once a backing
+// setting exists.
+const SHOW_MFA_DEFAULT_CARD = false;
+
 export function PlatformSettingsPage() {
   return (
     <div className="w-full max-w-[1000px] mx-auto">
@@ -26,7 +31,9 @@ export function PlatformSettingsPage() {
         {/* 1. Plan Catalog */}
         <PlanCatalogCard />
 
-        {/* 2. MFA Default — no backing platform setting yet (Phase 2). */}
+        {/* 2. MFA Default — no backing platform setting yet (Phase 2). Hidden
+            for now (SHOW_MFA_DEFAULT_CARD); code retained for when it's wired. */}
+        {SHOW_MFA_DEFAULT_CARD && (
         <Card
           header={
             <div className="flex items-center gap-2">
@@ -49,6 +56,7 @@ export function PlatformSettingsPage() {
             <Toggle id="mfa-default" label="New-tenant MFA default" hideLabel checked={false} onChange={() => {}} disabled />
           </div>
         </Card>
+        )}
 
         {/* 3. Retention Policy — static / informational. */}
         <Card

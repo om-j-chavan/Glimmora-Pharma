@@ -8,6 +8,7 @@ import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
 import { DOCUMENT_APPROVE_ROLES, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/permissions/roleSets";
+import { EVIDENCE_ORIGIN, canEditDocument, isHereOrigin } from "@/lib/permissions/documents";
 import {
   canonicalizeDocumentApprovalContent,
   computeContentHash,
@@ -27,6 +28,8 @@ const ApproveDocumentSchema = z.object({
 const CreateDocumentSchema = z.object({
   fileName: z.string().min(1),
   description: z.string().optional(),
+  // Simplified Add-Document form maps its single "Type" select to `category`.
+  category: z.string().optional(),
   linkedModule: z.string().optional(),
   linkedRecordId: z.string().optional(),
 });
@@ -62,7 +65,7 @@ function nowPlusYears(years: number): Date {
  */
 export async function createDocument(
   formData: FormData,
-  opts?: { bypassAuthorGate?: boolean },
+  opts?: { bypassAuthorGate?: boolean; sourceModule?: string },
 ): Promise<ActionResult> {
   const session = await requireAuth();
   const get = (k: string) => {
@@ -72,6 +75,7 @@ export async function createDocument(
   const parsed = CreateDocumentSchema.safeParse({
     fileName: get("fileName") ?? "",
     description: get("description"),
+    category: get("category"),
     linkedModule: get("linkedModule"),
     linkedRecordId: get("linkedRecordId"),
   });
@@ -102,10 +106,31 @@ export async function createDocument(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
-  // ── Optional file: validate + persist bytes via the shared fileStorage ──
+  // ── FILE-OR-LINK: a direct Evidence & Documents upload must provide EITHER a
+  // file OR a document link (URL) — at least one, not both required. A link-only
+  // doc is valid (no file). Trusted server callers (bypassAuthorGate) manage
+  // their own inputs. ──
+  const rawLink = get("linkUrl");
+  let linkUrl: string | null = null;
+  if (rawLink) {
+    let ok = false;
+    try {
+      const u = new URL(rawLink.trim());
+      ok = u.protocol === "http:" || u.protocol === "https:";
+    } catch { /* not a URL */ }
+    if (!ok) {
+      return { success: false, error: "Enter a valid http(s) link.", fieldErrors: { linkUrl: ["Must be a valid http(s) URL."] } };
+    }
+    linkUrl = rawLink.trim();
+  }
+
   let fileFields: Record<string, unknown> = {};
   const file = formData.get("file");
-  if (file instanceof File && file.size > 0) {
+  const hasFile = file instanceof File && file.size > 0;
+  if (!hasFile && !linkUrl && !opts?.bypassAuthorGate) {
+    return { success: false, error: "Provide a file or a document link.", fieldErrors: { file: ["Attach a file or provide a document link."] } };
+  }
+  if (hasFile && file instanceof File) {
     if (file.size > DOC_MAX_FILE_BYTES) {
       return { success: false, error: `File exceeds ${DOC_MAX_FILE_MB} MB limit` };
     }
@@ -137,6 +162,9 @@ export async function createDocument(
     }
   }
 
+  // Origin stamp: a direct upload here is "evidence" (editable/deletable);
+  // trusted server callers default to their linked module (locked mirror).
+  const sourceModule = opts?.sourceModule ?? (opts?.bypassAuthorGate ? (parsed.data.linkedModule ?? "linked") : EVIDENCE_ORIGIN);
   try {
     const doc = await prisma.document.create({
       data: {
@@ -146,6 +174,12 @@ export async function createDocument(
         version: "v1.0",
         status: "draft",
         uploadedBy: session.user.name,
+        // Authoritative uploader identity (never trusted from the client) +
+        // origin marker — the two server-enforced permission boundaries.
+        uploadedById: actor.userId,
+        sourceModule,
+        // File-OR-link: persist the external link (null when file-only).
+        linkUrl,
       },
     });
     await prisma.auditLog.create({
@@ -367,9 +401,15 @@ export async function deleteDocument(id: string, reason?: string): Promise<Actio
   }
   const existing = await prisma.document.findFirst({
     where: { id, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, fileName: true },
+    select: { id: true, fileName: true, sourceModule: true },
   });
   if (!existing) return { success: false, error: "Document not found" };
+  // ORIGIN boundary — a mirror of an other-module document must never be
+  // deleted here (it would corrupt the source module). Server-rejected
+  // regardless of the UI.
+  if (!isHereOrigin(existing.sourceModule)) {
+    return { success: false, error: "This document originates in another module and is read-only here." };
+  }
   try {
     // Soft-delete (Part 11 retention) — set the existing deletedAt/deletedBy/
     // deletionReason columns instead of destroying the row. List queries filter
@@ -400,6 +440,82 @@ export async function deleteDocument(id: string, reason?: string): Promise<Actio
   } catch (err) {
     console.error("[action] deleteDocument failed:", err);
     return { success: false, error: "Failed to delete document" };
+  }
+}
+
+const UpdateDocumentSchema = z.object({
+  fileName: z.string().min(1, "Title is required").optional(),
+  description: z.string().optional(),
+  category: z.string().optional(),
+});
+
+/**
+ * Edit a here-uploaded document's metadata (title / type / description).
+ * SERVER-ENFORCED permission boundary: requires a compliance-author role, the
+ * super_admin GxP bright line, tenant scope, AND here-origin — a foreign-origin
+ * mirror is rejected (editing it here would corrupt the source module).
+ * Audit-first: DOCUMENT_UPDATED with before/after. The immutable key columns
+ * (uploader, origin, storage) are never touched.
+ */
+export async function updateDocument(
+  id: string,
+  input: z.input<typeof UpdateDocumentSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = UpdateDocumentSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  const existing = await prisma.document.findFirst({
+    where: { id, tenantId: session.user.tenantId, deletedAt: null },
+    select: { id: true, fileName: true, description: true, category: true, sourceModule: true },
+  });
+  if (!existing) return { success: false, error: "Document not found" };
+  // Role + origin gate — the single server authority (mirrors canEditDocument).
+  if (!canEditDocument(session.user.role, existing.sourceModule)) {
+    return {
+      success: false,
+      error: isHereOrigin(existing.sourceModule)
+        ? "Your role does not permit editing documents."
+        : "This document originates in another module and is read-only here.",
+    };
+  }
+  const fileName = parsed.data.fileName?.trim() || existing.fileName;
+  const description = parsed.data.description?.trim() ?? existing.description ?? null;
+  const category = parsed.data.category?.trim() ?? existing.category ?? null;
+  if (fileName === existing.fileName && description === (existing.description ?? null) && category === (existing.category ?? null)) {
+    return { success: true, data: { id, unchanged: true } };
+  }
+  try {
+    const doc = await prisma.document.update({
+      where: { id, tenantId: session.user.tenantId },
+      data: { fileName, description, category },
+    });
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Evidence & Documents",
+        action: "DOCUMENT_UPDATED",
+        recordId: id,
+        recordTitle: fileName,
+        oldValue: JSON.stringify({ fileName: existing.fileName, description: existing.description ?? "—", category: existing.category ?? "—" }),
+        newValue: JSON.stringify({ fileName, description: description ?? "—", category: category ?? "—" }),
+      },
+    });
+    revalidatePath("/evidence");
+    return { success: true, data: doc };
+  } catch (err) {
+    console.error("[action] updateDocument failed:", err);
+    return { success: false, error: "Failed to update document" };
   }
 }
 

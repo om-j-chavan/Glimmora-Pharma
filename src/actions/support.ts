@@ -6,10 +6,9 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, type AuthSession } from "@/lib/auth";
-import { notify } from "@/lib/notify";
+import { notify, notifyMany } from "@/lib/notify";
 import {
   generateReference,
-  buildReferencePrefix,
   isReferenceConflict,
 } from "@/lib/reference";
 import {
@@ -24,7 +23,16 @@ import {
   type TicketPriority,
   type TicketActivityType,
 } from "@/lib/support/constants";
-import { canManageSupport, canViewTicket, isRequester } from "@/lib/support/permissions";
+import {
+  canManageSupport,
+  canViewTicket,
+  isRequester,
+  canHandleFirstLine,
+  canHandleTicket,
+  isTicketRoutedToRole,
+} from "@/lib/support/permissions";
+import { getTickets, toQueueRow, type TicketQueueRow } from "@/lib/queries/support";
+import type { ServerQuery } from "@/components/table/DataTable";
 
 type ActionResult<T = unknown> =
   | { success: true; data: T }
@@ -127,6 +135,29 @@ function revalidateSupport(id?: string) {
   }
 }
 
+/* ── loadSupportTickets — server-mode fetcher for the <DataTable> queues ──
+   Wraps getTickets so the client queue can page/search/filter on the SERVER
+   (Support is server-paginated). Scoping is enforced inside getTickets /
+   ticketScopeWhere (super_admin = all tenants; CA = own tenant; requester = own
+   tickets) — the `routedToMe` filter narrows to the caller's tier. */
+export async function loadSupportTickets(q: ServerQuery): Promise<{ rows: TicketQueueRow[]; total: number }> {
+  const session = await requireAuth();
+  const f = q.filters ?? {};
+  const res = await getTickets(session, {
+    page: q.page,
+    pageSize: q.pageSize,
+    filters: {
+      status: f.status || undefined,
+      priority: f.priority || undefined,
+      category: f.category || undefined,
+      tenantId: f.tenantId || undefined,
+      routedToMe: f.routedToMe === "1" || undefined,
+      search: q.search || undefined,
+    },
+  });
+  return { rows: res.rows.map(toQueueRow), total: res.total };
+}
+
 /* ── createTicket — single reusable entry point ─────────────────────────
    Used by the Raise Ticket modal AND the Help Assistant "create a ticket"
    handoff (pass opts.transcript to seed the first message). SMART ROUTING
@@ -162,14 +193,17 @@ export async function createTicket(
   const data = parsed.data;
   const { ip, userAgent } = await requestContext();
 
-  // Reference prefix uses the requester tenant's customerCode (central support
-  // spans tenants; the code identifies the origin). SUP-<CODE>-<year>-NNN.
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: session.user.tenantId },
-    select: { customerCode: true },
-  });
-  const prefix = buildReferencePrefix("SUP", tenant?.customerCode ?? null);
+  // Support tickets are global (not routed by region), so the reference is a
+  // flat TKT-<year>-<NNNNN> — no tenant/region code. Sequence is 5 digits.
+  const prefix = "TKT";
   const slaDueAt = computeSlaDueAt(data.priority);
+
+  // Default routing (Phase B): a new ticket lands with the tenant's FIRST-LINE
+  // tier, the Customer Admin. EDGE (Q4): a requester who is themselves a
+  // first-line handler (customer_admin — or super_admin) can't be their own
+  // first-liner, so their ticket skips straight to the SA tier. Based on the
+  // requester's role at creation.
+  const currentHandler = canHandleFirstLine(session.user.role) ? "super_admin" : "customer_admin";
 
   try {
     let created: { id: string; reference: string | null; tenantId: string } | null = null;
@@ -184,7 +218,7 @@ export async function createTicket(
               select: { reference: true },
             });
             return row?.reference ?? null;
-          });
+          }, 5);
           const t = await tx.ticket.create({
             data: {
               reference,
@@ -193,6 +227,7 @@ export async function createTicket(
               category: data.category,
               priority: data.priority,
               status: "New",
+              currentHandler,
               description: data.description,
               requesterId: session.user.id,
               requesterName: session.user.name,
@@ -347,19 +382,23 @@ export async function addTicketMessage(
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
 
-  const isManager = canManageSupport(session.user.role);
+  // "Handler" = whoever is acting as support on THIS ticket: a super_admin
+  // (cross-tenant) OR the tenant's first-line Customer Admin when the ticket is
+  // routed to them (Phase B). Internal notes + the support-side reply transition
+  // are handler-only; a requester reply is the user side.
+  const isHandler = canHandleTicket(session, ticket);
   const isInternal = !!parsed.data.isInternal;
-  if (isInternal && !isManager) {
+  if (isInternal && !isHandler) {
     return { success: false, error: "Only support can add internal notes." };
   }
 
-  // Status transitions on reply (spec): admin reply on New/Open → In Progress;
+  // Status transitions on reply (spec): handler reply on New/Open → In Progress;
   // user reply on Awaiting User → In Progress. Internal notes never transition.
   let nextStatus: TicketStatus | null = null;
   const status = ticket.status as TicketStatus;
   if (!isInternal) {
-    if (isManager && (status === "New" || status === "Open")) nextStatus = "In Progress";
-    else if (!isManager && status === "Awaiting User") nextStatus = "In Progress";
+    if (isHandler && (status === "New" || status === "Open")) nextStatus = "In Progress";
+    else if (!isHandler && status === "Awaiting User") nextStatus = "In Progress";
   }
 
   try {
@@ -393,18 +432,36 @@ export async function addTicketMessage(
 
     // Notify the OTHER party of a public reply (internal notes notify no one).
     if (!isInternal) {
-      const recipient = isManager ? ticket.requesterId : ticket.assigneeId;
-      await notify({
-        tenantId: ticket.tenantId,
-        recipientUserId: recipient,
-        actorUserId: session.user.id,
-        type: "TICKET_REPLY",
-        title: `New reply on ${ticket.reference ?? "your ticket"}`,
-        body: ticket.subject,
-        linkPath: `/support/${ticket.id}`,
-        entityType: "Ticket",
-        entityId: ticket.id,
-      });
+      if (isHandler) {
+        // Handler replied → notify the requester.
+        await notify({
+          tenantId: ticket.tenantId,
+          recipientUserId: ticket.requesterId,
+          actorUserId: session.user.id,
+          type: "TICKET_REPLY",
+          title: `New reply on ${ticket.reference ?? "your ticket"}`,
+          body: ticket.subject,
+          linkPath: `/support/${ticket.id}`,
+          entityType: "Ticket",
+          entityId: ticket.id,
+        });
+      } else {
+        // Requester replied → notify the CURRENT HANDLER TIER (gap fix): the CA
+        // tier for a CA-routed ticket, the SA tier once escalated — not the null
+        // assigneeId a tier-routed ticket carries.
+        const recips = (await handlerRecipients(ticket)).filter((r) => r !== session.user.id);
+        await notifyMany(recips.map((rid) => ({
+          tenantId: ticket.tenantId,
+          recipientUserId: rid,
+          actorUserId: session.user.id,
+          type: "TICKET_REPLY" as const,
+          title: `New reply on ${ticket.reference ?? "a ticket"}`,
+          body: ticket.subject,
+          linkPath: `/support/${ticket.id}`,
+          entityType: "Ticket",
+          entityId: ticket.id,
+        })));
+      }
     }
     revalidateSupport(ticket.id);
     return { success: true, data: null };
@@ -465,6 +522,105 @@ export async function assignTicket(
   }
 }
 
+/* ── escalateTicket — first-line CA → SA (routing, NOT lifecycle) ─────────
+   The two-hop escalation (Phase B). ONLY a first-line handler (customer_admin)
+   whose OWN tier currently holds the ticket, in their own tenant, can escalate:
+   a super_admin has nothing to escalate to (SA is terminal) and a requester
+   can't escalate. Moves currentHandler CA → SA and stamps the escalation trail;
+   STATUS IS UNCHANGED. Emits an ESCALATED activity + a TICKET_ESCALATED audit in
+   ONE $transaction, then notifies the SA tier. The escalation note is OPTIONAL —
+   when supplied it's stored as an INTERNAL message (handler-to-handler context
+   for SA), created inside the same tx so the whole escalation stays atomic. */
+
+const EscalateSchema = z.object({ note: z.string().optional() });
+
+export async function escalateTicket(
+  ticketId: string,
+  input?: z.input<typeof EscalateSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = EscalateSchema.safeParse(input ?? {});
+  if (!parsed.success) return { success: false, error: "Invalid input" };
+  const ticket = await loadTicketForView(session, ticketId);
+  if (!ticket) return { success: false, error: "Ticket not found" };
+
+  // Gate: a first-line handler (CA) whose own tier currently holds the ticket.
+  // isTicketRoutedToRole pins to the caller's tier — for a CA that's
+  // "customer_admin"; a super_admin (tier "super_admin") can't escalate, and a
+  // requester (canHandleFirstLine=false) can't either. In-tenant is enforced by
+  // loadTicketForView (canViewTicket tenant-pins a CA).
+  if (!(canHandleFirstLine(session.user.role) && isTicketRoutedToRole(session.user.role, ticket))) {
+    return { success: false, error: "You do not have permission to escalate this ticket." };
+  }
+  if (ticket.currentHandler !== "customer_admin") {
+    return { success: false, error: "This ticket is already with the platform support team." };
+  }
+
+  const note = parsed.data.note?.trim();
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.ticket.update({
+        where: { id: ticket.id },
+        data: {
+          currentHandler: "super_admin",
+          escalatedAt: new Date(),
+          escalatedById: session.user.id,
+          escalatedByName: session.user.name,
+          // status intentionally untouched — routing is a separate axis.
+        },
+      });
+      if (note) {
+        await tx.ticketMessage.create({
+          data: {
+            ticketId: ticket.id,
+            tenantId: ticket.tenantId,
+            authorId: session.user.id,
+            authorName: session.user.name,
+            authorRole: session.user.role,
+            body: note,
+            isInternal: true, // handler-to-handler context; not shown to the requester
+          },
+        });
+      }
+      await addActivity(
+        tx, ticket, session, "ESCALATED",
+        note ? "Escalated to platform support with a note" : "Escalated to platform support",
+        "customer_admin", "super_admin",
+      );
+      await writeAudit(tx, ticket, session, "TICKET_ESCALATED", {
+        from: "customer_admin",
+        to: "super_admin",
+        ...(note ? { note: note.slice(0, 200) } : {}),
+      });
+    });
+
+    // Notify the SA tier (all platform admins), never the actor.
+    const superAdmins = await prisma.tenant.findMany({ where: { role: "super_admin" }, select: { id: true } });
+    await Promise.allSettled(
+      superAdmins
+        .filter((sa) => sa.id !== session.user.id)
+        .map((sa) =>
+          notify({
+            tenantId: ticket.tenantId,
+            recipientUserId: sa.id,
+            actorUserId: session.user.id,
+            type: "TICKET_ESCALATED",
+            title: `Ticket ${ticket.reference ?? ""} escalated to platform support`,
+            body: ticket.subject,
+            linkPath: `/admin/support/${ticket.id}`,
+            entityType: "Ticket",
+            entityId: ticket.id,
+          }),
+        ),
+    );
+    revalidateSupport(ticket.id);
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] escalateTicket failed:", err);
+    return { success: false, error: "Failed to escalate ticket" };
+  }
+}
+
 /* ── updateTicketStatus (manage; non-terminal transitions only) ─────── */
 
 const StatusSchema = z.object({ status: z.enum(["Open", "In Progress", "Awaiting User"]) });
@@ -474,13 +630,16 @@ export async function updateTicketStatus(
   input: z.input<typeof StatusSchema>,
 ): Promise<ActionResult> {
   const session = await requireAuth();
-  if (!canManageSupport(session.user.role)) {
-    return { success: false, error: "You do not have permission to change ticket status." };
-  }
   const parsed = StatusSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Invalid status" };
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
+  // Handler-gated (Phase B): super_admin OR the first-line CA when the ticket is
+  // routed to them + in their tenant. A ticket escalated to SA is no longer
+  // handleable by the CA (canHandleTicket returns false once currentHandler=SA).
+  if (!canHandleTicket(session, ticket)) {
+    return { success: false, error: "You do not have permission to change ticket status." };
+  }
 
   const from = ticket.status as TicketStatus;
   const to = parsed.data.status as TicketStatus;
@@ -515,15 +674,18 @@ export async function resolveTicket(
   input: z.input<typeof ResolveSchema>,
 ): Promise<ActionResult> {
   const session = await requireAuth();
-  if (!canManageSupport(session.user.role)) {
-    return { success: false, error: "You do not have permission to resolve tickets." };
-  }
   const parsed = ResolveSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
+  // Handler-gated (Phase B): super_admin OR the first-line CA on a ticket routed
+  // to them. Close-with-message (option a) flows through here: the closing
+  // message is passed as `resolutionSummary`; category stays required.
+  if (!canHandleTicket(session, ticket)) {
+    return { success: false, error: "You do not have permission to resolve tickets." };
+  }
   const from = ticket.status as TicketStatus;
   if (!canTransition(from, "Resolved")) {
     return { success: false, error: `Cannot resolve a ${from} ticket.` };
@@ -571,7 +733,7 @@ export async function confirmResolution(ticketId: string): Promise<ActionResult>
   const session = await requireAuth();
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
-  if (!(isRequester(session, ticket) || canManageSupport(session.user.role))) {
+  if (!(isRequester(session, ticket) || canHandleTicket(session, ticket))) {
     return { success: false, error: "Only the requester or support can close this ticket." };
   }
   const from = ticket.status as TicketStatus;
@@ -607,7 +769,7 @@ export async function reopenTicket(
   if (!parsed.success) return { success: false, error: "A reason is required to reopen." };
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
-  if (!(isRequester(session, ticket) || canManageSupport(session.user.role))) {
+  if (!(isRequester(session, ticket) || canHandleTicket(session, ticket))) {
     return { success: false, error: "Only the requester or support can reopen this ticket." };
   }
   const from = ticket.status as TicketStatus;
@@ -655,7 +817,7 @@ export async function cancelTicket(
   if (!parsed.success) return { success: false, error: "A reason is required to cancel." };
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
-  if (!(isRequester(session, ticket) || canManageSupport(session.user.role))) {
+  if (!(isRequester(session, ticket) || canHandleTicket(session, ticket))) {
     return { success: false, error: "Only the requester or support can cancel this ticket." };
   }
   const from = ticket.status as TicketStatus;
@@ -714,6 +876,26 @@ export async function autoCloseStaleResolvedTickets(): Promise<ActionResult<{ cl
   return { success: true, data: { closed } };
 }
 
+/**
+ * Resolve the CURRENT HANDLER of a ticket to notification recipient id(s)
+ * (Phase C — closes the tier-routed notification gap). Ticket-row admins
+ * authenticate via the Tenant table, so their session.user.id IS a Tenant.id;
+ * the notification read path matches on session.user.id, so we address tiers by
+ * Tenant.id:
+ *   - assigned ticket        → the specific assignee (unchanged behaviour);
+ *   - tier=customer_admin     → that tenant's CA = the Tenant row (id = tenantId);
+ *   - tier=super_admin        → every super_admin Tenant row (the SA tier).
+ */
+async function handlerRecipients(ticket: { tenantId: string; assigneeId: string | null; currentHandler: string }): Promise<string[]> {
+  if (ticket.assigneeId) return [ticket.assigneeId];
+  if (ticket.currentHandler === "super_admin") {
+    const sas = await prisma.tenant.findMany({ where: { role: "super_admin" }, select: { id: true } });
+    return sas.map((s) => s.id);
+  }
+  // customer_admin tier — the tenant's CA is the Tenant row itself (id = tenantId).
+  return [ticket.tenantId];
+}
+
 /* ── shared notify helper ── */
 async function notifyParties(
   ticket: TicketRow,
@@ -723,21 +905,21 @@ async function notifyParties(
 ): Promise<void> {
   const recipients = new Set<string>();
   if (ticket.requesterId) recipients.add(ticket.requesterId);
-  if (ticket.assigneeId) recipients.add(ticket.assigneeId);
+  // The current handler tier (not just assigneeId — which is null for tier-routed
+  // tickets, the gap this closes).
+  for (const rid of await handlerRecipients(ticket)) recipients.add(rid);
   recipients.delete(session.user.id); // never self-notify
-  await Promise.allSettled(
-    [...recipients].map((rid) =>
-      notify({
-        tenantId: ticket.tenantId,
-        recipientUserId: rid,
-        actorUserId: session.user.id,
-        type,
-        title,
-        body: ticket.subject,
-        linkPath: `/support/${ticket.id}`,
-        entityType: "Ticket",
-        entityId: ticket.id,
-      }),
-    ),
+  await notifyMany(
+    [...recipients].map((rid) => ({
+      tenantId: ticket.tenantId,
+      recipientUserId: rid,
+      actorUserId: session.user.id,
+      type,
+      title,
+      body: ticket.subject,
+      linkPath: `/support/${ticket.id}`,
+      entityType: "Ticket",
+      entityId: ticket.id,
+    })),
   );
 }

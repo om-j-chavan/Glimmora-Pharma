@@ -9,12 +9,23 @@ import dayjs from "@/lib/dayjs";
 
 export type AccountCardFilter = "expiring" | "nearcap" | "noplan" | "suspended";
 
+/**
+ * Plan users USED = the tenant's own users (User-table rows), NOT the tenant
+ * admin identity. The mapper injects the tenant row itself into config.users as
+ * the admin login (its id === tenant.id), but that account does not consume a
+ * plan seat (the server cap in assertCanAddUser counts User rows only). So a
+ * freshly created tenant — which has no User rows yet — reads 0 used.
+ */
+export function planUsersUsed(t: Tenant): number {
+  return t.config.users.filter((u) => u.id !== t.id).length;
+}
+
 /** Fraction (0..1) of the higher of the two caps a tenant is using. */
 export function planUtilisation(t: Tenant): { userPct: number; sitePct: number } {
   const p = t.plan;
   if (!p) return { userPct: 0, sitePct: 0 };
   return {
-    userPct: p.maxUsers > 0 ? t.config.users.length / p.maxUsers : 0,
+    userPct: p.maxUsers > 0 ? planUsersUsed(t) / p.maxUsers : 0,
     sitePct: p.maxSites > 0 ? t.config.sites.length / p.maxSites : 0,
   };
 }
@@ -188,6 +199,8 @@ export interface AccountFormData {
   email: string;
   language: string;
   timezone: string;
+  // Regulatory region — super_admin owned. Empty string = unset.
+  regulatoryRegion: string;
   active: boolean;
   mfaEnabled: boolean;
   newPassword: string;
@@ -199,6 +212,13 @@ export interface AccountFormData {
 /** Typed field setter shared by the drawer + its form sections. */
 export type AccountFormSetter = <K extends keyof AccountFormData>(key: K, value: AccountFormData[K]) => void;
 
+/**
+ * Result of a save attempt, returned by the accounts hook's handleSave so the
+ * modal can keep itself open and surface server-side field errors (e.g. a
+ * duplicate username/email) inline instead of only in a toast.
+ */
+export type SaveResult = { ok: boolean; fieldErrors?: Record<string, string[]> };
+
 export function makeEmptyForm(): AccountFormData {
   return {
     customerName: "",
@@ -206,6 +226,7 @@ export function makeEmptyForm(): AccountFormData {
     email: "",
     language: "English, United States",
     timezone: "Asia/Kolkata",
+    regulatoryRegion: "",
     active: true,
     mfaEnabled: false,
     newPassword: "",

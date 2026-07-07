@@ -51,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               "var t=localStorage.getItem('glimmora-theme');" +
               "d.setAttribute('data-theme',t==='dark'?'dark':'light');" +
               "var c=localStorage.getItem('glimmora-color-theme');" +
-              "if(c)d.setAttribute('data-color-theme',c);" +
+              "d.setAttribute('data-color-theme',c||'emerald');" +
               "var de=localStorage.getItem('glimmora-density');" +
               "if(de)d.setAttribute('data-density',de);}catch(e){}",
           }}

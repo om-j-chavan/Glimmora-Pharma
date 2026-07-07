@@ -407,6 +407,19 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Readable identifier face — used for every region / framework display id
+   (REG-…, FMK-…) and other reference codes via the shared <DisplayId> atom.
+   A curated, legible monospace stack (distinct from the generic Tailwind
+   font-mono default) with tabular figures + a touch of tracking so uppercased
+   codes stay scannable. Cosmetic only. */
+.display-id {
+  font-family: "Cascadia Code", "JetBrains Mono", "IBM Plex Mono", "Roboto Mono",
+    ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
 /* Status badge background derives from its own text color (set inline by
    StatusBadge) so the pill tints correctly on BOTH light and dark surfaces —
    no more fixed light-hex pills glowing on a dark theme. The text color
@@ -491,6 +504,13 @@ body {
   .input:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  /* Suppress the browser-native password reveal/clear controls (Edge/IE render
+     a second "eye" via ::-ms-reveal). The app's own show/hide toggle
+     (AccountPasswordFields) is the single canonical control. */
+  .input::-ms-reveal,
+  .input::-ms-clear {
+    display: none;
   }
 
   .select {

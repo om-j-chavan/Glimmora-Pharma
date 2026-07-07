@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, RefreshCw } from "lucide-react";
-import { generateStrongPassword } from "@/lib/passwords";
+import { Eye, EyeOff } from "lucide-react";
 import { type AccountFormData, type AccountFormSetter } from "../../helpers";
 
 const LABEL = "block text-[11px] font-medium mb-1" as const;
@@ -10,51 +9,19 @@ const LABEL = "block text-[11px] font-medium mb-1" as const;
 interface AccountPasswordFieldsProps {
   form: AccountFormData;
   set: AccountFormSetter;
-  /** Sets newPassword + confirmPassword together (used by Generate). */
-  setPasswords: (pwd: string) => void;
   markTouched: (field: string) => void;
   errorVisible: (name: string) => boolean;
   errors: Record<string, string>;
   mode: "create" | "edit";
-  /** Surfaces the password-generated toast at the drawer root (viewport-anchored). */
-  onToast: (message: string) => void;
 }
 
-export function AccountPasswordFields({ form, set, setPasswords, markTouched, errorVisible, errors, mode, onToast }: AccountPasswordFieldsProps) {
+export function AccountPasswordFields({ form, set, markTouched, errorVisible, errors, mode }: AccountPasswordFieldsProps) {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  const handleGeneratePassword = async () => {
-    const pwd = generateStrongPassword(16);
-    setPasswords(pwd);
-    setShowNewPassword(true);
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard) {
-        await navigator.clipboard.writeText(pwd);
-        onToast("Password generated and copied to clipboard.");
-      } else {
-        onToast("Password generated. Copy it from the field below.");
-      }
-    } catch {
-      onToast("Password generated (clipboard copy failed — please copy manually).");
-    }
-  };
-
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h3 className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Password</h3>
-        <button
-          type="button"
-          onClick={handleGeneratePassword}
-          className="inline-flex items-center gap-1 text-[11px] font-semibold border-none bg-transparent cursor-pointer"
-          style={{ color: "var(--brand)" }}
-          aria-label="Generate strong password"
-        >
-          <RefreshCw className="w-3 h-3" aria-hidden="true" />
-          Generate
-        </button>
-      </div>
+      <h3 className="text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Password</h3>
       {mode === "edit" && <p className="text-[10px] mb-3" style={{ color: "var(--text-muted)" }}>Leave blank to keep current password</p>}
       <div className="grid grid-cols-2 gap-3">
         <div>

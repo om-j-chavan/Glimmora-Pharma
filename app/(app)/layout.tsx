@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { getTenant } from "@/lib/queries/tenants";
+import { effectiveFrameworksForTenant } from "@/lib/queries/frameworks";
+import { getActiveRegions, getRegionLabelMap } from "@/lib/queries/regions";
 import { AppShell } from "@/components/layout/AppShell";
 import type { AuthUser, UserRole } from "@/store/auth.slice";
 
@@ -43,8 +45,42 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         tenantId: session.user.tenantId,
       }
     : null;
+  // Server-resolved effective frameworks for THIS tenant — seeds the (non-
+  // persisted) frameworks slice on the first client render, exactly like
+  // initialTenant/initialUser. This guarantees framework-dependent UI (the Gap
+  // "Report Gap" dropdown, CSV columns, …) is populated immediately instead of
+  // depending on an async client round-trip. Re-runs per request (per login),
+  // so tenant switches can never carry state — no cross-tenant leak.
+  let initialFrameworks: { key: string; name: string }[] = [];
+  if (session.user.tenantId) {
+    try {
+      initialFrameworks = (await effectiveFrameworksForTenant(session.user.tenantId)).map((f) => ({ key: f.key, name: f.name }));
+    } catch (err) {
+      // Never let a framework-resolver failure white-screen EVERY (app) page via
+      // error.tsx — this shared layout wraps all customer routes. Degrade to an
+      // empty list and log loudly. The common dev cause is a `next dev` server
+      // that cached a Prisma client from BEFORE the Framework schema was added
+      // (globalThis singleton in src/lib/prisma.ts) — RESTART the dev server.
+      console.error(
+        "[app/layout] effectiveFrameworksForTenant failed. If the Framework schema was just added, STOP and restart `next dev` (stale Prisma client). Error:",
+        err,
+      );
+    }
+  }
+  // DB-backed regulatory regions (Item #3, Stage 2) — active options + a value→
+  // label map (incl. archived) to seed the regions slice. Both queries fall back
+  // to the REGULATORY_REGIONS constant internally, so a failure degrades to the
+  // exact prior behaviour rather than emptying the region dropdowns/labels.
+  let initialRegions: { active: { value: string; label: string }[]; labelMap: Record<string, string> } | undefined;
+  try {
+    const [active, labelMap] = await Promise.all([getActiveRegions(), getRegionLabelMap()]);
+    initialRegions = { active, labelMap };
+  } catch (err) {
+    console.error("[app/layout] region seed failed — client keeps the constant fallback:", err);
+  }
+
   return (
-    <AppShell initialTenant={initialTenant} initialUser={initialUser}>
+    <AppShell initialTenant={initialTenant} initialUser={initialUser} initialFrameworks={initialFrameworks} initialRegions={initialRegions}>
       {children}
     </AppShell>
   );

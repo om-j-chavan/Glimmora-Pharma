@@ -102,14 +102,16 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const frameworks = useAppSelector((s) => s.settings.frameworks);
+  // Effective enabled frameworks for this tenant (server-resolved, non-persisted).
+  const frameworkList = useAppSelector((s) => s.frameworks.list);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { hasSites } = useSetupStatus();
 
-  const showPart11 = frameworks.p11;
-  const showAnnex11 = frameworks.annex11;
-  const showGAMP5 = frameworks.gamp5;
+  const hasFramework = (key: string) => frameworkList.some((f) => f.key === key);
+  const showPart11 = hasFramework("p11");
+  const showAnnex11 = hasFramework("annex11");
+  const showGAMP5 = hasFramework("gamp5");
 
   /* ── State ── */
   const [activeTab, setActiveTab] = useState<TabId>("inventory");

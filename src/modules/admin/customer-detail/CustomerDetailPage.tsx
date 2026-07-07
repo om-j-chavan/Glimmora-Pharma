@@ -13,10 +13,12 @@ import {
   PauseCircle,
   PlayCircle,
   RefreshCw,
+  Globe,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { updateTenant as updateTenantLocal } from "@/store/auth.slice";
+import { regulatoryRegionLabel, GLOBAL_REGION_VALUE } from "@/constants/regulatoryRegions";
 import { toggleTenantMFA } from "@/actions/tenants";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -25,7 +27,10 @@ import { Toggle } from "@/components/ui/Toggle";
 import dayjs from "@/lib/dayjs";
 import { DetailHeader } from "./_components/DetailHeader";
 import { DetailSummaryCards } from "./_components/DetailSummaryCards";
+import { LogoCropModal } from "./_components/LogoCropModal";
+import { TenantLifecycleActions } from "./_components/TenantLifecycleActions";
 import { useCustomerAccounts } from "@/modules/admin/customer-accounts/useCustomerAccounts";
+import { planUsersUsed } from "@/modules/admin/customer-accounts/helpers";
 import { AccountModal } from "@/modules/admin/customer-accounts/_components/AccountModal";
 
 export function CustomerDetailPage() {
@@ -42,6 +47,7 @@ export function CustomerDetailPage() {
       s.auth.tenants.find((t) => t.customerCode === id) ??
       s.auth.tenants.find((t) => t.id === id),
   );
+  const regionLabelMap = useAppSelector((s) => s.regions.labelMap);
   const currentRole = useAppSelector((s) => s.auth.user?.role);
   const isSuperAdmin = currentRole === "super_admin";
 
@@ -56,6 +62,7 @@ export function CustomerDetailPage() {
   const [mfaUpdating, setMfaUpdating] = useState(false);
   const [mfaError, setMfaError] = useState<string | null>(null);
   const [mfaConfirmOpen, setMfaConfirmOpen] = useState(false);
+  const [logoModalOpen, setLogoModalOpen] = useState(false);
 
   const applyMfa = async (next: boolean) => {
     if (!isSuperAdmin || !tenant) return;
@@ -124,11 +131,18 @@ export function CustomerDetailPage() {
         <ArrowLeft className="w-4 h-4" aria-hidden="true" /> Back to Customer Accounts
       </Link>
 
-      <DetailHeader tenant={tenant} plan={plan} onEdit={() => ca.openEdit(tenant)} />
+      <DetailHeader
+        tenant={tenant}
+        plan={plan}
+        onEdit={() => ca.openEdit(tenant)}
+        onEditLogo={isSuperAdmin ? () => setLogoModalOpen(true) : undefined}
+      />
 
-      {/* Container-level utilisation — aggregate counts vs plan cap, no rosters. */}
+      {/* Container-level utilisation — aggregate counts vs plan cap, no rosters.
+          Users USED excludes the tenant-admin identity (planUsersUsed), so a
+          freshly created tenant with no users of its own reads 0. */}
       <DetailSummaryCards
-        userCount={tenant.config.users.length}
+        userCount={planUsersUsed(tenant)}
         siteCount={tenant.config.sites.length}
         plan={plan}
         planExpired={planExpired}
@@ -137,15 +151,19 @@ export function CustomerDetailPage() {
       {/* Organization — only fields the Create/Edit Account form sets. Admin
           email lives once, in the Primary Administrator card (the contact
           block). Date Format + Regulatory Region stay dropped (not collected). */}
-      <div className="card mb-6">
+      <div className="card mb-4">
         <div className="card-header">
           <span className="card-title">Organization</span>
         </div>
         <div className="card-body">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
             <div>
-              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Code</p>
+              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Tenant ID</p>
               <p className="text-[14px] font-medium font-mono" style={{ color: "var(--text-primary)" }}>{tenant.customerCode ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Username</p>
+              <p className="text-[14px] font-medium font-mono" style={{ color: "var(--text-primary)" }}>{adminUser?.username ?? "—"}</p>
             </div>
             <div>
               <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Timezone</p>
@@ -154,12 +172,42 @@ export function CustomerDetailPage() {
                 {tenant.config.org.timezone}
               </p>
             </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Regulatory Region</p>
+              <p className="text-[14px] font-medium flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+                <Globe className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                {(() => {
+                  const value = tenant.config.org.regulatoryRegion;
+                  if (!value) return <span style={{ color: "var(--text-muted)" }}>—</span>;
+                  const label = regulatoryRegionLabel(value, regionLabelMap);
+                  // Link to the region's page in the merged Regions & Frameworks
+                  // module. The [value] route resolves active, GLOBAL, AND
+                  // archived regions (getRegionCatalog includes archived), so any
+                  // region known to the label map (all regions incl. archived) is
+                  // reachable. GLOBAL is always linkable. A value with no region
+                  // row (purged/unknown edge) degrades to plain text.
+                  const reachable = value === GLOBAL_REGION_VALUE || value in regionLabelMap;
+                  return reachable ? (
+                    <Link
+                      href={`/admin/regions/${encodeURIComponent(value)}`}
+                      className="hover:underline"
+                      style={{ color: "var(--brand)" }}
+                      title={`Open ${label} in Regions & Frameworks`}
+                    >
+                      {label}
+                    </Link>
+                  ) : (
+                    <span>{label}</span>
+                  );
+                })()}
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Security · MFA + Primary Administrator — side by side. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         {/* Security — MFA + Account status, each a ui/Toggle (now visible in
             both modes). The toggles convey state; no "Enforced"/"Last Used". */}
         <div className="card">
@@ -271,6 +319,12 @@ export function CustomerDetailPage() {
                 <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>{plan.minRetentionYears} yr</p>
               </div>
               <div>
+                <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Duration</p>
+                <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>
+                  {(() => { const y = plan.durationMonths / 12; return `${Number.isInteger(y) ? y : y.toFixed(1)} yr`; })()}
+                </p>
+              </div>
+              <div>
                 <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Term</p>
                 <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>
                   {dayjs.utc(plan.startDate).format("DD MMM YYYY")} – {dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}
@@ -280,6 +334,23 @@ export function CustomerDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Lifecycle actions (suspend / soft-delete / restore / permanent delete)
+          — bottom of the page, super admin only. */}
+      {isSuperAdmin && <TenantLifecycleActions tenant={tenant} />}
+
+      {/* Logo crop-and-upload — super admin only. On save, the server persists
+          the data URL and we update Redux so the header reflects it at once. */}
+      {isSuperAdmin && (
+        <LogoCropModal
+          open={logoModalOpen}
+          onClose={() => setLogoModalOpen(false)}
+          tenantId={tenant.id}
+          tenantName={tenant.name}
+          currentLogo={tenant.logoUrl}
+          onSaved={(logoUrl) => dispatch(updateTenantLocal({ id: tenant.id, patch: { logoUrl } }))}
+        />
+      )}
 
       {/* MFA enable confirmation — toggleTenantMFA bumps sessionsValidAfter,
           which signs out every active user in the tenant. */}

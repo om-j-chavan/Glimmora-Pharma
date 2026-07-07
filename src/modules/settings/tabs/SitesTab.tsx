@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Plus, Pencil, Trash2, MapPin, Save, Lock } from "lucide-react";
 import clsx from "clsx";
+import { titleCase } from "@/lib/strings";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useTenantData } from "@/hooks/useTenantData";
@@ -22,14 +23,16 @@ import {
   removeTenantSite,
   type TenantSiteConfig,
 } from "@/store/auth.slice";
-import { createSite, updateSite, deleteSite } from "@/actions/settings";
+import { createSite, updateSite, deleteSiteWithPassword } from "@/actions/settings";
 import { errorCodeLabel, ERROR_CODE_LABELS } from "@/lib/labels/errorCodes";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
+import { PasswordConfirmModal } from "@/components/ui/PasswordConfirmModal";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 
 const siteSchema = z.object({
@@ -51,11 +54,6 @@ const RISK_OPTIONS = [
     badgeVariant: "amber" as const,
   },
   { value: "LOW", label: "LOW", badge: "LOW", badgeVariant: "green" as const },
-];
-
-const STATUS_OPTIONS = [
-  { value: "Active", label: "Active" },
-  { value: "Inactive", label: "Inactive" },
 ];
 
 function SiteForm({
@@ -124,12 +122,15 @@ function SiteForm({
           <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">
             Status
           </p>
-          <Dropdown
-            options={STATUS_OPTIONS}
-            value={watch("status")}
-            onChange={(v) => setValue("status", v as SiteFormValues["status"])}
-            width="w-full"
-          />
+          <div className="flex items-center h-[42px]">
+            <Toggle
+              id="site-status"
+              checked={watch("status") === "Active"}
+              onChange={(v) => setValue("status", v ? "Active" : "Inactive")}
+              label="Site status"
+              description={watch("status") === "Active" ? "Active" : "Inactive"}
+            />
+          </div>
         </div>
       </div>
 
@@ -164,15 +165,17 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const [addedPopup, setAddedPopup] = useState(false);
   const [savedPopup, setSavedPopup] = useState(false);
-  const [deletePopup, setDeletePopup] = useState(false);
-  const [siteToDelete, setSiteToDelete] = useState<string | null>(null);
+  // The site pending a password-gated delete (null = dialog closed).
+  const [siteToDelete, setSiteToDelete] = useState<TenantSiteConfig | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const handleAdd = async (data: SiteFormValues) => {
     setSyncError(null);
+    // Auto-capitalize (title-case) the location on save.
+    const location = titleCase(data.location);
     const result = await createSite({
       name: data.name,
-      location: data.location,
+      location,
       gmpScope: data.gmpScope,
       risk: data.risk,
     });
@@ -197,7 +200,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
         site: {
           id: created.id,
           name: data.name,
-          location: data.location,
+          location,
           gmpScope: data.gmpScope,
           risk: data.risk,
           status: data.status,
@@ -216,9 +219,11 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
   const handleEdit = async (data: SiteFormValues) => {
     if (!editingSite) return;
     setSyncError(null);
+    // Auto-capitalize (title-case) the location on save.
+    const location = titleCase(data.location);
     const result = await updateSite(editingSite.id, {
       name: data.name,
-      location: data.location,
+      location,
       gmpScope: data.gmpScope,
       risk: data.risk,
       isActive: data.status === "Active",
@@ -232,30 +237,43 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
       return;
     }
     dispatch(
-      updateTenantSite({ tenantId, siteId: editingSite.id, patch: data }),
+      updateTenantSite({ tenantId, siteId: editingSite.id, patch: { ...data, location } }),
     );
     setEditModal(false);
     setEditingSite(null);
     setSavedPopup(true);
   };
 
-  const handleDelete = async (siteId: string) => {
+  // Row-level status toggle. Optimistic: mirror to Redux immediately, then write
+  // through the existing audited updateSite action (SITE_UPDATED). Revert on
+  // failure so the row never shows a status that wasn't persisted.
+  const handleRowStatusToggle = async (site: TenantSiteConfig, active: boolean) => {
     setSyncError(null);
-    const result = await deleteSite(siteId);
+    const prevStatus = site.status;
+    const nextStatus = active ? "Active" : "Inactive";
+    dispatch(updateTenantSite({ tenantId, siteId: site.id, patch: { status: nextStatus } }));
+    const result = await updateSite(site.id, { isActive: active });
     if (!result.success) {
-      console.error("[settings/sites] deleteSite failed:", {
-        error: result.error,
-        fieldErrors: result.fieldErrors,
-      });
-      setSyncError(result.error ?? "Failed to remove site.");
-      return;
+      dispatch(updateTenantSite({ tenantId, siteId: site.id, patch: { status: prevStatus } }));
+      setSyncError(result.error ?? "Failed to update site status.");
     }
-    dispatch(removeTenantSite({ tenantId, siteId }));
+  };
+
+  // Password-gated delete. The dialog collects the Customer Admin password; the
+  // server action verifies it server-side before the audit-first delete runs.
+  const handleDeleteWithPassword = async (password: string) => {
+    if (!siteToDelete) return { success: false, error: "No site selected." };
+    const result = await deleteSiteWithPassword(siteToDelete.id, password);
+    if (result.success) {
+      dispatch(removeTenantSite({ tenantId, siteId: siteToDelete.id }));
+    }
+    return result;
   };
 
   return (
     <section aria-labelledby="sites-heading" className="space-y-6">
       {/* Header */}
+      <div>
       <div className="flex items-center justify-between">
         <div className="flex items-center">
           <h2
@@ -284,6 +302,13 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
             {atLimit ? "Limit reached" : "Add site"}
           </Button>
         )}
+      </div>
+        <p className="mt-1 text-[12px] text-(--text-secondary) max-w-2xl">
+          Sites are the manufacturing plants, labs and facilities you operate.
+          Manage each site&apos;s location, GMP scope, risk level and active
+          status here — they feed the site pickers, the dashboard risk heatmap
+          and every location-scoped compliance record across the platform.
+        </p>
       </div>
 
       {/* Sync error banner — surfaced when a server action fails */}
@@ -377,9 +402,19 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
               header: "Status",
               width: "w-[12%]",
               render: (s) => (
-                <Badge variant={s.status === "Active" ? "green" : "gray"}>
-                  {s.status}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Toggle
+                    id={`site-status-${s.id}`}
+                    checked={s.status === "Active"}
+                    onChange={(v) => void handleRowStatusToggle(s, v)}
+                    label={`Status for ${s.name}`}
+                    disabled={readOnly}
+                    hideLabel
+                  />
+                  <Badge variant={s.status === "Active" ? "green" : "gray"}>
+                    {s.status}
+                  </Badge>
+                </div>
               ),
             },
             ...(!readOnly
@@ -404,10 +439,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
                           size="sm"
                           icon={Trash2}
                           aria-label={`Delete ${s.name}`}
-                          onClick={() => {
-                            setSiteToDelete(s.id);
-                            setDeletePopup(true);
-                          }}
+                          onClick={() => setSiteToDelete(s)}
                         />
                       </div>
                     ),
@@ -434,8 +466,8 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
           }}
           onSubmit={handleAdd}
           onCancel={() => setAddModal(false)}
-          submitLabel="Add site"
-          submitIcon={Plus}
+          submitLabel="Save"
+          submitIcon={Save}
         />
       </Modal>
 
@@ -463,7 +495,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
               setEditModal(false);
               setEditingSite(null);
             }}
-            submitLabel="Save changes"
+            submitLabel="Save"
             submitIcon={Save}
           />
         )}
@@ -491,34 +523,23 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
         description="Changes saved successfully."
         onDismiss={() => setSavedPopup(false)}
       />
-      <Popup
-        isOpen={deletePopup}
-        variant="confirmation"
+      {/* Password-gated delete. Confirmation + Customer Admin password in one
+          dialog; the password is verified server-side before the delete runs. */}
+      <PasswordConfirmModal
+        open={!!siteToDelete}
+        onClose={() => setSiteToDelete(null)}
+        onConfirm={handleDeleteWithPassword}
         title="Remove this site?"
-        description="The site will be removed from all dropdowns and the dashboard heatmap. Existing records are preserved."
-        onDismiss={() => {
-          setDeletePopup(false);
-          setSiteToDelete(null);
-        }}
-        actions={[
-          {
-            label: "Cancel",
-            style: "ghost",
-            onClick: () => {
-              setDeletePopup(false);
-              setSiteToDelete(null);
-            },
-          },
-          {
-            label: "Yes, remove",
-            style: "primary",
-            onClick: () => {
-              if (siteToDelete) void handleDelete(siteToDelete);
-              setDeletePopup(false);
-              setSiteToDelete(null);
-            },
-          },
-        ]}
+        confirmLabel="Delete site"
+        variant="danger"
+        icon={Trash2}
+        message={
+          <>
+            Deleting <strong>{siteToDelete?.name}</strong> removes it from all
+            dropdowns and the dashboard heatmap. Existing records are preserved.
+            Enter your Customer Admin password to confirm.
+          </>
+        }
       />
     </section>
   );

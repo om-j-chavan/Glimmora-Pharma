@@ -31,6 +31,9 @@ export async function generateReference(
   prefix: string,
   now: Date,
   findLatestForYear: (prefix: string, year: number) => Promise<string | null>,
+  // Zero-pad width for the trailing sequence. Defaults to 3 ("-001") to keep
+  // every existing caller unchanged; support tickets pass 5 ("-00042").
+  pad = 3,
 ): Promise<string> {
   const year = now.getUTCFullYear();
   const latest = await findLatestForYear(prefix, year);
@@ -44,7 +47,7 @@ export async function generateReference(
       if (Number.isFinite(parsed)) nextNum = parsed + 1;
     }
   }
-  return `${prefix}-${year}-${String(nextNum).padStart(3, "0")}`;
+  return `${prefix}-${year}-${String(nextNum).padStart(pad, "0")}`;
 }
 
 /**

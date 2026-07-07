@@ -45,8 +45,10 @@ export interface ExportMenuProps {
   filename: string;
   /** Column headers shared by every format. */
   headers: string[];
-  /** Row data, or a lazy builder invoked when a format is chosen. */
-  rows: Cell[][] | (() => Cell[][]);
+  /** Row data, or a lazy (optionally async) builder invoked when a format is
+   *  chosen. Async lets a server-backed table assemble its FULL matching set
+   *  before writing the file. */
+  rows: Cell[][] | (() => Cell[][] | Promise<Cell[][]>);
   /** PDF document heading + footer org (also nice for screen context). */
   title?: string;
   subtitle?: string;
@@ -82,6 +84,7 @@ export function ExportMenu({
   className,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuId = useId();
@@ -115,26 +118,32 @@ export function ExportMenu({
     };
   }, [open]);
 
-  function resolveRows(): Cell[][] {
+  async function resolveRows(): Promise<Cell[][]> {
     return typeof rows === "function" ? rows() : rows;
   }
 
-  function runExport(format: ExportFormat) {
+  async function runExport(format: ExportFormat) {
+    if (busy) return;
     setOpen(false);
     focusTrigger();
-    const data = resolveRows();
-    switch (format) {
-      case "csv":
-        downloadCSV(filename, headers, data);
-        break;
-      case "excel":
-        downloadExcel(filename, headers, data);
-        break;
-      case "pdf":
-        downloadPDF(filename, headers, data, { title: title ?? filename, subtitle, org });
-        break;
+    setBusy(true);
+    try {
+      const data = await resolveRows();
+      switch (format) {
+        case "csv":
+          downloadCSV(filename, headers, data);
+          break;
+        case "excel":
+          downloadExcel(filename, headers, data);
+          break;
+        case "pdf":
+          downloadPDF(filename, headers, data, { title: title ?? filename, subtitle, org });
+          break;
+      }
+      onExported?.(format, data.length);
+    } finally {
+      setBusy(false);
     }
-    onExported?.(format, data.length);
   }
 
   // Roving focus within the menu via arrow keys.
@@ -163,7 +172,8 @@ export function ExportMenu({
         variant={variant}
         size={size}
         icon={Download}
-        disabled={disabled}
+        loading={busy}
+        disabled={disabled || busy}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

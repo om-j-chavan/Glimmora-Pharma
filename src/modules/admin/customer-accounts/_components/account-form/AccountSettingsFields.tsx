@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { Toggle } from "@/components/ui/Toggle";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { type AccountFormData, type AccountFormSetter } from "../../helpers";
+import { RegulatoryRegionField } from "./RegulatoryRegionField";
 
 const LABEL = "block text-[11px] font-medium mb-1" as const;
 
@@ -27,15 +28,28 @@ interface AccountSettingsFieldsProps {
   set: AccountFormSetter;
   mode: "create" | "edit";
   isSuperAdmin: boolean;
+  /** Inline validation error for the required region (Stage 5). */
+  regionError?: string;
 }
 
-export function AccountSettingsFields({ form, set, mode, isSuperAdmin }: AccountSettingsFieldsProps) {
+export function AccountSettingsFields({ form, set, mode, isSuperAdmin, regionError }: AccountSettingsFieldsProps) {
   return (
     <div>
       <h3 className="text-[11px] font-bold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>Settings</h3>
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Language</label><Dropdown value={form.language} onChange={(v) => set("language", v)} options={LANGUAGE_OPTIONS} width="w-full" size="sm" /></div>
         <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Time Zone</label><Dropdown value={form.timezone} onChange={(v) => set("timezone", v)} options={TIMEZONE_OPTIONS} width="w-full" size="sm" /></div>
+      </div>
+
+      {/* Regulatory Region — super_admin owned, backed by the fixed central
+          list. Select an existing value (no runtime add). */}
+      <div className="mb-3">
+        <RegulatoryRegionField
+          value={form.regulatoryRegion}
+          onChange={(v) => set("regulatoryRegion", v)}
+          required={mode === "create"}
+          error={regionError}
+        />
       </div>
 
       {/* Toggle settings — each in its own bordered row for clear separation, using

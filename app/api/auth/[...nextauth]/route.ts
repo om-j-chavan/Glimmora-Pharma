@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { generateOtp, verifyOtp } from "@/lib/otp";
 import { sendOtpEmail } from "@/lib/mailer";
 import { auditAuthEvent } from "@/lib/auditServer";
+import { isTenantAccessible } from "@/lib/permissions/roleSets";
 
 /**
  * Production guard for NEXTAUTH_SECRET (audit findings 3.6 + 11.3).
@@ -149,9 +150,20 @@ export const authOptions: NextAuthOptions = {
           const tenant = tenantMatches[0];
 
           if (tenant) {
-            if (!tenant.isActive) {
+            // Lifecycle gate — a SUSPENDED (isActive=false) or soft-DELETED
+            // (deletedAt set) tenant is blocked with a specific message so the
+            // client can tell the user to contact the platform admin. Distinct
+            // from wrong-password (generic) on purpose.
+            //
+            // The super_admin exemption lives in isTenantAccessible() (the
+            // shared, single-source-of-truth predicate in roleSets.ts): it
+            // returns true for a platform admin WITHOUT reading tenant status,
+            // so a null/placeholder/non-active platform row can never trip this
+            // block. The audit emit + throw stay HERE (the helper is
+            // decision-only). Behaviour is identical to the prior inline check.
+            if (!isTenantAccessible(tenant, tenant.role)) {
               await auditAuthEvent({
-                action: "LOGIN_ACCOUNT_INACTIVE",
+                action: "LOGIN_ACCOUNT_SUSPENDED",
                 tenantId: tenant.id,
                 userId: tenant.id,
                 userName: tenant.name,
@@ -159,9 +171,9 @@ export const authOptions: NextAuthOptions = {
                 recordId: tenant.id,
                 recordTitle: tenant.email,
                 ipAddress,
-                newValue: { email, path: "tenant" },
+                newValue: { email, path: "tenant", deleted: !!tenant.deletedAt },
               });
-              return null;
+              throw new Error("ACCOUNT_SUSPENDED");
             }
 
             const valid = await bcrypt.compare(password, tenant.passwordHash);
@@ -320,6 +332,29 @@ export const authOptions: NextAuthOptions = {
           const user = userMatches[0];
 
           if (user) {
+            // Parent-tenant lifecycle gate — if the tenant is SUSPENDED or
+            // soft-DELETED, ALL its users are blocked (item: "suspended tenant
+            // OR any of its users"), with the same specific message.
+            //
+            // Exemption via the shared isTenantAccessible() (super_admin is
+            // never evaluated for tenant status). The `user.tenant &&` guard is
+            // kept so the lifecycle block is only considered when a parent
+            // tenant is actually loaded — behaviour is identical to the prior
+            // inline check (a user with no loaded tenant is not blocked here).
+            if (user.tenant && !isTenantAccessible(user.tenant, user.role)) {
+              await auditAuthEvent({
+                action: "LOGIN_ACCOUNT_SUSPENDED",
+                tenantId: user.tenantId,
+                userId: user.id,
+                userName: user.name,
+                userRole: user.role,
+                recordId: user.id,
+                recordTitle: user.email,
+                ipAddress,
+                newValue: { email, path: "user", deleted: !!user.tenant.deletedAt },
+              });
+              throw new Error("ACCOUNT_SUSPENDED");
+            }
             if (!user.isActive) {
               await auditAuthEvent({
                 action: "LOGIN_ACCOUNT_INACTIVE",
@@ -464,6 +499,7 @@ export const authOptions: NextAuthOptions = {
           if (err instanceof Error) {
             // Bubble up specific signals the client UI handles explicitly.
             if (
+              err.message === "ACCOUNT_SUSPENDED" ||
               err.message === "SUBSCRIPTION_INACTIVE" ||
               err.message === "AMBIGUOUS_EMAIL" ||
               err.message === "OTP_REQUIRED" ||
@@ -515,6 +551,16 @@ export const authOptions: NextAuthOptions = {
       // a multi-tenant SaaS at this scale; revisit with a cache if needed.
       // The check lives here (Pages Router = Node runtime) because the Edge
       // proxy can't import the Prisma client.
+      //
+      // SCOPE (by design): this is the MFA session-invalidation cutoff ONLY —
+      // it reads sessionsValidAfter and applies to ALL roles, super_admin
+      // included (intentional; unchanged). It deliberately does NOT enforce
+      // tenant lifecycle (isActive/deletedAt), so it cannot lock a platform
+      // admin out on a suspended/deleted platform row. If a tenant-lifecycle
+      // read is ever added below, it MUST be routed through
+      // isTenantAccessible(tenant, token.role) (or guarded by isPlatformAdmin)
+      // so super_admin stays exempt by design — the same rule the login gates
+      // now use. Keep the null-safe `t && …` shape below regardless.
       const tenantId = token.tenantId as string | undefined;
       const iat = typeof token.iat === "number" ? token.iat : undefined;
       if (tenantId && iat) {

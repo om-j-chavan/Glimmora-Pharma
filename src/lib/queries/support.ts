@@ -5,6 +5,7 @@ import {
   ticketScopeWhere,
   canViewTicket,
   canManageSupport,
+  handlerTierForRole,
 } from "@/lib/support/permissions";
 
 export interface TicketListFilters {
@@ -14,6 +15,11 @@ export interface TicketListFilters {
   assigneeId?: string;
   /** Super-admin only; ignored for tenant-scoped roles (their scope already pins tenant). */
   tenantId?: string;
+  /** Phase B routing filter — narrow to tickets currently routed to the CALLER's
+   *  tier: CA → own-tenant `currentHandler="customer_admin"`; SA → cross-tenant
+   *  `currentHandler="super_admin"` (the escalated queue). No-op for a requester
+   *  (no tier). Composes ON TOP of ticketScopeWhere — never widens scope. */
+  routedToMe?: boolean;
   dateFrom?: string; // YYYY-MM-DD
   dateTo?: string; // YYYY-MM-DD
   search?: string;
@@ -47,6 +53,12 @@ export async function getTickets(
   if (f.assigneeId) where.assigneeId = f.assigneeId;
   // Tenant filter only meaningful (and only allowed to narrow) for super_admin.
   if (f.tenantId && session.user.role === "super_admin") where.tenantId = f.tenantId;
+  // "Routed to my tier" — narrows to the caller's own tier on top of the base
+  // scope (never widens). No-op for a requester (handlerTierForRole → null).
+  if (f.routedToMe) {
+    const tier = handlerTierForRole(session.user.role);
+    if (tier) where.currentHandler = tier;
+  }
   if (f.dateFrom || f.dateTo) {
     where.createdAt = {};
     if (f.dateFrom) (where.createdAt as Prisma.DateTimeFilter).gte = new Date(`${f.dateFrom}T00:00:00.000Z`);
@@ -73,6 +85,76 @@ export async function getTickets(
   ]);
 
   return { rows, total, page, pageSize };
+}
+
+/** Role-scoped ticket counts for the Support header cards. */
+export interface TicketStats {
+  /** Awaiting first action — status New + Open. */
+  open: number;
+  /** Actively being worked — status In Progress + Awaiting User. */
+  inProgress: number;
+  /** Currently escalated to the platform tier (currentHandler = super_admin),
+   *  excluding terminal tickets. Escalation is a routing axis, not a status. */
+  escalated: number;
+  /** Completed — status Resolved + Closed. */
+  resolved: number;
+}
+
+/**
+ * Ticket counts for the Support stats cards. Uses the SAME `ticketScopeWhere`
+ * as the queue (super_admin = all tenants; customer_admin = own tenant;
+ * requester = own tickets), so the cards always agree with the list the viewer
+ * can actually see — no scope widening. One grouped read + one escalated count.
+ */
+export async function getTicketStats(session: AuthSession): Promise<TicketStats> {
+  const where: Prisma.TicketWhereInput = { ...ticketScopeWhere(session) };
+  const [byStatus, escalated] = await Promise.all([
+    prisma.ticket.groupBy({ by: ["status"], where, _count: { _all: true } }),
+    prisma.ticket.count({
+      where: { ...where, currentHandler: "super_admin", status: { notIn: ["Closed", "Cancelled"] } },
+    }),
+  ]);
+  const n = (status: string) => byStatus.find((g) => g.status === status)?._count._all ?? 0;
+  return {
+    open: n("New") + n("Open"),
+    inProgress: n("In Progress") + n("Awaiting User"),
+    escalated,
+    resolved: n("Resolved") + n("Closed"),
+  };
+}
+
+/** Lean row for the queue tables (Phase C) — the fields the <DataTable> needs,
+ *  serializable across the server-action boundary. */
+export interface TicketQueueRow {
+  id: string;
+  reference: string | null;
+  subject: string;
+  category: string;
+  priority: string;
+  status: string;
+  currentHandler: string;
+  requesterName: string;
+  assigneeName: string | null;
+  tenantId: string;
+  slaDueAt: Date | null;
+  updatedAt: Date;
+}
+
+export function toQueueRow(t: Ticket): TicketQueueRow {
+  return {
+    id: t.id,
+    reference: t.reference,
+    subject: t.subject,
+    category: t.category,
+    priority: t.priority,
+    status: t.status,
+    currentHandler: t.currentHandler,
+    requesterName: t.requesterName,
+    assigneeName: t.assigneeName,
+    tenantId: t.tenantId,
+    slaDueAt: t.slaDueAt,
+    updatedAt: t.updatedAt,
+  };
 }
 
 export interface TicketDetail {

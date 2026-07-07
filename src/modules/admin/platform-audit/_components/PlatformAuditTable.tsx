@@ -1,8 +1,8 @@
-import type { AuditLog } from "@prisma/client";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
 import { roleLabel } from "@/lib/labels/roles";
 import { auditEventLabel } from "@/lib/labels/auditEvents";
+import type { PlatformAuditRow } from "@/lib/queries";
 import dayjs from "@/lib/dayjs";
 
 /* ── Event category (derived from the raw action prefix) ── */
@@ -22,27 +22,39 @@ const CATEGORY_VARIANT: Record<AuditCategory, "blue" | "green" | "amber" | "gray
   Other: "gray",
 };
 
+/** Actor label: joined login username → denormalised userName → "System"
+ *  (a genuinely user-less / automated event). */
+export function actorOf(e: PlatformAuditRow): string {
+  return e.username ?? (e.userName?.trim() || null) ?? "System";
+}
+
+/** Affected organisation name (recordId → Tenant.name), else the denormalised
+ *  recordTitle, else an em-dash. */
+export function accountOf(e: PlatformAuditRow): string {
+  return e.accountName ?? e.recordTitle ?? "—";
+}
+
 interface PlatformAuditTableProps {
-  rows: AuditLog[];
-  tenantMap: Record<string, { code: string | null; name: string }>;
+  rows: PlatformAuditRow[];
+  /** Row click / View — opens the read-only detail. */
+  onView: (row: PlatformAuditRow) => void;
 }
 
 /**
- * Platform audit table. Who → roleLabel (never a raw role code), Event →
- * auditEventLabel (never a raw action code), Tenant → customerCode when known
- * else the tenant name.
+ * Platform audit table. Username → the actor (login username, falling back to
+ * the captured display name, then "System"); Account Name → the affected
+ * organisation; Event → auditEventLabel (never a raw action code). Rows are
+ * read-only; clicking one opens the detail view.
  */
-export function PlatformAuditTable({ rows, tenantMap }: PlatformAuditTableProps) {
-  const tenantOf = (e: AuditLog): string => {
-    const t = e.recordId ? tenantMap[e.recordId] : undefined;
-    return t?.code ?? t?.name ?? e.recordTitle ?? "—";
-  };
-
+export function PlatformAuditTable({ rows, onView }: PlatformAuditTableProps) {
   return (
     <DataTable
       ariaLabel="Platform audit events"
       data={rows}
       rowKey={(e) => e.id}
+      minWidth={880}
+      onRowClick={(e) => onView(e)}
+      rowClassName={() => "cursor-pointer hover:bg-(--bg-hover)"}
       emptyState={
         <p className="text-center text-[13px] py-8" style={{ color: "var(--text-muted)" }}>No events match the current filter.</p>
       }
@@ -57,13 +69,20 @@ export function PlatformAuditTable({ rows, tenantMap }: PlatformAuditTableProps)
           ),
         },
         {
-          key: "who",
-          header: "Who",
+          key: "username",
+          header: "Username",
           render: (e) => (
             <div className="text-[12px]">
-              <p className="font-medium" style={{ color: "var(--text-primary)" }}>{e.userName}</p>
+              <p className="font-medium" style={{ color: "var(--text-primary)" }}>{actorOf(e)}</p>
               {e.userRole && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{roleLabel(e.userRole)}</p>}
             </div>
+          ),
+        },
+        {
+          key: "account",
+          header: "Account Name",
+          render: (e) => (
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{accountOf(e)}</span>
           ),
         },
         {
@@ -79,14 +98,7 @@ export function PlatformAuditTable({ rows, tenantMap }: PlatformAuditTableProps)
             );
           },
         },
-        {
-          key: "tenant",
-          header: "Tenant",
-          render: (e) => (
-            <span className="text-[12px] font-mono" style={{ color: "var(--text-secondary)" }}>{tenantOf(e)}</span>
-          ),
-        },
-      ] satisfies Column<AuditLog>[]}
+      ] satisfies Column<PlatformAuditRow>[]}
     />
   );
 }

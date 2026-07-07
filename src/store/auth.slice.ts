@@ -96,11 +96,19 @@ export interface Tenant {
   // carry it — the next getTenants() reload supplies the real value.
   customerCode?: string;
   adminEmail: string;
+  // Tenant logo, stored as a data URL (Tenant.logoUrl). Null/undefined => the
+  // detail view falls back to the building icon. Set via the logo crop modal.
+  logoUrl?: string | null;
   // Server-authoritative (Tenant.createdAt @default(now())). Optional
   // because optimistic client-side inserts don't carry it — the next
   // getTenants() reload supplies the real value.
   createdAt?: string;
   active: boolean;
+  // Soft-delete timestamp (ISO). Present => tenant is in the DELETED state
+  // (recoverable via Restore). null/undefined => not soft-deleted. Combined
+  // with `active`: ACTIVE (active=true, deletedAt null), SUSPENDED (active=false,
+  // deletedAt null), DELETED (deletedAt set). See src/actions/tenants.ts.
+  deletedAt?: string | null;
   mfaEnabled?: boolean;
   config: TenantConfig;
   // Subscription Phase A — exactly one optional plan per tenant (null until a
@@ -187,6 +195,10 @@ const authSlice = createSlice({
       const t = state.tenants.find((t) => t.id === payload.tenantId);
       if (t) { const u = t.config.users.find((u) => u.id === payload.userId); if (u) Object.assign(u, payload.patch); }
     },
+    removeTenantUser(state, { payload }: PayloadAction<{ tenantId: string; userId: string }>) {
+      const t = state.tenants.find((t) => t.id === payload.tenantId);
+      if (t) t.config.users = t.config.users.filter((u) => u.id !== payload.userId);
+    },
 
     // Subscription Phase A — set (or clear with null) the tenant's single plan.
     setTenantPlan(state, { payload }: PayloadAction<{ tenantId: string; plan: PlanConfig | null }>) {
@@ -205,7 +217,7 @@ export const {
   setCredentials, setAiCredentials, setActiveSite, setSelectedSite, setCurrentTenant,
   addTenant, updateTenant, removeTenant, setTenants,
   updateTenantOrg, addTenantSite, updateTenantSite, removeTenantSite,
-  addTenantUser, updateTenantUser,
+  addTenantUser, updateTenantUser, removeTenantUser,
   setTenantPlan,
   logout,
 } = authSlice.actions;

@@ -2,6 +2,8 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { BCRYPT_COST } from "../src/lib/passwords";
 import { PLAN_TIERS } from "../src/lib/plans";
+import { RESERVED_FRAMEWORKS } from "../src/constants/frameworks";
+import { REGULATORY_REGIONS, GLOBAL_REGION_VALUE, GLOBAL_REGION_LABEL } from "../src/constants/regulatoryRegions";
 
 const prisma = new PrismaClient();
 
@@ -165,6 +167,15 @@ async function main() {
     }
   }
   console.log("  Extra tier tenants:", extraTenants.map((t) => `${t.code}(${t.tier})`).join(", "));
+
+  // Assign Helios to the EMA region so the region archive → auto-reassign
+  // scenario (Stage 3) has a real in-use region to demonstrate. Idempotent:
+  // only backfills when unset, so a later admin change is never clobbered.
+  const heliosReassigned = await prisma.tenant.updateMany({
+    where: { email: "admin@helios.test", regulatoryRegion: null },
+    data: { regulatoryRegion: "EMA" },
+  });
+  if (heliosReassigned.count) console.log("  Helios → EMA region assigned");
 
   // ── Sites ──
   // Upsert keyed on (tenantId, name) so re-seeding doesn't duplicate rows.
@@ -1061,6 +1072,67 @@ async function main() {
     });
   }
   console.log("  Findings:", findings.length);
+
+  // ── Regulatory regions (Item #3, parity-critical) ──
+  // Seed the RegulatoryRegion lookup from the load-bearing REGULATORY_REGIONS
+  // constant so the DB reproduces the EXACT 8 value strings that Tenant.
+  // regulatoryRegion + FrameworkRegion.region already reference. Idempotent by
+  // value; `update: {}` never clobbers an admin-edited label on re-seed.
+  for (const r of REGULATORY_REGIONS) {
+    await prisma.regulatoryRegion.upsert({
+      where: { value: r.value },
+      update: {},
+      create: { value: r.value, label: r.label },
+    });
+  }
+  // Reserved GLOBAL region (Stage 1). A REAL, protected RegulatoryRegion row —
+  // not just the Framework.appliesToAllRegions flag — so GLOBAL can be the
+  // archive → reassignment target and appear in region dropdowns. Idempotent by
+  // value; `update: {}` never clobbers the label on re-seed. PARITY: this row
+  // adds no FrameworkRegion links, so no tenant's effective framework set moves.
+  await prisma.regulatoryRegion.upsert({
+    where: { value: GLOBAL_REGION_VALUE },
+    update: {},
+    create: { value: GLOBAL_REGION_VALUE, label: GLOBAL_REGION_LABEL },
+  });
+  console.log("  Regulatory regions:", REGULATORY_REGIONS.length + 1, "(incl. reserved GLOBAL)");
+
+  // ── Frameworks catalog + per-tenant enablement (Phase 1, parity-critical) ──
+  // Seed the 9 reserved frameworks as GLOBAL (appliesToAllRegions) + platform-
+  // enabled, then enable all 9 for every existing customer tenant. This exactly
+  // reproduces today's "all frameworks enabled" default so the Gap dropdown is
+  // unchanged. Idempotent: upsert by key and by (tenantId, frameworkId), and the
+  // tenant upsert `update:{}` never clobbers a later admin toggle on re-seed.
+  const frameworkRows = await Promise.all(
+    RESERVED_FRAMEWORKS.map((f, i) =>
+      prisma.framework.upsert({
+        where: { key: f.key },
+        update: { name: f.name, description: f.description },
+        create: {
+          key: f.key,
+          name: f.name,
+          description: f.description,
+          platformEnabled: true,
+          appliesToAllRegions: true,
+          sortOrder: i + 1, // stable display order (Item #5) — no all-0 ties
+        },
+      }),
+    ),
+  );
+  const customerTenants = await prisma.tenant.findMany({
+    where: { role: { not: "super_admin" } }, // platform admin doesn't raise gaps
+    select: { id: true },
+  });
+  for (const t of customerTenants) {
+    for (const fw of frameworkRows) {
+      await prisma.tenantFramework.upsert({
+        where: { tenantId_frameworkId: { tenantId: t.id, frameworkId: fw.id } },
+        update: {}, // preserve any explicit admin enable/disable on re-seed
+        create: { tenantId: t.id, frameworkId: fw.id, enabled: true },
+      });
+    }
+  }
+  console.log("  Frameworks:", frameworkRows.length, "catalog; enabled for", customerTenants.length, "tenants");
 
   console.log("Seed complete.");
 }

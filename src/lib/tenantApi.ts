@@ -90,14 +90,17 @@ export async function fetchTenants(): Promise<Tenant[]> {
 /**
  * Persist a newly created tenant to Neon by invoking the createTenant server
  * action. The Redux Tenant shape is flattened: the customer_admin user from
- * config.users[0] supplies email/username/password, and the tenant.id is
- * reused as the customerCode so subsequent lookups can correlate.
+ * config.users[0] supplies email/username/password. The human-readable Tenant
+ * ID (customerCode, TEN-YYYY-NNNN) is allocated server-side and returned here
+ * so the caller can reflect it on the optimistic row immediately.
  *
  * After the tenant row exists, the tenant's single plan (if any) is assigned
  * via assignPlan so the plan gate (AppShell) sees a live plan for the new
  * account.
+ *
+ * Returns the server-authoritative id + customerCode.
  */
-export async function createTenantApi(tenant: Tenant): Promise<void> {
+export async function createTenantApi(tenant: Tenant): Promise<{ id: string; customerCode: string | null }> {
   return logCall("POST", "/tenants (server action)", async () => {
     const admin = tenant.config?.users?.find((u) => u.role === "customer_admin")
       ?? tenant.config?.users?.[0];
@@ -106,12 +109,19 @@ export async function createTenantApi(tenant: Tenant): Promise<void> {
       throw new Error("New customer admin must have a password");
     }
     const result = await createTenantAction({
+      // Persist the client-generated id AS the DB primary key so Redux/UI and
+      // the DB agree — otherwise a later edit targets an id Prisma never stored
+      // and fails with P2025 ("No record found for an update").
+      id: tenant.id,
       name: tenant.name,
       email: admin.email,
       username: admin.username ?? admin.email,
-      customerCode: tenant.id,
       password: admin.password,
       timezone: tenant.config?.org?.timezone ?? "Asia/Kolkata",
+      // Pass the region through as-is (empty string included) so the server-side
+      // required check (Stage 5) rejects an empty region rather than the client
+      // silently coercing it to undefined.
+      regulatoryRegion: tenant.config?.org?.regulatoryRegion ?? "",
       isActive: tenant.active ?? true,
     });
     if (!result.success) {
@@ -119,8 +129,8 @@ export async function createTenantApi(tenant: Tenant): Promise<void> {
       const msg = detail ? `${result.error} — ${detail}` : result.error;
       throw new TenantApiError(msg, result.fieldErrors);
     }
-    const created = result.data as { id: string } | undefined;
-    if (!created?.id) return;
+    const created = result.data as { id: string; customerCode: string | null } | undefined;
+    if (!created?.id) return { id: tenant.id, customerCode: null };
 
     // Plan: assign the tenant's single plan (if one was configured).
     const plan = tenant.plan;
@@ -145,6 +155,7 @@ export async function createTenantApi(tenant: Tenant): Promise<void> {
         throw new TenantApiError(planRes.error, planRes.fieldErrors, true);
       }
     }
+    return { id: created.id, customerCode: created.customerCode ?? null };
   });
 }
 
@@ -160,6 +171,9 @@ export async function updateTenantApi(
     if (patch.name !== undefined) data.name = patch.name;
     if (patch.adminEmail !== undefined) data.email = patch.adminEmail;
     if (patch.active !== undefined) data.isActive = patch.active;
+    // Regulatory region (super_admin-owned) lives in config.org — forward it
+    // when the patch carries it so the edit persists server-side.
+    if (patch.config?.org?.regulatoryRegion !== undefined) data.regulatoryRegion = patch.config.org.regulatoryRegion;
     if (Object.keys(data).length === 0) return;
     const result = await updateTenantAction(id, data);
     if (!result.success) {

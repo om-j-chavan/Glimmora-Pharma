@@ -5,7 +5,7 @@ import { Upload, Save, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { MIN_TAILORED_RETENTION_YEARS } from "@/lib/plans";
-import { type AccountFormData } from "../helpers";
+import { type AccountFormData, type SaveResult } from "../helpers";
 import { AccountInfoFields } from "./account-form/AccountInfoFields";
 import { AccountSettingsFields } from "./account-form/AccountSettingsFields";
 import { AccountPasswordFields } from "./account-form/AccountPasswordFields";
@@ -25,7 +25,9 @@ export function AccountModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (data: AccountFormData) => void;
+  /** May return a SaveResult so the modal can keep itself open and surface
+   *  server-side field errors (e.g. duplicate username/email) inline. */
+  onSave: (data: AccountFormData) => void | Promise<SaveResult | void>;
   initial: AccountFormData;
   mode: "create" | "edit";
   /** Tenant-level MFA toggle is super_admin only — customer_admin must not
@@ -50,13 +52,15 @@ export function AccountModal({
   // Drag-drop overlay: only shown when the user is actively dragging a file
   // over the modal. Keeps the body uncluttered in the common no-drag state.
   const [isDragging, setIsDragging] = useState(false);
-  // Password-generator toast — set by AccountPasswordFields via onToast.
-  const [pwToast, setPwToast] = useState<string | null>(null);
   // Username auto-derive (create form only): while true, the username field
   // mirrors a sanitised version of the email local-part. Flips false the
   // moment super_admin edits the username manually, handing them control.
   // Edit mode starts false so an existing username is never overwritten.
   const [usernameAuto, setUsernameAuto] = useState(mode === "create");
+  // Server-side field errors (e.g. duplicate username/email) returned by the
+  // save handler. Keyed by form field; shown inline and always visible until
+  // the user edits that field. Cleared on reopen.
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open) {
@@ -64,24 +68,24 @@ export function AccountModal({
       setTouched({});
       setSubmitAttempted(false);
       setUsernameAuto(mode === "create");
+      setServerErrors({});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const set = <K extends keyof AccountFormData>(key: K, value: AccountFormData[K]) =>
+  const set = <K extends keyof AccountFormData>(key: K, value: AccountFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
-
-  // Sets new + confirm together (Generate). Kept as one update so the two
-  // fields change atomically, exactly as before.
-  const setPasswords = (pwd: string) => setForm((prev) => ({ ...prev, newPassword: pwd, confirmPassword: pwd }));
+    // Editing a field clears any stale server error on it (e.g. after fixing a
+    // duplicate username) so the inline message disappears immediately.
+    setServerErrors((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key as string];
+      return next;
+    });
+  };
 
   const markTouched = (field: string) => setTouched((t) => ({ ...t, [field]: true }));
-
-  // Surfaces the password-generated toast (auto-dismisses after 3s).
-  const onToast = (message: string) => {
-    setPwToast(message);
-    setTimeout(() => setPwToast(null), 3000);
-  };
 
   // Errors are derived from form + mode on every render — no setErrors. This
   // lets the inline error text disappear the instant the user fixes a field,
@@ -104,6 +108,12 @@ export function AccountModal({
     const email = form.email.trim();
     if (!email) e.email = "Required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "Enter a valid email";
+
+    // Regulatory Region is REQUIRED on create (Stage 5) — a tenant must have a
+    // region for its effective frameworks to resolve. Not forced on edit.
+    if (mode === "create" && !form.regulatoryRegion.trim()) {
+      e.regulatoryRegion = "Regulatory Region is required";
+    }
 
     if (mode === "create") {
       if (!form.newPassword) e.newPassword = "Required";
@@ -147,15 +157,32 @@ export function AccountModal({
     return e;
   }, [form, mode, currentUserCount, currentSiteCount]);
 
-  // A field-level error is "visible" once the user has interacted with that
-  // field OR clicked Save. Pristine fields stay silent.
-  const errorVisible = (name: string): boolean => (touched[name] || submitAttempted) && !!errors[name];
+  // Server field errors override/augment the derived client errors so the same
+  // inline slot shows either. Client validation runs first on submit, so these
+  // only ever appear for things the client can't know (uniqueness).
+  const shownErrors: Record<string, string> = { ...errors, ...serverErrors };
 
-  const handleSubmit = () => {
-    if (Object.keys(errors).length === 0) {
-      onSave(form);
-      onClose();
+  // A field-level error is "visible" once the user has interacted with that
+  // field OR clicked Save. Server errors are always visible until edited.
+  const errorVisible = (name: string): boolean =>
+    !!serverErrors[name] || ((touched[name] || submitAttempted) && !!errors[name]);
+
+  const handleSubmit = async () => {
+    if (Object.keys(errors).length > 0) return;
+    const result = await onSave(form);
+    // A save that returns ok:false (e.g. duplicate username/email) keeps the
+    // modal open and lights up the offending field(s); otherwise close.
+    if (result && result.ok === false) {
+      if (result.fieldErrors) {
+        const flat: Record<string, string> = {};
+        for (const [field, msgs] of Object.entries(result.fieldErrors)) {
+          if (msgs && msgs.length) flat[field] = msgs[0];
+        }
+        setServerErrors(flat);
+      }
+      return;
     }
+    onClose();
   };
 
   // Live form-validity check for the Save button's disabled state. Mirrors
@@ -168,6 +195,8 @@ export function AccountModal({
     /^[a-z0-9_]+$/.test(form.username.trim()) &&
     form.email.trim().length > 0 &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
+    // Region required on create (Stage 5); not forced on edit.
+    (mode === "edit" || form.regulatoryRegion.trim().length > 0) &&
     (mode === "edit"
       ? (!form.newPassword || (form.newPassword.length >= 8 && form.newPassword === form.confirmPassword))
       : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword) &&
@@ -186,6 +215,7 @@ export function AccountModal({
     customerName: "Customer Name",
     username: "Username",
     email: "Email",
+    regulatoryRegion: "Regulatory Region",
     newPassword: "Password",
     confirmPassword: "Confirm Password",
     planMaxUsers: "Max users",
@@ -229,9 +259,7 @@ export function AccountModal({
             icon={Save}
             onClick={() => {
               setSubmitAttempted(true);
-              if (Object.keys(errors).length === 0) {
-                handleSubmit();
-              }
+              handleSubmit();
             }}
             className={canSave ? "" : "opacity-50 cursor-not-allowed"}
           >
@@ -289,12 +317,18 @@ export function AccountModal({
           set={set}
           markTouched={markTouched}
           errorVisible={errorVisible}
-          errors={errors}
+          errors={shownErrors}
           usernameAuto={usernameAuto}
           setUsernameAuto={setUsernameAuto}
         />
 
-        <AccountSettingsFields form={form} set={set} mode={mode} isSuperAdmin={isSuperAdmin} />
+        <AccountSettingsFields
+          form={form}
+          set={set}
+          mode={mode}
+          isSuperAdmin={isSuperAdmin}
+          regionError={errorVisible("regulatoryRegion") ? shownErrors.regulatoryRegion : undefined}
+        />
 
         {/* Plan assignment is now an inline section of the form — no separate
             popup. The account's single Save submits the plan with it. */}
@@ -314,28 +348,12 @@ export function AccountModal({
         <AccountPasswordFields
           form={form}
           set={set}
-          setPasswords={setPasswords}
           markTouched={markTouched}
           errorVisible={errorVisible}
           errors={errors}
           mode={mode}
-          onToast={onToast}
         />
       </div>
-
-      {/* Password-generator toast — fixed bottom-right of the viewport. The Modal
-          panel carries no persistent transform, so this anchors to the viewport
-          and unmounts with the modal. */}
-      {pwToast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-6 z-[70] rounded-lg px-4 py-3 text-[12px] font-medium shadow-lg"
-          style={{ background: "var(--success-bg)", color: "var(--success)", border: "1px solid var(--success)" }}
-        >
-          {pwToast}
-        </div>
-      )}
     </Modal>
   );
 }

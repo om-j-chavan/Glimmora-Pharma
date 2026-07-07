@@ -41,6 +41,11 @@ const UpdateUserSchema = CreateUserSchema.partial().extend({
   password: z.string().min(6).optional(),
   // Status toggle (Active/Inactive) maps to Prisma User.isActive.
   isActive: z.boolean().optional(),
+  // Site assignment (User.siteId, a nullable 1:1 FK): a string assigns, an
+  // explicit null CLEARS it (all-sites / no site), undefined leaves it
+  // unchanged. `partial()` alone makes it string|undefined, which can't clear —
+  // hence the nullable override.
+  siteId: z.string().nullable().optional(),
 });
 
 function isAdmin(role: string): boolean {
@@ -76,9 +81,10 @@ export async function createSite(
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   // Hard cap enforcement (Phase 1) — blocks creation past plan.maxSites, and on
-  // no-plan / expired-plan. Runs AFTER the role gate; never a bypass. For
-  // super_admin this is the platform tenant (no plan) → NO_PLAN_ASSIGNED.
-  const cap = await assertCanAddSite(session.user.tenantId);
+  // no-plan / expired-plan. Runs AFTER the role gate; never a bypass. Passing
+  // the role exempts super_admin (the plan-less platform tenant), so it is not
+  // spuriously blocked with NO_PLAN_ASSIGNED.
+  const cap = await assertCanAddSite(session.user.tenantId, session.user.role);
   if (!cap.ok) {
     const code: CapBlockCode = cap.code ?? "SITE_CAP_EXCEEDED";
     await prisma.auditLog.create({
@@ -246,9 +252,10 @@ export async function createUser(
     return { success: false, error: "You are not permitted to create a user with that role." };
   }
   // Hard cap enforcement (Phase 1) — blocks creation past plan.maxUsers, and on
-  // no-plan / expired-plan. Runs AFTER the role gate; never a bypass. For
-  // super_admin this is the platform tenant (no plan) → NO_PLAN_ASSIGNED.
-  const cap = await assertCanAddUser(session.user.tenantId);
+  // no-plan / expired-plan. Runs AFTER the role gate; never a bypass. Passing
+  // the role exempts super_admin (the plan-less platform tenant), so it is not
+  // spuriously blocked with NO_PLAN_ASSIGNED.
+  const cap = await assertCanAddUser(session.user.tenantId, session.user.role);
   if (!cap.ok) {
     const code: CapBlockCode = cap.code ?? "PLAN_CAP_EXCEEDED";
     await prisma.auditLog.create({
@@ -265,12 +272,28 @@ export async function createUser(
     });
     return { success: false, error: code };
   }
+  // Duplicate-email guard (case-insensitive). Emails are stored lower-cased, so
+  // normalize the input and look for an existing row in THIS tenant before we
+  // attempt the insert. Surfaced as an inline field error; the DB
+  // @@unique([tenantId, email]) constraint remains the final backstop (P2002).
+  const normalizedEmail = parsed.data.email.toLowerCase();
+  const existingEmail = await prisma.user.findFirst({
+    where: { tenantId: session.user.tenantId, email: normalizedEmail },
+    select: { id: true },
+  });
+  if (existingEmail) {
+    return {
+      success: false,
+      error: "This email is already registered.",
+      fieldErrors: { email: ["This email is already registered."] },
+    };
+  }
   try {
     const passwordHash = await bcrypt.hash(parsed.data.password, BCRYPT_COST);
     const user = await prisma.user.create({
       data: {
         name: parsed.data.name,
-        email: parsed.data.email.toLowerCase(),
+        email: normalizedEmail,
         username: parsed.data.username,
         role: parsed.data.role,
         siteId: parsed.data.siteId ?? null,
@@ -318,7 +341,7 @@ export async function checkUserCap(): Promise<ActionResult> {
   if (!isAdmin(session.user.role)) {
     return { success: false, error: "Access denied" };
   }
-  const cap = await assertCanAddUser(session.user.tenantId);
+  const cap = await assertCanAddUser(session.user.tenantId, session.user.role);
   if (cap.ok) return { success: true, data: null };
   const code: CapBlockCode = cap.code ?? "PLAN_CAP_EXCEEDED";
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -484,6 +507,119 @@ export async function setUserStatus(id: string, isActive: boolean): Promise<Acti
     console.error("[action] setUserStatus failed:", err);
     return { success: false, error: "Failed to update user status" };
   }
+}
+
+/**
+ * Server-side re-authentication of the ACTING admin's own password. Reuses the
+ * exact mechanism of the tenant permanent-delete gate (deleteTenantWithPassword):
+ * admins authenticate via the Tenant table (nextauth Path 1), so
+ * `session.user.id` is their Tenant.id and the credential is Tenant.passwordHash
+ * — the same bcrypt check login uses. NEVER compared on the client.
+ */
+type ActingSession = Awaited<ReturnType<typeof requireAuth>>;
+async function verifyActingAdminPassword(
+  session: ActingSession,
+  password: string,
+): Promise<boolean> {
+  if (!password) return false;
+  const me = await prisma.tenant.findUnique({
+    where: { id: session.user.id },
+    select: { passwordHash: true },
+  });
+  return !!me && (await bcrypt.compare(password, me.passwordHash));
+}
+
+/**
+ * Password-gated site delete. The acting Customer Admin must re-enter THEIR OWN
+ * password; it is verified SERVER-SIDE (never on the client). A failed attempt
+ * is itself audited. On success it delegates to the existing audit-first
+ * deleteSite() so tenant-scoping + the SITE_DELETED audit are unchanged.
+ */
+export async function deleteSiteWithPassword(id: string, password: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!isAdmin(session.user.role)) return { success: false, error: "Access denied" };
+  if (!password) return { success: false, error: "Enter your password to confirm." };
+  const valid = await verifyActingAdminPassword(session, password);
+  if (!valid) {
+    const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Settings",
+        action: "SITE_DELETE_DENIED",
+        recordId: id,
+        newValue: "wrong_password",
+      },
+    });
+    return { success: false, error: "Incorrect password. Delete cancelled." };
+  }
+  return deleteSite(id);
+}
+
+/**
+ * Password-gated user delete. Same server-side re-auth as
+ * deleteSiteWithPassword; on success delegates to the existing audit-first
+ * deleteUser() (tenant-scoping + USER_DELETED audit unchanged).
+ */
+export async function deleteUserWithPassword(id: string, password: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!isAdmin(session.user.role)) return { success: false, error: "Access denied" };
+  if (!password) return { success: false, error: "Enter your password to confirm." };
+  const valid = await verifyActingAdminPassword(session, password);
+  if (!valid) {
+    const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Settings",
+        action: "USER_DELETE_DENIED",
+        recordId: id,
+        newValue: "wrong_password",
+      },
+    });
+    return { success: false, error: "Incorrect password. Delete cancelled." };
+  }
+  return deleteUser(id);
+}
+
+/**
+ * Password-gated GxP signatory change (Part 11). Granting/revoking signatory
+ * authority is a Part 11 event, so it additionally requires the acting Customer
+ * Admin to re-enter their password (verified server-side). On success delegates
+ * to the existing audit-first setUserGxpSignatory() (GRANTED/REVOKED audit).
+ */
+export async function setUserGxpSignatoryWithPassword(
+  id: string,
+  value: boolean,
+  password: string,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!isAdmin(session.user.role)) return { success: false, error: "Access denied" };
+  if (!password) return { success: false, error: "Enter your password to confirm." };
+  const valid = await verifyActingAdminPassword(session, password);
+  if (!valid) {
+    const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: "Settings",
+        action: "USER_SIGNATORY_CHANGE_DENIED",
+        recordId: id,
+        newValue: "wrong_password",
+      },
+    });
+    return { success: false, error: "Incorrect password. Change cancelled." };
+  }
+  return setUserGxpSignatory(id, value);
 }
 
 export async function deleteUser(id: string): Promise<ActionResult> {

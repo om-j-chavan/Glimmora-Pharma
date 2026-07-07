@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { requireRoleOrDeny } from "@/lib/authz";
-import { getAuditLogs } from "@/lib/queries";
+import { getPlatformAuditLogs, getPlatformAuditActions } from "@/lib/queries";
 import { getTenants } from "@/lib/queries/tenants";
 import { PlatformAuditPage } from "@/modules/admin/platform-audit";
 
@@ -11,7 +11,13 @@ export const metadata = {
   title: "Platform Audit — Pharma Glimmora",
 };
 
-export default async function Page() {
+interface PageProps {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}
+
+const one = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
+
+export default async function Page({ searchParams }: PageProps) {
   const session = await requireAuth();
   await requireRoleOrDeny(session, ALLOWED_ROLES, {
     module: "admin",
@@ -20,23 +26,38 @@ export default async function Page() {
     extra: { path: "/admin/audit" },
   });
 
-  // Platform admin actions (TENANT_*/PLAN_*/MFA_*) are logged under the
-  // super_admin's own tenantId, so this returns the platform event feed.
-  const result = await getAuditLogs(session.user.tenantId);
+  const sp = (await searchParams) ?? {};
+  const page = Math.max(1, Number.parseInt(one(sp.page) ?? "1", 10) || 1);
 
-  // Resolve each event's affected tenant (recordId → human label). Only the
-  // id→{code,name} map crosses to the client — never any user/site roster.
-  const tenants = await getTenants();
-  const tenantMap: Record<string, { code: string | null; name: string }> = {};
-  for (const t of tenants) tenantMap[t.id] = { code: t.customerCode ?? null, name: t.name };
+  // Server-side pagination + filtering. Scope is the super_admin's own tenant
+  // (where platform TENANT_*/PLAN_*/MFA_* events are logged) — preserved by the
+  // query; the affected-account resolution spans tenants for display only.
+  const result = await getPlatformAuditLogs(session.user.tenantId, {
+    page,
+    pageSize: 25,
+    filters: {
+      action: one(sp.action),
+      username: one(sp.username),
+      accountId: one(sp.accountId),
+      dateFrom: one(sp.dateFrom),
+      dateTo: one(sp.dateTo),
+      search: one(sp.search),
+    },
+  });
+
+  // Filter option sources: distinct actions (this feed) + tenant list for the
+  // Account Name filter. Only id→name crosses to the client — no roster.
+  const [actions, tenants] = await Promise.all([
+    getPlatformAuditActions(session.user.tenantId),
+    getTenants(),
+  ]);
+  const tenantOptions = tenants.map((t) => ({ id: t.id, name: t.name }));
 
   return (
     <PlatformAuditPage
-      logs={result.logs}
-      totalCount={result.totalCount}
-      truncated={result.truncated}
-      limit={result.limit}
-      tenantMap={tenantMap}
+      result={result}
+      actionOptions={actions}
+      tenantOptions={tenantOptions}
     />
   );
 }

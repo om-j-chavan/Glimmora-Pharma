@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Paperclip, Save, Send } from "lucide-react";
+import { Paperclip, Save, Send, Wrench, CheckCircle2, FileCheck2 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
@@ -11,9 +11,12 @@ import { useToast } from "@/components/ui/Toast";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
+import { frameworkLabel } from "@/constants/frameworks";
 import { EVIDENCE_CATEGORIES, EVIDENCE_CATEGORY_LABEL } from "@/lib/queries/evidence";
 import { uploadFindingEvidence, removeFindingEvidence, saveFindingWorkNotes, submitFinding, postFindingMessage } from "@/actions/findings";
-import { GroupedTaskDocs, TaskThread } from "./DeviationTaskPanel";
+import { TaskThread } from "./DeviationTaskPanel";
+import { DocumentCard } from "@/components/shared/DocumentCard";
+import { worklistDocToCardView } from "@/components/shared/documentCardAdapters";
 import type { WorklistFinding } from "@/lib/queries/worklist";
 
 /** Status pill variant for the finding loop states. */
@@ -129,16 +132,21 @@ export function FindingWorkPanel({
               <Badge variant={getSeverityVariant(finding.severity, "generic")}>{finding.severity}</Badge>
             </div>
             <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2 text-[11px]">
-              <div><span style={{ color: "var(--text-muted)" }}>Framework</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{finding.framework ?? "—"}</span></div>
+              <div><span style={{ color: "var(--text-muted)" }}>Framework</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{finding.framework ? frameworkLabel(finding.framework) : "—"}</span></div>
               <div><span style={{ color: "var(--text-muted)" }}>Area</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{finding.area}</span></div>
               <div><span style={{ color: "var(--text-muted)" }}>Target date</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{fmtDate(finding.targetDate)}</span></div>
             </div>
           </div>
 
-          {/* Rework "current ask" banner */}
+          {/* Rework "current ask" — a distinct, labelled callout so the worker
+              can't miss QA's request. Stored on the finding (reworkReason). */}
           {finding.status === "Rework" && finding.reworkReason && (
-            <div className="p-2 rounded-lg" style={{ background: "var(--danger-bg)" }}>
-              <p className="text-[11px]" style={{ color: "var(--danger)" }}><span className="font-semibold">Rework requested:</span> {finding.reworkReason}</p>
+            <div className="rounded-lg border p-3 flex items-start gap-2.5" style={{ background: "var(--danger-bg)", borderColor: "var(--danger)" }}>
+              <Wrench className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--danger)" }} aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--danger)" }}>Rework requested by QA</p>
+                <p className="text-[12px] mt-0.5 whitespace-pre-wrap" style={{ color: "var(--text-primary)" }}>{finding.reworkReason}</p>
+              </div>
             </div>
           )}
 
@@ -150,26 +158,39 @@ export function FindingWorkPanel({
               multiple files allowed, and each doc is removable until submitted. */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Evidence documents</p>
-            <GroupedTaskDocs
-              docs={finding.docs}
-              emptyText="No evidence uploaded yet — pick a category and upload below."
-              onRemove={canWork ? (id) => void removeDoc(id) : undefined}
-              busyId={removingDocId}
-            />
+            {/* #4 — shared <DocumentCard> (Category badge + Author/file-info +
+                View + Download; removable pre-submit for the worker). */}
+            {finding.docs.length === 0 ? (
+              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>No evidence uploaded yet — pick a category and upload below.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {finding.docs.map((d) => (
+                  <DocumentCard
+                    key={d.id}
+                    doc={worklistDocToCardView(d)}
+                    onRemove={canWork ? () => void removeDoc(d.id) : undefined}
+                    removing={removingDocId === d.id}
+                  />
+                ))}
+              </div>
+            )}
             {canWork && (
               <>
-                <div className="flex items-center gap-2 flex-wrap mt-2">
-                  <Dropdown
-                    placeholder="Select category…"
-                    value={uploadCategory}
-                    onChange={setUploadCategory}
-                    width="w-48"
-                    size="sm"
-                    options={EVIDENCE_CATEGORIES.map((c) => ({ value: c, label: EVIDENCE_CATEGORY_LABEL[c] }))}
-                    disabled={busy}
-                  />
-                  <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", opacity: (busy || !uploadCategory) ? 0.6 : 1 }}>
-                    <Paperclip className="w-3.5 h-3.5" /> Upload file
+                {/* #6 — Category (75%) + Upload action (25%) on ONE flex row. */}
+                <div className="flex items-stretch gap-2 mt-2">
+                  <div className="flex-[3] min-w-0">
+                    <Dropdown
+                      placeholder="Select category…"
+                      value={uploadCategory}
+                      onChange={setUploadCategory}
+                      width="w-full"
+                      size="sm"
+                      options={EVIDENCE_CATEGORIES.map((c) => ({ value: c, label: EVIDENCE_CATEGORY_LABEL[c] }))}
+                      disabled={busy}
+                    />
+                  </div>
+                  <label className="flex-1 inline-flex items-center justify-center gap-1.5 text-[12px] cursor-pointer px-2.5 rounded-lg border" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", opacity: (busy || !uploadCategory) ? 0.6 : 1 }}>
+                    <Paperclip className="w-3.5 h-3.5" /> Upload
                     <input type="file" className="hidden" disabled={busy || !uploadCategory} onChange={onPickFile} />
                   </label>
                 </div>
@@ -226,10 +247,18 @@ export function FindingWorkPanel({
         }
       >
         <div className="space-y-3">
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Send your completed work to QA for review. They&apos;ll see your completion notes and any uploaded evidence. You can still reply in the conversation after submitting, but the notes become read-only.</p>
+          <div className="flex items-start gap-3 rounded-lg p-3" style={{ background: "var(--brand-muted)", border: "1px solid var(--brand-border)" }}>
+            <Send className="w-4 h-4 mt-0.5 shrink-0 text-(--brand)" aria-hidden="true" />
+            <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>You&apos;re handing this finding to QA for review. QA will read your completion notes and evidence, then either accept it (closing the gap) or return it for rework.</p>
+          </div>
+          <ul className="space-y-1.5 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <li className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--success)" }} aria-hidden="true" /> Sent to QA for accept / rework</li>
+            <li className="flex items-center gap-2"><FileCheck2 className="w-3.5 h-3.5 shrink-0 text-(--brand)" aria-hidden="true" /> {finding.docs.length} evidence document{finding.docs.length === 1 ? "" : "s"} included</li>
+            <li className="flex items-center gap-2"><Save className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" /> Your notes become read-only (you can still reply in the conversation)</li>
+          </ul>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Completion notes</p>
-            <p className="text-[12px] whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>{notes.trim() || "—"}</p>
+            <p className="text-[12px] whitespace-pre-wrap rounded-lg p-2.5" style={{ color: "var(--text-secondary)", background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>{notes.trim() || "—"}</p>
           </div>
           {notes.trim().length < 5 && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>Add completion notes (at least 5 characters) on the panel before submitting.</p>}
         </div>

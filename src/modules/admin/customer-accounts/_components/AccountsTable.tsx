@@ -8,8 +8,9 @@ import { DataTable, type Column } from "@/components/shared";
 import { planLabel } from "@/lib/plans";
 import { planState, lifecycleLabel } from "@/lib/tenantStatus";
 import dayjs from "@/lib/dayjs";
+import { formatDate } from "@/lib/dates";
 import { type Tenant } from "@/store/auth.slice";
-import { planUtilisation } from "../helpers";
+import { planUtilisation, planUsersUsed } from "../helpers";
 import { AccountRowMenu } from "./AccountRowMenu";
 
 /**
@@ -69,7 +70,16 @@ export function AccountsTable({ rows, totalCount, isSuperAdmin, isFiltered, onEd
               const initial = tenant.name.charAt(0).toUpperCase();
               return (
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-[14px] font-bold" style={{ background: "var(--brand-muted)", color: "var(--brand)" }}>{initial}</div>
+                  {/* Show the tenant's uploaded logo (data URL) when present so a
+                      logo change on the detail page reflects here immediately;
+                      fall back to the name initial. */}
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 overflow-hidden text-[14px] font-bold" style={{ background: "var(--brand-muted)", color: "var(--brand)" }}>
+                    {tenant.logoUrl ? (
+                      <img src={tenant.logoUrl} alt="" className="w-full h-full object-cover" aria-hidden="true" />
+                    ) : (
+                      initial
+                    )}
+                  </div>
                   <div className="min-w-0">
                     <span className="text-[13px] font-semibold block truncate" style={{ color: "var(--text-primary)" }}>{tenant.name}</span>
                     <p className="text-[11px] font-mono truncate" style={{ color: "var(--text-muted)" }}>{tenant.adminEmail}</p>
@@ -94,7 +104,7 @@ export function AccountsTable({ rows, totalCount, isSuperAdmin, isFiltered, onEd
           },
           {
             key: "utilisation",
-            header: "Utilisation",
+            header: "Usage",
             render: (tenant) => {
               const tenantPlan = tenant.plan;
               const util = tenantPlan ? planUtilisation(tenant) : null;
@@ -105,7 +115,7 @@ export function AccountsTable({ rows, totalCount, isSuperAdmin, isFiltered, onEd
               return util ? (
                 <div className="min-w-[110px]">
                   <span className="text-[12px]" style={{ color: nearCap ? barColor : "var(--text-secondary)" }}>
-                    {tenant.config.users.length}/{tenantPlan!.maxUsers}u · {tenant.config.sites.length}/{tenantPlan!.maxSites}s
+                    {planUsersUsed(tenant)}/{tenantPlan!.maxUsers}u · {tenant.config.sites.length}/{tenantPlan!.maxSites}s
                   </span>
                   <div className="h-1.5 rounded-full mt-1" style={{ background: "var(--bg-border)" }} role="progressbar" aria-valuenow={Math.round(maxPct * 100)} aria-valuemin={0} aria-valuemax={100} aria-label={`${tenant.name} utilisation`}>
                     <div className="h-full rounded-full transition-all" style={{ width: `${Math.round(maxPct * 100)}%`, background: barColor }} />
@@ -150,7 +160,7 @@ export function AccountsTable({ rows, totalCount, isSuperAdmin, isFiltered, onEd
             header: "Created",
             render: (tenant) => (
               <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                {tenant.createdAt ? dayjs(tenant.createdAt).format("MMM D, YYYY") : "—"}
+                {formatDate(tenant.createdAt)}
               </span>
             ),
           },

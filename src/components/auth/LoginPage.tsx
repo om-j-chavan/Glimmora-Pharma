@@ -185,6 +185,12 @@ export function LoginPage() {
 
     if (!result.ok) {
       // Specific, actionable errors first.
+      if (result.error && result.error.includes("ACCOUNT_SUSPENDED")) {
+        const msg = "Your account has been suspended. Please contact the Pharma Platform administrator.";
+        setError("root", { message: msg });
+        toast.error(msg);
+        return;
+      }
       if (result.error && result.error.includes("SUBSCRIPTION_INACTIVE")) {
         const msg = "Your subscription has expired or no active plan is configured. Please contact your administrator.";
         setError("root", { message: msg });

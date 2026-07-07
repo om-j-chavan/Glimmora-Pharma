@@ -9,10 +9,12 @@ import dayjs from "@/lib/dayjs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
+import { frameworkLabel } from "@/constants/frameworks";
 import { submitForReview } from "@/actions/capas";
 import type { Worklist, WorklistGroup, WorklistItem, WorklistDeviationTask, WorklistStageTask, WorklistFinding } from "@/lib/queries/worklist";
 import { EvidenceCollectionPanel } from "@/modules/capa/tabs/EvidenceCollectionPanel";
@@ -245,20 +247,16 @@ export function WorklistPage({
   return (
     <div className="capa-shell min-h-full">
     <div className="p-6">
-      {/* ── Title section ── */}
-      <div className="mb-5">
-        <h1 className="text-[22px] font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>My Worklist</h1>
-        <p className="text-[12px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
-          {currentUserName} · {ROLE_LABEL[currentUserRole] ?? currentUserRole}
-          {isViewer && " · read-only"}
-          {(openCount > 0 || reworkCount > 0) && (
-            <span style={{ color: "var(--text-muted)" }}>
-              {" "}· {openCount} open
-              {reworkCount > 0 && <> · <span style={{ color: "var(--status-blocked)" }}>{reworkCount} need rework</span></>}
-            </span>
-          )}
-        </p>
-      </div>
+      <PageLayout
+        title="My Worklist"
+        description={[
+          currentUserName,
+          ROLE_LABEL[currentUserRole] ?? currentUserRole,
+          isViewer ? "read-only" : null,
+          openCount > 0 ? `${openCount} open` : null,
+          reworkCount > 0 ? `${reworkCount} need rework` : null,
+        ].filter(Boolean).join(" · ")}
+      >
 
       {/* ── Status summary cards — clickable filters (toggle) ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
@@ -635,7 +633,7 @@ export function WorklistPage({
                     {f.reference ?? f.id.slice(0, 8)} · {f.requirement}
                   </p>
                   <p className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>
-                    {[f.framework, f.area].filter(Boolean).join(" · ")}
+                    {[f.framework ? frameworkLabel(f.framework) : null, f.area].filter(Boolean).join(" · ")}
                     {f.targetDate ? ` · target ${dayjs.utc(f.targetDate).format(dateFormat)}` : ""}
                   </p>
                 </div>
@@ -675,6 +673,7 @@ export function WorklistPage({
         ) : null;
       })()}
 
+      </PageLayout>
     </div>
     </div>
   );

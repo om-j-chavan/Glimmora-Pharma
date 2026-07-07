@@ -127,7 +127,11 @@ export type TicketActivityType =
   | "RESOLVED"
   | "REOPENED"
   | "CLOSED"
-  | "CANCELLED";
+  | "CANCELLED"
+  // Two-hop escalation (Phase A adds the type; the escalate action that emits it
+  // comes in Phase B). Unprefixed to match the members above — the central
+  // AuditLog action string for it is the prefixed "TICKET_ESCALATED".
+  | "ESCALATED";
 
 /** Central AuditLog module string for Support (matches Audit Trail filters). */
 export const SUPPORT_AUDIT_MODULE = "Support";

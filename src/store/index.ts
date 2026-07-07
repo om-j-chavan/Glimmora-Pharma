@@ -11,6 +11,8 @@ import notificationsReducer from "./notifications.slice";
 import readinessReducer from "./readiness.slice";
 import deviationReducer from "./deviation.slice";
 import systemsReducer from "./systems.slice";
+import frameworksReducer from "./frameworks.slice";
+import regionsReducer from "./regions.slice";
 import { loadPersistedState, persistMiddleware } from "./persistence";
 
 const combinedReducer = combineReducers({
@@ -26,6 +28,11 @@ const combinedReducer = combineReducers({
   readiness: readinessReducer,
   deviation: deviationReducer,
   systems: systemsReducer,
+  // Non-persisted — hydrated per tenant from the server (see frameworks.slice).
+  frameworks: frameworksReducer,
+  // Non-persisted — DB-backed region options/labels; initial state = constant
+  // fallback so dropdowns are never empty (see regions.slice).
+  regions: regionsReducer,
 });
 
 type RootStateInternal = ReturnType<typeof combinedReducer>;

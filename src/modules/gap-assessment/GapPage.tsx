@@ -23,6 +23,7 @@ import {
   type FindingSeverity,
 } from "@/store/findings.slice";
 import { adaptFinding, type FindingWithEdits } from "./GapPage.adapter";
+import type { FindingAssignee } from "@/lib/queries";
 import {
   createFinding as createFindingAction,
   updateFinding as updateFindingAction,
@@ -44,11 +45,6 @@ import { EvidenceLinkModal } from "./modals/EvidenceLinkModal";
 /* ── Constants ── */
 
 const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
-const FRAMEWORK_LABELS: Record<string, string> = {
-  p210: "21 CFR 210/211", p11: "Part 11", annex11: "Annex 11",
-  annex15: "Annex 15", ichq9: "ICH Q9", ichq10: "ICH Q10",
-  gamp5: "GAMP 5", who: "WHO GMP", mhra: "MHRA",
-};
 const DOC_TYPE_MAP: Record<string, string> = {
   p210: "Record", p11: "Audit Trail", annex11: "Audit Trail",
   annex15: "Validation", ichq9: "Report", ichq10: "Report",
@@ -98,9 +94,11 @@ export interface GapPageProps {
   /** Finding IDs that have an uploaded evidence document retrievable via the
    *  download route. Used by the Evidence Index to make the link clickable. */
   evidenceDocFindingIds?: string[];
+  /** SERVER-SCOPED assignee pool (tenant + the assigner's own site). */
+  assignees?: FindingAssignee[];
 }
 
-export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: GapPageProps = {}) {
+export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assignees = [] }: GapPageProps = {}) {
   const router = useRouter();
   const dispatch = useAppDispatch();
 
@@ -124,15 +122,17 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
   const { org, sites, users } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const frameworks = useAppSelector((s) => s.settings.frameworks);
+  // Effective enabled frameworks for THIS tenant — server-resolved, non-persisted
+  // (replaces the old settings.frameworks booleans; see frameworks.slice).
+  const frameworkList = useAppSelector((s) => s.frameworks.list);
   const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const authUser = useAppSelector((s) => s.auth.user);
   const agiCapa = useAppSelector((s) => s.settings.agi.agents.capa);
 
   const activeFrameworks = useMemo(
-    () => (Object.keys(frameworks) as (keyof typeof frameworks)[]).filter((k) => frameworks[k]),
-    [frameworks],
+    () => frameworkList.map((f) => f.key),
+    [frameworkList],
   );
 
   /* ── State ── */
@@ -263,7 +263,11 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
 
   /* ── Filter dropdowns ── */
   const siteOptions = useMemo(() => [{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))], [sites]);
-  const fwOptions = useMemo(() => [{ value: "", label: "All frameworks" }, ...activeFrameworks.map((k) => ({ value: k, label: FRAMEWORK_LABELS[k] ?? k }))], [activeFrameworks]);
+  // Filter labels use the catalog display NAME (editable metadata), so a
+  // Super-Admin framework rename shows here — reserved AND custom. The value
+  // stays the immutable key. (frameworkLabel is still used for finding badges,
+  // which only carry the stored key.)
+  const fwOptions = useMemo(() => [{ value: "", label: "All frameworks" }, ...frameworkList.map((f) => ({ value: f.key, label: f.name }))], [frameworkList]);
 
   function renderFilters(compact = false) {
     return (
@@ -442,6 +446,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds }: Gap
           />
           <GapRegisterTab
             filteredFindings={baseFindings} findingsTotal={findings.length}
+            assignees={assignees}
             selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding} isViewOnly={isViewOnly} users={users}
             timezone={timezone} dateFormat={dateFormat} capas={capas}
             agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}

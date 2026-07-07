@@ -41,17 +41,6 @@ import {
 } from "@/lib/ai/regulatoryAssistant";
 
 /** Framework key → display label, mirroring Settings → Frameworks. */
-const FRAMEWORK_LABELS: Record<string, string> = {
-  p210: "FDA 21 CFR 210/211",
-  p11: "FDA 21 CFR Part 11",
-  annex11: "EU GMP Annex 11",
-  annex15: "EU GMP Annex 15",
-  ichq9: "ICH Q9",
-  ichq10: "ICH Q10",
-  gamp5: "GAMP 5",
-  who: "WHO GMP",
-  mhra: "MHRA Guidelines",
-};
 
 // Centered-modal dimensions. Width/height are capped but shrink to fit small
 // viewports (the min()/calc in the style), and the body scrolls inside.
@@ -86,10 +75,10 @@ export function RegulatoryAIAssistant({
   const region = org?.regulatoryRegion || "your region";
   const { role } = useRole();
   const roleText = roleLabel(role);
-  const frameworks = useAppSelector((s) => s.settings.frameworks);
-  const activeFrameworks = Object.entries(frameworks)
-    .filter(([, on]) => on)
-    .map(([key]) => ({ key, label: FRAMEWORK_LABELS[key] ?? key }));
+  // Effective enabled frameworks for this tenant (server-resolved, non-persisted).
+  // The slice carries each framework's catalog name, used as the AI-context label.
+  const frameworkList = useAppSelector((s) => s.frameworks.list);
+  const activeFrameworks = frameworkList.map((f) => ({ key: f.key, label: f.name }));
 
   // AI backend token — same resolution the floating Compliance Assistant uses.
   // The backend is permissive, so we fall back to "anonymous" rather than

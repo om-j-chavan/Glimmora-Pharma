@@ -23,7 +23,16 @@ model Tenant {
   language            String   @default("en")
   timezone            String   @default("Asia/Kolkata")
   logoUrl             String?
+  // Regulatory region is owned by the platform super_admin (set on tenant
+  // create/edit), NOT the customer_admin. Nullable for the backfill window.
+  // Values come from the central RegulatoryRegion lookup table.
+  regulatoryRegion    String?
   isActive            Boolean  @default(true)
+  // Soft-delete timestamp. Lifecycle: ACTIVE (isActive=true, deletedAt=null),
+  // SUSPENDED (isActive=false, deletedAt=null), DELETED-soft (deletedAt set).
+  // Both SUSPENDED and DELETED block login; DELETED is recoverable via Restore.
+  // A hard/permanent delete removes the row entirely (cascades to children).
+  deletedAt           DateTime?
   mfaEnabled          Boolean  @default(false)
   sessionsValidAfter  DateTime @default(now())
   createdAt           DateTime @default(now())
@@ -51,6 +60,8 @@ model Tenant {
   validationStageTasks ValidationStageTask[]
   // Stage 5 — reverse for DeviationTaskMessage.tenantId.
   deviationTaskMessages DeviationTaskMessage[]
+  // Frameworks Phase 1 — per-tenant framework enablement.
+  tenantFrameworks      TenantFramework[]
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -83,6 +94,35 @@ model Plan {
   expiryDate        DateTime
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+// Central lookup of Regulatory Region values, shared across ALL tenants (not
+// per-tenant). The platform super_admin picks an existing value or adds a new
+// one on the tenant create/edit modal; new values persist here and become
+// immediately selectable everywhere. `value` is @unique; the action layer
+// additionally guards against case-insensitive duplicates.
+model RegulatoryRegion {
+  id        String   @id @default(cuid())
+  // IMMUTABLE key — stored as a bare FK string in Tenant.regulatoryRegion and
+  // FrameworkRegion.region. Renaming would orphan those refs, so a value change
+  // is archive-and-alias with reference re-pointing (never an in-place mutation).
+  value     String   @unique
+  // Editable display label (never part of the contract).
+  label     String
+  // Optional free-text description (Stage 2) — presentation only, never part of
+  // any contract.
+  description String?
+  // Soft-archive (null = active). Archived regions drop out of dropdowns but
+  // still resolve their label for historical display.
+  archivedAt DateTime?
+  // Archive-and-alias lineage — old.aliasOfId → successor (same locked direction
+  // as Framework). Set on the archived OLD row during a value supersede.
+  aliasOfId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  aliasOf   RegulatoryRegion?  @relation("RegionLineage", fields: [aliasOfId], references: [id])
+  aliasedBy RegulatoryRegion[] @relation("RegionLineage")
 }
 
 // ── SETTINGS ──
@@ -1189,7 +1229,16 @@ model Document {
   description    String?
   linkedModule   String?
   linkedRecordId String?
+  // External document LINK (file-OR-link). Nullable + additive: a document may
+  // carry a stored file (storageKey), a linkUrl, or both — but never NEITHER
+  // (server-enforced in createDocument). A link-only doc has no storageKey.
+  linkUrl        String?
   uploadedBy     String
+  // Authoritative uploader identity (User FK id) alongside the legacy
+  // `uploadedBy` display-name string. Written from the session on create so the
+  // server can enforce "a regular user sees/edits only their OWN documents" by
+  // ID, never by name. Nullable for legacy rows uploaded before this column.
+  uploadedById   String?
   approvedBy     String?
   approvedAt     DateTime?
   createdAt      DateTime  @default(now())
@@ -1220,6 +1269,7 @@ model Document {
   approvalSignature  SignedRecord?  @relation("DocumentApprovalSignature", fields: [approvalSignatureId], references: [id])
 
   @@index([tenantId, sourceModule, sourceId])
+  @@index([tenantId, uploadedById])
   @@index([tenantId, uploadedAt])
   @@index([sha256])
   @@index([deletedAt])
@@ -1841,7 +1891,7 @@ model Notification {
 // upload pipeline — no attachment table here.
 model Ticket {
   id        String  @id @default(cuid())
-  reference String? @unique // SUP-<CUSTOMERCODE>-<year>-NNN
+  reference String? @unique // TKT-<year>-<NNNNN> (flat, global — not tenant/region coded)
   tenantId  String
 
   subject     String
@@ -1859,6 +1909,18 @@ model Ticket {
   // Null = Unassigned. Manual assignment only (no auto-routing).
   assigneeId   String?
   assigneeName String?
+
+  // Routing tier (Phase A foundation) — WHO currently holds the ticket. SEPARATE
+  // from `status` (which is lifecycle). Values: "customer_admin" | "super_admin".
+  // Default "super_admin" preserves TODAY'S behaviour (everything is effectively
+  // SA-central now), so existing tickets are unchanged. Nothing routes to
+  // customer_admin until Phase B wires the escalate/default-routing flow.
+  currentHandler String @default("super_admin")
+  // Escalation trail — set ONLY when a customer_admin escalates to SA (Phase B);
+  // null on every ticket until then.
+  escalatedAt     DateTime?
+  escalatedById   String?
+  escalatedByName String?
 
   // Optional link to a domain record — REQUEST only; never mutates the record.
   relatedModule   String?
@@ -1932,4 +1994,74 @@ model TicketActivity {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId, createdAt])
+}
+
+// ── FRAMEWORKS (Regulatory Region ↔ Frameworks, Phase 1) ──────────────────────
+// Platform catalog of regulatory frameworks. `key` is a STABLE public id: the 9
+// reserved keys (p210, p11, annex11, annex15, ichq9, ichq10, gamp5, who, mhra)
+// match the strings already stored in Finding.framework across the app and MUST
+// never be renamed or dropped. New frameworks get a fresh unique slug key.
+model Framework {
+  id                  String   @id @default(cuid())
+  key                 String   @unique
+  name                String
+  description         String?
+  platformEnabled     Boolean  @default(true)
+  // GLOBAL = applies to every regulatory region. When false, applicability is
+  // restricted to the linked FrameworkRegion rows.
+  appliesToAllRegions Boolean  @default(true)
+  // Soft-archive marker. null = active; a timestamp = archived (excluded from
+  // tenant-facing reads, but kept so historical Finding.framework keys still
+  // resolve their label via this row). Hard delete is prohibited.
+  archivedAt          DateTime?
+  // Archive-and-alias lineage for a "key change" — never an in-place key mutation.
+  // When a key is superseded a NEW row is created and THIS (old) row is archived
+  // with aliasOfId → the successor. So an archived old-key row is literally "an
+  // alias of" its successor: resolving a historical old-key finding's *current*
+  // label is a single forward hop (old.aliasOf.name), while the old row's own
+  // name still resolves the old-key label directly.
+  aliasOfId           String?
+  // Display metadata (Item #5) — presentation only, never part of any contract.
+  sortOrder           Int      @default(0)   // manual display order (backfilled)
+  category            String?                // optional grouping label (nullable)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  regions          FrameworkRegion[]
+  tenantFrameworks TenantFramework[]
+
+  aliasOf   Framework?  @relation("FrameworkLineage", fields: [aliasOfId], references: [id])
+  aliasedBy Framework[] @relation("FrameworkLineage")
+}
+
+// Framework ↔ regulatory region link (only meaningful when appliesToAllRegions
+// = false). `region` stores the Tenant.regulatoryRegion string value (e.g. "FDA")
+// — reuses the existing region field; no new column on Tenant.
+model FrameworkRegion {
+  id          String @id @default(cuid())
+  frameworkId String
+  region      String
+
+  framework Framework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+
+  @@unique([frameworkId, region])
+  @@index([region])
+}
+
+// Per-tenant enablement of a catalog framework. Absence of a row = ENABLED
+// (parity default — an existing tenant with no rows still sees every framework);
+// a row records an explicit enable/disable for that tenant.
+model TenantFramework {
+  id          String   @id @default(cuid())
+  tenantId    String
+  frameworkId String
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  framework Framework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, frameworkId])
+  @@index([tenantId])
 }

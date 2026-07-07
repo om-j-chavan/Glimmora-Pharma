@@ -35,7 +35,10 @@ export function adaptFinding(p: FindingWithEdits): Finding {
     createdAt: p.createdAt.toISOString(),
     editHistory: p.edits?.length
       ? p.edits.map((e) => ({
-          editedBy: e.editedBy,
+          // Use the denormalised human name (editedByName), NOT the raw userId
+          // (editedBy) — the Audit Trail renders this via displayName, so passing
+          // the id showed a cuid instead of a name (#12).
+          editedBy: e.editedByName || e.editedBy,
           editedAt: e.editedAt.toISOString(),
           reason: e.reason ?? undefined,
           changes: (() => {

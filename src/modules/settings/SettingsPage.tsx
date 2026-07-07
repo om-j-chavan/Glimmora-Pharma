@@ -92,7 +92,12 @@ export function SettingsPage() {
             hidden={active !== tab.id}
             className="focus:outline-none"
           >
-            {tab.id === "org" && <OrgTab readOnly={readOnly} />}
+            {/* Company Details (Organisation) is Super-Admin-managed, so it is
+                view-only on the tenant side — including for customer_admin, who
+                can edit the other tabs. Regulatory Region moved to Super Admin.
+                Server-side, the only writer of these fields is the super_admin
+                updateTenant action, so this is enforcement, not just hiding. */}
+            {tab.id === "org" && <OrgTab readOnly={readOnly || role === "customer_admin"} />}
             {tab.id === "sites" && <SitesTab readOnly={readOnly} />}
             {tab.id === "users" && <UsersTab readOnly={readOnly} />}
             {/* Subscription is inherently read-only — no readOnly prop / no controls.

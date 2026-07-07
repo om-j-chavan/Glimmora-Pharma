@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Info, Save, Pencil } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { updateTenantOrg } from "@/store/auth.slice";
 import { Popup } from "@/components/ui/Popup";
@@ -13,12 +14,15 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { regulatoryRegionLabel } from "@/constants/regulatoryRegions";
 
+// Regulatory Region is Super-Admin-owned and set per-tenant; Customer Admin
+// sees it read-only here and cannot change it, so it is deliberately NOT part
+// of this editable form schema.
 const orgSchema = z.object({
   companyName: z.string().min(2, "Company name is required"),
   timezone: z.string().min(1, "Timezone is required"),
   dateFormat: z.enum(["DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"]),
-  regulatoryRegion: z.string().min(1, "Regulatory region is required"),
 });
 
 type OrgFormValues = z.infer<typeof orgSchema>;
@@ -33,17 +37,6 @@ const TIMEZONES = [
   { value: "Asia/Tokyo", label: "Asia/Tokyo (JST)" },
   { value: "Asia/Shanghai", label: "Asia/Shanghai (CST)" },
   { value: "UTC", label: "UTC" },
-];
-
-const REGIONS = [
-  { value: "FDA", label: "FDA (United States)" },
-  { value: "EMA", label: "EMA (European Union)" },
-  { value: "India", label: "India — CDSCO + WHO GMP" },
-  { value: "CDSCO", label: "CDSCO (India)" },
-  { value: "PMDA", label: "PMDA (Japan)" },
-  { value: "TGA", label: "TGA (Australia)" },
-  { value: "WHO", label: "WHO (Global)" },
-  { value: "MHRA", label: "MHRA (United Kingdom)" },
 ];
 
 const DATE_FORMATS = [
@@ -75,7 +68,6 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
     companyName: org.companyName,
     timezone: org.timezone,
     dateFormat: org.dateFormat as OrgFormValues["dateFormat"],
-    regulatoryRegion: org.regulatoryRegion,
   };
 
   const {
@@ -93,7 +85,7 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
   useEffect(() => {
     reset(orgDefaults);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [org.companyName, org.timezone, org.dateFormat, org.regulatoryRegion]);
+  }, [org.companyName, org.timezone, org.dateFormat]);
 
   const openEdit = () => { reset(orgDefaults); setEditOpen(true); };
 
@@ -113,7 +105,8 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
   const cancelConfirm = () => { setConfirmOpen(false); setPendingData(null); };
 
   const tzLabel = TIMEZONES.find((t) => t.value === org.timezone)?.label ?? org.timezone;
-  const regionLabel = REGIONS.find((r) => r.value === org.regulatoryRegion)?.label ?? org.regulatoryRegion;
+  const regionLabelMap = useAppSelector((s) => s.regions.labelMap);
+  const regionLabel = regulatoryRegionLabel(org.regulatoryRegion, regionLabelMap);
 
   return (
     <section aria-labelledby="org-heading" className="w-full space-y-4">
@@ -181,22 +174,10 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
             </div>
           </div>
 
-          <div>
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">
-              Regulatory Region <span className="text-(--danger)" aria-hidden="true">*</span>
-            </p>
-            <Dropdown
-              options={REGIONS}
-              value={watch("regulatoryRegion")}
-              onChange={(v) => setValue("regulatoryRegion", v, { shouldValidate: true })}
-              placeholder="Select region"
-              searchable
-              width="w-full"
-            />
-            {errors.regulatoryRegion && (
-              <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.regulatoryRegion.message}</p>
-            )}
-          </div>
+          {/* Regulatory Region is intentionally omitted here — it is Super-Admin
+              owned and shown read-only on the Organisation card above. Customer
+              Admin cannot change it (server also rejects any non-super_admin
+              write in updateTenant). */}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-(--bg-border)">
             <Button variant="secondary" onClick={() => setEditOpen(false)}>Cancel</Button>
@@ -209,7 +190,7 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
         isOpen={confirmOpen}
         variant="confirmation"
         title="Save organisation settings?"
-        description="This updates company name, timezone, date format, and region across the platform."
+        description="This updates company name, timezone, and date format across the platform."
         onDismiss={cancelConfirm}
         actions={[
           { label: "Cancel", style: "ghost", onClick: cancelConfirm },

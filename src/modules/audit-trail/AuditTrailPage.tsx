@@ -5,305 +5,185 @@
 // identity, timestamp, and tenant-scoped persistence — do NOT add
 // tamper-evidence / immutable UI claims until the schema supports them.
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { ScrollText, RefreshCw, Search, Filter, FileSearch, X } from "lucide-react";
+import { useState } from "react";
 import dayjs from "@/lib/dayjs";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Dropdown } from "@/components/ui/Dropdown";
-import { DatePicker } from "@/components/ui/DatePicker";
-import { ExportMenu } from "@/components/ui/ExportMenu";
-import { DataTable, type Column } from "@/components/shared";
+import { PageLayout } from "@/components/layout/PageLayout";
+import { DataTable, type DataColumn, type DataFilter } from "@/components/table/DataTable";
 import { roleLabel } from "@/lib/labels/roles";
-import type { AuditTrailView } from "@/lib/queries";
-import { AuditDetailModal } from "./_components/AuditDetailModal";
-import {
-  MODULES,
-  ACTION_GROUPS,
-  SEVERITY_VARIANT,
-  severityOf,
-  actionGroupMatch,
-  formatAction,
-  formatTimestamp,
-} from "./audit-helpers";
+import { auditEventLabel } from "@/lib/labels/auditEvents";
+import { moduleLabel } from "@/lib/labels/modules";
+import { loadAuditTrail } from "@/actions/auditLogs";
+import type { AuditTrailRow, AuditTrailFilterOptions, PlatformAuditRow } from "@/lib/queries";
+// Reuse the humanised, read-only detail modal built for the #4 Framework
+// Activity surface (field-level before/after diff, meaningful IP, target as a
+// reference — never a raw CUID) rather than forking a second one.
+import { AuditDetailModal } from "@/modules/admin/platform-audit/_components/AuditDetailModal";
+import { SEVERITY_VARIANT, severityOf, type Severity } from "./audit-helpers";
 
-interface Filters {
-  module: string;
-  action: string;
-  userId: string;
-  search: string;
-  dateFrom: string;
-  dateTo: string;
-}
+// MUST match the route's getAuditTrailPage pageSize — the route seeds page 1 as
+// initialData, and Show More requests page 2 at this size.
+const PAGE_SIZE = 25;
 
-const EMPTY_FILTERS: Filters = {
-  module: "all",
-  action: "all",
-  userId: "all",
-  search: "",
-  dateFrom: "",
-  dateTo: "",
+/** Compact severity tag beside the action label (no tag for routine events, to
+ *  keep the column quiet). */
+const SEVERITY_TAG: Record<Severity, string | null> = {
+  critical: "Critical",
+  status_change: "Status",
+  create: "New",
+  other: null,
 };
 
-export function AuditTrailPage({ rows, totalCount, truncated, limit }: AuditTrailView) {
-  const router = useRouter();
-  const { users, org } = useTenantConfig();
-  const timezone = org.timezone;
+/** ::1 / 127.0.0.1 → "Localhost (server)"; null → "—". Mirrors the reused
+ *  AuditDetailModal's IP presentation for the table cell (item 6). */
+function ipLabel(ip: string | null): string {
+  if (!ip) return "—";
+  const v = ip.trim();
+  if (v === "::1" || v === "127.0.0.1" || v === "::ffff:127.0.0.1") return "Localhost (server)";
+  return v;
+}
 
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [detailId, setDetailId] = useState<string | null>(null);
+interface Props {
+  initialData: { rows: AuditTrailRow[]; total: number };
+  options: AuditTrailFilterOptions;
+}
 
-  const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) =>
-    setFilters((prev) => ({ ...prev, [key]: value }));
+export function AuditTrailPage({ initialData, options }: Props) {
+  const { org } = useTenantConfig();
+  const tz = org.timezone;
+  const [detailRow, setDetailRow] = useState<AuditTrailRow | null>(null);
 
-  const anyFilter =
-    filters.module !== "all" ||
-    filters.action !== "all" ||
-    filters.userId !== "all" ||
-    filters.search.trim() !== "" ||
-    filters.dateFrom !== "" ||
-    filters.dateTo !== "";
+  const columns: DataColumn<AuditTrailRow>[] = [
+    {
+      key: "timestamp",
+      label: "Timestamp",
+      sortable: true,
+      exportValue: (e) => dayjs.utc(e.createdAt).tz(tz).format("YYYY-MM-DD HH:mm:ss"),
+      render: (e) => (
+        <time
+          dateTime={dayjs(e.createdAt).toISOString()}
+          title={dayjs.utc(e.createdAt).tz(tz).format("DD MMM YYYY HH:mm:ss")}
+          className="font-mono text-[12px]"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {dayjs.utc(e.createdAt).tz(tz).format("DD MMM YYYY, HH:mm")}
+        </time>
+      ),
+    },
+    {
+      key: "action",
+      label: "Action",
+      sortable: true,
+      exportValue: (e) => auditEventLabel(e.action),
+      render: (e) => {
+        const sev = severityOf(e.action);
+        const tag = SEVERITY_TAG[sev];
+        return (
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{auditEventLabel(e.action)}</span>
+            {tag && <Badge variant={SEVERITY_VARIANT[sev]}>{tag}</Badge>}
+          </div>
+        );
+      },
+    },
+    {
+      key: "module",
+      label: "Module",
+      sortable: true,
+      exportValue: (e) => moduleLabel(e.module),
+      render: (e) => <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{moduleLabel(e.module)}</span>,
+    },
+    {
+      key: "actor",
+      label: "Actor",
+      sortable: true,
+      exportValue: (e) => (e.userRole ? `${e.userName} (${roleLabel(e.userRole)})` : e.userName),
+      render: (e) => (
+        <div className="text-[12px]">
+          <p className="font-medium" style={{ color: "var(--text-primary)" }}>{e.userName}</p>
+          {e.userRole && <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{roleLabel(e.userRole)}</p>}
+        </div>
+      ),
+    },
+    {
+      key: "target",
+      label: "Target",
+      exportValue: (e) => e.displayId,
+      render: (e) => (
+        <span
+          className="font-mono text-[12px] block truncate max-w-[240px]"
+          style={{ color: "var(--text-secondary)" }}
+          title={e.recordTitle && e.recordTitle !== e.displayId ? `${e.displayId} · ${e.recordTitle}` : e.displayId}
+        >
+          {e.displayId}
+        </span>
+      ),
+    },
+    {
+      key: "ip",
+      label: "IP",
+      exportValue: (e) => ipLabel(e.ipAddress),
+      render: (e) => <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{ipLabel(e.ipAddress)}</span>,
+    },
+  ];
 
-  const filtered = useMemo(() => {
-    let result = rows;
-    if (filters.module !== "all") result = result.filter((e) => e.module === filters.module);
-    if (filters.action !== "all") result = result.filter((e) => actionGroupMatch(e.action, filters.action));
-    if (filters.userId !== "all") result = result.filter((e) => e.userId === filters.userId);
-    if (filters.search.trim()) {
-      const q = filters.search.toLowerCase();
-      result = result.filter(
-        (e) =>
-          e.userName.toLowerCase().includes(q) ||
-          e.action.toLowerCase().includes(q) ||
-          e.module.toLowerCase().includes(q) ||
-          e.displayId.toLowerCase().includes(q) ||
-          (e.recordTitle ?? "").toLowerCase().includes(q),
-      );
-    }
-    if (filters.dateFrom) {
-      const from = dayjs(filters.dateFrom).startOf("day");
-      result = result.filter((e) => !dayjs(e.createdAt).isBefore(from));
-    }
-    if (filters.dateTo) {
-      const to = dayjs(filters.dateTo).endOf("day");
-      result = result.filter((e) => !dayjs(e.createdAt).isAfter(to));
-    }
-    return result;
-  }, [rows, filters]);
+  // Toolbar filters. Module/action/actor options come from the DB-distinct
+  // values (labels humanised client-side); "time" is a rolling-window preset the
+  // server maps to a dateFrom. Every filter re-queries the server via the
+  // fetcher — so a filter narrows the WHOLE trail, not just the loaded page.
+  const filters: DataFilter<AuditTrailRow>[] = [
+    { key: "module", label: "modules", options: options.modules.map((m) => ({ value: m, label: moduleLabel(m) })) },
+    { key: "action", label: "actions", options: options.actions.map((a) => ({ value: a, label: auditEventLabel(a) })) },
+    { key: "actor", label: "actors", options: options.actors.map((n) => ({ value: n, label: n })) },
+    {
+      key: "period",
+      label: "time",
+      options: [
+        { value: "24h", label: "Last 24 hours" },
+        { value: "7d", label: "Last 7 days" },
+        { value: "30d", label: "Last 30 days" },
+        { value: "90d", label: "Last 90 days" },
+      ],
+    },
+  ];
 
-  const detailRow = detailId ? filtered.find((r) => r.id === detailId) ?? rows.find((r) => r.id === detailId) : null;
-
-  const entryWord = (n: number) => (n === 1 ? "entry" : "entries");
-
-  // CSV/PDF export of the current (filtered) slice.
-  const AUDIT_HEADERS = ["Timestamp", "User", "Role", "Module", "Action", "Record", "Record Title", "Before", "After"];
-  const buildAuditRows = () =>
-    filtered.map((e) => [
-      dayjs(e.createdAt).tz(timezone).format("DD/MM/YYYY HH:mm"),
-      e.userName,
-      e.userRole ? roleLabel(e.userRole) : "",
-      e.module,
-      formatAction(e.action),
-      e.displayId,
-      e.recordTitle ?? "",
-      e.oldValue ?? "",
-      e.newValue ?? "",
-    ]);
+  // Adapt the enriched trail row to the shape the reused (platform) modal wants:
+  // actor falls back to the denormalised userName (username left null); this is a
+  // single-tenant view, so there's no affected-account name — the modal then
+  // shows the resolved reference (displayId) as the Target, with the raw
+  // recordId only as a hover tooltip.
+  const modalRow: PlatformAuditRow | null = detailRow
+    ? {
+        ...detailRow,
+        username: null,
+        accountName: null,
+        recordTitle: detailRow.displayId !== "—" ? detailRow.displayId : detailRow.recordTitle,
+      }
+    : null;
 
   return (
-    <main id="main-content" aria-label="Audit Trail" className="w-full space-y-5">
-      {/* Header — matches the other list modules (icon + title + subtitle + actions) */}
-      <header className="flex items-start justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-2">
-          <ScrollText className="w-5 h-5" style={{ color: "var(--brand)" }} aria-hidden="true" />
-          <div>
-            <h1 className="page-title">Audit Trail</h1>
-            <p className="page-subtitle mt-1">
-              Every action across the platform, with actor identity and timestamp (21 CFR Part 11).
-              {" "}
-              <span className="text-(--text-muted)">
-                {totalCount.toLocaleString()} {entryWord(totalCount)}
-                {truncated && ` · showing the ${limit.toLocaleString()} most recent`}
-              </span>
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <ExportMenu
-            filename={`audit-trail-${dayjs().format("YYYY-MM-DD")}`}
-            title="Audit Trail"
-            subtitle={`${filtered.length} ${entryWord(filtered.length)} · ${dayjs().format("DD MMM YYYY HH:mm")}`}
-            headers={AUDIT_HEADERS}
-            rows={buildAuditRows}
-            variant="ghost"
-            label="Export"
-            disabled={filtered.length === 0}
-          />
-          <Button variant="ghost" size="sm" icon={RefreshCw} onClick={() => router.refresh()} aria-label="Refresh audit log from server">
-            Refresh
-          </Button>
-        </div>
-      </header>
+    <PageLayout
+      title="Audit Log"
+      description="Every recorded action in your organisation — actor, timestamp, and the affected record (21 CFR Part 11). Read-only."
+    >
+      <DataTable<AuditTrailRow>
+        mode="server"
+        fetcher={loadAuditTrail}
+        initialData={initialData}
+        rowKey={(e) => e.id}
+        ariaLabel="Audit trail"
+        columns={columns}
+        pageSize={PAGE_SIZE}
+        defaultSort={{ key: "timestamp", dir: "desc" }}
+        search={{ placeholder: "Search action, actor, record…" }}
+        filters={filters}
+        exportOptions={{ filename: `audit-trail-${dayjs().format("YYYY-MM-DD")}`, title: "Audit Log" }}
+        onRowClick={(e) => setDetailRow(e)}
+        emptyState="No audit events match the current filters."
+      />
 
-      {/* Filters — standard filter section */}
-      <section
-        aria-label="Audit trail filters"
-        className="flex items-center gap-3 flex-wrap p-3 rounded-xl"
-        style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
-      >
-        <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-        <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
-
-        <Dropdown value={filters.module} onChange={(v) => setFilter("module", v)} options={MODULES} width="w-44" />
-        <Dropdown
-          value={filters.action}
-          onChange={(v) => setFilter("action", v)}
-          width="w-40"
-          options={ACTION_GROUPS.map((a) => ({ value: a, label: a === "all" ? "All actions" : a }))}
-        />
-        <Dropdown
-          value={filters.userId}
-          onChange={(v) => setFilter("userId", v)}
-          width="w-44"
-          options={[{ value: "all", label: "All users" }, ...users.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))]}
-        />
-        <DatePicker
-          id="audit-date-from"
-          value={filters.dateFrom}
-          onChange={(v) => setFilter("dateFrom", v)}
-          max={filters.dateTo || undefined}
-          placeholder="From date"
-          className="w-40"
-        />
-        <DatePicker
-          id="audit-date-to"
-          value={filters.dateTo}
-          onChange={(v) => setFilter("dateTo", v)}
-          min={filters.dateFrom || undefined}
-          placeholder="To date"
-          className="w-40"
-        />
-
-        <div className="relative ml-auto flex-1 min-w-[200px] max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-          <input
-            type="search"
-            className="input w-full pl-10 text-[12px]"
-            placeholder="Search user, action, record…"
-            value={filters.search}
-            onChange={(e) => setFilter("search", e.target.value)}
-            aria-label="Search audit events"
-          />
-        </div>
-
-        {anyFilter && (
-          <button
-            type="button"
-            onClick={() => setFilters(EMPTY_FILTERS)}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] text-(--text-muted) hover:text-(--text-primary) border-none bg-transparent cursor-pointer"
-            aria-label="Clear all filters"
-          >
-            <X className="h-3 w-3" aria-hidden="true" />
-            Clear
-          </button>
-        )}
-      </section>
-
-      {/* Results */}
-      {filtered.length === 0 ? (
-        <div className="card p-10 text-center">
-          <FileSearch className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-          <p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
-            {rows.length === 0 ? "No audit events yet" : "No audit events match the current filters"}
-          </p>
-          <p className="text-[12px] mb-3" style={{ color: "var(--text-secondary)" }}>
-            {rows.length === 0
-              ? "Once users start acting in the platform, every state change is captured here automatically."
-              : "Adjust the filters or clear them to see more rows."}
-          </p>
-          {anyFilter && (
-            <Button variant="secondary" size="sm" icon={X} onClick={() => setFilters(EMPTY_FILTERS)}>
-              Clear filters
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="card overflow-hidden">
-          <DataTable
-            ariaLabel="Audit trail"
-            caption={`Audit events with timestamp, actor, module, action, and affected record. Showing ${filtered.length} of ${rows.length} loaded ${entryWord(rows.length)}.`}
-            data={filtered}
-            rowKey={(e) => e.id}
-            minWidth={760}
-            onRowClick={(e) => setDetailId(e.id)}
-            columns={[
-              {
-                key: "timestamp",
-                header: "Timestamp",
-                render: (e) => (
-                  <time
-                    dateTime={dayjs(e.createdAt).toISOString()}
-                    title={dayjs(e.createdAt).tz(timezone).format("DD MMM YYYY HH:mm:ss")}
-                    className="font-mono text-[12px]"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
-                    {formatTimestamp(e.createdAt, timezone)}
-                  </time>
-                ),
-              },
-              {
-                key: "user",
-                header: "User",
-                render: (e) => (
-                  <>
-                    <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{e.userName}</span>
-                    {e.userRole && (
-                      <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-(--bg-elevated) text-(--text-secondary)">
-                        {roleLabel(e.userRole)}
-                      </span>
-                    )}
-                  </>
-                ),
-              },
-              {
-                key: "module",
-                header: "Module",
-                render: (e) => (
-                  <span className="font-mono text-[12px]" style={{ color: "var(--brand)" }}>{e.module}</span>
-                ),
-              },
-              {
-                key: "action",
-                header: "Action",
-                render: (e) => (
-                  <Badge variant={SEVERITY_VARIANT[severityOf(e.action)]}>{formatAction(e.action)}</Badge>
-                ),
-              },
-              {
-                key: "record",
-                header: "Record",
-                cellClassName: "max-w-[280px]",
-                render: (e) => (
-                  <span
-                    className="font-mono text-[12px] block truncate"
-                    style={{ color: "var(--text-secondary)" }}
-                    title={e.recordTitle && e.recordTitle !== e.displayId ? `${e.displayId} · ${e.recordTitle}` : e.displayId}
-                  >
-                    {e.displayId}
-                  </span>
-                ),
-              },
-            ] satisfies Column<(typeof rows)[number]>[]}
-          />
-        </div>
-      )}
-
-      {/* Detail modal */}
-      {detailRow && (
-        <AuditDetailModal row={detailRow} timezone={timezone} onClose={() => setDetailId(null)} />
-      )}
-    </main>
+      <AuditDetailModal row={modalRow} onClose={() => setDetailRow(null)} />
+    </PageLayout>
   );
 }

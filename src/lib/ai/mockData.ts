@@ -2,6 +2,7 @@
 // Replaced by real LLM when MOCK_AI_RESPONSES=false.
 // Pool selection deterministic; same input -> same output.
 
+import { frameworkLabel, RESERVED_FRAMEWORK_KEYS } from "@/constants/frameworks";
 import type {
   RcaMethod,
   RcaSuggestion,
@@ -1321,11 +1322,8 @@ export function mockDriftDetection(): DriftDetectionResult {
  * coercion: the framework is constrained to the tenant's active frameworks and
  * severity is always Critical/High/Low. */
 
-const TRIAGE_FRAMEWORK_LABELS: Record<string, string> = {
-  p210: "21 CFR 210/211", p11: "Part 11", annex11: "Annex 11",
-  annex15: "Annex 15", ichq9: "ICH Q9", ichq10: "ICH Q10",
-  gamp5: "GAMP 5", who: "WHO GMP", mhra: "MHRA",
-};
+// Framework labels + the reserved-key set now come from the unified source
+// (src/constants/frameworks.ts) — see frameworkLabel / RESERVED_FRAMEWORK_KEYS.
 
 interface TriageRule {
   /** Lowercased keywords that trigger this rule. */
@@ -1392,7 +1390,7 @@ export function mockFindingTriage(
   const picked = rule ?? TRIAGE_DEFAULT;
 
   // Constrain to the tenant's active frameworks, exactly like the backend.
-  const allowed = activeFrameworks.filter((f) => f in TRIAGE_FRAMEWORK_LABELS);
+  const allowed = activeFrameworks.filter((f) => RESERVED_FRAMEWORK_KEYS.has(f));
   const framework =
     allowed.length === 0 || allowed.includes(picked.framework)
       ? picked.framework
@@ -1407,12 +1405,12 @@ export function mockFindingTriage(
   const focus = requirement.trim().replace(/\.$/, "");
   return {
     framework,
-    frameworkLabel: TRIAGE_FRAMEWORK_LABELS[framework] ?? framework,
+    frameworkLabel: frameworkLabel(framework),
     clause: picked.clause,
     severity: picked.severity,
     severityRationale: sevReason[picked.severity],
     agiSummary:
-      `This gap maps to ${TRIAGE_FRAMEWORK_LABELS[framework] ?? framework} (${picked.clause}). ` +
+      `This gap maps to ${frameworkLabel(framework)} (${picked.clause}). ` +
       `"${focus}" presents a ${picked.severity.toLowerCase()} compliance risk` +
       `${area ? ` in ${area}` : ""}; ensure the evidence below is assembled before inspection.`,
     evidenceGaps: picked.evidenceGaps,
