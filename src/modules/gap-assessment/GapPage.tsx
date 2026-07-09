@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { BarChart3, ClipboardList, FolderOpen, Plus } from "lucide-react";
+import { BarChart3, ClipboardCheck, ClipboardList, FolderOpen, Plus } from "lucide-react";
 import type { Finding as PrismaFinding } from "@prisma/client";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
-import { NoSitesPopup, TabBar, PlanLimitPopup, PageHeader, StatusGuide } from "@/components/shared";
+import { NoSitesPopup, TabBar, PlanLimitPopup, StatusGuide } from "@/components/shared";
+import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { FINDING_STATUSES } from "@/constants/statusTaxonomy";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -35,6 +36,7 @@ import { linkFindingToSystem as linkFindingToSystemAction } from "@/actions/syst
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
+import { useToast } from "@/components/ui/Toast";
 
 import { GapSummaryTab } from "./tabs/GapSummaryTab";
 import { GapRegisterTab } from "./tabs/GapRegisterTab";
@@ -62,6 +64,10 @@ const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
   { value: "Open", label: "Open" },
   { value: "In Progress", label: "In Progress" },
+  // Submit → QA-review loop states (mirror FINDING_STATUSES) so a Submitted/
+  // Rework finding can be filtered, not just Open/In Progress/Closed.
+  { value: "Submitted", label: "Submitted" },
+  { value: "Rework", label: "Rework" },
   { value: "Closed", label: "Closed" },
 ];
 
@@ -114,6 +120,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   // ad-hoc canCreateFindings = !isCustomerAdmin && !isViewer (which wrongly
   // hid customer_admin).
   const gapCan = usePermissions("gap");
+  const toast = useToast();
   const { hasSites } = useSetupStatus();
   const { isAtLimit, getLimit, tenantPlan } = usePlanLimits();
   const atFindingLimit = isAtLimit("findings");
@@ -241,9 +248,12 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   }
   const evidenceAreas = useMemo(() =>
     AREAS.map((area) => {
-      const areaFindings = findings.filter((f) => f.area === area);
+      // Use baseFindings (the 5 page-level filters), NOT the raw findings list, so
+      // the Evidence Index honours the same site/area/framework/severity/status
+      // filters as Summary and Register instead of always showing everything.
+      const areaFindings = baseFindings.filter((f) => f.area === area);
       const rows = areaFindings.map((f) => ({
-        findingId: f.id, reference: formatReference("GAP", f), framework: f.framework,
+        findingId: f.id, reference: formatReference("FND", f), framework: f.framework,
         docType: DOC_TYPE_MAP[f.framework] ?? "Record",
         name: f.requirement, evidenceLink: f.evidenceLink,
         evidenceHref: resolveEvidenceHref(f.id, f.evidenceLink),
@@ -254,7 +264,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       return { area, rows, status: getAreaStatus(rows) };
     }).filter((a) => a.rows.length > 0),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [findings, capas, evidenceDocIds]);
+  [baseFindings, capas, evidenceDocIds]);
 
   const allEvidenceRows = evidenceAreas.flatMap((a) => a.rows);
   const completeCount = allEvidenceRows.filter((r) => r.status === "Complete").length;
@@ -304,7 +314,15 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       diGateRequired: ["p11", "annex11"].includes(finding.framework),
     });
     if (!result.success) {
-      console.error("[gap] handleRaiseCapa failed:", result.error);
+      // The "Raise CAPA" button is hidden for non-QA (canCreateCAPA), so this
+      // path is a stale-UI / race guard. Log for debugging (warn, not a red
+      // error) and surface a friendly toast instead of a dead click.
+      console.warn("[gap] handleRaiseCapa rejected:", result.error);
+      toast.error(
+        result.error === "Only QA Head can create a CAPA."
+          ? "Only your QA Head can create a CAPA from this finding."
+          : "Couldn't raise a CAPA from this finding. Please try again.",
+      );
       return;
     }
     const capaData = result.data as { id: string; reference?: string; findingCarryover?: { convertedEvidenceCount?: number } };
@@ -326,7 +344,10 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   }
 
   async function handleAddFinding(data: FindingForm) {
-    const { raiseCapaImmediately, evidenceFiles, ...rest } = data;
+    // `raiseCapaImmediately` is intentionally left in the payload shape (see
+    // AddFindingModal) but the UI never sets it — CAPAs are raised via the
+    // normal disposition, so there is no create-time raise branch here.
+    const { evidenceFiles, ...rest } = data;
     // BUG FIX — the Evidence Link must be ONLY what the user typed. Previously it
     // fell back to `evidenceFiles?.[0]?.name` (the uploaded file's NAME), so a
     // finding with an attached file but no typed link got its Evidence Link
@@ -380,17 +401,15 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
     }
     setAddOpen(false);
     setAddedPopup(true);
-    if (raiseCapaImmediately && created) {
-      await handleRaiseCapa(adaptFinding(created));
-    } else {
-      router.refresh();
-    }
+    router.refresh();
   }
 
   async function handleLinkEvidence(findingId: string, evidenceLink: string) {
     const result = await updateFindingAction(findingId, { evidenceLink });
     if (!result.success) {
-      console.error("[gap] handleLinkEvidence failed:", result.error);
+      // The link action is hidden for non-QA (canEditFinding); stale-UI guard.
+      // Warn (not a red error); the modal surfaces `error` inline.
+      console.warn("[gap] handleLinkEvidence rejected:", result.error);
       return { ok: false, error: result.error };
     }
     setEvidenceLinkedPopup(true);
@@ -422,14 +441,34 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
 
   /* ══════════════════════════════════════ */
 
+  // Header subtitle preserved verbatim as PageLayout's description (live counts).
+  const headerDescription =
+    findings.length === 0
+      ? "No findings logged yet"
+      : `${findings.length} findings \u00b7 ${criticalCount} critical \u00b7 ${openCount} open`;
+  // "Report Gap" preserved as a PageAction (same gates: no-sites / plan-limit).
+  const headerActions: PageAction[] = gapCan.canCreate
+    ? [{
+        label: "Report Gap",
+        variant: "primary",
+        icon: Plus,
+        onClick: () => {
+          if (!hasSites) { setNoSitesOpen(true); return; }
+          if (atFindingLimit) { setPlanLimitOpen(true); return; }
+          setAddOpen(true);
+        },
+      }]
+    : [];
+
   return (
-    <main id="main-content" aria-label="GxP/GMP gap assessment and findings" className="w-full space-y-5">
-      {/* Header */}
-      <PageHeader
-        title="Gap Assessment &amp; Findings"
-        subtitle={findings.length === 0 ? "No findings logged yet" : `${findings.length} findings \u00b7 ${criticalCount} critical \u00b7 ${openCount} open`}
-        actions={gapCan.canCreate ? <Button variant="primary" icon={Plus} onClick={() => { if (!hasSites) { setNoSitesOpen(true); return; } if (atFindingLimit) { setPlanLimitOpen(true); return; } setAddOpen(true); }}>Report Gap</Button> : undefined}
-      />
+    <PageLayout
+      title="Gap Assessment & Findings"
+      titleIcon={ClipboardCheck}
+      description={headerDescription}
+      actions={headerActions}
+      className="w-full"
+    >
+      <div className="space-y-5">
       <StatusGuide module="Gap Assessment" statuses={FINDING_STATUSES} />
 
       {/* Tab bar */}
@@ -446,7 +485,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
             const closed = baseFindings.filter((f) => f.status === "Closed");
             if (closed.length === 0) return null;
             const latest = closed.reduce((a, b) => (dayjs(a.createdAt).isAfter(b.createdAt) ? a : b));
-            return { id: formatReference("GAP", latest), closedAt: latest.createdAt ? dayjs.utc(latest.createdAt).tz(timezone).format(dateFormat) : undefined };
+            return { id: formatReference("FND", latest), closedAt: latest.createdAt ? dayjs.utc(latest.createdAt).tz(timezone).format(dateFormat) : undefined };
           })()}
         />
       )}
@@ -467,7 +506,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
             selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding} isViewOnly={isViewOnly} users={users}
             timezone={timezone} dateFormat={dateFormat} capas={capas}
             agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
-            renderFilters={renderFilters}
+            renderFilters={renderFilters} onClearFilters={clearFilters}
             onAddOpen={() => setAddOpen(true)} onRaiseCapa={handleRaiseCapa}
             onNavigateCapa={() => router.push("/capa")}
             onManageEvidence={(fid, link) => { setEvidenceFindingId(fid); setEvidenceCurrentLink(link); setEvidenceModalOpen(true); }}
@@ -479,6 +518,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
         <GapEvidenceTab
           evidenceAreas={evidenceAreas} allEvidenceRows={allEvidenceRows}
           completeCount={completeCount} partialCount={partialCount} missingCount={missingCount}
+          renderFilters={renderFilters} isAnyFilterActive={isAnyFilterActive}
           expandedAreas={expandedAreas} onToggleArea={toggleArea} isViewOnly={isViewOnly} users={users}
           onLinkEvidence={(fid, link) => { setEvidenceFindingId(fid); setEvidenceCurrentLink(link); setEvidenceModalOpen(true); }}
           onFindingClick={(fid) => { setActiveTab("register"); const f = findings.find((x) => x.id === fid); if (f) setSelectedFinding(f); }}
@@ -512,6 +552,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       <Popup isOpen={evidenceLinkedPopup} variant="success" title="Evidence saved" description="Evidence document saved. Close the finding to mark evidence as Complete." onDismiss={() => setEvidenceLinkedPopup(false)} />
       <NoSitesPopup isOpen={noSitesOpen} onClose={() => setNoSitesOpen(false)} feature="Gap Assessment" />
       <PlanLimitPopup isOpen={planLimitOpen} onClose={() => setPlanLimitOpen(false)} resource="finding" plan={tenantPlan} limit={getLimit("findings")} />
-    </main>
+      </div>
+    </PageLayout>
   );
 }

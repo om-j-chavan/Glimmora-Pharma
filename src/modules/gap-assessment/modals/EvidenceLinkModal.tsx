@@ -34,7 +34,7 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, onUpload, findingId
     setError("");
   }, [currentLink, findingId]);
 
-  const displayRef = finding ? formatReference("GAP", finding) : findingId;
+  const displayRef = finding ? formatReference("FND", finding) : findingId;
 
   function handleClose() {
     onClose();

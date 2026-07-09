@@ -206,6 +206,17 @@ export const AUDIT_TRAIL_VIEW_ROLES: readonly string[] = ["qa_head", "customer_a
  *  APPROVE/return submitted work, CLOSE/verify. qa_head only (+SA oversight). */
 export const QA_AUTHORITY_ROLES: readonly string[] = ["qa_head", "super_admin"];
 
+/** Client mirror of the `updateFinding` / `closeFinding` server gate: editing or
+ *  assessing a gap finding is a QA authority judgment (QA_AUTHORITY_ROLES) and
+ *  never super_admin (canAuthorGxP bright line that requireGxPAuthor enforces) —
+ *  i.e. qa_head today. Use this to gate the Edit + evidence-link UI so the button
+ *  matches the server. Do NOT reuse the broad `usePermissions("gap").canEdit`
+ *  (COMPLIANCE_AUTHOR_ROLES) — that is wider than who may EDIT and dead-ends
+ *  csv_val_lead / regulatory_affairs / customer_admin against the server. */
+export function canEditFinding(role: string): boolean {
+  return QA_AUTHORITY_ROLES.includes(role) && canAuthorGxP(role);
+}
+
 /** CREATE gates per the responsibility map (origination of the record). */
 // Gap Assessment is DENYLIST-scoped: any functional/seat role OR qa_head may
 // originate a gap finding; only the read-only viewer and the two admin
@@ -216,6 +227,16 @@ export const GAP_CREATE_ROLES: readonly string[] = [
   "qa_head", "qa", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head",
 ];
 export const CAPA_CREATE_ROLES: readonly string[] = ["qa_head", "super_admin"];           // a CAPA is raised ONLY by QA (SA blocked by requireGxPAuthor)
+/** Client mirror of the `createCAPA` server gate: a CAPA may be raised ONLY by
+ *  QA (CAPA_CREATE_ROLES) and never by super_admin (the canAuthorGxP bright line
+ *  that `requireGxPAuthor` enforces server-side) — i.e. qa_head today. Use this
+ *  to hide every "Raise CAPA" trigger (Gap findings, deviations, …) so the
+ *  button and the server boundary can never drift. Do NOT reuse the broad
+ *  `usePermissions("capa").canCreate` for this — that governs general CAPA
+ *  authoring and is deliberately wider than who may CREATE. */
+export function canCreateCAPA(role: string): boolean {
+  return CAPA_CREATE_ROLES.includes(role) && canAuthorGxP(role);
+}
 export const INSPECTION_CREATE_ROLES: readonly string[] = ["qa_head", "regulatory_affairs", "super_admin"];
 export const CSV_CREATE_ROLES: readonly string[] = ["csv_val_lead", "qa_head", "super_admin"]; // csv doer OR QA (NOT admin)
 /** Deviation is REPORT-FIRST — any functional "doer" role OR qa_head may log one.

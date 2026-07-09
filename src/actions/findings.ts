@@ -154,7 +154,7 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
             return row?.reference ?? null;
           },
         );
-        return tx.finding.create({
+        const created = await tx.finding.create({
           data: {
             ...parsed.data,
             reference,
@@ -169,6 +169,44 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
             targetDate: new Date(parsed.data.targetDate),
           },
         });
+        // Audit is written INSIDE the same transaction as the create so a finding
+        // can never exist without its paired FINDING_CREATED row (ALCOA+). A
+        // reference-conflict retry rolls the whole tx back, so no double audit.
+        await tx.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: "Gap Assessment",
+            action: "FINDING_CREATED",
+            recordId: created.id,
+            recordTitle: created.reference
+              ? `${created.reference} — ${parsed.data.requirement.slice(0, 60)}`
+              : parsed.data.requirement.slice(0, 80),
+            newValue: parsed.data.severity,
+          },
+        });
+        if (parsed.data.previousCAPAId) {
+          await tx.auditLog.create({
+            data: {
+              tenantId: session.user.tenantId,
+              userId: actor.userId,
+              userName: actor.displayName,
+              userRole: actor.role,
+              module: "Gap Assessment",
+              action: "FINDING_LINKED_TO_PRIOR_CAPA_AS_RECURRENCE",
+              recordId: created.id,
+              recordTitle: parsed.data.requirement.slice(0, 80),
+              newValue: JSON.stringify({
+                previousCAPAId: parsed.data.previousCAPAId,
+                priorCAPAStatus,
+                atCreation: true,
+              }),
+            },
+          });
+        }
+        return created;
       });
       break;
     } catch (err) {
@@ -181,49 +219,8 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
     return { success: false, error: sanitizeServerError(lastRefErr, "Failed to allocate finding reference") };
   }
 
-  try {
-
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Gap Assessment",
-        action: "FINDING_CREATED",
-        recordId: finding.id,
-        recordTitle: finding.reference
-          ? `${finding.reference} — ${parsed.data.requirement.slice(0, 60)}`
-          : parsed.data.requirement.slice(0, 80),
-        newValue: parsed.data.severity,
-      },
-    });
-    if (parsed.data.previousCAPAId) {
-      await prisma.auditLog.create({
-        data: {
-          tenantId: session.user.tenantId,
-          userId: actor.userId,
-          userName: actor.displayName,
-          userRole: actor.role,
-          module: "Gap Assessment",
-          action: "FINDING_LINKED_TO_PRIOR_CAPA_AS_RECURRENCE",
-          recordId: finding.id,
-          recordTitle: parsed.data.requirement.slice(0, 80),
-          newValue: JSON.stringify({
-            previousCAPAId: parsed.data.previousCAPAId,
-            priorCAPAStatus,
-            atCreation: true,
-          }),
-        },
-      });
-    }
-
-    revalidatePath("/gap-assessment");
-    return { success: true, data: finding };
-  } catch (err) {
-    console.error("[action] createFinding failed:", err);
-    return { success: false, error: "Failed to create finding" };
-  }
+  revalidatePath("/gap-assessment");
+  return { success: true, data: finding };
 }
 
 // Human-readable labels + value formatting for the edit-history diff. Only
@@ -268,22 +265,17 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
     return { success: false, error: "Only QA Head can edit a gap finding." };
   }
   try {
+    // A soft-deleted finding is immutable — exclude it (mirrors every other
+    // finding action; closeFinding now does the same).
     const before = await prisma.finding.findFirst({
-      where: { id, tenantId: session.user.tenantId },
+      where: { id, tenantId: session.user.tenantId, deletedAt: null },
     });
     if (!before) return { success: false, error: "Finding not found" };
 
     const { reason, ...updates } = parsed.data;
 
-    const finding = await prisma.finding.update({
-      where: { id, tenantId: session.user.tenantId },
-      data: {
-        ...updates,
-        ...(updates.targetDate ? { targetDate: new Date(updates.targetDate) } : {}),
-      },
-    });
-
-    // Build the field-level diff for the append-only edit trail.
+    // Build the field-level diff for the append-only edit trail (pure — computed
+    // from the pre-image + the incoming updates, before any write).
     const changes = DIFF_FIELDS.flatMap(({ key, label }) => {
       if (!(key in updates) || updates[key] === undefined) return [];
       const oldValue = normalizeForDiff(key, (before as Record<string, unknown>)[key]);
@@ -292,31 +284,45 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
       return [{ field: label, oldValue, newValue }];
     });
 
-    if (changes.length > 0) {
-      await prisma.findingEdit.create({
+    // Mutation + FindingEdit + AuditLog in ONE transaction so an edit can never
+    // land without its paired append-only trail + audit row (ALCOA+).
+    const finding = await prisma.$transaction(async (tx) => {
+      const updated = await tx.finding.update({
+        where: { id, tenantId: session.user.tenantId },
         data: {
-          findingId: id,
-          tenantId: session.user.tenantId,
-          editedBy: session.user.id,
-          editedByName: session.user.name,
-          reason: reason?.trim() || null,
-          changes: JSON.stringify(changes),
+          ...updates,
+          ...(updates.targetDate ? { targetDate: new Date(updates.targetDate) } : {}),
         },
       });
-    }
 
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Gap Assessment",
-        action: "FINDING_UPDATED",
-        recordId: id,
-        recordTitle: before.reference ?? undefined,
-        newValue: changes.length > 0 ? JSON.stringify(changes) : undefined,
-      },
+      if (changes.length > 0) {
+        await tx.findingEdit.create({
+          data: {
+            findingId: id,
+            tenantId: session.user.tenantId,
+            editedBy: session.user.id,
+            editedByName: session.user.name,
+            reason: reason?.trim() || null,
+            changes: JSON.stringify(changes),
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Gap Assessment",
+          action: "FINDING_UPDATED",
+          recordId: id,
+          recordTitle: before.reference ?? undefined,
+          newValue: changes.length > 0 ? JSON.stringify(changes) : undefined,
+        },
+      });
+
+      return updated;
     });
 
     revalidatePath("/gap-assessment");
@@ -390,43 +396,50 @@ export async function assignFinding(
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
-    const updated = await prisma.finding.update({
-      where: { id: findingId, tenantId: session.user.tenantId },
-      // Assigning a still-Open finding moves it into the work loop (In Progress) —
-      // the disposition uses this as the "assigned" signal to show the assignee
-      // read-only + hide the dropdown (mirrors a deviation gaining an activeTask).
-      // A finding already past Open (In Progress/Submitted/Rework) keeps its status
-      // on reassignment.
-      data: { owner: assignee.id, ...(finding.status === "Open" ? { status: "In Progress" } : {}) },
+    // Mutation + append-only edit trail + audit in ONE transaction (ALCOA+).
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id: findingId, tenantId: session.user.tenantId },
+        // Assigning a still-Open finding moves it into the work loop (In Progress) —
+        // the disposition uses this as the "assigned" signal to show the assignee
+        // read-only + hide the dropdown (mirrors a deviation gaining an activeTask).
+        // A finding already past Open (In Progress/Submitted/Rework) keeps its status
+        // on reassignment.
+        data: { owner: assignee.id, ...(finding.status === "Open" ? { status: "In Progress" } : {}) },
+      });
+
+      // Append-only edit trail (same as updateFinding tracks an owner change) so
+      // the reassignment shows in the finding's own history, not just auditLog.
+      await tx.findingEdit.create({
+        data: {
+          findingId,
+          tenantId: session.user.tenantId,
+          editedBy: session.user.id,
+          editedByName: session.user.name,
+          reason: "Assigned to a different owner",
+          changes: JSON.stringify([{ field: "Owner", oldValue: finding.owner, newValue: assignee.id }]),
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Gap Assessment",
+          action: "FINDING_ASSIGNED",
+          recordId: findingId,
+          recordTitle: (finding.reference ?? finding.requirement).slice(0, 80),
+          newValue: JSON.stringify({ assigneeId: assignee.id, previousOwner: finding.owner }),
+        },
+      });
+
+      return result;
     });
 
-    // Append-only edit trail (same as updateFinding tracks an owner change) so
-    // the reassignment shows in the finding's own history, not just auditLog.
-    await prisma.findingEdit.create({
-      data: {
-        findingId,
-        tenantId: session.user.tenantId,
-        editedBy: session.user.id,
-        editedByName: session.user.name,
-        reason: "Assigned to a different owner",
-        changes: JSON.stringify([{ field: "Owner", oldValue: finding.owner, newValue: assignee.id }]),
-      },
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Gap Assessment",
-        action: "FINDING_ASSIGNED",
-        recordId: findingId,
-        recordTitle: (finding.reference ?? finding.requirement).slice(0, 80),
-        newValue: JSON.stringify({ assigneeId: assignee.id, previousOwner: finding.owner }),
-      },
-    });
-
+    // Notification is an external side-effect — kept OUT of the transaction so a
+    // slow/failed notify can't roll back (or hold open) the committed assignment.
     await notify({
       tenantId: session.user.tenantId,
       recipientUserId: assignee.id,
@@ -559,21 +572,35 @@ export async function closeFinding(id: string): Promise<ActionResult> {
   }
 
   try {
-    const finding = await prisma.finding.update({
-      where: { id, tenantId: session.user.tenantId },
-      data: { status: "Closed" }, // RUNG 3H — canonical Title Case
+    // Precondition: the finding must exist, not be soft-deleted, and not already
+    // be Closed — closeFinding previously had NO status/deletedAt guard, so a
+    // deleted or already-closed finding could be "closed" again (a no-op audit).
+    const existing = await prisma.finding.findFirst({
+      where: { id, tenantId: session.user.tenantId, deletedAt: null },
+      select: { id: true, status: true, reference: true },
     });
+    if (!existing) return { success: false, error: "Finding not found" };
+    if (existing.status === "Closed") return { success: false, error: "This finding is already closed." };
 
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Gap Assessment",
-        action: "FINDING_CLOSED",
-        recordId: id,
-      },
+    // Mutation + audit in ONE transaction (ALCOA+).
+    const finding = await prisma.$transaction(async (tx) => {
+      const updated = await tx.finding.update({
+        where: { id, tenantId: session.user.tenantId },
+        data: { status: "Closed" }, // RUNG 3H — canonical Title Case
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Gap Assessment",
+          action: "FINDING_CLOSED",
+          recordId: id,
+          recordTitle: existing.reference ?? undefined,
+        },
+      });
+      return updated;
     });
 
     revalidatePath("/gap-assessment");
@@ -760,7 +787,7 @@ export async function removeFindingEvidence(
   const session = await requireAuth();
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, owner: true, status: true },
+    select: { id: true, owner: true, status: true, evidenceLink: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
   const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
@@ -781,18 +808,44 @@ export async function removeFindingEvidence(
   if (!doc) return { success: false, error: "Document not found on this finding." };
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
-    await prisma.document.update({
-      where: { id: documentId, tenantId: session.user.tenantId },
-      data: { deletedAt: new Date(), deletedBy: session.user.name, deletionReason: "Removed from gap finding" },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
-        module: "Gap Assessment", action: "FINDING_EVIDENCE_REMOVED",
-        recordId: findingId, recordTitle: doc.fileName,
-        newValue: JSON.stringify({ findingId, documentId }),
-      },
+    // Soft-delete + (if needed) repoint the finding's evidenceLink + audit, all
+    // in ONE transaction. Previously removing the doc whose filename is stored in
+    // finding.evidenceLink left a DANGLING link: the finding still displayed it,
+    // getEvidenceStatus still scored it Complete/Partial, and the download route
+    // served the next-newest doc or 404'd. Now we repoint to the newest remaining
+    // Gap Assessment doc for this finding (or clear it), but ONLY when the link
+    // actually points at the removed file (a typed reference is left untouched).
+    await prisma.$transaction(async (tx) => {
+      await tx.document.update({
+        where: { id: documentId, tenantId: session.user.tenantId },
+        data: { deletedAt: new Date(), deletedBy: session.user.name, deletionReason: "Removed from gap finding" },
+      });
+
+      if (finding.evidenceLink && finding.evidenceLink === doc.fileName) {
+        const nextDoc = await tx.document.findFirst({
+          where: {
+            tenantId: session.user.tenantId,
+            linkedModule: "Gap Assessment", linkedRecordId: findingId,
+            deletedAt: null, id: { not: documentId },
+          },
+          orderBy: { createdAt: "desc" },
+          select: { fileName: true },
+        });
+        await tx.finding.update({
+          where: { id: findingId, tenantId: session.user.tenantId },
+          data: { evidenceLink: nextDoc?.fileName ?? null },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+          module: "Gap Assessment", action: "FINDING_EVIDENCE_REMOVED",
+          recordId: findingId, recordTitle: doc.fileName,
+          newValue: JSON.stringify({ findingId, documentId }),
+        },
+      });
     });
     revalidatePath("/gap-assessment");
     revalidatePath("/worklist");
@@ -839,21 +892,24 @@ export async function saveFindingWorkNotes(
   }
 
   try {
-    await prisma.finding.update({
-      where: { id: findingId, tenantId: session.user.tenantId },
-      data: { completionNotes: parsed.data.notes.trim() || null },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Gap Assessment",
-        action: "FINDING_NOTES_SAVED",
-        recordId: findingId,
-        recordTitle: finding.reference ?? undefined,
-      },
+    // Mutation + audit in ONE transaction (ALCOA+).
+    await prisma.$transaction(async (tx) => {
+      await tx.finding.update({
+        where: { id: findingId, tenantId: session.user.tenantId },
+        data: { completionNotes: parsed.data.notes.trim() || null },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Gap Assessment",
+          action: "FINDING_NOTES_SAVED",
+          recordId: findingId,
+          recordTitle: finding.reference ?? undefined,
+        },
+      });
     });
     revalidatePath("/gap-assessment");
     revalidatePath("/worklist");
@@ -899,22 +955,26 @@ export async function submitFinding(
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
-    const updated = await prisma.finding.update({
-      where: { id: findingId, tenantId: session.user.tenantId },
-      data: {
-        status: "Submitted",
-        completionNotes: parsed.data.completionNotes,
-        submittedAt: new Date(),
-        submittedById: actor.userId,
-      },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
-        module: "Gap Assessment", action: "FINDING_SUBMITTED",
-        recordId: findingId, recordTitle: finding.reference ?? undefined,
-      },
+    // Mutation + audit in ONE transaction (ALCOA+).
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id: findingId, tenantId: session.user.tenantId },
+        data: {
+          status: "Submitted",
+          completionNotes: parsed.data.completionNotes,
+          submittedAt: new Date(),
+          submittedById: actor.userId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+          module: "Gap Assessment", action: "FINDING_SUBMITTED",
+          recordId: findingId, recordTitle: finding.reference ?? undefined,
+        },
+      });
+      return result;
     });
     revalidatePath("/gap-assessment");
     revalidatePath("/worklist");
@@ -945,17 +1005,21 @@ export async function reviewFinding(findingId: string): Promise<ActionResult> {
     return { success: false, error: "Separation of duties: you cannot review a finding assigned to you. A different QA Head must review it." };
   }
   try {
-    const updated = await prisma.finding.update({
-      where: { id: findingId, tenantId: session.user.tenantId },
-      data: { status: "Closed" },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
-        module: "Gap Assessment", action: "FINDING_REVIEW_CLOSED",
-        recordId: findingId, recordTitle: finding.reference ?? undefined,
-      },
+    // Mutation + audit in ONE transaction (ALCOA+); notify after (side-effect).
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id: findingId, tenantId: session.user.tenantId },
+        data: { status: "Closed" },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+          module: "Gap Assessment", action: "FINDING_REVIEW_CLOSED",
+          recordId: findingId, recordTitle: finding.reference ?? undefined,
+        },
+      });
+      return result;
     });
     await notify({
       tenantId: session.user.tenantId,
@@ -1005,33 +1069,38 @@ export async function reworkFinding(
     return { success: false, error: "Separation of duties: you cannot review a finding assigned to you. A different QA Head must review it." };
   }
   try {
-    const updated = await prisma.finding.update({
-      where: { id: findingId, tenantId: session.user.tenantId },
-      data: {
-        status: "Rework",
-        reworkReason: parsed.data.reason,
-        reworkAt: new Date(),
-        reworkById: actor.userId,
-      },
-    });
-    await prisma.findingMessage.create({
-      data: {
-        tenantId: session.user.tenantId,
-        findingId,
-        authorId: actor.userId,
-        authorName: actor.displayName,
-        authorRole: actor.role,
-        body: parsed.data.reason,
-      },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId, userName: actor.displayName, userRole: actor.role,
-        module: "Gap Assessment", action: "FINDING_REWORK",
-        recordId: findingId, recordTitle: finding.reference ?? undefined,
-        newValue: JSON.stringify({ reason: parsed.data.reason.slice(0, 200) }),
-      },
+    // Mutation + auto-posted rework message + audit in ONE transaction (ALCOA+);
+    // notify after (side-effect).
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.finding.update({
+        where: { id: findingId, tenantId: session.user.tenantId },
+        data: {
+          status: "Rework",
+          reworkReason: parsed.data.reason,
+          reworkAt: new Date(),
+          reworkById: actor.userId,
+        },
+      });
+      await tx.findingMessage.create({
+        data: {
+          tenantId: session.user.tenantId,
+          findingId,
+          authorId: actor.userId,
+          authorName: actor.displayName,
+          authorRole: actor.role,
+          body: parsed.data.reason,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+          module: "Gap Assessment", action: "FINDING_REWORK",
+          recordId: findingId, recordTitle: finding.reference ?? undefined,
+          newValue: JSON.stringify({ reason: parsed.data.reason.slice(0, 200) }),
+        },
+      });
+      return result;
     });
     await notify({
       tenantId: session.user.tenantId,

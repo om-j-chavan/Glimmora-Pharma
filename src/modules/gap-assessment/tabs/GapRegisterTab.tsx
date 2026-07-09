@@ -8,6 +8,7 @@ import dayjs from "@/lib/dayjs";
 import { frameworkLabel } from "@/constants/frameworks";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canCreateCAPA, canEditFinding } from "@/lib/permissions/roleSets";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import type { FindingAssignee } from "@/lib/queries";
 import { formatReference } from "@/lib/reference";
@@ -53,11 +54,17 @@ function severityBadge(s: FindingSeverity) {
 const FINDING_STATUS_LABEL: Record<string, string> = {
   open: "Open",
   "in progress": "In Progress",
+  submitted: "Submitted",
+  rework: "Rework",
   closed: "Closed",
 };
 const FINDING_STATUS_CLASS: Record<string, string> = {
   open: "badge badge-blue",
   "in progress": "badge badge-amber",
+  // Match the FINDING_STATUSES taxonomy (Submitted = purple, Rework = red) so
+  // the submit→QA-review loop no longer falls through to a gray fallback badge.
+  submitted: "badge badge-purple",
+  rework: "badge badge-red",
   closed: "badge badge-green",
 };
 function statusBadge(s: FindingStatus) {
@@ -127,6 +134,8 @@ interface GapRegisterTabProps {
   agiCapa: boolean;
   isAnyFilterActive: boolean;
   renderFilters: (compact?: boolean) => ReactNode;
+  /** Clears the page-level filters (owned by GapPage). */
+  onClearFilters: () => void;
   onAddOpen: () => void;
   onRaiseCapa: (finding: Finding) => void;
   onNavigateCapa: (capaId: string) => void;
@@ -137,7 +146,7 @@ interface GapRegisterTabProps {
 export function GapRegisterTab({
   filteredFindings, findingsTotal, assignees, selectedFinding, onSelectFinding,
   isViewOnly, users, timezone, dateFormat, capas,
-  agiMode, agiCapa, isAnyFilterActive, renderFilters,
+  agiMode, agiCapa, isAnyFilterActive, renderFilters, onClearFilters,
   onAddOpen, onRaiseCapa, onNavigateCapa, onManageEvidence,
 }: GapRegisterTabProps) {
   const isDark = useAppSelector((s) => s.theme.mode === "dark");
@@ -145,7 +154,11 @@ export function GapRegisterTab({
   const user = useAppSelector((s) => s.auth.user);
   // Capability mirrors of the server (exclude super_admin from authoring).
   const gapCan = usePermissions("gap");
-  const capaCan = usePermissions("capa");
+  // "Raise CAPA" is stricter than general CAPA authoring: only QA may CREATE a
+  // CAPA (mirrors the createCAPA server gate). Gate on canCreateCAPA, NOT the
+  // broad usePermissions("capa").canCreate, so the button matches the server.
+  const { role } = usePermissions();
+  const canRaiseCapa = canCreateCAPA(role);
   // Gap Step 1 — QA assigns the finding to the person who will work it.
   const { isQAHead } = usePermissions();
   const [assignTo, setAssignTo] = useState("");
@@ -257,14 +270,15 @@ export function GapRegisterTab({
   const [savedPopup, setSavedPopup] = useState(false);
   const [saveError, setSaveError] = useState("");
 
-  // Mirrors the server author set (COMPLIANCE_AUTHOR_ROLES via gapCan.canEdit):
-  // any author role (csv_val_lead / qa_head / regulatory_affairs /
-  // customer_admin) may edit any finding — the server's updateFinding has no
-  // owner restriction, so the old admin/qa/owner role-list is dropped.
+  // Mirrors the server gate exactly: updateFinding is QA-authority-only
+  // (QA_AUTHORITY_ROLES → qa_head; super_admin blocked by requireGxPAuthor), NOT
+  // the broad COMPLIANCE_AUTHOR_ROLES. Gating on canEditFinding keeps the Edit
+  // button in lockstep with the server so csv_val_lead / regulatory_affairs /
+  // customer_admin never see an Edit that dead-ends with "Only QA Head can edit".
   const canEdit =
     !isViewOnly &&
     selectedFinding?.status !== "Closed" &&
-    gapCan.canEdit;
+    canEditFinding(role);
 
   const form = useForm<EditForm>({
     defaultValues: {
@@ -397,7 +411,9 @@ export function GapRegisterTab({
     });
 
     if (!result.success) {
-      console.error("[gap] updateFinding failed:", result.error);
+      // Edit is hidden for non-QA (canEditFinding); this is a stale-UI / race
+      // guard. Warn (not a red error) and surface the reason inline.
+      console.warn("[gap] updateFinding rejected:", result.error);
       setSaveError(result.error || "Failed to save changes. Please try again.");
       return;
     }
@@ -450,7 +466,7 @@ export function GapRegisterTab({
             ) : (
               <>
                 <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>No findings match the current filters</p>
-                {isAnyFilterActive && <Button variant="ghost" size="sm" onClick={() => {}}>Clear filters</Button>}
+                {(isAnyFilterActive || searchQuery) && <Button variant="ghost" size="sm" onClick={() => { onClearFilters(); setSearchQuery(""); }}>Clear filters</Button>}
               </>
             )}
           </div>
@@ -891,7 +907,7 @@ export function GapRegisterTab({
                               <div className="flex items-center gap-2 flex-wrap">
                                 <Dropdown placeholder="Assign to…" value={assignTo} onChange={setAssignTo} width="w-56" size="sm" options={assignees.map((u) => ({ value: u.id, label: `${u.name} · ${roleLabel(u.role)}` }))} />
                                 <Button variant="primary" size="sm" icon={Plus} disabled={assignBusy || !assignTo} loading={assignBusy} onClick={() => void handleAssignFinding()}>Assign person</Button>
-                                {capaCan.canCreate && <Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>}
+                                {canRaiseCapa && <Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>}
                               </div>
                               {assignError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{assignError}</p>}
                             </>
@@ -908,14 +924,14 @@ export function GapRegisterTab({
                               Assigned to <strong style={{ color: "var(--text-primary)" }}>{ownerName(selectedFinding.owner)}</strong>
                               {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` · ${roleLabel(u.role)}` : ""; })()}
                             </p>
-                            {capaCan.canCreate && (
+                            {canRaiseCapa && (
                               <div className="mt-2"><Button variant="secondary" size="sm" icon={Plus} onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button></div>
                             )}
                           </>
                         )}
                       </>
                     ) : (
-                      capaCan.canCreate ? (
+                      canRaiseCapa ? (
                         <Button variant="secondary" icon={Plus} fullWidth onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>
                       ) : null
                     )}
