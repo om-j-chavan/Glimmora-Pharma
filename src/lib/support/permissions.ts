@@ -81,7 +81,10 @@ export function canHandleTicket(
 
 /**
  * Prisma `where` fragment scoping a ticket list to what the session may see:
- *  - super_admin            → {} (all tenants)
+ *  - super_admin            → ONLY escalated tickets (escalatedAt not null),
+ *                             across all tenants. SA is the platform's second
+ *                             line: it never sees a tenant's non-escalated
+ *                             tickets. (Strict scope — the CA handles first line.)
  *  - customer_admin         → own tenant (all of its tickets)
  *  - any other tenant user  → own tenant AND only tickets they raised
  *
@@ -89,21 +92,26 @@ export function canHandleTicket(
  */
 export function ticketScopeWhere(session: AuthSession): Record<string, unknown> {
   const { role, tenantId, id } = session.user;
-  if (isCrossTenantSupport(role)) return {};
+  if (isCrossTenantSupport(role)) return { escalatedAt: { not: null } };
   if (role === "customer_admin") return { tenantId };
   return { tenantId, requesterId: id };
 }
 
-/** Minimal shape needed to authorize an individual ticket. */
+/** Minimal shape needed to authorize an individual ticket. `escalatedAt` is
+ *  optional so lean selects still type-check; when omitted, a super_admin view is
+ *  treated as NOT escalated (fail-closed to match the strict list scope). */
 export interface TicketAuthFields {
   tenantId: string;
   requesterId: string;
+  escalatedAt?: Date | null;
 }
 
-/** Can the session VIEW this ticket? (mirrors ticketScopeWhere for one row). */
+/** Can the session VIEW this ticket? (mirrors ticketScopeWhere for one row).
+ *  super_admin sees ONLY escalated tickets — the same strict scope as the list,
+ *  enforced here so a direct-URL fetch of a non-escalated ticket 404s too. */
 export function canViewTicket(session: AuthSession, t: TicketAuthFields): boolean {
   const { role, tenantId, id } = session.user;
-  if (isCrossTenantSupport(role)) return true;
+  if (isCrossTenantSupport(role)) return t.escalatedAt != null;
   if (t.tenantId !== tenantId) return false;
   if (role === "customer_admin") return true;
   return t.requesterId === id;
@@ -112,4 +120,19 @@ export function canViewTicket(session: AuthSession, t: TicketAuthFields): boolea
 /** The requester (or a manager) — used for confirm-resolution / reopen / cancel. */
 export function isRequester(session: AuthSession, t: TicketAuthFields): boolean {
   return t.requesterId === session.user.id;
+}
+
+/**
+ * Can the session EDIT this ticket's content (subject/description/priority/
+ * category)? Editing is only allowed EARLY — while the ticket is still New or
+ * Open (before support has begun working it) — and only for the requester who
+ * raised it or a handler on the ticket. A cancelled/resolved/closed/in-progress
+ * ticket is never editable. Server-authoritative; the UI mirrors it.
+ */
+export function canEditTicket(
+  session: AuthSession,
+  ticket: { tenantId: string; requesterId: string; currentHandler: string; status: string },
+): boolean {
+  if (ticket.status !== "New" && ticket.status !== "Open") return false;
+  return isRequester(session, ticket) || canHandleTicket(session, ticket);
 }
