@@ -24,8 +24,8 @@ import {
   type TicketActivityType,
 } from "@/lib/support/constants";
 import {
-  canManageSupport,
   canViewTicket,
+  canEditTicket,
   isRequester,
   canHandleFirstLine,
   canHandleTicket,
@@ -172,6 +172,13 @@ const CreateTicketSchema = z.object({
   relatedModule: z.string().optional(),
   relatedRecordId: z.string().optional(),
   relatedRecordRef: z.string().optional(),
+  // Optional evidence URL. Accept "" too so the field can be submitted cleared.
+  evidenceLink: z.string().url().optional().or(z.literal("")),
+  // Site the ticket is raised for. REQUIRED for a customer_admin (they raise on
+  // behalf of a site — enforced in the action against the caller's role, which
+  // the schema can't see); every other role derives it server-side from their
+  // own User row and may omit it here.
+  siteId: z.string().optional(),
   // Auto-captured client context (hidden inputs, not user-facing fields).
   originUrl: z.string().optional(),
   appVersion: z.string().optional(),
@@ -191,6 +198,32 @@ export async function createTicket(
     // a note. Tighten via a SUPPORT_RAISE_ROLES set if that ever changes.)
   }
   const data = parsed.data;
+
+  // Site attribution. A customer_admin raises ON BEHALF OF a site and MUST pick
+  // one (spec: CA-only site requirement); the chosen site is re-checked against
+  // the caller's tenant so it can't be spoofed. Every other role derives its
+  // site from its own User row server-side — never from client input.
+  let siteId: string | null = null;
+  if (session.user.role === "customer_admin") {
+    if (!data.siteId) {
+      return { success: false, error: "Validation failed", fieldErrors: { siteId: ["Select a site."] } };
+    }
+    const site = await prisma.site.findFirst({
+      where: { id: data.siteId, tenantId: session.user.tenantId },
+      select: { id: true },
+    });
+    if (!site) {
+      return { success: false, error: "Validation failed", fieldErrors: { siteId: ["Unknown site."] } };
+    }
+    siteId = site.id;
+  } else {
+    const u = await prisma.user.findFirst({
+      where: { id: session.user.id, tenantId: session.user.tenantId },
+      select: { siteId: true },
+    });
+    siteId = u?.siteId ?? null;
+  }
+
   const { ip, userAgent } = await requestContext();
 
   // Support tickets are global (not routed by region), so the reference is a
@@ -223,12 +256,14 @@ export async function createTicket(
             data: {
               reference,
               tenantId: session.user.tenantId,
+              siteId,
               subject: data.subject,
               category: data.category,
               priority: data.priority,
               status: "New",
               currentHandler,
               description: data.description,
+              evidenceLink: data.evidenceLink || null,
               requesterId: session.user.id,
               requesterName: session.user.name,
               requesterRole: session.user.role,
@@ -471,54 +506,66 @@ export async function addTicketMessage(
   }
 }
 
-/* ── assignTicket (manage only; never auto) ─────────────────────────── */
+/* ── editTicket (requester or handler; only while New / Open) ──────────
+   Content edits are allowed EARLY only — once support begins work (In Progress
+   or beyond) or the ticket is terminal, it's frozen. canEditTicket enforces the
+   status window + actor; the server is authoritative. Stamps lastEdited* and
+   writes a paired TICKET_EDITED activity + AuditLog in one $transaction. */
 
-export async function assignTicket(
+const EditTicketSchema = z.object({
+  subject: z.string().min(3, "Subject is required"),
+  description: z.string().min(5, "Description is required"),
+  priority: z.enum(TICKET_PRIORITIES),
+  category: z.enum(TICKET_CATEGORIES),
+});
+
+export async function editTicket(
   ticketId: string,
-  assignee: { assigneeId: string; assigneeName: string },
+  input: z.input<typeof EditTicketSchema>,
 ): Promise<ActionResult> {
   const session = await requireAuth();
-  if (!canManageSupport(session.user.role)) {
-    return { success: false, error: "You do not have permission to assign tickets." };
+  const parsed = EditTicketSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
-  if (!assignee.assigneeId) return { success: false, error: "Choose an assignee." };
+  if (!canEditTicket(session, ticket)) {
+    return { success: false, error: "This ticket can no longer be edited (only New or Open tickets are editable)." };
+  }
 
-  const status = ticket.status as TicketStatus;
-  const nextStatus: TicketStatus | null = status === "New" ? "Open" : null;
+  // Only the field NAMES land in the audit/activity trail (not full bodies) —
+  // enough to prove what was touched without duplicating content into the log.
+  const changedFields: string[] = [];
+  if (parsed.data.subject !== ticket.subject) changedFields.push("subject");
+  if (parsed.data.description !== ticket.description) changedFields.push("description");
+  if (parsed.data.priority !== ticket.priority) changedFields.push("priority");
+  if (parsed.data.category !== ticket.category) changedFields.push("category");
+  if (changedFields.length === 0) return { success: true, data: null };
+
+  const now = new Date();
   try {
     await prisma.$transaction(async (tx) => {
       await tx.ticket.update({
         where: { id: ticket.id },
         data: {
-          assigneeId: assignee.assigneeId,
-          assigneeName: assignee.assigneeName,
-          ...(nextStatus ? { status: nextStatus } : {}),
+          subject: parsed.data.subject,
+          description: parsed.data.description,
+          priority: parsed.data.priority,
+          category: parsed.data.category,
+          lastEditedAt: now,
+          lastEditedById: session.user.id,
+          lastEditedByName: session.user.name,
         },
       });
-      await addActivity(tx, ticket, session, "ASSIGNED", `Assigned to ${assignee.assigneeName}`, ticket.assigneeName, assignee.assigneeName);
-      if (nextStatus) {
-        await addActivity(tx, ticket, session, "STATUS_CHANGED", `Status: ${status} → ${nextStatus}`, status, nextStatus);
-      }
-      await writeAudit(tx, ticket, session, "TICKET_ASSIGNED", { assigneeId: assignee.assigneeId, assigneeName: assignee.assigneeName });
-    });
-    await notify({
-      tenantId: ticket.tenantId,
-      recipientUserId: assignee.assigneeId,
-      actorUserId: session.user.id,
-      type: "TICKET_ASSIGNED",
-      title: `Ticket ${ticket.reference ?? ""} assigned to you`,
-      body: ticket.subject,
-      linkPath: `/admin/support/${ticket.id}`,
-      entityType: "Ticket",
-      entityId: ticket.id,
+      await addActivity(tx, ticket, session, "EDITED", `Ticket edited — ${changedFields.join(", ")}`);
+      await writeAudit(tx, ticket, session, "TICKET_EDITED", { fields: changedFields });
     });
     revalidateSupport(ticket.id);
     return { success: true, data: null };
   } catch (err) {
-    console.error("[action] assignTicket failed:", err);
-    return { success: false, error: "Failed to assign ticket" };
+    console.error("[action] editTicket failed:", err);
+    return { success: false, error: "Failed to edit ticket" };
   }
 }
 
@@ -532,15 +579,19 @@ export async function assignTicket(
    when supplied it's stored as an INTERNAL message (handler-to-handler context
    for SA), created inside the same tx so the whole escalation stays atomic. */
 
-const EscalateSchema = z.object({ note: z.string().optional() });
+const EscalateSchema = z.object({
+  reason: z.string().min(5, "A reason (min 5 characters) is required to escalate."),
+});
 
 export async function escalateTicket(
   ticketId: string,
-  input?: z.input<typeof EscalateSchema>,
+  input: z.input<typeof EscalateSchema>,
 ): Promise<ActionResult> {
   const session = await requireAuth();
-  const parsed = EscalateSchema.safeParse(input ?? {});
-  if (!parsed.success) return { success: false, error: "Invalid input" };
+  const parsed = EscalateSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
   const ticket = await loadTicketForView(session, ticketId);
   if (!ticket) return { success: false, error: "Ticket not found" };
 
@@ -556,7 +607,7 @@ export async function escalateTicket(
     return { success: false, error: "This ticket is already with the platform support team." };
   }
 
-  const note = parsed.data.note?.trim();
+  const reason = parsed.data.reason.trim();
   try {
     await prisma.$transaction(async (tx) => {
       await tx.ticket.update({
@@ -569,28 +620,30 @@ export async function escalateTicket(
           // status intentionally untouched — routing is a separate axis.
         },
       });
-      if (note) {
-        await tx.ticketMessage.create({
-          data: {
-            ticketId: ticket.id,
-            tenantId: ticket.tenantId,
-            authorId: session.user.id,
-            authorName: session.user.name,
-            authorRole: session.user.role,
-            body: note,
-            isInternal: true, // handler-to-handler context; not shown to the requester
-          },
-        });
-      }
+      // The mandatory reason is ALSO stored as an internal (handler-to-handler)
+      // message so the SA tier reads the context in the thread; the requester
+      // never sees it (isInternal). The reason itself lives on the activity
+      // summary below (spec).
+      await tx.ticketMessage.create({
+        data: {
+          ticketId: ticket.id,
+          tenantId: ticket.tenantId,
+          authorId: session.user.id,
+          authorName: session.user.name,
+          authorRole: session.user.role,
+          body: reason,
+          isInternal: true,
+        },
+      });
       await addActivity(
         tx, ticket, session, "ESCALATED",
-        note ? "Escalated to platform support with a note" : "Escalated to platform support",
+        `Escalated to platform support — ${reason}`,
         "customer_admin", "super_admin",
       );
       await writeAudit(tx, ticket, session, "TICKET_ESCALATED", {
         from: "customer_admin",
         to: "super_admin",
-        ...(note ? { note: note.slice(0, 200) } : {}),
+        reason: reason.slice(0, 200),
       });
     });
 
@@ -758,7 +811,7 @@ export async function confirmResolution(ticketId: string): Promise<ActionResult>
 
 /* ── reopenTicket (requester or manager; requires reason) ───────────── */
 
-const ReopenSchema = z.object({ reason: z.string().min(3, "Reopen reason is required") });
+const ReopenSchema = z.object({ reason: z.string().min(5, "A reason (min 5 characters) is required to reopen.") });
 
 export async function reopenTicket(
   ticketId: string,
@@ -806,7 +859,7 @@ export async function reopenTicket(
 
 /* ── cancelTicket (requester or manager; terminal) ──────────────────── */
 
-const CancelSchema = z.object({ reason: z.string().min(3, "Cancellation reason is required") });
+const CancelSchema = z.object({ reason: z.string().min(5, "A reason (min 5 characters) is required to cancel.") });
 
 export async function cancelTicket(
   ticketId: string,
@@ -877,17 +930,15 @@ export async function autoCloseStaleResolvedTickets(): Promise<ActionResult<{ cl
 }
 
 /**
- * Resolve the CURRENT HANDLER of a ticket to notification recipient id(s)
- * (Phase C — closes the tier-routed notification gap). Ticket-row admins
- * authenticate via the Tenant table, so their session.user.id IS a Tenant.id;
- * the notification read path matches on session.user.id, so we address tiers by
- * Tenant.id:
- *   - assigned ticket        → the specific assignee (unchanged behaviour);
- *   - tier=customer_admin     → that tenant's CA = the Tenant row (id = tenantId);
- *   - tier=super_admin        → every super_admin Tenant row (the SA tier).
+ * Resolve the CURRENT HANDLER of a ticket to notification recipient id(s).
+ * Ticket-row admins authenticate via the Tenant table, so their session.user.id
+ * IS a Tenant.id; the notification read path matches on session.user.id, so we
+ * address tiers by Tenant.id:
+ *   - tier=customer_admin → that tenant's CA = the Tenant row (id = tenantId);
+ *   - tier=super_admin    → every super_admin Tenant row (the SA tier).
+ * (Direct assignment was removed — routing is purely CA↔SA by tier now.)
  */
-async function handlerRecipients(ticket: { tenantId: string; assigneeId: string | null; currentHandler: string }): Promise<string[]> {
-  if (ticket.assigneeId) return [ticket.assigneeId];
+async function handlerRecipients(ticket: { tenantId: string; currentHandler: string }): Promise<string[]> {
   if (ticket.currentHandler === "super_admin") {
     const sas = await prisma.tenant.findMany({ where: { role: "super_admin" }, select: { id: true } });
     return sas.map((s) => s.id);

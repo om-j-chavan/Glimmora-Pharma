@@ -1,5 +1,6 @@
 import { requireAuth } from "@/lib/auth";
 import { getTickets, getTicketStats, toQueueRow } from "@/lib/queries/support";
+import { getSites } from "@/lib/queries/settings";
 import { SupportQueue } from "@/modules/support/SupportQueue";
 import { ErrorBoundary } from "@/components/errors";
 
@@ -19,10 +20,15 @@ export default async function Page() {
     getTicketStats(session),
   ]);
   const initialData = { rows: page1.rows.map(toQueueRow), total: page1.total };
+  // Site picker is CA-only (a CA raises on behalf of a site); requesters derive
+  // their site server-side, so they need no options.
+  const siteOptions = view === "ca"
+    ? (await getSites(session.user.tenantId)).map((s) => ({ id: s.id, name: s.name }))
+    : [];
 
   return (
     <ErrorBoundary moduleName="Support">
-      <SupportQueue view={view} initialData={initialData} stats={stats} />
+      <SupportQueue view={view} initialData={initialData} stats={stats} siteOptions={siteOptions} />
     </ErrorBoundary>
   );
 }

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireAuth } from "@/lib/auth";
 import { getTicket, getTicketAttachments } from "@/lib/queries";
-import { canManageSupport, canHandleTicket, canHandleFirstLine, isTicketRoutedToRole } from "@/lib/support/permissions";
+import { canHandleTicket, canHandleFirstLine, isTicketRoutedToRole, canEditTicket } from "@/lib/support/permissions";
 import { TicketDetailView } from "@/modules/support/TicketDetailView";
 import { ErrorBoundary } from "@/components/errors";
 
@@ -25,14 +25,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         // the CA→SA hop. The server enforces all three — the UI mirrors so no
         // dead/forbidden button ever renders.
         manage={canHandleTicket(session, t)}
-        canAssign={canManageSupport(session.user.role)}
         // Escalate is the CA→SA hop only: a first-line handler whose OWN tier
         // (customer_admin) currently holds the ticket. SA (tier super_admin) is
         // terminal — this stays false for them, matching escalateTicket's gate.
         canEscalate={canHandleFirstLine(session.user.role) && isTicketRoutedToRole(session.user.role, t) && t.currentHandler === "customer_admin"}
+        canEdit={canEditTicket(session, t)}
         viewerRole={session.user.role}
         currentUserId={session.user.id}
-        assigneeOptions={[]}
       />
     </ErrorBoundary>
   );
