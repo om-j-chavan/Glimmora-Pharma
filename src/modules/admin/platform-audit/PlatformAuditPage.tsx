@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Button } from "@/components/ui/Button";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { auditEventLabel } from "@/lib/labels/auditEvents";
@@ -51,14 +52,12 @@ export function PlatformAuditPage({ result, actionOptions, tenantOptions }: Plat
   const clearAll = () => { setSearchInput(""); setActorInput(""); router.push(BASE_PATH); };
 
   return (
-    <div className="w-full">
-      <div className="mb-6">
-        <h1 className="text-[22px] font-bold" style={{ color: "var(--text-primary)" }}>Platform Audit</h1>
-        <p className="text-[13px] mt-1" style={{ color: "var(--text-secondary)" }}>
-          Platform-level events — account, plan, and security changes
-        </p>
-      </div>
-
+    <PageLayout
+      title="Platform Audit"
+      titleIcon={ScrollText}
+      description="The cross-tenant platform audit trail — every account, plan, MFA, and security change across all tenants."
+      className="w-full"
+    >
       {/* Search — free-text across target / action / actor. */}
       <form
         className="relative max-w-lg mb-4"
@@ -160,6 +159,6 @@ export function PlatformAuditPage({ result, actionOptions, tenantOptions }: Plat
 
       {/* Read-only single-record detail (immutable — no edit/delete). */}
       <AuditDetailModal row={selected} onClose={() => setSelected(null)} />
-    </div>
+    </PageLayout>
   );
 }

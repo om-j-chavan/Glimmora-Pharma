@@ -42,6 +42,8 @@ export interface PageBreadcrumb {
 export interface PageLayoutProps {
   /** Required unless a `breadcrumb` is given (drill-down pages). */
   title?: string;
+  /** Optional Lucide icon rendered left of the title (plain-title mode only). */
+  titleIcon?: LucideIcon;
   /** REQUIRED — a management page must explain itself in one line. */
   description: string;
   actions?: PageAction[];
@@ -95,7 +97,7 @@ function ActionBar({ actions }: { actions: PageAction[] }) {
   );
 }
 
-function Heading({ title, breadcrumb }: { title?: string; breadcrumb?: PageBreadcrumb }) {
+function Heading({ title, breadcrumb, titleIcon: TitleIcon }: { title?: string; breadcrumb?: PageBreadcrumb; titleIcon?: LucideIcon }) {
   if (breadcrumb) {
     return (
       <div className="flex items-center gap-1.5 min-w-0">
@@ -112,10 +114,15 @@ function Heading({ title, breadcrumb }: { title?: string; breadcrumb?: PageBread
       </div>
     );
   }
-  return <h1 className="text-[20px] font-bold" style={{ color: "var(--text-primary)" }}>{title}</h1>;
+  return (
+    <h1 className="text-[20px] font-bold inline-flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+      {TitleIcon && <TitleIcon className="w-5 h-5" style={{ color: "var(--brand)" }} aria-hidden="true" />}
+      {title}
+    </h1>
+  );
 }
 
-export function PageLayout({ title, description, actions = [], headerRight, breadcrumb, children, className }: PageLayoutProps) {
+export function PageLayout({ title, titleIcon, description, actions = [], headerRight, breadcrumb, children, className }: PageLayoutProps) {
   if (process.env.NODE_ENV !== "production" && !title && !breadcrumb) {
     console.warn("[PageLayout] rendered without a title or breadcrumb.");
   }
@@ -125,8 +132,8 @@ export function PageLayout({ title, description, actions = [], headerRight, brea
           description one line under the title; divider under the whole header. */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <Heading title={title} breadcrumb={breadcrumb} />
-          <p className="text-[13px] mt-1 max-w-3xl" style={{ color: "var(--text-secondary)" }}>{description}</p>
+          <Heading title={title} breadcrumb={breadcrumb} titleIcon={titleIcon} />
+          {description && <p className="text-[13px] mt-1 max-w-3xl" style={{ color: "var(--text-secondary)" }}>{description}</p>}
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
           {headerRight}
