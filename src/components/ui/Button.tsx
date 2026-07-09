@@ -77,6 +77,7 @@ export function Button({
     <button
       {...props}
       disabled={isDisabled}
+      suppressHydrationWarning
       className={clsx(
         "inline-flex items-center justify-center",
         "font-semibold whitespace-nowrap",
