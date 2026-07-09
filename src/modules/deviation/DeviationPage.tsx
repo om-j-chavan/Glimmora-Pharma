@@ -383,7 +383,14 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     });
     setRaiseBusy(false);
     if (!result.success) {
-      toast.error(result.error || "Failed to raise CAPA. Please try again.");
+      // "Raise CAPA" is QA-only (isQAHead gates every trigger); this guards the
+      // stale-UI / race case. Friendly, consistent copy for the policy rejection.
+      if (result.error === "Only QA Head can create a CAPA.") {
+        console.warn("[deviation] raise CAPA denied:", result.error);
+        toast.error("Only your QA Head can create a CAPA from this deviation.");
+      } else {
+        toast.error(result.error || "Failed to raise CAPA. Please try again.");
+      }
       return;
     }
     setRaiseConfirmOpen(false);

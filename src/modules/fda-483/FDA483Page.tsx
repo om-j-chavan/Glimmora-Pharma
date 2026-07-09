@@ -1007,7 +1007,14 @@ export function FDA483Page({
                       rcaMethod: obs.rcaMethod,
                     });
                     if (!result.success) {
-                      toast.error(`Could not complete action: ${result.error || "Failed to raise CAPA from this observation. Please try again."}`);
+                      // The trigger is QA-only; this guards the stale-UI / race
+                      // case with a friendly, consistent policy message.
+                      if (result.error === "Only QA Head can create a CAPA.") {
+                        console.warn("[fda483] raise CAPA denied:", result.error);
+                        toast.error("Only your QA Head can create a CAPA from this observation.");
+                      } else {
+                        toast.error(`Could not complete action: ${result.error || "Failed to raise CAPA from this observation. Please try again."}`);
+                      }
                       return;
                     }
                     toast.success("CAPA raised.");
