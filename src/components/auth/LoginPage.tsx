@@ -203,6 +203,12 @@ export function LoginPage() {
         toast.error(msg);
         return;
       }
+      if (result.error && result.error.includes("NO_SITE_ASSIGNED")) {
+        const msg = "No site has been assigned to your account. Please contact your Customer Administrator.";
+        setError("root", { message: msg });
+        toast.error(msg);
+        return;
+      }
       // Generic case: CredentialsSignin (wrong password) AND no-such-email
       // share the same message to prevent account enumeration.
       const msg = "Incorrect email or password";

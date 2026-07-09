@@ -380,11 +380,11 @@ export function DocumentUpload({
                     {existingMatch.fileName} ({existingMatch.version}) already exists
                   </p>
                   <label className="flex items-start gap-2 mb-1.5 cursor-pointer">
-                    <input type="radio" name="version-mode" checked={versionMode === "new_version"} onChange={() => setVersionMode("new_version")} className="mt-0.5 accent-[#0ea5e9]" />
+                    <input type="radio" name="version-mode" checked={versionMode === "new_version"} onChange={() => setVersionMode("new_version")} className="mt-0.5 cursor-pointer accent-[#0ea5e9]" />
                     <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Upload as new version ({nextVersion(existingDocs, selectedFile.name)}) — previous marked superseded</span>
                   </label>
                   <label className="flex items-start gap-2 cursor-pointer">
-                    <input type="radio" name="version-mode" checked={versionMode === "separate"} onChange={() => setVersionMode("separate")} className="mt-0.5 accent-[#0ea5e9]" />
+                    <input type="radio" name="version-mode" checked={versionMode === "separate"} onChange={() => setVersionMode("separate")} className="mt-0.5 cursor-pointer accent-[#0ea5e9]" />
                     <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Upload as separate document</span>
                   </label>
                 </div>

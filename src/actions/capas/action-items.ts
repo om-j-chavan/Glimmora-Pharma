@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
-import { isAssignedToTask } from "@/lib/permissions/roleSets";
+import { QA_AUTHORITY_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
 import {
   ACTION_ITEMS_AUDIT_MODULE,
@@ -166,8 +166,12 @@ export async function addActionItem(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Your role does not permit this action." };
+  // Responsibility map - ASSIGN work is a QA authority action: only QA Head may
+  // add (assign) a CAPA action item (QA_AUTHORITY_ROLES; super_admin blocked
+  // above by requireGxPAuthor). The ASSIGNEE executes it via updateActionItem
+  // status-only (isAssignedToTask), not by authoring.
+  if (!QA_AUTHORITY_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can add (assign) a CAPA action item." };
   }
   try {
     const created = await prisma.$transaction(async (tx) => {
@@ -306,7 +310,10 @@ export async function updateActionItem(
   // delete) and the skipped/rework statuses stay author-only. requireGxPAuthor
   // (platform-admin block, above) and the viewer hard-stop baked into
   // isAssignedToTask both precede this check.
-  const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
+  // Responsibility map - full edit/reassign of an action item is a QA authority
+  // action (QA_AUTHORITY_ROLES). The assignee still makes status-only transitions
+  // via the isAssignedOwner branch below.
+  const isAuthorRole = QA_AUTHORITY_ROLES.includes(session.user.role);
   const isAssignedOwner = isAssignedToTask(session, existing);
   const OWNER_ALLOWED_STATUSES: readonly string[] = ["pending", "in_progress", "complete"];
   const ownerStatusOnly =

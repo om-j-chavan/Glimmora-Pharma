@@ -226,9 +226,9 @@ export function DatePicker({
               tabIndex={isFocused ? 0 : -1}
               onClick={() => selectDay(d)}
               className={clsx(
-                "h-8 rounded-md text-[12px] flex items-center justify-center border-none cursor-pointer transition-colors",
+                "h-8 rounded-md text-[12px] flex items-center justify-center border-none cursor-pointer disabled:cursor-not-allowed transition-colors",
                 !inMonth && "opacity-40",
-                dayDisabled && "opacity-30 cursor-not-allowed",
+                dayDisabled && "opacity-30",
                 isSelected
                   ? "bg-(--brand) text-white font-semibold"
                   : isToday
@@ -272,7 +272,10 @@ export function DatePicker({
         className={clsx(
           baseField,
           error ? errorBorder : normalBorder,
-          disabled && "opacity-50 cursor-not-allowed",
+          // Interactive → pointer; disabled → not-allowed (the disabled: variant
+          // wins over cursor-pointer by :disabled specificity).
+          "cursor-pointer disabled:cursor-not-allowed",
+          disabled && "opacity-50",
         )}
       >
         <span className={selected ? "text-(--text-primary)" : "text-(--text-muted)"}>

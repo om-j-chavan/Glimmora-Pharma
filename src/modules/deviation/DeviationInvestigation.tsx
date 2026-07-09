@@ -512,18 +512,19 @@ export function InvestigationSection({
               <Button variant="ghost" size="sm" disabled={busy} onClick={handleCancel}>
                 Cancel
               </Button>
-              <Button variant="secondary" size="sm" icon={Save} disabled={!canInvestigate || busy} loading={busy} onClick={() => persist(false)}>
-                Save progress
-              </Button>
+              {/* Req 4 — SAVING THE RCA completes the investigation step. The
+                  separate "Complete Investigation" action is removed; this single
+                  Save IS the completion (persist(true) → completeInvestigation).
+                  Gated on a filled root cause. */}
               <Button
                 variant="primary"
                 size="sm"
-                icon={CheckCircle2}
+                icon={Save}
                 disabled={!canInvestigate || busy || !canComplete(method, buffers)}
                 loading={busy}
                 onClick={() => persist(true)}
               >
-                Complete Investigation
+                Save RCA
               </Button>
             </div>
           </div>

@@ -38,9 +38,6 @@ const UpdateRTMSchema = z.object({
   ursRequirement: z.string().min(10, "Requirement must be at least 10 characters").optional(),
   // RUNG 1 (Finding #6) — first wired field for updateRTMEntry.
   notes: z.string().max(2000).optional(),
-  // RUNG 2 — real FK links (nullable to allow clearing).
-  findingId: z.string().nullable().optional(),
-  capaId: z.string().nullable().optional(),
   // NOTE: evidenceStatus / traceabilityStatus are NOT accepted from the
   // client — they are auto-derived server-side (Phase 9 #31) below.
 });

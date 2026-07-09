@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, CAPA_CREATE_ROLES, DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { getCAPAReadiness } from "@/lib/capa-readiness";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
@@ -381,8 +381,12 @@ export async function createCAPA(
   input: z.input<typeof CreateCAPASchema>,
 ): Promise<ActionResult> {
   const session = await requireAuth();
-  if (!CAPA_WRITE_ROLES.includes(session.user.role)) {
-    return { success: false, error: "You do not have permission to create CAPAs." };
+  // Responsibility map - a CAPA is raised ONLY by QA (CAPA_CREATE_ROLES = qa_head;
+  // super_admin is blocked below by requireGxPAuthor). This is stricter than the
+  // general CAPA_WRITE_ROLES used for edit/start; functional/admin roles reach
+  // their CAPA work through the Worklist, not by creating CAPAs.
+  if (!CAPA_CREATE_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can create a CAPA." };
   }
   const parsed = CreateCAPASchema.safeParse(input);
   if (!parsed.success) {

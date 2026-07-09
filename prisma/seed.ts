@@ -2,6 +2,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { BCRYPT_COST } from "../src/lib/passwords";
 import { PLAN_TIERS } from "../src/lib/plans";
+import { seedPlanRoleLimits } from "./roleLimitsSeed";
 import { RESERVED_FRAMEWORKS } from "../src/constants/frameworks";
 import { REGULATORY_REGIONS, GLOBAL_REGION_VALUE, GLOBAL_REGION_LABEL } from "../src/constants/regulatoryRegions";
 
@@ -1133,6 +1134,11 @@ async function main() {
     }
   }
   console.log("  Frameworks:", frameworkRows.length, "catalog; enabled for", customerTenants.length, "tenants");
+
+  // Per-plan role-cap DEFAULTS (idempotent — fills missing rows, never clobbers
+  // an admin-edited cap). Kills the ∞ display on standard plans.
+  const rl = await seedPlanRoleLimits(prisma);
+  console.log("  Plan role limits:", `${rl.created} created, ${rl.updated} updated, ${rl.keptEdited} kept across ${rl.plans} plans`);
 
   console.log("Seed complete.");
 }

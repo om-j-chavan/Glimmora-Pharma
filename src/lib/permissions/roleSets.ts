@@ -45,6 +45,24 @@ export function canAuthorGxP(role: string): boolean {
   return !isPlatformAdmin(role);
 }
 
+/**
+ * TENANT-WIDE / site-less-by-design roles — they see ALL sites, so a single-site
+ * assignment is neither required nor meaningful. Mirrors the "sees all sites"
+ * set already used by useTenantConfig (accessibleSites) and tenantMapper
+ * (allSites): super_admin (platform, no tenant), customer_admin (tenant admin
+ * who ASSIGNS sites), qa_head (tenant-wide QA oversight). Single source of truth.
+ */
+export const SITELESS_ROLES: readonly string[] = ["super_admin", "customer_admin", "qa_head"];
+/**
+ * A site-BOUND seat user REQUIRES a site assignment to enter the app (without one
+ * they'd see no site-scoped data). True for every role EXCEPT the site-less set
+ * above — so the Customer Admins / Super Admins who assign sites are NEVER blocked
+ * for lacking one themselves. Reused by the login gate (auth) and the UI.
+ */
+export function roleRequiresSite(role: string): boolean {
+  return !SITELESS_ROLES.includes(role);
+}
+
 /* ── Tenant lifecycle access (single source of truth) ───────────────────────
  * Answers "may this account access the app, given its tenant's lifecycle
  * status?". super_admin (any PLATFORM_ADMIN_ROLES) is the PLATFORM account, not
@@ -176,6 +194,41 @@ export const READINESS_ADMIN_ROLES: readonly string[] = ["qa_head", "customer_ad
 export const AUDIT_TRAIL_VIEW_ROLES: readonly string[] = ["qa_head", "customer_admin", "super_admin"];
 
 /* ════════════════════════════════════════════════════════════════════════════
+ * RESPONSIBILITY-MAP role-sets — 21 CFR Part 11 segregation of duties enforced at
+ * the SERVER action layer ("the doer ≠ the approver; the reporter ≠ the closer").
+ * super_admin is listed where a platform-oversight exemption is intended; for
+ * GxP-AUTHORING actions requireGxPAuthor() still blocks it AFTER the role check.
+ * customer_admin is DELIBERATELY excluded from compliance actions — admin ≠
+ * quality authority (create/assess/assign/approve/close). See RESPONSIBILITY_MAP.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/** QA authority — the quality judgments: assess/triage/disposition, ASSIGN work,
+ *  APPROVE/return submitted work, CLOSE/verify. qa_head only (+SA oversight). */
+export const QA_AUTHORITY_ROLES: readonly string[] = ["qa_head", "super_admin"];
+
+/** CREATE gates per the responsibility map (origination of the record). */
+// Gap Assessment is DENYLIST-scoped: any functional/seat role OR qa_head may
+// originate a gap finding; only the read-only viewer and the two admin
+// identities (customer_admin: admin ≠ doer; super_admin: walled from the
+// customer app) are blocked. Explicit allow-set = every role EXCEPT
+// {viewer, customer_admin, super_admin}.
+export const GAP_CREATE_ROLES: readonly string[] = [
+  "qa_head", "qa", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head",
+];
+export const CAPA_CREATE_ROLES: readonly string[] = ["qa_head", "super_admin"];           // a CAPA is raised ONLY by QA (SA blocked by requireGxPAuthor)
+export const INSPECTION_CREATE_ROLES: readonly string[] = ["qa_head", "regulatory_affairs", "super_admin"];
+export const CSV_CREATE_ROLES: readonly string[] = ["csv_val_lead", "qa_head", "super_admin"]; // csv doer OR QA (NOT admin)
+/** Deviation is REPORT-FIRST — any functional "doer" role OR qa_head may log one.
+ *  Excludes viewer (read-only) and the admins (customer_admin: admin ≠ doer;
+ *  super_admin: walled from the customer app). */
+export const DEVIATION_CREATE_ROLES: readonly string[] = [
+  "qa_head", "qa", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head",
+];
+export function canReportDeviation(role: string): boolean {
+  return DEVIATION_CREATE_ROLES.includes(role);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
  * Per-module capability computation — the comprehensive mirror of the server
  * role-sets above, consumed by usePermissions(module). Pure function: same
  * inputs → same output, no React/Redux. canView is passed in by the hook
@@ -227,7 +280,10 @@ export function getModuleCapabilities(
     case "gap":
       return {
         canView,
-        canCreate: has(COMPLIANCE_AUTHOR_ROLES) && gxpOk,
+        // Create uses the shared GAP_CREATE_ROLES denylist (blocks viewer +
+        // both admins) — same set the createFinding server action enforces, so
+        // the hidden button and the server boundary can never drift.
+        canCreate: has(GAP_CREATE_ROLES) && gxpOk,
         canEdit: has(COMPLIANCE_AUTHOR_ROLES) && gxpOk,
         canApprove: false,
         canSign: false,

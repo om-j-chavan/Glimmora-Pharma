@@ -227,7 +227,7 @@ export function OverviewBody({
             )}
             {capa.owner && (
               <span>
-                <span style={{ color: "var(--text-muted)" }}>Assigned to (driver): </span>
+                <span style={{ color: "var(--text-muted)" }}>Assigned to (owner): </span>
                 <span style={{ color: "var(--text-primary)" }}>{nameRole(capa.owner)}</span>
               </span>
             )}

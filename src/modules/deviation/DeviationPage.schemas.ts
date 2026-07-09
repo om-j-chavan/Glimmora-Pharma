@@ -10,6 +10,9 @@ export const addSchema = z.object({
   type: z.enum(["planned", "unplanned"]),
   category: z.enum(["process", "equipment", "material", "environmental", "personnel", "documentation", "system", "other"]),
   severity: z.enum(FDA_SEVERITY),
+  // The SELECTED site — drives the DEV-<siteCode>-… reference prefix at creation.
+  // (Bug fix: the form previously ignored this and always sent allSites[0].)
+  siteId: z.string().min(1, "Site required"),
   area: z.string().min(1, "Area required"),
   immediateAction: z.string().min(5, "Immediate action required"),
   patientSafetyImpact: z.enum(["high", "medium", "low", "none"]),

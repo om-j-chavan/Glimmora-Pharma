@@ -126,9 +126,6 @@ export interface StageReworkTask {
 export interface ValidationStage {
   key: ValidationStageKey;
   status: ValidationStageStatus;
-  date?: string;
-  targetDate?: string;
-  documentName?: string;
   documents?: StageDocument[];
   reworkTasks?: StageReworkTask[];
   notes?: string;
@@ -136,14 +133,11 @@ export interface ValidationStage {
   // RUNG 2.8 — stable submitter principal id (for the self-approval SoD hint).
   submittedById?: string;
   submittedDate?: string;
-  reviewedBy?: string;
-  reviewedDate?: string;
   approvedBy?: string;
   approvedDate?: string;
   rejectedBy?: string;
   rejectedDate?: string;
   rejectionReason?: string;
-  completionDate?: string;
   /**
    * Optional Prisma row id — set by `adaptPrismaStage()`.
    * Used by ValidationPanel to address the right row when calling
@@ -181,9 +175,6 @@ export interface GxPSystem {
   productQualityImpact?: RiskLevel;
   regulatoryExposure?: RiskLevel;
   diImpact?: RiskLevel;
-  remediationCapaId?: string;
-  remediationTargetDate?: string;
-  remediationNotes?: string;
   // ── RUNG 1 persistence fields ──
   remediationPlan?: string;
   remediationStatus?: string;

@@ -73,6 +73,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               rightAdornment ? "pr-9" : "pr-3",
               error ? errorBorder : normalBorder,
               disabled && "opacity-50 cursor-not-allowed",
+              // When the app supplies its own show/hide control (rightAdornment)
+              // on a password field, hide the browser-native reveal (Edge/IE
+              // ::-ms-reveal) so only ONE eye shows. Password fields WITHOUT a
+              // custom toggle keep the native reveal as their sole control.
+              type === "password" && rightAdornment && "suppress-native-reveal",
             )}
             {...rest}
           />

@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { DEVIATION_QA_ROLES, GAP_CREATE_ROLES, QA_AUTHORITY_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import { notify } from "@/lib/notify";
 import { fileStorage } from "@/lib/fileStorage";
@@ -117,8 +117,11 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Your role does not permit this action." };
+  // Responsibility map — a gap finding may be originated by any functional/seat
+  // role or qa_head (GAP_CREATE_ROLES denylist); viewer + customer_admin are
+  // rejected here, super_admin already blocked above by requireGxPAuthor.
+  if (!GAP_CREATE_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Your role cannot create a gap assessment." };
   }
 
   // SME final rung â€” site-scoped reference allocation. Same retry-on-
@@ -260,8 +263,9 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Your role does not permit this action." };
+  // Responsibility map — editing a finding is a QA ASSESSMENT judgment (QA_AUTHORITY_ROLES = qa_head).
+  if (!QA_AUTHORITY_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can edit a gap finding." };
   }
   try {
     const before = await prisma.finding.findFirst({
@@ -365,6 +369,12 @@ export async function assignFinding(
   if (!assignee) return { success: false, error: "Assignee must be an active user in your organisation." };
   if (["super_admin", "customer_admin", "viewer"].includes(assignee.role)) {
     return { success: false, error: "Findings can only be assigned to operational staff, not platform or admin roles." };
+  }
+  // No self-assignment — QA cannot assign a finding to themselves (mirrors the
+  // dropdown, which omits the current user). Assigning to the RAISER is allowed
+  // and NOT blocked here. Enforced server-side even if the client forces it.
+  if (assignee.id === session.user.id) {
+    return { success: false, error: "You cannot assign a finding to yourself." };
   }
   // SITE boundary (re-enforced server-side, mirrors getFindingAssignees): a
   // site-bound assigner may assign ONLY within their own site; a tenant-level
@@ -543,8 +553,9 @@ export async function closeFinding(id: string): Promise<ActionResult> {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Your role does not permit this action." };
+  // Responsibility map — CLOSE is a QA authority action (QA_AUTHORITY_ROLES = qa_head).
+  if (!QA_AUTHORITY_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can close a gap finding." };
   }
 
   try {
@@ -719,7 +730,10 @@ export async function loadFindingDocuments(findingId: string): Promise<ActionRes
       deletedAt: null,
     },
     orderBy: { createdAt: "asc" },
-    select: { id: true, fileName: true, category: true, uploadedBy: true, createdAt: true },
+    // uploadedById lets the detail split origin: docs uploaded by the finding's
+    // OWNER (the worklist assignee/worker) = "Worklist Documents"; others = "Gap
+    // Evidence" (uploaded on the gap detail).
+    select: { id: true, fileName: true, category: true, uploadedBy: true, uploadedById: true, createdAt: true },
   });
   return {
     success: true,
@@ -728,6 +742,7 @@ export async function loadFindingDocuments(findingId: string): Promise<ActionRes
       fileName: d.fileName,
       category: d.category,
       uploadedBy: d.uploadedBy,
+      uploadedById: d.uploadedById,
       uploadedAt: d.createdAt.toISOString(),
     })),
   };

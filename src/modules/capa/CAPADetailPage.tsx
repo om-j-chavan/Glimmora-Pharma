@@ -470,7 +470,7 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
               style={selectedPerson === c.id
                 ? { background: "var(--brand)", color: "#fff", borderColor: "var(--brand)" }
                 : { background: "transparent", color: "var(--text-secondary)", borderColor: "var(--bg-border)" }}>
-              {c.name} {c.count}{c.driver ? " ·drv" : ""}{c.rework ? " [R]" : ""}
+              {c.name} {c.count}{c.driver ? " ·own" : ""}{c.rework ? " [R]" : ""}
             </button>
           ))}
         </div>

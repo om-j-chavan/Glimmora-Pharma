@@ -1,9 +1,13 @@
 "use client";
 
-import { CreditCard, Users, MapPin, Archive, Info } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CreditCard, Users, MapPin, Archive, Info, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { PlanLimitUsageBar } from "@/components/shared";
+import { RoleMatrixTable } from "@/components/shared/RoleMatrixTable";
+import { getMyRoleMatrix } from "@/actions/roleLimits";
+import type { RoleMatrixSummary } from "@/lib/roleLimits";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { planLabel } from "@/lib/plans";
 import { planState } from "@/lib/tenantStatus";
@@ -26,12 +30,27 @@ export function SubscriptionTab() {
     plan,
     usedAccounts,
     maxUsers,
+    accountsRemaining,
     isAtAccountLimit,
     usedSites,
     maxSites,
+    sitesRemaining,
     isAtSiteLimit,
     daysRemaining,
   } = useTenantConfig();
+
+  // READ-ONLY role matrix for the CA's OWN tenant. getMyRoleMatrix is scoped to
+  // the session tenant and exposes no write — no config control is rendered here.
+  // Hook runs before the early `if (!plan)` return (Rules of Hooks).
+  const [roleMatrix, setRoleMatrix] = useState<RoleMatrixSummary | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await getMyRoleMatrix();
+      if (!cancelled && res.success) setRoleMatrix(res.data);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // No plan → minimal informational card (no controls).
   if (!plan) {
@@ -96,6 +115,12 @@ export function SubscriptionTab() {
             </p>
           </div>
           <div>
+            <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Duration</p>
+            <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
+              {plan.durationMonths} month{plan.durationMonths === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div>
             <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>
               {state === "expired" ? "Expired" : "Expires"}
             </p>
@@ -110,11 +135,71 @@ export function SubscriptionTab() {
         </div>
       </Card>
 
+      {/* Capacity — explicit Total / Current / Remaining for users and sites
+          (item 3), read-only. Numbers come from useTenantConfig (the same source
+          the meters below use), so they always agree with the usage bars. */}
+      <Card
+        header={
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" />
+            <span className="card-title">Capacity</span>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[
+            { icon: Users, label: "Users", total: maxUsers, current: usedAccounts, remaining: accountsRemaining, atLimit: isAtAccountLimit },
+            { icon: MapPin, label: "Sites", total: maxSites, current: usedSites, remaining: sitesRemaining, atLimit: isAtSiteLimit },
+          ].map((row) => (
+            <div key={row.label} className="rounded-lg p-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}>
+              <div className="flex items-center gap-1.5 mb-2">
+                <row.icon className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{row.label}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-[16px] font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{row.total}</p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Total</p>
+                </div>
+                <div>
+                  <p className="text-[16px] font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{row.current}</p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Current</p>
+                </div>
+                <div>
+                  <p className="text-[16px] font-bold tabular-nums" style={{ color: row.atLimit ? "var(--danger)" : "var(--success)" }}>{row.remaining}</p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Remaining</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       {/* 2. Usage vs caps — the "why am I blocked" answer, made visible */}
       <div className="space-y-3">
         <PlanLimitUsageBar icon={Users} label="Users" count={usedAccounts} limit={maxUsers} plan={label} atLimit={isAtAccountLimit} nearLimit={userNear} />
         <PlanLimitUsageBar icon={MapPin} label="Sites" count={usedSites} limit={maxSites} plan={label} atLimit={isAtSiteLimit} nearLimit={siteNear} />
       </div>
+
+      {/* Per-role limits — READ-ONLY (item 3). LIMIT / USED / REMAINING from the
+          resolver (getMyRoleMatrix). No edit controls; caps are SA-managed. Shown
+          only when at least one role is capped (else the total-only view above
+          already tells the whole story). */}
+      {roleMatrix && roleMatrix.rows.some((r) => r.cap !== "unlimited") && (
+        <Card
+          header={
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" />
+              <span className="card-title">Users by role</span>
+            </div>
+          }
+        >
+          <RoleMatrixTable rows={roleMatrix.rows} variant="usage" />
+          <p className="text-[11px] mt-2" style={{ color: "var(--text-muted)" }}>
+            Per-role limits are managed by the platform administrator.
+          </p>
+        </Card>
+      )}
 
       {/* 4. At/over-cap helper — informational only (no upgrade button) */}
       {(isAtAccountLimit || isAtSiteLimit) && (

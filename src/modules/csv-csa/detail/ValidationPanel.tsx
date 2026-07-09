@@ -77,14 +77,6 @@ function stageLabel(status: ValidationStage["status"]): string {
   if (status === "skipped") return "Skipped";
   return "Not Started";
 }
-function stageGlyph(status: ValidationStage["status"]): string {
-  if (status === "approved" || status === "complete") return "\u2713";
-  if (status === "in_review" || status === "in-progress") return "\u223C";
-  if (status === "skipped") return "\u23ED";
-  if (status === "rejected") return "\u2717";
-  if (status === "draft" || status === "in_progress") return "\u25D0";
-  return "\u25CB";
-}
 function stageBorderColor(status: ValidationStage["status"]): string {
   if (status === "approved" || status === "complete") return "#10b981";
   if (status === "in_review" || status === "in-progress") return "#0ea5e9";
@@ -567,12 +559,24 @@ export function ValidationPanel({
 
   return (
     <div className="space-y-4">
-      {/* Dual-track progress */}
+      {/* Consolidated validation progress — merges the former dual-track card,
+          completion-criteria banner, and overall-progress card into one view.
+          No metric lost: overall %, execution/approval tracks, per-stage
+          breakdown, and the completion criteria all live here. */}
       <div className={clsx("rounded-xl p-4 border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
         <div className="flex items-center justify-between mb-3">
           <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{system.name}</p>
-          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: overallColor + "18", color: overallColor }}>{overallLabel}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: overallColor + "18", color: overallColor }}>{overallLabel}</span>
+            <span className="text-[14px] font-bold" style={{ color: progressPct >= 80 ? "#10b981" : progressPct >= 50 ? "#f59e0b" : "#ef4444" }}>{progressPct}%</span>
+          </div>
         </div>
+
+        {/* Overall progress bar (was the standalone "Validation progress" card) */}
+        <div className="h-2 rounded-full mb-4" style={{ background: isDark ? "#1e3a5a" : "#e2e8f0" }} role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100} aria-label="Overall validation progress">
+          <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, background: progressPct >= 80 ? "#10b981" : progressPct >= 50 ? "#f59e0b" : "#ef4444" }} />
+        </div>
+
         <div className="grid grid-cols-2 gap-4 mb-3">
           <div>
             <div className="flex items-center justify-between text-[11px] mb-1"><span style={{ color: "var(--text-muted)" }}>Execution</span><span className="font-bold" style={{ color: executionPct === 100 ? "#10b981" : "#f59e0b" }}>{executionPct}%</span></div>
@@ -607,42 +611,22 @@ export function ValidationPanel({
             );
           })}</tbody>
         </table>
-      </div>
 
-      {/* Completion definition banner */}
-      {showBanner && (
-        <div className="flex items-start gap-2 p-3 rounded-xl border" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
-          <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-          <div className="flex-1 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-            <p className="font-semibold mb-1" style={{ color: "var(--brand)" }}>Validation completion criteria</p>
-            <p><strong>Execution complete</strong> (CSV/Val Lead): All documents uploaded, test cases executed, results recorded, submitted for QA review.</p>
-            <p className="mt-1"><strong>Approval complete</strong> (QA Head): All stages reviewed, documents verified, QA Head formally approved.</p>
-            <p className="mt-1 font-semibold" style={{ color: "var(--brand)" }}>System validated = Both complete \u2713</p>
+        {/* Completion criteria (dismissible) \u2014 folded into the progress card */}
+        {showBanner && (
+          <div className="flex items-start gap-2 mt-4 p-3 rounded-lg border" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
+            <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
+            <div className="flex-1 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              <p className="font-semibold mb-1" style={{ color: "var(--brand)" }}>Validation completion criteria</p>
+              <p><strong>Execution complete</strong> (CSV/Val Lead): All documents uploaded, test cases executed, results recorded, submitted for QA review.</p>
+              <p className="mt-1"><strong>Approval complete</strong> (QA Head): All stages reviewed, documents verified, QA Head formally approved.</p>
+              <p className="mt-1 font-semibold" style={{ color: "var(--brand)" }}>System validated = Both complete \u2713</p>
+            </div>
+            <button type="button" onClick={() => { setShowBanner(false); try { localStorage.setItem("glimmora-csv-completion-banner-dismissed", "1"); } catch { /* ignore */ } }} className="p-1 rounded cursor-pointer border-none bg-transparent" style={{ color: "var(--brand)" }} aria-label="Dismiss">
+              <X className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
           </div>
-          <button type="button" onClick={() => { setShowBanner(false); try { localStorage.setItem("glimmora-csv-completion-banner-dismissed", "1"); } catch { /* ignore */ } }} className="p-1 rounded cursor-pointer border-none bg-transparent" style={{ color: "var(--brand)" }} aria-label="Dismiss">
-            <X className="w-3.5 h-3.5" aria-hidden="true" />
-          </button>
-        </div>
-      )}
-
-      {/* Progress card */}
-      <div className="card">
-        <div className="card-header">
-          <span className="card-title">Validation progress</span>
-          <span className="text-[14px] font-bold" style={{ color: progressPct >= 80 ? "#10b981" : progressPct >= 50 ? "#f59e0b" : "#ef4444" }}>{progressPct}%</span>
-        </div>
-        <div className="card-body space-y-3">
-          <div className="h-2 rounded-full" style={{ background: "var(--bg-elevated)" }} role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
-            <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, background: progressPct >= 80 ? "#10b981" : progressPct >= 50 ? "#f59e0b" : "#ef4444" }} />
-          </div>
-          <div className="flex flex-wrap gap-1.5" role="list" aria-label="Validation stages">
-            {stages.map((s) => (
-              <div key={s.key} role="listitem" className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold" style={{ background: stageBorderColor(s.status) + "1a", color: stageBorderColor(s.status), border: `1px solid ${stageBorderColor(s.status)}33` }} title={`${VALIDATION_STAGE_LABELS[s.key]} \u2014 ${stageLabel(s.status)}`}>
-                <span>{s.key}</span><span aria-hidden="true">{stageGlyph(s.status)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Stage cards */}

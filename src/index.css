@@ -507,9 +507,14 @@ body {
   }
   /* Suppress the browser-native password reveal/clear controls (Edge/IE render
      a second "eye" via ::-ms-reveal). The app's own show/hide toggle
-     (AccountPasswordFields) is the single canonical control. */
+     (AccountPasswordFields) is the single canonical control. The
+     `.suppress-native-reveal` variant covers the reusable <Input> component
+     (which uses Tailwind classes, not `.input`) when it carries a custom
+     rightAdornment toggle — keeping exactly one eye there too. */
   .input::-ms-reveal,
-  .input::-ms-clear {
+  .input::-ms-clear,
+  .suppress-native-reveal::-ms-reveal,
+  .suppress-native-reveal::-ms-clear {
     display: none;
   }
 

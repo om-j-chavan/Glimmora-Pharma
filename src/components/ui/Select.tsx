@@ -36,7 +36,7 @@ export function Select({
         {label}
         {required && (
           <>
-            <span aria-hidden="true"> *</span>
+            <span className="text-(--danger)" aria-hidden="true"> *</span>
             <span className="sr-only"> (required)</span>
           </>
         )}

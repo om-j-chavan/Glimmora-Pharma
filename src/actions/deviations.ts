@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
+import { DEVIATION_QA_ROLES, canReportDeviation } from "@/lib/permissions/roleSets";
 import { createDocument } from "@/actions/documents";
 import {
   canonicalizeDeviationClosureContent,
@@ -63,10 +63,13 @@ export async function attachDeviationDocument(
   // detail-modal attach UI stays QA-only. A non-author reporter (e.g.
   // operations_head) bypasses createDocument's author gate exactly like the task
   // assignee does — the super_admin/viewer stops inside createDocument still apply.
-  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
+  // Segregation of duties (RBAC pass) — the DOER (the deviation's reporter)
+  // supplies supporting evidence; QA REVIEWS it and must NOT upload here. This
+  // tightens the prior "QA or reporter" gate so QA-qua-reviewer is rejected.
+  // (The low-priority task assignee uploads to THEIR task in the worklist.)
   const isReporter = !!deviation.createdById && deviation.createdById === actor.userId;
-  if (!isQA && !isReporter) {
-    return { success: false, error: "Only QA Head or the deviation's reporter can attach evidence to it." };
+  if (!isReporter) {
+    return { success: false, error: "QA reviews evidence and cannot upload it here — the deviation's reporter attaches supporting documents." };
   }
 
   // Link server-side (ignore any client-supplied linkage), then delegate to the
@@ -97,7 +100,8 @@ export async function attachDeviationDocument(
 
 const CloseDeviationSchema = z.object({
   password: z.string().min(1, "Password is required to sign"),
-  notes: z.string().max(2000).optional(),
+  // Part 11 — a closure MESSAGE is required (records the meaning of the signature).
+  notes: z.string().min(5, "A closure message (at least 5 characters) is required").max(2000),
 });
 
 // Stage 2 (deviation redesign) — default triage priority from FDA severity.
@@ -160,7 +164,9 @@ const UpdateDeviationSchema = CreateDeviationSchema.partial().extend({
 });
 
 const RejectSchema = z.object({
-  reason: z.string().min(5),
+  reason: z.string().min(5, "A rejection message (at least 5 characters) is required"),
+  // Part 11 — reject is now an electronic signature: password re-auth at signing.
+  password: z.string().min(1, "Password is required to sign"),
 });
 
 export async function createDeviation(
@@ -179,8 +185,10 @@ export async function createDeviation(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Responsibility map - deviation is REPORT-FIRST: any functional "doer" role
+  // OR qa_head may log one; viewer + admin roles are rejected server-side.
+  if (!canReportDeviation(session.user.role)) {
+    return { success: false, error: "Only a functional role or QA Head can report a deviation." };
   }
   // SME Section 1, Stage 6 (FULL) â€” if previousCAPAId is supplied,
   // verify it exists in the caller's tenant before persisting the
@@ -654,11 +662,36 @@ export async function rejectDeviation(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
+
+  // §11.200(a)(1)(ii) — re-authenticate at the moment of signing. Reject is a
+  // Part 11 electronic signature: the password is verified SERVER-SIDE against
+  // the real credential (never compared on the client). A wrong password blocks
+  // the action and is itself audited.
+  const passwordOk = await verifyPasswordForSigning(session.user.id, parsed.data.password);
+  if (!passwordOk) {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: SIGNING_AUDIT_MODULE,
+        action: "SIGNING_PASSWORD_FAILED",
+        recordId: id,
+        newValue: JSON.stringify({ recordType: "DEVIATION_REJECTION", attempt_at: new Date().toISOString() }),
+      },
+    });
+    return { success: false, error: "Password verification failed. The signature was not applied." };
+  }
+
   try {
     const deviation = await prisma.deviation.update({
       where: { id, tenantId: session.user.tenantId },
       data: { status: "rejected" },
     });
+    // Part 11 SIGNATURE RECORD — who signed (userId/name/role), when (signedAt),
+    // the action (DEVIATION_REJECTED), and the message. This audit row IS the
+    // reject signature record.
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,
@@ -668,7 +701,7 @@ export async function rejectDeviation(
         module: "Deviation Management",
         action: "DEVIATION_REJECTED",
         recordId: id,
-        newValue: parsed.data.reason.slice(0, 200),
+        newValue: JSON.stringify({ signed: true, signedAt: new Date().toISOString(), message: parsed.data.reason.slice(0, 500) }),
       },
     });
     revalidatePath("/deviation");
@@ -736,6 +769,10 @@ export async function saveInvestigationProgress(
   if (existing.status === "closed" || existing.status === "rejected") {
     return { success: false, error: "Cannot edit the investigation of a closed or rejected deviation." };
   }
+  // Responsibility map - viewers are read-only; every mutation rejects viewer.
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot perform this action." };
+  }
   // SoD — the reporter cannot perform the investigation.
   if (existing.createdById && existing.createdById === session.user.id) {
     return { success: false, error: "Investigation must be performed by someone other than the reporter." };
@@ -792,6 +829,10 @@ export async function completeInvestigation(
   if (!existing) return { success: false, error: "Deviation not found" };
   if (existing.status === "closed" || existing.status === "rejected") {
     return { success: false, error: "Cannot complete the investigation of a closed or rejected deviation." };
+  }
+  // Responsibility map - viewers are read-only; every mutation rejects viewer.
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot perform this action." };
   }
   if (existing.createdById && existing.createdById === session.user.id) {
     return { success: false, error: "Investigation must be performed by someone other than the reporter." };

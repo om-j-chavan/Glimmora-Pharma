@@ -1,10 +1,24 @@
 "use client";
 
-import { TAILORED_CEILINGS, resolvePlanCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
+import { TAILORED_CEILINGS, PLAN_FIELD_BOUNDS, resolvePlanCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { Stepper } from "@/components/ui/Stepper";
 import dayjs from "@/lib/dayjs";
 import { type PlanDraft, makePlanDraft } from "../../helpers";
+
+/** Labelled – / + stepper field for the plan caps (disabled = tier-fixed display). */
+function StepperField({ label, value, min, max, disabled, error, onChange }: {
+  label: string; value: number; min: number; max: number; disabled: boolean; error?: string; onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <label className={LABEL} style={{ color: "var(--text-secondary)" }}>{label}</label>
+      <Stepper value={Number.isFinite(value) ? value : min} onChange={onChange} min={min} max={max} disabled={disabled} invalid={!!error} ariaLabel={label} />
+      {error && <p className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{error}</p>}
+    </div>
+  );
+}
 
 const TIER_OPTIONS = [
   { value: "ESSENTIALS", label: "Essentials" },
@@ -33,6 +47,9 @@ interface AccountPlanFieldsProps {
   /** Same, for the Duration (months) term. */
   durationError?: string;
   onDurationBlur?: () => void;
+  /** Hide the Max Users field (Create mode) — the total is shown/derived in the
+   *  Role Limits section instead (fixed for standard, Σ role caps for Tailored). */
+  hideMaxUsers?: boolean;
 }
 
 /**
@@ -42,7 +59,7 @@ interface AccountPlanFieldsProps {
  * plan along with the rest of the form (assignPlan-on-save wiring lives in the
  * parent hook).
  */
-export function AccountPlanFields({ plan, onPlanChange, maxUsersError, onMaxUsersBlur, maxSitesError, onMaxSitesBlur, retentionError, onRetentionBlur, durationError, onDurationBlur }: AccountPlanFieldsProps) {
+export function AccountPlanFields({ plan, onPlanChange, maxUsersError, maxSitesError, retentionError, durationError, hideMaxUsers = false }: AccountPlanFieldsProps) {
   const activeSub = plan;
 
   const updateSub = (patch: Partial<PlanDraft>) => {
@@ -137,93 +154,54 @@ export function AccountPlanFields({ plan, onPlanChange, maxUsersError, onMaxUser
               />
             </div>
           </div>
+          {/* Caps — – / + steppers, editable only for TAILORED (fixed tiers show
+              their preset, disabled). Max Users is hidden in Create mode: the
+              total lives in the Role Limits section (fixed for standard tiers,
+              Σ role caps for Tailored). Each stepper is clamped to its bound. */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Max users</label>
-              {/* valueAsNumber yields NaN (not 0) for an emptied field, and the
-                  value falls back to "" so the box shows blank instead of a
-                  silently-coerced 0 — letting the modal's validation catch it. */}
-              <input
-                type="number"
+            {!hideMaxUsers && (
+              <StepperField
+                label="Max users"
+                value={activeSub.maxUsers}
                 min={1}
                 max={TAILORED_CEILINGS.maxUsers}
-                value={Number.isFinite(activeSub.maxUsers) ? activeSub.maxUsers : ""}
                 disabled={activeSub.tier !== "TAILORED"}
-                onChange={(e) => updateSub({ maxUsers: e.target.valueAsNumber })}
-                onBlur={onMaxUsersBlur}
-                aria-invalid={!!maxUsersError}
-                aria-describedby={maxUsersError ? "plan-max-users-error" : undefined}
-                className={`input text-[12px] ${maxUsersError ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
+                error={maxUsersError}
+                onChange={(v) => updateSub({ maxUsers: v })}
               />
-              {maxUsersError && (
-                <p id="plan-max-users-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{maxUsersError}</p>
-              )}
-            </div>
-            <div>
-              <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Max sites</label>
-              {/* valueAsNumber → NaN (not 0) on empty; blank fallback so an
-                  emptied field is caught by validation, not silently coerced. */}
-              <input
-                type="number"
-                min={1}
-                max={TAILORED_CEILINGS.maxSites}
-                value={Number.isFinite(activeSub.maxSites) ? activeSub.maxSites : ""}
-                disabled={activeSub.tier !== "TAILORED"}
-                onChange={(e) => updateSub({ maxSites: e.target.valueAsNumber })}
-                onBlur={onMaxSitesBlur}
-                aria-invalid={!!maxSitesError}
-                aria-describedby={maxSitesError ? "plan-max-sites-error" : undefined}
-                className={`input text-[12px] ${maxSitesError ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
-              />
-              {maxSitesError && (
-                <p id="plan-max-sites-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{maxSitesError}</p>
-              )}
-            </div>
-            <div>
-              <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Retention (yr)</label>
-              {/* minRetentionYears — a minimum, floor 1 (same as users/sites).
-                  valueAsNumber + blank fallback as above. */}
-              <input
-                type="number"
-                min={1}
-                max={TAILORED_CEILINGS.minRetentionYears}
-                value={Number.isFinite(activeSub.minRetentionYears) ? activeSub.minRetentionYears : ""}
-                disabled={activeSub.tier !== "TAILORED"}
-                onChange={(e) => updateSub({ minRetentionYears: e.target.valueAsNumber })}
-                onBlur={onRetentionBlur}
-                aria-invalid={!!retentionError}
-                aria-describedby={retentionError ? "plan-retention-error" : undefined}
-                className={`input text-[12px] ${retentionError ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
-              />
-              {retentionError && (
-                <p id="plan-retention-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{retentionError}</p>
-              )}
-            </div>
-            <div>
-              <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Duration (mo)</label>
-              {/* Subscription term — tier preset, editable only for TAILORED
-                  (same pattern as the caps). Drives the derived expiry above. */}
-              <input
-                type="number"
-                min={1}
-                max={TAILORED_CEILINGS.durationMonths}
-                value={Number.isFinite(activeSub.durationMonths) ? activeSub.durationMonths : ""}
-                disabled={activeSub.tier !== "TAILORED"}
-                onChange={(e) => setDurationMonths(e.target.valueAsNumber)}
-                onBlur={onDurationBlur}
-                aria-invalid={!!durationError}
-                aria-describedby={durationError ? "plan-duration-error" : undefined}
-                className={`input text-[12px] ${durationError ? "border-[#dc2626] focus:border-[#dc2626]" : ""}`}
-              />
-              {durationError && (
-                <p id="plan-duration-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{durationError}</p>
-              )}
-            </div>
+            )}
+            <StepperField
+              label="Max sites"
+              value={activeSub.maxSites}
+              min={PLAN_FIELD_BOUNDS.maxSites.min}
+              max={PLAN_FIELD_BOUNDS.maxSites.max}
+              disabled={activeSub.tier !== "TAILORED"}
+              error={maxSitesError}
+              onChange={(v) => updateSub({ maxSites: v })}
+            />
+            <StepperField
+              label="Retention (yr)"
+              value={activeSub.minRetentionYears}
+              min={PLAN_FIELD_BOUNDS.retentionYears.min}
+              max={PLAN_FIELD_BOUNDS.retentionYears.max}
+              disabled={activeSub.tier !== "TAILORED"}
+              error={retentionError}
+              onChange={(v) => updateSub({ minRetentionYears: v })}
+            />
+            <StepperField
+              label="Duration (mo)"
+              value={activeSub.durationMonths}
+              min={PLAN_FIELD_BOUNDS.durationMonths.min}
+              max={PLAN_FIELD_BOUNDS.durationMonths.max}
+              disabled={activeSub.tier !== "TAILORED"}
+              error={durationError}
+              onChange={setDurationMonths}
+            />
           </div>
           {activeSub.tier !== "TAILORED" ? (
             <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Caps are fixed for this tier. Choose Tailored to set custom caps.</p>
           ) : (
-            <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Tailored ceilings: {TAILORED_CEILINGS.maxUsers} users / {TAILORED_CEILINGS.maxSites} sites / {TAILORED_CEILINGS.minRetentionYears}yr / {TAILORED_CEILINGS.durationMonths}mo.</p>
+            <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Tailored bounds: ≤ {TAILORED_CEILINGS.maxUsers} users · {PLAN_FIELD_BOUNDS.maxSites.min}–{PLAN_FIELD_BOUNDS.maxSites.max} sites · {PLAN_FIELD_BOUNDS.retentionYears.min}–{PLAN_FIELD_BOUNDS.retentionYears.max}yr · {PLAN_FIELD_BOUNDS.durationMonths.min}–{PLAN_FIELD_BOUNDS.durationMonths.max}mo.</p>
           )}
         </div>
       )}

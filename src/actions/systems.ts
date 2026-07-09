@@ -9,6 +9,7 @@ import {
   CSV_STAGE_REVIEW_ROLES as STAGE_REVIEW_ROLES,
   CSV_SYSTEM_WRITE_ROLES as SYSTEM_WRITE_ROLES,
   CSV_SYSTEM_DELETE_ROLES as SYSTEM_DELETE_ROLES,
+  CSV_CREATE_ROLES,
 } from "@/lib/permissions/roleSets";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
@@ -253,8 +254,11 @@ export async function createSystem(
 ): Promise<ActionResult> {
   const session = await requireAuth();
   // RUNG 3A — gate creation to system-write roles (server-side, not just UI).
-  if (!SYSTEM_WRITE_ROLES.includes(session.user.role)) {
-    return { success: false, error: "You do not have permission to create systems." };
+  // Responsibility map - CSV/CSA validation is created by the CSV doer OR QA
+  // (CSV_CREATE_ROLES = csv_val_lead, qa_head); customer_admin is excluded
+  // (admin != compliance doer). super_admin is blocked below by requireGxPAuthor.
+  if (!CSV_CREATE_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only CSV/Val Lead or QA Head can create a system." };
   }
   const parsed = CreateSystemSchema.safeParse(input);
   if (!parsed.success) {
@@ -813,6 +817,11 @@ export async function updateStageNotes(stageId: string, notes: string): Promise<
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
+  // Responsibility map - editing stage notes is a CSV write; gate to the
+  // system-write roles (was requireGxPAuthor-only, which let viewer/any role in).
+  if (!SYSTEM_WRITE_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
+  }
   try {
     const stage = await prisma.validationStage.update({
       where: { id: stageId },
@@ -929,6 +938,11 @@ export async function updateRoadmapActivity(id: string, status: string): Promise
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  // Responsibility map - changing a roadmap activity is a CSV write; gate to the
+  // system-write roles (was requireGxPAuthor-only, which let viewer/any role in).
+  if (!SYSTEM_WRITE_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   try {
     const activity = await prisma.roadmapActivity.update({
@@ -1172,6 +1186,11 @@ export async function removeStageDocument(
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  // Responsibility map - removing a stage document is a CSV write; gate to the
+  // system-write roles (was requireGxPAuthor-only, which let viewer/any role in).
+  if (!SYSTEM_WRITE_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   try {
     await prisma.$transaction(async (tx) => {

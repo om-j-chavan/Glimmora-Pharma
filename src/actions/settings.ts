@@ -5,6 +5,7 @@ import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk } from "@/lib/auth";
+import { verifyPasswordForSigning } from "@/lib/signing";
 import { BCRYPT_COST } from "@/lib/passwords";
 import { sanitizeServerError } from "@/lib/errors";
 import { assertCanAddUser, assertCanAddSite, type CapBlockCode } from "@/lib/planCaps";
@@ -251,11 +252,13 @@ export async function createUser(
     });
     return { success: false, error: "You are not permitted to create a user with that role." };
   }
-  // Hard cap enforcement (Phase 1) — blocks creation past plan.maxUsers, and on
-  // no-plan / expired-plan. Runs AFTER the role gate; never a bypass. Passing
-  // the role exempts super_admin (the plan-less platform tenant), so it is not
-  // spuriously blocked with NO_PLAN_ASSIGNED.
-  const cap = await assertCanAddUser(session.user.tenantId, session.user.role);
+  // Hard cap enforcement — EXEMPTION → TOTAL → ROLE (Phase B). Blocks creation
+  // past plan.maxUsers (total) AND past a configured per-role cap, and on
+  // no-plan / expired-plan. Runs AFTER the role-grant ceiling; never a bypass.
+  //   • 2nd arg = the NEW user's role (parsed.data.role) → drives the role cap.
+  //   • 3rd arg = the ACTOR's role (session.user.role) → the super_admin
+  //     exemption, so a platform admin is never blocked (plan-less tenant).
+  const cap = await assertCanAddUser(session.user.tenantId, parsed.data.role, session.user.role);
   if (!cap.ok) {
     const code: CapBlockCode = cap.code ?? "PLAN_CAP_EXCEEDED";
     await prisma.auditLog.create({
@@ -267,9 +270,14 @@ export async function createUser(
         module: "Settings",
         action: "USER_CREATE_BLOCKED",
         recordTitle: parsed.data.name,
-        newValue: code,
+        // Machine code for total blocks; role-specific detail for role blocks.
+        newValue: cap.message ?? code,
       },
     });
+    // Return the machine CODE for every cap block (total AND role). The client
+    // maps it via errorCodeLabel — so a ROLE_CAP_EXCEEDED block shows the exact
+    // tenant-facing copy. The role-specific "(2/2)" detail stays in the audit
+    // entry above (cap.message), not the UI. Server remains the authority.
     return { success: false, error: code };
   }
   // Duplicate-email guard (case-insensitive). Emails are stored lower-cased, so
@@ -341,7 +349,10 @@ export async function checkUserCap(): Promise<ActionResult> {
   if (!isAdmin(session.user.role)) {
     return { success: false, error: "Access denied" };
   }
-  const cap = await assertCanAddUser(session.user.tenantId, session.user.role);
+  // Generic pre-check: no specific target role yet, so pass newUserRole=undefined
+  // (total-only) and the actor role for the super_admin exemption. The per-role
+  // gate runs in createUser once a role is chosen.
+  const cap = await assertCanAddUser(session.user.tenantId, undefined, session.user.role);
   if (cap.ok) return { success: true, data: null };
   const code: CapBlockCode = cap.code ?? "PLAN_CAP_EXCEEDED";
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -379,6 +390,18 @@ export async function updateUser(
       select: { id: true },
     });
     if (!owned) return { success: false, error: "FORBIDDEN" };
+  }
+  // Privilege-escalation guard (responsibility map) - a customer_admin may only
+  // GRANT the site-level roles (CUSTOMER_ADMIN_GRANTABLE_ROLES); it must NOT
+  // elevate a user to customer_admin or super_admin. Mirrors the createUser
+  // ceiling (which lacked an update equivalent). Enforced only when the role is
+  // actually being changed; super_admin bypasses.
+  if (
+    session.user.role !== "super_admin" &&
+    parsed.data.role !== undefined &&
+    !CUSTOMER_ADMIN_GRANTABLE_ROLES.has(parsed.data.role)
+  ) {
+    return { success: false, error: "You are not permitted to assign that role." };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
@@ -510,11 +533,18 @@ export async function setUserStatus(id: string, isActive: boolean): Promise<Acti
 }
 
 /**
- * Server-side re-authentication of the ACTING admin's own password. Reuses the
- * exact mechanism of the tenant permanent-delete gate (deleteTenantWithPassword):
- * admins authenticate via the Tenant table (nextauth Path 1), so
- * `session.user.id` is their Tenant.id and the credential is Tenant.passwordHash
- * — the same bcrypt check login uses. NEVER compared on the client.
+ * Server-side re-authentication of the ACTING admin's own password, verified
+ * against THEIR real credential wherever it lives. Delegates to the canonical
+ * Part 11 verify (verifyPasswordForSigning) — the same helper every e-signature
+ * gate uses — which resolves `session.user.id` against the Tenant table first
+ * (customer_admin / super_admin authenticate as a Tenant, nextauth Path 1) and
+ * falls back to the User table (a designated admin User row, per resolveUserFk).
+ *
+ * ROOT CAUSE of the delete-user "Incorrect password" bug: the prior body looked
+ * up ONLY the Tenant table by `session.user.id` and returned false whenever that
+ * id resolved to a User (not a Tenant) — so even the CORRECT password was
+ * rejected. Verifying against the wrong credential source. NEVER compared on the
+ * client. Correctly bcrypt-hashed-compared inside verifyPasswordForSigning.
  */
 type ActingSession = Awaited<ReturnType<typeof requireAuth>>;
 async function verifyActingAdminPassword(
@@ -522,11 +552,7 @@ async function verifyActingAdminPassword(
   password: string,
 ): Promise<boolean> {
   if (!password) return false;
-  const me = await prisma.tenant.findUnique({
-    where: { id: session.user.id },
-    select: { passwordHash: true },
-  });
-  return !!me && (await bcrypt.compare(password, me.passwordHash));
+  return verifyPasswordForSigning(session.user.id, password);
 }
 
 /**

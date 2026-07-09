@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Paperclip, Send, Clock } from "lucide-react";
+import { Send, Clock } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Dropdown } from "@/components/ui/Dropdown";
+import { CategorizedDocUploader, type DocUploadEntry } from "@/components/shared/CategorizedDocUploader";
 import { useToast } from "@/components/ui/Toast";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -99,8 +99,6 @@ export function DeviationTaskPanel({
   const [notes, setNotes] = useState("");
   const [msgBody, setMsgBody] = useState("");
   const [posting, setPosting] = useState(false);
-  const [removingDocId, setRemovingDocId] = useState<string | null>(null);
-  const [uploadCategory, setUploadCategory] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
 
   const canWork = task.status === "pending" || task.status === "in_progress" || task.status === "rework";
@@ -119,26 +117,33 @@ export function DeviationTaskPanel({
     toast.success("Task started."); onChanged();
   }
 
-  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setBusy(true); setErr(null);
-    const fd = new FormData();
-    fd.set("fileName", file.name);
-    fd.set("file", file);
-    const res = await attachDeviationTaskDocument(task.id, fd, uploadCategory);
-    setBusy(false);
-    if (!res.success) { setErr(res.error || "Upload failed."); toast.error(res.error || "Upload failed."); return; }
-    toast.success("Document attached."); onChanged();
+  // Multi-document upload (each with its own required category) — loop the
+  // audit-first, permission-enforcing attachDeviationTaskDocument per document.
+  async function handleUploadDocs(entries: DocUploadEntry[]) {
+    let failed = 0;
+    let lastErr = "";
+    for (const { file, category } of entries) {
+      const fd = new FormData();
+      fd.set("fileName", file.name);
+      fd.set("file", file);
+      const res = await attachDeviationTaskDocument(task.id, fd, category);
+      if (!res.success) { failed += 1; lastErr = res.error ?? "Upload failed."; }
+    }
+    onChanged();
+    if (failed > 0) {
+      toast.error(`${failed} document${failed === 1 ? "" : "s"} failed to upload.`);
+      return { success: false, error: lastErr };
+    }
+    toast.success(`${entries.length} document${entries.length === 1 ? "" : "s"} attached.`);
+    return { success: true };
   }
 
-  async function removeDoc(docId: string) {
-    setBusy(true); setRemovingDocId(docId); setErr(null);
+  async function handleRemoveDoc(docId: string) {
     const res = await removeDeviationTaskDocument(task.id, docId);
-    setBusy(false); setRemovingDocId(null);
-    if (!res.success) { setErr(res.error || "Failed to remove."); toast.error(res.error || "Failed to remove document."); return; }
-    toast.success("Document removed."); onChanged();
+    if (!res.success) { toast.error(res.error || "Failed to remove document."); return { success: false, error: res.error }; }
+    toast.success("Document removed.");
+    onChanged();
+    return { success: true };
   }
 
   async function submit() {
@@ -207,17 +212,24 @@ export function DeviationTaskPanel({
             </div>
           )}
 
-          {/* Deviation documents — READ-ONLY */}
+          {/* Deviation documents — FOREIGN origin (the parent deviation's docs).
+              Rendered on the shared <DocumentCard> but LOCKED: canDelete=()=>false
+              → Lock icon + no Delete (a worker can't remove the deviation's own
+              evidence). Server would reject a delete here regardless. */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Deviation documents (read-only)</p>
-            <DocList docs={task.deviationDocs.map(toDocItem)} emptyText="None attached to the deviation." />
+            <CategorizedDocUploader
+              docs={task.deviationDocs}
+              canDelete={() => false}
+              emptyText="None attached to the deviation."
+            />
           </div>
 
-          {/* Worker's own task documents — read-only here; upload/remove live in
-              the "Send to QA" modal (req 5). */}
+          {/* Worker's own task documents — read-only MIRROR here (no lock icon:
+              they're yours). Add / delete live in the "Send to QA" modal (req 5). */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Your task documents</p>
-            <GroupedTaskDocs docs={task.taskDocs} emptyText="No documents uploaded yet — add them when you send your response." />
+            <CategorizedDocUploader docs={task.taskDocs} readOnly emptyText="No documents uploaded yet — add them when you send your response." />
           </div>
 
           {/* Conversation — flat QA↔worker thread */}
@@ -253,31 +265,17 @@ export function DeviationTaskPanel({
             <label htmlFor="dev-task-notes" className="text-[10px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Completion notes <span style={{ color: "var(--danger)" }}>*</span></label>
             <textarea id="dev-task-notes" className="input text-[12px] w-full min-h-24" placeholder="What was done? (≥ 5 characters)" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} disabled={busy} />
           </div>
+          {/* Supporting documents — multi-document upload with a REQUIRED per-doc
+              category, on the shared <DocumentCard> (Delete confirms). These are
+              the worker's OWN docs, so each is deletable here. */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Supporting documents (optional)</p>
-            {task.taskDocs.length > 0 && (
-              <div className="mb-1.5">
-                <GroupedTaskDocs docs={task.taskDocs} emptyText="" onRemove={(id) => void removeDoc(id)} busyId={removingDocId} />
-              </div>
-            )}
-            {/* Piece 1 — pick a GxP category, then upload. The category is stored
-                on the doc and groups it above (and maps to CAPA evidence on carryover). */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <Dropdown
-                value={uploadCategory}
-                onChange={setUploadCategory}
-                options={EVIDENCE_CATEGORIES.map((c) => ({ value: c, label: EVIDENCE_CATEGORY_LABEL[c] }))}
-                placeholder="Select category…"
-                disabled={busy}
-                size="sm"
-                width="w-48"
-              />
-              <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", opacity: (busy || !uploadCategory) ? 0.6 : 1 }}>
-                <Paperclip className="w-3.5 h-3.5" /> Upload file
-                <input type="file" className="hidden" disabled={busy || !uploadCategory} onChange={onPickFile} />
-              </label>
-            </div>
-            {!uploadCategory && <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Pick a category to enable upload.</p>}
+            <CategorizedDocUploader
+              docs={task.taskDocs}
+              onUpload={handleUploadDocs}
+              onRemove={handleRemoveDoc}
+              emptyText="No documents attached yet — use Add Document to attach one or more."
+            />
           </div>
           {err && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{err}</p>}
         </div>

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
+import { INSPECTION_CREATE_ROLES } from "@/lib/permissions/roleSets";
 import { assertTenantOwnsParent } from "@/lib/tenantScope";
 
 type ActionResult<T = unknown> =
@@ -62,8 +63,11 @@ export async function createInspection(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Responsibility map - inspection/regulatory records are created by QA
+  // (+ Regulatory Affairs): INSPECTION_CREATE_ROLES. super_admin is blocked
+  // above by requireGxPAuthor; functional/admin roles are rejected server-side.
+  if (!INSPECTION_CREATE_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head or Regulatory Affairs can create an inspection." };
   }
   try {
     const inspection = await prisma.inspection.create({

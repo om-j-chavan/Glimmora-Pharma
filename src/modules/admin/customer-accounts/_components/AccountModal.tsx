@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Upload, Save, AlertCircle } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Upload, Save, AlertCircle, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
-import { MIN_TAILORED_RETENTION_YEARS } from "@/lib/plans";
+import { MIN_TAILORED_RETENTION_YEARS, defaultRoleCapsForPlan, TAILORED_START_USERS, TAILORED_CEILINGS, PLAN_FIELD_BOUNDS } from "@/lib/plans";
+import { RoleCapsEditor, deriveRoleCapsState, type RoleCapsDraft } from "@/components/shared/RoleCapsEditor";
+import type { RoleMatrixRow } from "@/lib/roleLimits";
+import { CAP_ELIGIBLE_ROLES } from "@/lib/labels/roles";
 import { type AccountFormData, type SaveResult } from "../helpers";
+import { LogoCropModal } from "@/modules/admin/customer-detail/_components/LogoCropModal";
 import { AccountInfoFields } from "./account-form/AccountInfoFields";
 import { AccountSettingsFields } from "./account-form/AccountSettingsFields";
 import { AccountPasswordFields } from "./account-form/AccountPasswordFields";
@@ -52,6 +56,12 @@ export function AccountModal({
   // Drag-drop overlay: only shown when the user is actively dragging a file
   // over the modal. Keeps the body uncluttered in the common no-drag state.
   const [isDragging, setIsDragging] = useState(false);
+  // Shared logo crop modal (the SAME LogoCropModal the tenant View uses, in
+  // return-mode). `logoSeedFile` preloads a drag-dropped image into the cropper.
+  const [logoCropOpen, setLogoCropOpen] = useState(false);
+  const [logoSeedFile, setLogoSeedFile] = useState<File | null>(null);
+  const openLogoCrop = (seed: File | null) => { setLogoSeedFile(seed); setLogoCropOpen(true); };
+  const closeLogoCrop = () => { setLogoCropOpen(false); setLogoSeedFile(null); };
   // Username auto-derive (create form only): while true, the username field
   // mirrors a sanitised version of the email local-part. Flips false the
   // moment super_admin edits the username manually, handing them control.
@@ -61,6 +71,37 @@ export function AccountModal({
   // save handler. Keyed by form field; shown inline and always visible until
   // the user edits that field. Cleared on reopen.
   const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
+  // Create-mode per-role caps. Numeric draft (role → cap), PREFILLED from the
+  // plan-tier defaults (concrete, no ∞). Editable for TAILORED; read-only
+  // (inherited) for standard tiers. Create has no usage yet, so rows are used=0.
+  const [roleCapsDraft, setRoleCapsDraft] = useState<RoleCapsDraft>({});
+  const roleRows = useMemo<RoleMatrixRow[]>(
+    () => CAP_ELIGIBLE_ROLES.map((role) => ({ role, cap: 0, used: 0, remaining: 0 })),
+    [],
+  );
+  const editingTailoredCaps = mode === "create" && form.plan?.tier === "TAILORED";
+
+  // Total Users: STANDARD → the tier's fixed maxUsers; TAILORED → the LIVE SUM of
+  // the role caps (Total IS the sum, so sum==total holds by construction).
+  const roleCapsSum = useMemo(
+    () => CAP_ELIGIBLE_ROLES.reduce((s, r) => s + Math.max(0, Math.floor(roleCapsDraft[r] ?? 0)), 0),
+    [roleCapsDraft],
+  );
+  const totalUsers = editingTailoredCaps ? roleCapsSum : (form.plan?.maxUsers ?? 0);
+  // The editor's sum guard uses `totalUsers`; for TAILORED that equals the sum,
+  // so notEqualTotal is never tripped (no spurious over/under-allocation error).
+  const roleCapsState = useMemo(
+    () => deriveRoleCapsState(roleCapsDraft, roleRows, totalUsers),
+    [roleCapsDraft, roleRows, totalUsers],
+  );
+  // TAILORED: the computed Total must stay within [1, ceiling] (server-enforced too).
+  const tailoredTotalError = !editingTailoredCaps
+    ? null
+    : totalUsers < 1
+      ? "Allocate at least 1 user across the roles."
+      : totalUsers > TAILORED_CEILINGS.maxUsers
+        ? `Total users (${totalUsers}) exceeds the Tailored ceiling of ${TAILORED_CEILINGS.maxUsers}.`
+        : null;
 
   useEffect(() => {
     if (open) {
@@ -69,9 +110,32 @@ export function AccountModal({
       setSubmitAttempted(false);
       setUsernameAuto(mode === "create");
       setServerErrors({});
+      // Prefill caps from the plan's tier defaults (or empty if no plan yet).
+      setRoleCapsDraft(initial.plan ? defaultRoleCapsForPlan(initial.plan.maxUsers) : {});
+      prevTierRef.current = initial.plan?.tier;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Re-prefill from defaults on a TIER change (plan assigned / tier switched) —
+  // but NOT on maxUsers edits within a tier. TAILORED seeds from a starter Total
+  // (Max Users is no longer an input — Total = Σ caps), and its maxUsers is pinned
+  // to that starter (kept in sync with Σ at submit). Keyed by prevTierRef so
+  // stepper edits aren't wiped.
+  const prevTierRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!open || !form.plan) return;
+    if (form.plan.tier !== prevTierRef.current) {
+      prevTierRef.current = form.plan.tier;
+      if (mode === "create" && form.plan.tier === "TAILORED") {
+        setRoleCapsDraft(defaultRoleCapsForPlan(TAILORED_START_USERS));
+        set("plan", { ...form.plan, maxUsers: TAILORED_START_USERS });
+      } else {
+        setRoleCapsDraft(defaultRoleCapsForPlan(form.plan.maxUsers));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, form.plan?.tier, form.plan?.maxUsers]);
 
   const set = <K extends keyof AccountFormData>(key: K, value: AccountFormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -169,7 +233,16 @@ export function AccountModal({
 
   const handleSubmit = async () => {
     if (Object.keys(errors).length > 0) return;
-    const result = await onSave(form);
+    if (editingTailoredCaps && tailoredTotalError) return; // Total (Σ caps) out of range
+    // TAILORED: Total Users IS the sum of role caps — pin the plan's maxUsers to
+    // it so the persisted plan total matches. Attach the per-role caps for the
+    // create handler to persist AFTER tenant + plan exist (setTenantRoleLimits).
+    const submitData: AccountFormData = {
+      ...form,
+      plan: editingTailoredCaps && form.plan ? { ...form.plan, maxUsers: totalUsers } : form.plan,
+      initialRoleCaps: editingTailoredCaps ? roleCapsState.parsed : undefined,
+    };
+    const result = await onSave(submitData);
     // A save that returns ok:false (e.g. duplicate username/email) keeps the
     // modal open and lights up the offending field(s); otherwise close.
     if (result && result.ok === false) {
@@ -208,7 +281,10 @@ export function AccountModal({
         Number.isFinite(form.plan.durationMonths) && form.plan.durationMonths >= 1 &&
         // TAILORED: caps may not drop below current active usage, and retention
         // may not drop below the compliance floor (equal ok for both).
-        (form.plan.tier !== "TAILORED" || (form.plan.maxUsers >= currentUserCount && form.plan.maxSites >= currentSiteCount && form.plan.minRetentionYears >= MIN_TAILORED_RETENTION_YEARS))));
+        (form.plan.tier !== "TAILORED" || (form.plan.maxSites >= currentSiteCount && form.plan.minRetentionYears >= MIN_TAILORED_RETENTION_YEARS)))) &&
+    // TAILORED create: the computed Total (Σ role caps) must be in [1, ceiling].
+    // No sum==total error — Total IS the sum by construction.
+    (!editingTailoredCaps || !tailoredTotalError);
 
   // Footer: the "please complete" hint strip + Cancel/Save buttons.
   const labels: Record<string, string> = {
@@ -292,7 +368,9 @@ export function AccountModal({
           e.preventDefault();
           setIsDragging(false);
           const f = e.dataTransfer.files[0];
-          if (f && (f.type === "image/png" || f.type === "image/jpeg")) set("logoFile", f);
+          // Drop-to-crop: hand the image to the shared crop modal (seeded), so a
+          // dropped logo goes through the SAME square-crop/zoom step as picking one.
+          if (f && (f.type === "image/png" || f.type === "image/jpeg" || f.type === "image/webp")) openLogoCrop(f);
         }}
       >
         {/* Drop overlay — visible only during active drag */}
@@ -320,6 +398,7 @@ export function AccountModal({
           errors={shownErrors}
           usernameAuto={usernameAuto}
           setUsernameAuto={setUsernameAuto}
+          onEditLogo={() => openLogoCrop(null)}
         />
 
         <AccountSettingsFields
@@ -335,15 +414,52 @@ export function AccountModal({
         <AccountPlanFields
           plan={form.plan}
           onPlanChange={(p) => set("plan", p)}
+          hideMaxUsers={mode === "create"}
           maxUsersError={errorVisible("planMaxUsers") ? errors.planMaxUsers : undefined}
-          onMaxUsersBlur={() => markTouched("planMaxUsers")}
           maxSitesError={errorVisible("planMaxSites") ? errors.planMaxSites : undefined}
-          onMaxSitesBlur={() => markTouched("planMaxSites")}
           retentionError={errorVisible("planRetention") ? errors.planRetention : undefined}
-          onRetentionBlur={() => markTouched("planRetention")}
           durationError={errorVisible("planDuration") ? errors.planDuration : undefined}
-          onDurationBlur={() => markTouched("planDuration")}
         />
+
+        {/* Role Limits — shown once a plan is chosen at CREATE, prefilled from the
+            plan's tier defaults (CONCRETE, no ∞). Total Users is a READOUT at the
+            top: STANDARD = the tier's fixed value; TAILORED = Σ role caps, LIVE.
+            TAILORED → editable – / + steppers (each ≤ per-role ceiling); no
+            over/under error since Total IS the sum. Standard tiers → read-only. */}
+        {mode === "create" && form.plan && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <SlidersHorizontal className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              <label className="text-[11px] font-medium text-(--text-secondary)">
+                Role Limits {editingTailoredCaps ? "(customize)" : "(inherited from plan)"}
+              </label>
+            </div>
+            {/* Total Users readout. */}
+            <div className="flex items-center justify-between rounded-lg px-3 py-2 mb-2" style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}>
+              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                Total Users {editingTailoredCaps ? "(sum of role caps)" : "(fixed for this tier)"}
+              </span>
+              <span className="text-[13px] font-bold tabular-nums" style={{ color: tailoredTotalError ? "var(--danger)" : "var(--text-primary)" }}>{totalUsers}</span>
+            </div>
+            <p className="text-[11px] mb-1.5" style={{ color: "var(--text-muted)" }}>
+              {editingTailoredCaps
+                ? <>Set each role&apos;s cap (0–{PLAN_FIELD_BOUNDS.roleCap.max}) with the steppers — Total Users updates live as their sum.</>
+                : <>This plan&apos;s default per-role caps (summing to the tier total). Tune them on the tenant after creation.</>}
+            </p>
+            <RoleCapsEditor
+              rows={roleRows}
+              total={totalUsers}
+              perRoleMax={editingTailoredCaps ? PLAN_FIELD_BOUNDS.roleCap.max : form.plan.maxUsers}
+              draft={roleCapsDraft}
+              onDraftChange={setRoleCapsDraft}
+              showUsage={false}
+              disabled={!editingTailoredCaps}
+            />
+            {tailoredTotalError && (
+              <p role="alert" className="text-[11px] mt-1.5" style={{ color: "var(--danger)" }}>{tailoredTotalError}</p>
+            )}
+          </div>
+        )}
 
         <AccountPasswordFields
           form={form}
@@ -354,6 +470,20 @@ export function AccountModal({
           mode={mode}
         />
       </div>
+
+      {/* Shared logo crop-and-upload — the SAME component the tenant View uses,
+          in return-mode (persist=false): it hands back a cropped 256px JPEG data
+          URL that we stash on the form; Create/Edit persist it via updateTenantLogo
+          on submit. No tenantId needed (Create has none yet). */}
+      <LogoCropModal
+        open={logoCropOpen}
+        onClose={closeLogoCrop}
+        tenantName={form.customerName.trim() || "this account"}
+        currentLogo={form.logoDataUrl}
+        persist={false}
+        initialFile={logoSeedFile}
+        onSaved={(url) => { set("logoDataUrl", url); closeLogoCrop(); }}
+      />
     </Modal>
   );
 }

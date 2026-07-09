@@ -14,6 +14,7 @@ import {
 } from "@/store/auth.slice";
 import { fetchTenants, createTenantApi, updateTenantApi, TenantApiError } from "@/lib/tenantApi";
 import { toggleTenantMFA, assignPlan, suspendTenant, softDeleteTenant, restoreTenant, updateTenantLogo } from "@/actions/tenants";
+import { setTenantRoleLimits } from "@/actions/roleLimits";
 import { resolvePlanCaps, resolveExpiry } from "@/lib/plans";
 import dayjs from "@/lib/dayjs";
 import { useToast } from "@/components/ui/Toast";
@@ -37,39 +38,6 @@ import {
   hasNoPlan,
   isSuspendedTenant,
 } from "./helpers";
-
-/**
- * Encode a chosen logo File → a square 256px JPEG data URL — the SAME format the
- * dedicated LogoCropModal produces and updateTenantLogo validates
- * (data:image/jpeg;base64,…, well under the 400 KB cap). Cover-fit + center-crop
- * so any aspect ratio yields a clean square avatar. Browser-only (canvas); no
- * new deps.
- */
-const LOGO_SIZE = 256;
-async function encodeLogoDataUrl(file: File): Promise<string> {
-  const src = await new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(file);
-  });
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const im = new Image();
-    im.onload = () => resolve(im);
-    im.onerror = reject;
-    im.src = src;
-  });
-  const canvas = document.createElement("canvas");
-  canvas.width = LOGO_SIZE;
-  canvas.height = LOGO_SIZE;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas is not supported in this browser.");
-  const scale = Math.max(LOGO_SIZE / img.width, LOGO_SIZE / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
-  ctx.drawImage(img, (LOGO_SIZE - w) / 2, (LOGO_SIZE - h) / 2, w, h);
-  return canvas.toDataURL("image/jpeg", 0.85);
-}
 
 /**
  * Data hook for the Customer Accounts screen — owns all state, the tenant
@@ -307,25 +275,22 @@ export function useCustomerAccounts({
           setSyncError(friendlyError(undefined));
         }
       }
-      // Logo (the Edit modal collects it as a File under `logoFile`). This was
-      // previously DROPPED — never encoded or persisted — so an upload showed
-      // only the modal's local object-URL preview and never reached
-      // Tenant.logoUrl, which the View header AND the accounts table both read.
-      // Encode → persist via the SAME updateTenantLogo action the dedicated crop
-      // modal uses (server writes Tenant.logoUrl + revalidatePath("/admin")),
-      // then reflect it in Redux so the View + table update immediately.
-      // Best-effort: a logo failure never undoes the (already-saved) account.
-      if (data.logoFile) {
+      // Logo — the modal collects a CROPPED 256px JPEG data URL (form.logoDataUrl)
+      // via the shared LogoCropModal (return-mode). Persist via the SAME
+      // updateTenantLogo action the View's crop modal uses (server writes
+      // Tenant.logoUrl + revalidatePath("/admin")), then reflect it in Redux so
+      // the View header AND the accounts table update immediately. Best-effort:
+      // a logo failure never undoes the (already-saved) account.
+      if (data.logoDataUrl) {
         try {
-          const logoUrl = await encodeLogoDataUrl(data.logoFile);
-          const logoRes = await updateTenantLogo(editingTenant.id, logoUrl);
+          const logoRes = await updateTenantLogo(editingTenant.id, data.logoDataUrl);
           if (logoRes.success) {
-            dispatch(updateTenant({ id: editingTenant.id, patch: { logoUrl } }));
+            dispatch(updateTenant({ id: editingTenant.id, patch: { logoUrl: data.logoDataUrl } }));
           } else {
             toast.error(`${data.customerName} updated, but the logo could not be saved: ${logoRes.error}`);
           }
         } catch (err) {
-          console.error("[admin] logo encode/save failed", err);
+          console.error("[admin] logo save failed", err);
           toast.error(`${data.customerName} updated, but the logo could not be saved.`);
         }
       }
@@ -405,6 +370,46 @@ export function useCustomerAccounts({
       dispatch(addTenant(newTenant));
       setSyncError(null);
       toast.success(`Customer ${data.customerName} created.`);
+
+      // Logo — the Create modal now collects a CROPPED 256px JPEG data URL
+      // (form.logoDataUrl) via the shared LogoCropModal. The create branch
+      // previously DROPPED it (collect-and-persist was never wired), so a logo
+      // chosen at creation never reached Tenant.logoUrl. Hook it HERE, after
+      // createTenantApi + addTenant — the tenant row now exists under `tenantId`
+      // (the same id setTenantRoleLimits below writes to), so updateTenantLogo
+      // attaches logoUrl to a real record. Persist via the SAME action the View
+      // uses, then reflect in Redux so the table + detail show it immediately.
+      // Best-effort: a logo failure toasts but does NOT roll back the tenant.
+      if (data.logoDataUrl) {
+        try {
+          const logoRes = await updateTenantLogo(tenantId, data.logoDataUrl);
+          if (logoRes.success) {
+            dispatch(updateTenant({ id: tenantId, patch: { logoUrl: data.logoDataUrl } }));
+          } else {
+            toast.error(`${data.customerName} created, but the logo could not be saved: ${logoRes.error}. Set it from the tenant's detail page.`);
+          }
+        } catch (err) {
+          console.error("[admin] logo save on create failed", err);
+          toast.error(`${data.customerName} created, but the logo could not be saved. Set it from the tenant's detail page.`);
+        }
+      }
+
+      // Deferred Phase-C 2a — Tailored per-role caps. The tenant + plan now exist
+      // (createTenantApi assigned the plan), so persist the initial caps via
+      // setTenantRoleLimits. BEST-EFFORT: a caps failure surfaces a toast but does
+      // NOT roll back the created tenant (the caps are editable on the tenant later).
+      const hasInitialCaps = data.initialRoleCaps && Object.values(data.initialRoleCaps).some((v) => v !== null);
+      if (data.plan?.tier === "TAILORED" && hasInitialCaps && data.initialRoleCaps) {
+        try {
+          const capRes = await setTenantRoleLimits(tenantId, data.initialRoleCaps);
+          if (!capRes.success) {
+            toast.error(`${data.customerName} created, but role limits couldn't be saved: ${capRes.error}. Set them from the tenant's Role Limits.`);
+          }
+        } catch (err) {
+          console.error("[admin] setTenantRoleLimits on create failed", err);
+          toast.error(`${data.customerName} created, but role limits couldn't be saved. Set them from the tenant's Role Limits.`);
+        }
+      }
 
       // Auto-open the plan-assignment modal if no plan was set in the drawer
       if (!data.plan) {
@@ -531,7 +536,7 @@ export function useCustomerAccounts({
       newPassword: "",
       confirmPassword: "",
       plan: editingTenant.plan ? planConfigToDraft(editingTenant.plan) : null,
-      logoFile: null,
+      logoDataUrl: null,
     };
   };
 

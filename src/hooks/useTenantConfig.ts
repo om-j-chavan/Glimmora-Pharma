@@ -78,6 +78,9 @@ export function useTenantConfig() {
   return {
     tenantId: currentTenantId ?? "",
     tenantName: tenant?.name ?? "Pharma Glimmora",
+    // Server-authoritative Tenant.createdAt (ISO). Undefined until a getTenants()
+    // reload supplies it (optimistic inserts don't carry it).
+    orgCreatedAt: tenant?.createdAt ?? null,
     org: config?.org ?? DEFAULT_ORG,
     sites: accessibleSites,
     allSites,

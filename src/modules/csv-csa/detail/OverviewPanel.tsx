@@ -4,10 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Target, Shield, Zap, Server, Info, Pencil, X, Save } from "lucide-react";
 import type { GxPSystem } from "@/types/csv-csa";
-import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { updateSystem as updateSystemServer } from "@/actions/systems";
-import { displayUserName } from "@/lib/identity-display";
 
 /* ── Props ── */
 
@@ -15,15 +13,9 @@ type DocFieldKey = "intendedUse" | "gxpScope" | "criticalFunctions";
 
 export interface OverviewPanelProps {
   system: GxPSystem;
-  sites: SiteConfig[];
-  users: UserConfig[];
   role: string;
   /** Jump to another detail tab (welcome-banner shortcuts). */
   onNavigateTab: (tab: "risk" | "validation") => void;
-}
-
-function ownerName(uid: string, users: UserConfig[]) {
-  return displayUserName(uid, users);
 }
 
 /* ── Inline-editable documentation field ──
@@ -111,7 +103,7 @@ function DocField({
   );
 }
 
-export function OverviewPanel({ system, sites, users, role, onNavigateTab }: OverviewPanelProps) {
+export function OverviewPanel({ system, role, onNavigateTab }: OverviewPanelProps) {
   const router = useRouter();
   const canEdit = role !== "viewer";
   const intendedUseRef = useRef<HTMLDivElement>(null);
@@ -159,15 +151,11 @@ export function OverviewPanel({ system, sites, users, role, onNavigateTab }: Ove
       <DocField Icon={Zap} color="#f59e0b" title="Critical GxP functions" value={system.criticalFunctions ?? ""} fieldKey="criticalFunctions" systemId={system.id} canEdit={canEdit} onSaved={onSaved} />
 
       <div className="card col-span-full"><div className="card-header"><div className="flex items-center gap-2"><Server className="w-4 h-4" style={{ color: "#64748b" }} aria-hidden="true" /><span className="card-title">System information</span></div></div><div className="card-body">
+        {/* Identity fields (type/site/GAMP/GxP relevance/owner) live in the header card — not repeated here. */}
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-y-3 gap-x-6 text-[12px]">
           {([
             ["Vendor", system.vendor], ["Version", system.version],
-            ["Owner", ownerName(system.owner, users)],
-            ["Site", sites.find((s) => s.id === system.siteId)?.name ?? "—"],
-            ["GAMP Cat", `Category ${system.gamp5Category}`],
-            ["GxP relevance", system.gxpRelevance],
             ["Risk level", system.riskLevel],
-            ["System type", system.type],
           ] as const).map(([l, v]) => (
             <div key={l} className="border-b pb-2" style={{ borderColor: "var(--bg-border)" }}><span className="text-[10px] uppercase tracking-wider font-semibold block mb-0.5" style={{ color: "var(--text-muted)" }}>{l}</span><span className="font-medium" style={{ color: "var(--text-primary)" }}>{v}</span></div>
           ))}

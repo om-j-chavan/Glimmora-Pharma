@@ -664,6 +664,16 @@ export async function removeEvidenceFile(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
+  // Responsibility map - removing evidence is EXECUTE-level work: only a
+  // compliance author OR the CAPA's assignee may remove a file. Was previously
+  // gated ONLY by requireGxPAuthor (which blocks super_admin only), so a viewer
+  // or unrelated role could delete evidence. Mirrors addEvidenceFile's gate;
+  // rejects viewer (never an author, hard-stopped in isAssignedToTask).
+  const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
+  const isAssignee = isAssignedToTask(session, { ownerId: file.evidenceItem.capa.ownerId });
+  if (!isAuthorRole && !isAssignee) {
+    return { success: false, error: "Your role does not permit removing this evidence." };
+  }
   try {
     await prisma.$transaction(async (tx) => {
       await tx.evidenceFile.update({

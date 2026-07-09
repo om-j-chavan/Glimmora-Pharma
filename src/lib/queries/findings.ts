@@ -29,6 +29,10 @@ const NON_ASSIGNEE_ROLES = ["super_admin", "customer_admin", "viewer"];
  *      predicate) so they aren't locked out.
  * Operational staff only (platform/admin/viewer excluded). Mirrors — and is
  * re-enforced by — the assignFinding action.
+ *
+ * Excludes ONLY the current logged-in user (no self-assignment). Everyone else
+ * eligible stays — including the RAISER of the finding, who QA may legitimately
+ * assign the work to (the query has no createdById exclusion, by design).
  */
 export async function getFindingAssignees(session: AuthSession): Promise<FindingAssignee[]> {
   const tenantId = session.user.tenantId;
@@ -39,6 +43,9 @@ export async function getFindingAssignees(session: AuthSession): Promise<Finding
       tenantId,
       isActive: true,
       role: { notIn: NON_ASSIGNEE_ROLES },
+      // Exclude only the current user — self-assignment is disallowed. The raiser
+      // is NOT excluded here.
+      id: { not: session.user.id },
       ...(assignerSiteId ? { siteId: assignerSiteId } : {}),
     },
     select: { id: true, name: true, role: true },

@@ -62,6 +62,8 @@ model Tenant {
   deviationTaskMessages DeviationTaskMessage[]
   // Frameworks Phase 1 — per-tenant framework enablement.
   tenantFrameworks      TenantFramework[]
+  // Role-Based User Limits (Phase A, INERT) — per-tenant per-role cap OVERRIDES.
+  tenantRoleLimits      TenantRoleLimit[]
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -94,6 +96,9 @@ model Plan {
   expiryDate        DateTime
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  // Role-Based User Limits (Phase A, INERT) — this plan's DEFAULT per-role caps.
+  roleLimits        PlanRoleLimit[]
 }
 
 // Central lookup of Regulatory Region values, shared across ALL tenants (not
@@ -2063,5 +2068,52 @@ model TenantFramework {
   framework Framework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, frameworkId])
+  @@index([tenantId])
+}
+
+// ── ROLE-BASED USER LIMITS (Phase A — INERT foundation) ──
+//
+// Two additive tables implement the locked HYBRID model. Nothing reads them in
+// Phase A (the resolver in src/lib/roleLimits.ts is defined-but-unwired; no
+// enforcement, no UI). Both are intentionally EMPTY after `db push` — no seed —
+// because ABSENCE of a row = that role is UNCAPPED (unlimited). So every
+// existing plan/tenant keeps today's exact behavior: total-only, per-role
+// unlimited. `cap` is a required Int (a row that exists always carries a cap);
+// "no cap" is expressed by the ROW being absent, never by cap = 0/null.
+//
+// `role` is String (NOT a Prisma enum — SQLite has none; mirrors User.role) and
+// carries the canonical role vocabulary (src/lib/labels/roles.ts ROLE_LABELS /
+// roleLimits.ts CAP_ELIGIBLE_ROLES). Resolution order (Phase B enforcement):
+// TenantRoleLimit override → PlanRoleLimit default → unlimited.
+
+// A plan's DEFAULT cap for a role. Plan is 1:1 with Tenant, so this is the
+// per-tenant-plan baseline that a TenantRoleLimit can later override.
+model PlanRoleLimit {
+  id        String   @id @default(cuid())
+  planId    String
+  role      String
+  cap       Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, role])
+  @@index([planId])
+}
+
+// A per-tenant OVERRIDE of a role's cap. Absence → fall back to the plan default
+// (PlanRoleLimit) → unlimited.
+model TenantRoleLimit {
+  id        String   @id @default(cuid())
+  tenantId  String
+  role      String
+  cap       Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, role])
   @@index([tenantId])
 }

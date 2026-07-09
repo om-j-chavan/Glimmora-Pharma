@@ -14,7 +14,6 @@ import {
   CreditCard,
   Eye,
   EyeOff,
-  Search,
   ShieldCheck,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
@@ -48,13 +47,13 @@ import { errorCodeLabel } from "@/lib/labels/errorCodes";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Dropdown } from "@/components/ui/Dropdown";
+import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
+import { getMyRoleMatrix } from "@/actions/roleLimits";
+import { roleCapStatus, type RoleMatrixSummary } from "@/lib/roleLimits";
 import { Modal } from "@/components/ui/Modal";
 import { Toggle } from "@/components/ui/Toggle";
-import { Checkbox } from "@/components/ui/Checkbox";
 import { Badge } from "@/components/ui/Badge";
 import { PasswordConfirmModal } from "@/components/ui/PasswordConfirmModal";
-import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 
 // Role ordering for the dropdowns. Display text comes from roleLabel() — the
 // shared label layer — so labels never drift between screens.
@@ -82,7 +81,6 @@ const TENANT_ROLES_FOR_CUSTOMER_ADMIN = [
   "viewer",
 ];
 
-const ALL_SITES_ROLES = ["super_admin", "customer_admin", "qa_head", "it_cdo"];
 
 const roleChip: Record<string, string> = {
   super_admin: "bg-(--danger-bg) text-(--danger)",
@@ -193,7 +191,7 @@ function UserForm({
   onSubmit: (data: UserFormValues) => Promise<{ emailError?: string } | void>;
   submitLabel: string;
   submitIcon: typeof Plus;
-  roleOptions: { value: string; label: string }[];
+  roleOptions: DropdownOption[];
   mode?: "add" | "edit";
 }) {  const { allSites: tenantSites } = useTenantConfig();
 
@@ -201,8 +199,6 @@ function UserForm({
   // Add and Edit modals (this form backs both).
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  // Free-text filter for the assignable-sites list (U4).
-  const [siteQuery, setSiteQuery] = useState("");
   // "Discard changes?" gate — shown when Cancel/backdrop/Escape is used while
   // the form has unsaved edits (U6).
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -213,10 +209,15 @@ function UserForm({
     watch,
     setValue,
     setError,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isSubmitting, isDirty, isValid },
   } = useForm<UserFormValues>({
     resolver: zodResolver(makeUserSchema(mode)),
     defaultValues,
+    // Live validity so the submit button can stay disabled until every required
+    // field is filled, the email is valid, a role is selected, and (add mode)
+    // the password rules pass. Role caps are enforced separately: at-cap roles
+    // are disabled in the dropdown and the plan/account limit gates modal open.
+    mode: "onChange",
   });
 
   // The sticky-footer submit button lives OUTSIDE the <form> (Modal renders the
@@ -224,35 +225,27 @@ function UserForm({
   const formId = `user-form-${mode}`;
 
   const watchRole = watch("role");
-  const watchAllSites = watch("allSites");
   const watchSites = watch("assignedSites") ?? [];
 
-  // Auto-set allSites when role changes
+  // EVERY role — QA Head included — is a SINGLE-site assignment (User.siteId is a
+  // 1:1 FK): one site, or none. No role gets an all-sites ASSIGNMENT here. Force
+  // allSites=false so a freshly picked site is never nulled at write time (also
+  // heals a legacy allSites=true row, e.g. a qa_head created under the old rule).
   useEffect(() => {
-    if (ALL_SITES_ROLES.includes(watchRole)) {
-      setValue("allSites", true);
-      setValue("assignedSites", []);
-    }
+    setValue("allSites", false);
   }, [watchRole, setValue]);
 
-  const toggleSite = (siteId: string, checked: boolean) => {
-    if (checked) {
-      setValue("assignedSites", [...watchSites, siteId]);
-    } else {
-      setValue(
-        "assignedSites",
-        watchSites.filter((id) => id !== siteId),
-      );
-    }
+  // Single-site select: one site, or none. Keeps assignedSites as a 1-element (or
+  // empty) array so the existing write path (nextSiteId = assignedSites[0] ?? null)
+  // is unchanged — no regression to the site-persist fix.
+  const siteOptions: DropdownOption[] = [
+    { value: "", label: "No specific site" },
+    ...tenantSites.map((s) => ({ value: s.id, label: s.name, description: `${s.location} · ${s.gmpScope}` })),
+  ];
+  const setSingleSite = (siteId: string) => {
+    setValue("allSites", false, { shouldDirty: true });
+    setValue("assignedSites", siteId ? [siteId] : [], { shouldDirty: true });
   };
-
-  const filteredSites = tenantSites.filter((s) => {
-    const q = siteQuery.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      s.name.toLowerCase().includes(q) || s.location.toLowerCase().includes(q)
-    );
-  });
 
   // Wrap the parent's onSubmit so a returned duplicate-email error is surfaced
   // inline on the email field instead of as a global popup (U4).
@@ -285,6 +278,7 @@ function UserForm({
             type="submit"
             form={formId}
             loading={isSubmitting}
+            disabled={!isValid || isSubmitting}
           >
             {submitLabel}
           </Button>
@@ -397,106 +391,27 @@ function UserForm({
         />
       </div>
 
-      {/* Site assignment */}
-      <div className="py-3 border-t border-(--bg-border) space-y-3">
-        <div
-          className={clsx(
-            "flex items-center justify-between p-3 rounded-lg border",
-            "bg-(--bg-surface) border-(--bg-border)",
-          )}
-        >
-          <div>
-            <p
-              id="all-sites-label"
-              className="text-[13px] font-medium"
-              style={{ color: "var(--text-primary)" }}
-            >
-              Access all sites
-            </p>
-            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-              User can see data from every site
-            </p>
-          </div>
-          <Toggle
-            id="form-all-sites"
-            checked={watchAllSites}
-            onChange={(v) => {
-              setValue("allSites", v);
-              if (v) setValue("assignedSites", []);
-            }}
-            label="Access all sites"
-            hideLabel
-            disabled={ALL_SITES_ROLES.includes(watchRole)}
-          />
-        </div>
-
-        {ALL_SITES_ROLES.includes(watchRole) && (
-          <p className="text-[11px] text-[#10b981]">
-            This role automatically gets access to all sites
+      {/* Site assignment — SINGLE site (User.siteId is a 1:1 FK) for EVERY role,
+          QA Head included: one site, or none. No all-sites assignment path. */}
+      <div className="py-3 border-t border-(--bg-border) space-y-2">
+        <p className="text-[11px] font-medium text-(--text-secondary)">Site assignment</p>
+        {tenantSites.length === 0 ? (
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            No sites configured yet. Add sites in the Sites tab first.
           </p>
-        )}
-
-        {!watchAllSites && !ALL_SITES_ROLES.includes(watchRole) && (
-          <div>
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-2">
-              Assigned sites
+        ) : (
+          <>
+            <Dropdown
+              options={siteOptions}
+              value={watchSites[0] ?? ""}
+              onChange={setSingleSite}
+              placeholder="Select a site"
+              width="w-full"
+            />
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              Assign this user to a single site, or leave unassigned. A user with no site won&apos;t see location-specific data.
             </p>
-            {tenantSites.length === 0 ? (
-              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                No sites configured yet. Add sites in the Sites tab first.
-              </p>
-            ) : (
-              <>
-                {/* Search to filter the assignable-sites list (U4) */}
-                <Input
-                  id="assign-sites-search"
-                  type="search"
-                  icon={Search}
-                  placeholder="Search sites by name or location"
-                  aria-label="Search assignable sites"
-                  value={siteQuery}
-                  onChange={(e) => setSiteQuery(e.target.value)}
-                  className="mb-2"
-                />
-                {filteredSites.length === 0 ? (
-                  <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                    No sites match &ldquo;{siteQuery}&rdquo;.
-                  </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {filteredSites.map((site) => (
-                      <div
-                        key={site.id}
-                        className={clsx(
-                          "flex items-center justify-between gap-3 p-3 rounded-lg border transition-colors",
-                          watchSites.includes(site.id)
-                            ? "bg-(--brand-muted) border-[#0ea5e9]"
-                            : "bg-(--bg-surface) border-(--bg-border)",
-                        )}
-                      >
-                        <Checkbox
-                          id={`assign-site-${site.id}`}
-                          checked={watchSites.includes(site.id)}
-                          onChange={(c) => toggleSite(site.id, c)}
-                          label={site.name}
-                          description={`${site.location} · ${site.gmpScope}`}
-                        />
-                        <Badge variant={getSeverityVariant(site.risk, "generic")}>
-                          {normalizeSeverityForDisplay(site.risk, "generic") ?? site.risk}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-            {tenantSites.length > 0 && watchSites.length === 0 && (
-              <p className="text-[11px] text-[#f59e0b] mt-2">
-                No sites assigned — user won&apos;t see any location-specific
-                data
-              </p>
-            )}
-          </div>
+          </>
         )}
       </div>
     </form>
@@ -607,6 +522,41 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
     ? ROLE_OPTIONS_ALL
     : ROLE_OPTIONS_CUSTOMER_ADMIN;
 
+  // Item 4a — per-role usage for the Add-User role dropdown. Read-only view of
+  // the resolver (getMyRoleMatrix, this tenant). Refetched when the Add modal
+  // opens so counts are current.
+  const [roleMatrix, setRoleMatrix] = useState<RoleMatrixSummary | null>(null);
+  useEffect(() => {
+    if (!addModal) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await getMyRoleMatrix();
+      if (!cancelled && res.success) setRoleMatrix(res.data);
+    })();
+    return () => { cancelled = true; };
+  }, [addModal]);
+
+  // Annotate each role option with "used/cap" and disable a FULL role (reason in
+  // the badge). Super Admin is EXEMPT (Phase B) — never disable for SA, only show
+  // usage. Uncapped roles render plain. Mirrors the gate's decision; the server
+  // stays authoritative if a create is attempted anyway.
+  const addRoleOptions: DropdownOption[] = roleOptions.map((opt) => {
+    const row = roleMatrix?.rows.find((r) => r.role === opt.value);
+    if (!row || row.cap === "unlimited") return opt;
+    const status = roleCapStatus(row.cap, row.used);
+    const full = status === "full";
+    return {
+      ...opt,
+      label: `${opt.label} · ${row.used}/${row.cap}`,
+      ...(full && !isSuperAdmin
+        ? { disabled: true, badge: "Full", badgeVariant: "red" as const }
+        : full
+          ? { badge: "Full", badgeVariant: "red" as const }
+          : status === "near"
+            ? { badge: "Near", badgeVariant: "amber" as const }
+            : {}),
+    };
+  });
 
   const handleAdd = async (data: UserFormValues) => {
     // AI backend + our @@unique([tenantId, username]) require username ≥ 3 chars;
@@ -1025,17 +975,15 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
               header: "Sites",
               width: "w-[12%]",
               render: (u) =>
-                u.allSites || ALL_SITES_ROLES.includes(u.role) ? (
-                  <Badge variant="green">All sites</Badge>
-                ) : u.assignedSites.length === 0 ? (
-                  <Badge variant="red">No sites</Badge>
+                // Single-site model for every role (QA Head included): one site, or none.
+                u.assignedSites.length === 0 ? (
+                  <Badge variant="red">No site</Badge>
                 ) : (
                   <span
                     className="text-[12px]"
                     style={{ color: "var(--text-secondary)" }}
                   >
                     {u.assignedSites.length} site
-                    {u.assignedSites.length !== 1 ? "s" : ""}
                   </span>
                 ),
             },
@@ -1132,7 +1080,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           onSubmit={handleAdd}
           submitLabel="Add user"
           submitIcon={UserPlus}
-          roleOptions={roleOptions}
+          roleOptions={addRoleOptions}
         />
       )}
 
@@ -1152,9 +1100,9 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             role: editingUser.role,
             gxpSignatory: editingUser.gxpSignatory,
             status: editingUser.status,
-            allSites:
-              editingUser.allSites ??
-              ALL_SITES_ROLES.includes(editingUser.role),
+            // Single-site model — never prefill an all-sites assignment; the
+            // form normalizes to false and shows the single-site picker.
+            allSites: false,
             assignedSites: editingUser.assignedSites ?? [],
             password: "",
             confirmPassword: "",

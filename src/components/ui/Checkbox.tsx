@@ -39,7 +39,7 @@ export function Checkbox({ checked, onChange, label, id, description, disabled, 
             "disabled:opacity-40 disabled:cursor-not-allowed",
           )}
         />
-        <label htmlFor={id} className={clsx("cursor-pointer select-none", disabled && "opacity-40 cursor-not-allowed")}>
+        <label htmlFor={id} className={clsx("select-none", disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer")}>
           <span className="text-sm font-medium text-(--text-primary)">{label}</span>
           {description && (
             <p id={descId} className="text-xs text-(--text-muted)">{description}</p>

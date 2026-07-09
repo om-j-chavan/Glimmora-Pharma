@@ -15,8 +15,9 @@
  */
 
 import { useState, type CSSProperties } from "react";
-import { Sparkles, Copy, Check, ThumbsUp, ThumbsDown, AlertTriangle, ChevronDown } from "lucide-react";
+import { Sparkles, Copy, Check, ThumbsUp, ThumbsDown, AlertTriangle, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiSummarizeSend, AiChatError, type SummaryResponse } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -24,10 +25,13 @@ import { friendlyAiError } from "@/lib/friendlyError";
 type Lens = "qa" | "management" | "risks";
 type Length = "short" | "detailed";
 
+// Human-readable audience labels for the summary-view (lens) selector. NOTE: the
+// KEYS (qa/management/risks) are the lens param sent to the AI backend and are
+// UNCHANGED — only these display labels are clarified.
 const LENS_LABEL: Record<Lens, string> = {
-  qa: "QA review",
+  qa: "QA Review",
   management: "Management",
-  risks: "Highlight risks only",
+  risks: "Highlight Risks",
 };
 
 interface Props {
@@ -94,93 +98,122 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
   const toggleBtn = (active: boolean): CSSProperties =>
     active ? { background: "var(--brand)", color: "#fff" } : { background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" };
 
-  // Collapsed — just the Summarize button (the "before" state).
-  if (!open) {
-    return (
+  const close = () => setOpen(false);
+
+  // The trigger stays in place; the summary now renders in the SHARED <Modal>
+  // (centered dialog) instead of an inline page panel. ALL behavior is preserved
+  // — immediate run on open, loading state, the labeled lens selector (in the
+  // modal header) that regenerates, short-circuit/error states, bullets,
+  // Short/Detailed, Copy + feedback.
+  return (
+    <>
       <Button type="button" variant="primary" size="sm" icon={Sparkles} onClick={() => run(length, lens)} className={className}>
         {buttonLabel}
       </Button>
-    );
-  }
 
-  return (
-    <section aria-label="AI document summary" className={"rounded-xl overflow-hidden " + (className ?? "")} style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
-      <div className="flex items-center justify-between px-3 py-2" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--card-border)" }}>
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: "var(--brand)" }}>
-          <Sparkles className="w-3.5 h-3.5" aria-hidden="true" /> AI Summary
-        </span>
-        {/* Lens menu (advanced) */}
-        <div className="relative">
-          <button type="button" onClick={() => setLensMenu((v) => !v)} aria-expanded={lensMenu} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border cursor-pointer" style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", background: "var(--bg-surface)" }}>
-            {LENS_LABEL[lens]} <ChevronDown className="w-3 h-3" aria-hidden="true" />
-          </button>
-          {lensMenu && (
-            <div className="absolute right-0 mt-1 z-20 rounded-lg py-1 text-[12px] min-w-[180px]" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", boxShadow: "0 8px 24px rgba(0,0,0,0.18)" }}>
-              {(Object.keys(LENS_LABEL) as Lens[]).map((l) => (
-                <button key={l} type="button" onClick={() => pickLens(l)} className="w-full text-left px-3 py-2 cursor-pointer border-0 bg-transparent" style={{ color: l === lens ? "var(--brand)" : "var(--text-primary)" }}>
-                  Summarize for: {LENS_LABEL[l]}
+      <Modal
+        open={open}
+        onClose={close}
+        title={`AI Summary${title ? ` — ${title}` : ""}`}
+        header={
+          <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-(--bg-border)">
+            <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold min-w-0 truncate" style={{ color: "var(--text-primary)" }}>
+              <Sparkles className="w-4 h-4 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" /> <span className="truncate">AI Summary{title ? ` — ${title}` : ""}</span>
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Summary-view (lens) selector — re-frames the summary for a different
+                  audience; each pick regenerates via pickLens(). Labeled + tooltip. */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setLensMenu((v) => !v)}
+                  aria-expanded={lensMenu}
+                  aria-label="Summary view — re-frame this summary for a different audience"
+                  title="Re-frame this summary for a different audience"
+                  className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border cursor-pointer"
+                  style={{ borderColor: "var(--bg-border)", color: "var(--text-secondary)", background: "var(--bg-surface)" }}
+                >
+                  <span style={{ color: "var(--text-muted)" }}>Summary view:</span>
+                  <span className="font-medium" style={{ color: "var(--text-primary)" }}>{LENS_LABEL[lens]}</span>
+                  <ChevronDown className="w-3 h-3" aria-hidden="true" />
                 </button>
-              ))}
+                {lensMenu && (
+                  <div className="absolute right-0 mt-1 z-20 rounded-lg py-1 text-[12px] min-w-[210px]" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", boxShadow: "0 8px 24px rgba(0,0,0,0.18)" }}>
+                    <p className="px-3 py-1.5 text-[10px] uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Re-frame summary for…</p>
+                    {(Object.keys(LENS_LABEL) as Lens[]).map((l) => (
+                      <button key={l} type="button" onClick={() => pickLens(l)} className="w-full text-left px-3 py-2 cursor-pointer border-0 bg-transparent" style={{ color: l === lens ? "var(--brand)" : "var(--text-primary)" }}>
+                        {LENS_LABEL[l]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* Single header close (✕); the footer "Close" mirrors it (same action). */}
+              <button type="button" onClick={close} aria-label="Close" className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors">
+                <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+              </button>
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        }
+        footer={
+          <div className="flex justify-end">
+            <Button type="button" variant="secondary" size="sm" onClick={close}>Close</Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {busy && <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Summarizing…</p>}
+          {error && <p role="alert" className="text-[12px]" style={{ color: "var(--danger)" }}>{error}</p>}
 
-      <div className="p-3 space-y-3">
-        {busy && <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Summarizing…</p>}
-        {error && <p role="alert" className="text-[12px]" style={{ color: "var(--danger)" }}>{error}</p>}
-
-        {!busy && result?.status === "skipped" && (
-          <div className="space-y-2">
+          {!busy && result?.status === "skipped" && (
             <p className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "var(--bg-surface)", color: "var(--text-secondary)" }}>
               <span className="font-semibold" style={{ color: "var(--brand)" }}>AI </span>{result.reason}
             </p>
-            <Button type="button" variant="secondary" size="xs" onClick={() => { setOpen(false); setResult(null); }}>Close</Button>
-          </div>
-        )}
+          )}
 
-        {!busy && result?.status === "error" && (
-          <p className="text-[12px]" style={{ color: "var(--danger)" }}>{result.reason}</p>
-        )}
+          {!busy && result?.status === "error" && (
+            <p className="text-[12px]" style={{ color: "var(--danger)" }}>{result.reason}</p>
+          )}
 
-        {!busy && result?.status === "summarized" && (
-          <>
-            <ul className="space-y-1.5">
-              {result.bullets.map((b, i) => (
-                <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: "var(--text-primary)" }}>
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--brand)" }} aria-hidden="true" />
-                  <span>{b}</span>
-                </li>
-              ))}
-            </ul>
+          {!busy && result?.status === "summarized" && (
+            <>
+              <ul className="space-y-1.5">
+                {result.bullets.map((b, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: "var(--text-primary)" }}>
+                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--brand)" }} aria-hidden="true" />
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
 
-            {/* Short / Detailed length toggle */}
-            <div className="inline-flex rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
-              <button type="button" onClick={() => pickLength("short")} className="px-3 py-1 text-[11px] font-medium border-0 cursor-pointer" style={toggleBtn(length === "short")}>Short</button>
-              <button type="button" onClick={() => pickLength("detailed")} className="px-3 py-1 text-[11px] font-medium border-0 cursor-pointer" style={toggleBtn(length === "detailed")}>Detailed</button>
-            </div>
+              {/* Short / Detailed length toggle */}
+              <div className="inline-flex rounded-lg overflow-hidden" style={{ border: "1px solid var(--bg-border)" }}>
+                <button type="button" onClick={() => pickLength("short")} className="px-3 py-1 text-[11px] font-medium border-0 cursor-pointer" style={toggleBtn(length === "short")}>Short</button>
+                <button type="button" onClick={() => pickLength("detailed")} className="px-3 py-1 text-[11px] font-medium border-0 cursor-pointer" style={toggleBtn(length === "detailed")}>Detailed</button>
+              </div>
 
-            {/* Verify disclaimer */}
-            <div className="flex items-start gap-1.5 rounded-lg px-3 py-2 text-[11px]" style={{ background: "#fef3c7", color: "#92400e" }}>
-              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
-              <span>{result.disclaimer}</span>
-            </div>
+              {/* Verify disclaimer */}
+              <div className="flex items-start gap-1.5 rounded-lg px-3 py-2 text-[11px]" style={{ background: "#fef3c7", color: "#92400e" }}>
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden="true" />
+                <span>{result.disclaimer}</span>
+              </div>
 
-            {/* Copy + feedback */}
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="secondary" size="xs" icon={copied ? Check : Copy} onClick={copyAll}>
-                {copied ? "Copied" : "Copy"}
-              </Button>
-              <button type="button" aria-label="Helpful" onClick={() => setVote("up")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "up" ? "var(--brand)" : "var(--text-muted)" }}>
-                <ThumbsUp className="w-3 h-3" aria-hidden="true" />
-              </button>
-              <button type="button" aria-label="Not helpful" onClick={() => setVote("down")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "down" ? "var(--danger)" : "var(--text-muted)" }}>
-                <ThumbsDown className="w-3 h-3" aria-hidden="true" />
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </section>
+              {/* Copy + feedback */}
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="secondary" size="xs" icon={copied ? Check : Copy} onClick={copyAll}>
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+                <button type="button" aria-label="Helpful" onClick={() => setVote("up")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "up" ? "var(--brand)" : "var(--text-muted)" }}>
+                  <ThumbsUp className="w-3 h-3" aria-hidden="true" />
+                </button>
+                <button type="button" aria-label="Not helpful" onClick={() => setVote("down")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "down" ? "var(--danger)" : "var(--text-muted)" }}>
+                  <ThumbsDown className="w-3 h-3" aria-hidden="true" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+    </>
   );
 }

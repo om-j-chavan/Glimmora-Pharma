@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { formatDate } from "@/lib/dates";
 import { regulatoryRegionLabel } from "@/constants/regulatoryRegions";
 
 // Regulatory Region is Super-Admin-owned and set per-tenant; Customer Admin
@@ -58,7 +59,7 @@ function Field({ label, value }: { label: string; value: string }) {
 
 export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
-  const { org, tenantId } = useTenantConfig();
+  const { org, tenantId, orgCreatedAt } = useTenantConfig();
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -122,7 +123,7 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
           <Field label="Company Name" value={org.companyName} />
           <Field label="Regulatory Region" value={regionLabel} />
           <Field label="Timezone" value={tzLabel} />
-          <Field label="Date Format" value={org.dateFormat} />
+          <Field label="Organization Created Date" value={orgCreatedAt ? formatDate(orgCreatedAt) : "—"} />
         </div>
 
         <div className="px-5 pb-4">

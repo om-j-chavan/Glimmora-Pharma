@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { generateOtp, verifyOtp } from "@/lib/otp";
 import { sendOtpEmail } from "@/lib/mailer";
 import { auditAuthEvent } from "@/lib/auditServer";
-import { isTenantAccessible } from "@/lib/permissions/roleSets";
+import { isTenantAccessible, roleRequiresSite } from "@/lib/permissions/roleSets";
 
 /**
  * Production guard for NEXTAUTH_SECRET (audit findings 3.6 + 11.3).
@@ -384,6 +384,29 @@ export const authOptions: NextAuthOptions = {
                 newValue: { email, reason: "wrong_password", path: "user" },
               });
               return null;
+            }
+
+            // ── Site-assignment gate (User path) ──
+            // A site-BOUND seat user with NO assigned site cannot enter the app
+            // (they'd see no site-scoped data). Blocked server-side here — the
+            // real boundary, not a UI redirect. EXEMPT: the site-less-by-design
+            // roles (super_admin, customer_admin, qa_head) via roleRequiresSite()
+            // — blocking them would lock out the admins who ASSIGN sites. Runs
+            // after password verification so only an authenticated user learns
+            // the specific reason.
+            if (roleRequiresSite(user.role) && !user.siteId) {
+              await auditAuthEvent({
+                action: "LOGIN_NO_SITE",
+                tenantId: user.tenantId,
+                userId: user.id,
+                userName: user.name,
+                userRole: user.role,
+                recordId: user.id,
+                recordTitle: user.email,
+                ipAddress,
+                newValue: { email, role: user.role, path: "user" },
+              });
+              throw new Error("NO_SITE_ASSIGNED");
             }
 
             const plan = user.tenant?.plan;

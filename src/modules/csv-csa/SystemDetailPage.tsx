@@ -129,7 +129,7 @@ export function SystemDetailPage({ system: prismaSystem, availableFindings, rece
       {/* ── ASSESS ── */}
       {tab === "assess" && (
         <div className="space-y-4">
-          <OverviewPanel system={system} sites={sites} users={users} role={role} onNavigateTab={(t) => goTab(t === "validation" ? "execute" : "assess")} />
+          <OverviewPanel system={system} role={role} onNavigateTab={(t) => goTab(t === "validation" ? "execute" : "assess")} />
           <ComplianceFindingsTab
             system={system} role={role}
             showPart11={hasFramework("p11")} showAnnex11={hasFramework("annex11")} showGAMP5={hasFramework("gamp5")}

@@ -326,8 +326,13 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   }
 
   async function handleAddFinding(data: FindingForm) {
-    const { raiseCapaImmediately, evidenceFile, ...rest } = data;
-    const evidenceReference = rest.evidenceLink?.trim() || evidenceFile?.name || "";
+    const { raiseCapaImmediately, evidenceFiles, ...rest } = data;
+    // BUG FIX — the Evidence Link must be ONLY what the user typed. Previously it
+    // fell back to `evidenceFiles?.[0]?.name` (the uploaded file's NAME), so a
+    // finding with an attached file but no typed link got its Evidence Link
+    // auto-populated with the file name. The files are uploaded separately
+    // (uploadFindingEvidence, post-create) and must NOT masquerade as the link.
+    const evidenceReference = rest.evidenceLink?.trim() || "";
     const result = await createFindingAction({
       requirement: rest.requirement,
       purpose: rest.purpose || undefined,
@@ -359,6 +364,18 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       const linkRes = await linkFindingToSystemAction(rest.linkedSystemId, created.id);
       if (!linkRes.success) {
         console.error("[gap] linkFindingToSystem failed:", linkRes.error);
+      }
+    }
+    // Multi-file evidence (#2) — the create modal stages files; now that the
+    // finding exists, upload each as a real linked Document (mirrors the
+    // worklist FindingWorkPanel upload). Best-effort + sequential: a per-file
+    // failure is logged, not fatal (the finding is already created).
+    if (created?.id && evidenceFiles && evidenceFiles.length > 0) {
+      for (const ev of evidenceFiles) {
+        const fd = new FormData();
+        fd.append("file", ev.file);
+        const upRes = await uploadFindingEvidenceAction(created.id, fd);
+        if (!upRes.success) console.error("[gap] uploadFindingEvidence failed:", ev.name, upRes.error);
       }
     }
     setAddOpen(false);

@@ -4,7 +4,6 @@ import { useForm, Controller } from "react-hook-form";
 import {
   ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, Paperclip, Send, Wrench, CheckCircle2, Clock, X,
 } from "lucide-react";
-import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import { frameworkLabel } from "@/constants/frameworks";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -75,6 +74,21 @@ function capaStatusBadge(s: string) {
 
 const LABEL = "text-[11px] font-semibold uppercase tracking-wider text-(--text-muted) mb-1 block";
 const LOCKED_HINT = <span className="text-[10px] text-[#64748b] italic ml-1.5">(cannot change)</span>;
+
+/** A labelled group of evidence documents on the SHARED <DocumentCard> (View +
+ *  Download). Used for the origin-split (Gap Evidence vs Worklist Documents);
+ *  renders nothing when the group is empty (no empty placeholder). */
+function DocGroup({ label, docs }: { label: string; docs: WorklistDoc[] }) {
+  if (docs.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>{label}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {docs.map((d) => <DocumentCard key={d.id} doc={worklistDocToCardView(d)} />)}
+      </div>
+    </div>
+  );
+}
 
 /* ── Form type ── */
 interface EditForm {
@@ -157,10 +171,8 @@ export function GapRegisterTab({
   const [reworkReasonInput, setReworkReasonInput] = useState("");
   const [reviewMsg, setReviewMsg] = useState("");
   const [reviewError, setReviewError] = useState<string | null>(null);
-  // Round 4 — the finding's uploaded evidence docs (read-only in the modal) +
-  // the collapsible Audit Trail open state (collapsed by default).
+  // Round 4 — the finding's uploaded evidence docs (read-only in the modal).
   const [findingDocs, setFindingDocs] = useState<WorklistDoc[]>([]);
-  const [auditOpen, setAuditOpen] = useState(false);
   // #13 — Clock icon in the modal header opens a scrollable Audit Trail modal.
   const [auditModalOpen, setAuditModalOpen] = useState(false);
 
@@ -187,6 +199,13 @@ export function GapRegisterTab({
     })();
     return () => { cancelled = true; };
   }, [selectedFinding?.id]);
+
+  // Item 4 — origin split (reuses the Worklist Detail pattern + shared DocumentCard):
+  // docs uploaded by the finding's OWNER (the worklist assignee/worker) are the
+  // "Worklist Documents"; docs uploaded by anyone else (QA/author, on the gap
+  // detail) are "Gap Evidence". Origin is Document.uploadedById === finding.owner.
+  const worklistDocs = findingDocs.filter((d) => !!d.uploadedById && d.uploadedById === selectedFinding?.owner);
+  const gapDocs = findingDocs.filter((d) => !(d.uploadedById && d.uploadedById === selectedFinding?.owner));
 
   async function refreshReview() {
     if (!selectedFinding) return;
@@ -281,7 +300,6 @@ export function GapRegisterTab({
     setIsEditing(false);
     setEditReason("");
     setSaveError("");
-    setAuditOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFinding?.id]);
 
@@ -597,6 +615,8 @@ export function GapRegisterTab({
       >
         {selectedFinding && (
           <div className="space-y-4">
+            {/* Created-At removed from the detail TOP section (the full timestamp
+                remains in the audit/details section below + the header-clock modal). */}
             {/* Header: severity + status badges, with the Edit action on the
                 right (header action; ✕ closes; Save/Cancel in footer on edit). */}
             <div className="flex items-center justify-between gap-2">
@@ -918,14 +938,12 @@ export function GapRegisterTab({
                 {review.completionNotes && (
                   <p className="text-[12px] mt-1.5" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {review.completionNotes}</p>
                 )}
-                {/* Worker-uploaded evidence — the SAME shared <DocumentCard>, so QA
-                    sees the notes AND the attached documents together (#9). */}
+                {/* Evidence — split by origin (shared <DocumentCard>): Gap Evidence
+                    (gap-native) vs Worklist Documents (received from the worker). */}
                 {findingDocs.length > 0 && (
-                  <div className="mt-2">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Evidence submitted</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {findingDocs.map((d) => <DocumentCard key={d.id} doc={worklistDocToCardView(d)} />)}
-                    </div>
+                  <div className="mt-2 space-y-3">
+                    <DocGroup label="Gap Evidence" docs={gapDocs} />
+                    <DocGroup label="Worklist Documents" docs={worklistDocs} />
                   </div>
                 )}
                 {/* The rework reason renders ONCE — in the Conversation thread
@@ -956,89 +974,20 @@ export function GapRegisterTab({
                 <DocumentCard> (View + Download per card). Rendered here ONLY when
                 the QA-review card above is NOT shown (pre-submission / no review
                 loop); once submitted, the same docs surface inside that card as
-                the "Evidence submitted" bundle, so they never duplicate. ── */}
-            {!(review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0)) && (
-              <div className="pt-4 border-t border-(--bg-border)">
-                <h3 className={LABEL}>Documents</h3>
-                {findingDocs.length === 0 ? (
-                  <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>No documents uploaded to this finding.</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {findingDocs.map((d) => <DocumentCard key={d.id} doc={worklistDocToCardView(d)} />)}
-                  </div>
-                )}
+                the "Evidence submitted" bundle, so they never duplicate. #6 —
+                the whole section is HIDDEN when there are no documents (no empty
+                placeholder). ── */}
+            {!(review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0)) && findingDocs.length > 0 && (
+              <div className="pt-4 border-t border-(--bg-border) space-y-3">
+                <DocGroup label="Gap Evidence" docs={gapDocs} />
+                <DocGroup label="Worklist Documents" docs={worklistDocs} />
               </div>
             )}
 
-            {/* ── Created (always visible, #8) + Audit Trail (collapsible, collapsed
-                by default) — the former "Timeline", renamed (Round 4 #7+#9). ── */}
-            {!isEditing && (
-              <div className="pt-4 border-t border-(--bg-border)">
-                {selectedFinding.createdAt && (
-                  <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
-                    Created {dayjs.utc(selectedFinding.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
-                  </p>
-                )}
-                <button type="button" onClick={() => setAuditOpen((v) => !v)} aria-expanded={auditOpen}
-                  className="flex items-center gap-1.5 bg-transparent border-none cursor-pointer p-0">
-                  <ChevronRight className={clsx("w-3.5 h-3.5 transition-transform", auditOpen && "rotate-90")} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                  <span className={LABEL} style={{ marginBottom: 0 }}>Audit Trail</span>
-                </button>
-                {auditOpen && (
-                <div className="space-y-2.5 text-[11px] mt-2">
-                  {selectedFinding.createdAt && (
-                    <div className="flex items-start gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "var(--brand)" }} />
-                      <div>
-                        <p className="font-medium" style={{ color: "var(--text-primary)" }}>Created</p>
-                        <p style={{ color: "var(--text-muted)" }}>
-                          {ownerName(selectedFinding.owner)} &mdash; {dayjs.utc(selectedFinding.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {selectedFinding.capaId && (() => {
-                    const linkedCapa = capas.find((c) => c.id === selectedFinding.capaId) ?? capas.find((c) => c.findingId === selectedFinding.id);
-                    return linkedCapa ? (
-                      <div className="flex items-start gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#f59e0b" }} />
-                        <div>
-                          <p className="font-medium" style={{ color: "var(--text-primary)" }}>CAPA raised &mdash; {linkedCapa.reference ?? linkedCapa.id}</p>
-                          <p style={{ color: "var(--text-muted)" }}>
-                            {ownerName(linkedCapa.owner)} &mdash; {linkedCapa.createdAt ? dayjs.utc(linkedCapa.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A") : "\u2014"}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null;
-                  })()}
-                  {/* Full edit history, folded into the unified Audit Trail
-                      (the separate "Edit history" view was a redundant filter of
-                      the SAME data and was removed — #11). Names are readable
-                      (#12: the adapter now uses editedByName, not the userId). */}
-                  {selectedFinding.editHistory && selectedFinding.editHistory.slice().reverse().map((edit) => (
-                    <div key={edit.editedAt} className="flex items-start gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#10b981" }} />
-                      <div>
-                        <p className="font-medium" style={{ color: "var(--text-primary)" }}>Edited by {displayName({ name: edit.editedBy })}</p>
-                        <p style={{ color: "var(--text-muted)" }}>{dayjs.utc(edit.editedAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}</p>
-                        {edit.reason && <p className="italic" style={{ color: "var(--text-secondary)" }}>&ldquo;{edit.reason}&rdquo;</p>}
-                        {edit.changes.map((c, ci) => (
-                          <p key={ci} style={{ color: "var(--text-secondary)" }}>
-                            {c.field}: <span style={{ color: "#ef4444" }}>{String(c.oldValue)}</span>{" → "}<span style={{ color: "#10b981" }}>{String(c.newValue)}</span>
-                          </p>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  {selectedFinding.linkedSystemName && (
-                    <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
-                      Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
-                    </p>
-                  )}
-                </div>
-                )}
-              </div>
-            )}
+            {/* #8 — the inline "Audit Trail" collapse was removed: it duplicated
+                the header-clock Audit Trail modal below. No audit DATA is dropped
+                — Created + CAPA-raised + linked-system + edit history all live in
+                that modal now. */}
 
           </div>
         )}
@@ -1057,6 +1006,19 @@ export function GapRegisterTab({
                 </div>
               </div>
             )}
+            {/* #8 — CAPA-raised entry (folded in from the removed inline collapse). */}
+            {selectedFinding.capaId && (() => {
+              const linkedCapa = capas.find((c) => c.id === selectedFinding.capaId) ?? capas.find((c) => c.findingId === selectedFinding.id);
+              return linkedCapa ? (
+                <div className="flex items-start gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#f59e0b" }} />
+                  <div>
+                    <p className="font-medium" style={{ color: "var(--text-primary)" }}>CAPA raised &mdash; {linkedCapa.reference ?? linkedCapa.id}</p>
+                    <p style={{ color: "var(--text-muted)" }}>{ownerName(linkedCapa.owner)} &mdash; {linkedCapa.createdAt ? dayjs.utc(linkedCapa.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A") : "—"}</p>
+                  </div>
+                </div>
+              ) : null;
+            })()}
             {selectedFinding.editHistory && selectedFinding.editHistory.slice().reverse().map((edit) => (
               <div key={edit.editedAt} className="flex items-start gap-2">
                 <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "#10b981" }} />
@@ -1070,6 +1032,12 @@ export function GapRegisterTab({
                 </div>
               </div>
             ))}
+            {/* #8 — linked-system entry (folded in from the removed inline collapse). */}
+            {selectedFinding.linkedSystemName && (
+              <p className="mt-1" style={{ color: "var(--text-muted)" }}>
+                Linked system: <span style={{ color: "var(--text-primary)" }}>{selectedFinding.linkedSystemName}</span>
+              </p>
+            )}
             {(!selectedFinding.editHistory || selectedFinding.editHistory.length === 0) && (
               <p style={{ color: "var(--text-muted)" }}>No edits recorded yet.</p>
             )}

@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Upload, X, Sparkles, Bot } from "lucide-react";
+import { Plus, Upload, X, Sparkles, Bot, Trash2 } from "lucide-react";
 import { classifyFinding, type FindingTriageResult } from "@/lib/ai";
 import type { FindingSeverity } from "@/store/findings.slice";
 import type { DocType } from "@/store/evidence.slice";
@@ -13,8 +13,10 @@ import { Input } from "@/components/ui/Input";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
-import { RcaMethodFields, rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
-import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { DocumentCard } from "@/components/shared/DocumentCard";
+import { rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
+import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
 import { frameworkLabel } from "@/constants/frameworks";
 
 const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
@@ -42,14 +44,22 @@ const findingSchema = z.object({
 });
 type FindingForm = z.infer<typeof findingSchema>;
 
-interface UploadedEvidenceFile {
+/** A single evidence file STAGED in the create modal (before the finding
+ *  exists). Holds the real `File` so GapPage can upload it via
+ *  uploadFindingEvidence once the finding is created; `url` is a local
+ *  object URL used only for the in-modal View button. */
+interface StagedEvidenceFile {
+  id: string;
+  file: File;
   name: string;
   sizeKb: number;
   type: DocType;
+  url: string;
 }
 
 type AddFindingPayload = FindingForm & {
-  evidenceFile?: UploadedEvidenceFile;
+  /** Staged evidence files — uploaded to the finding post-create (multi-file). */
+  evidenceFiles?: { file: File; name: string; type: DocType }[];
   /** Structured RCA JSON (rootCause carries the readable mirror). */
   rcaDetail?: string;
 };
@@ -75,10 +85,16 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     resolver: zodResolver(findingSchema),
     defaultValues: { severity: "High", siteId: lockedSiteId ?? "", raiseCapaImmediately: false },
   });
-  const [evidenceFile, setEvidenceFile] = useState<UploadedEvidenceFile | null>(null);
-  // Gap RCA (Batch B) — structured method detail (mirrors CAPA's create modal).
+  // Multi-file staged evidence — uploaded to the finding post-create. Each
+  // carries the real File + a local object URL (for the View button).
+  const [evidenceFiles, setEvidenceFiles] = useState<StagedEvidenceFile[]>([]);
+  // Delete-confirmation target (shared ConfirmModal before removing a file).
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  // Gap RCA (Batch B) — structured method detail. RCA is not collected in the Add
+  // form (assessment-time only), but the state is retained so the submit payload
+  // shape stays stable (serializes to undefined when no method is set).
   const [detail, setDetail] = useState<RcaDetail>({});
-  const rcaMethod = watch("rcaMethod");
+  const evidenceLinkValue = watch("evidenceLink") ?? "";
 
   // Feature I — Finding Triage (AGI). Pre-fills framework + severity and shows
   // a risk summary + evidence gaps. Advisory only: the values land in the form
@@ -128,15 +144,38 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
   }
 
   function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setEvidenceFile({
-      name: file.name,
-      sizeKb: Math.max(1, Math.round(file.size / 1024)),
-      type: inferDocType(file.name),
-    });
-    setValue("evidenceLink", file.name, { shouldDirty: true });
+    // Multi-file: append EVERY picked file to the staged list (the input allows
+    // multiple, and re-picking adds more — the value is reset so the same file
+    // can be chosen again).
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    setEvidenceFiles((prev) => [
+      ...prev,
+      ...files.map((file) => ({
+        id: `${file.name}-${file.size}-${prev.length}-${file.lastModified}`,
+        file,
+        name: file.name,
+        sizeKb: Math.max(1, Math.round(file.size / 1024)),
+        type: inferDocType(file.name),
+        url: URL.createObjectURL(file),
+      })),
+    ]);
     e.currentTarget.value = "";
+  }
+
+  function confirmRemoveFile() {
+    if (!pendingDeleteId) return;
+    setEvidenceFiles((prev) => {
+      const target = prev.find((f) => f.id === pendingDeleteId);
+      if (target) URL.revokeObjectURL(target.url);
+      return prev.filter((f) => f.id !== pendingDeleteId);
+    });
+    setPendingDeleteId(null);
+  }
+
+  /** Revoke every staged object URL (on close / after save) to avoid leaks. */
+  function revokeAllStaged() {
+    setEvidenceFiles((prev) => { prev.forEach((f) => URL.revokeObjectURL(f.url)); return []; });
   }
 
   // Smart default: auto-select Part 11 framework when the user picks CSV/IT area
@@ -156,12 +195,13 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     const rootCause = data.rcaMethod ? rcaDetailToText(data.rcaMethod, detail) : undefined;
     onSave({
       ...data,
-      evidenceFile: evidenceFile ?? undefined,
+      evidenceFiles: evidenceFiles.map((f) => ({ file: f.file, name: f.name, type: f.type })),
       rootCause: rootCause || undefined,
       rcaDetail: data.rcaMethod ? JSON.stringify(detail) : undefined,
     });
     reset();
-    setEvidenceFile(null);
+    revokeAllStaged();
+    setPendingDeleteId(null);
     setDetail({});
     setTriage(null);
     setTriageError("");
@@ -171,12 +211,14 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     onClose();
     setDetail({});
     reset();
-    setEvidenceFile(null);
+    revokeAllStaged();
+    setPendingDeleteId(null);
     setTriage(null);
     setTriageError("");
   }
 
   return (
+    <>
     <Modal open={isOpen} onClose={handleClose} title="Report Compliance Gap"
       footer={
         <div className="flex justify-end gap-3">
@@ -311,9 +353,10 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
             <textarea id="f-purpose" rows={2} className="input text-[12px] resize-none" placeholder="Why this gap matters / what closing it achieves" {...reg("purpose")} />
           </div>
 
-          {/* Target date (Owner field removed — owner is auto-assigned to the
-              creator server-side). */}
-          <div>
+          {/* Target date — FULL WIDTH (#1). Owner field removed (owner is
+              auto-assigned to the creator server-side). The `-mt-2` trims the
+              extra gap ABOVE the picker without touching the spacing below. */}
+          <div className="col-span-2 -mt-2">
             <DatePicker id="f-target" label="Target date" required min={todayISO()}
               value={watch("targetDate") ?? ""}
               onChange={(v) => setValue("targetDate", v, { shouldValidate: true })}
@@ -321,77 +364,84 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
           </div>
 
           <div className="col-span-2">
+            {/* #3 — Evidence link with a Clear (✕) button at the end (shown only
+                when the field has a value; clears just this field). */}
             <Input
               id="f-evidence"
               label="Evidence link (optional)"
               placeholder="Document reference or URL"
               {...reg("evidenceLink")}
+              rightAdornment={evidenceLinkValue ? (
+                <button
+                  type="button"
+                  onClick={() => setValue("evidenceLink", "", { shouldDirty: true, shouldValidate: true })}
+                  className="w-6 h-6 rounded-md flex items-center justify-center border-none bg-transparent cursor-pointer hover:bg-(--bg-hover) text-(--text-muted)"
+                  aria-label="Clear evidence link"
+                  title="Clear"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              ) : undefined}
             />
             <div className="mt-2 rounded-lg border p-3" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)" }}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>Upload evidence file</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>Adds the document to Evidence & Documents and links it to this finding.</p>
+                  <p className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>Upload evidence files</p>
+                  <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>Add one or more documents — each is uploaded to Evidence &amp; Documents and linked to this finding.</p>
                 </div>
-                <label className="inline-flex">
-                  <input type="file" className="hidden" onChange={handleFileChange} />
+                {/* #2 — MULTIPLE file selection (multiple + add-more). */}
+                <label className="inline-flex shrink-0">
+                  <input type="file" multiple className="hidden" onChange={handleFileChange} />
                   <span className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium cursor-pointer" style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "1px solid var(--brand-border)" }}>
                     <Upload className="w-3.5 h-3.5" />
-                    Choose file
+                    {evidenceFiles.length > 0 ? "Add more" : "Choose files"}
                   </span>
                 </label>
               </div>
-              {evidenceFile && (
-                <div className="mt-3 flex items-center justify-between gap-3 rounded-lg px-3 py-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{evidenceFile.name}</p>
-                    <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{evidenceFile.type} · {evidenceFile.sizeKb} KB</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEvidenceFile(null);
-                      setValue("evidenceLink", "", { shouldDirty: true });
-                    }}
-                    className="border-none bg-transparent p-1 cursor-pointer"
-                    style={{ color: "var(--text-muted)" }}
-                    aria-label="Remove selected evidence file"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+              {/* #2 — staged files as the shared <DocumentCard> (View opens the
+                  local file; the Delete/Trash action confirms via ConfirmModal). */}
+              {evidenceFiles.length > 0 && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {evidenceFiles.map((f) => (
+                    <DocumentCard
+                      key={f.id}
+                      doc={{
+                        id: f.id,
+                        title: f.name,
+                        meta: `${f.type} · ${f.sizeKb} KB`,
+                        badge: { label: "Pending upload", tone: "amber" },
+                        viewHref: f.url,
+                        downloadHref: null,
+                      }}
+                      onRemove={() => setPendingDeleteId(f.id)}
+                    />
+                  ))}
                 </div>
               )}
             </div>
           </div>
 
-          {/* Root Cause Analysis — method-driven (reuses CAPA's RcaMethodFields
-              + canonical CAPA_RCA_METHODS). Serialized to rootCause (mirror) +
-              rcaDetail (JSON) on save. */}
-          <div className="col-span-2">
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Root Cause Analysis <span className="text-[10px] font-normal" style={{ color: "var(--text-muted)" }}>(optional)</span></p>
-            {/* Deselectable: "— None" clears an accidental method and resets the
-                structured detail (incl. any AI-drafted content). */}
-            <Dropdown placeholder="Select method..." value={watch("rcaMethod") ?? ""}
-              onChange={(v) => { setValue("rcaMethod", (v || undefined) as FindingForm["rcaMethod"]); if (!v) setDetail({}); }}
-              width="w-full"
-              options={[{ value: "", label: "— None" }, ...rcaMethodOptions(CAPA_RCA_METHODS)]} />
-            <div className="mt-2">
-              {/* AI Draft helper — same component the CAPA modals use. Passing
-                  draftContext (Requirement + Purpose) turns on the "AI Draft"
-                  button so the 5 Why / Fishbone / free-text methods can be
-                  AI-drafted here too. No recordId yet (create modal) — the
-                  component falls back to "-". */}
-              <RcaMethodFields
-                method={rcaMethod}
-                detail={detail}
-                onChange={setDetail}
-                draftContext={[watchRequirement, watch("purpose")].filter(Boolean).join("\n\n")}
-              />
-            </div>
-          </div>
+          {/* RCA (Root Cause Analysis) is INTENTIONALLY not in the Add form — it is
+              an assessment-time activity, done later in the finding detail /
+              assessment flow (GapRegisterTab), not at add-time. Removed here only;
+              the schema fields stay optional so the payload shape is stable. */}
         </div>
       </form>
     </Modal>
+
+    {/* #2 — shared confirm dialog before removing a staged evidence file. */}
+    <ConfirmModal
+      open={!!pendingDeleteId}
+      onClose={() => setPendingDeleteId(null)}
+      onConfirm={confirmRemoveFile}
+      title="Remove this document?"
+      message="It won't be uploaded to this finding. You can add it again before saving."
+      confirmLabel="Remove"
+      cancelLabel="Keep"
+      variant="danger"
+      icon={Trash2}
+    />
+    </>
   );
 }
 

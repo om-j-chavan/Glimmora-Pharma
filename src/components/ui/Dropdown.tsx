@@ -298,7 +298,7 @@ export function Dropdown({
                   "text-[12px] font-medium",
                   "border-none outline-none",
                   "transition-colors duration-100",
-                  "disabled:opacity-40 disabled:cursor-not-allowed",
+                  "cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed",
                   opt.danger && "text-(--danger) hover:bg-(--danger-bg)",
                   !opt.danger && isSelected && "bg-(--brand-muted) text-(--brand)",
                   !opt.danger && !isSelected && "text-(--text-primary) hover:bg-(--bg-hover)",
@@ -368,7 +368,9 @@ export function Dropdown({
           // 'sm' matches ui/Input / DatePicker (py-2.5); 'md' is the original py-2.
           size === "sm" ? "py-2.5" : "py-2",
           "border outline-none transition-all duration-150",
-          "disabled:opacity-50 disabled:cursor-not-allowed",
+          // Interactive → pointer; disabled → not-allowed (the disabled: variant's
+          // :disabled specificity beats the plain cursor-pointer when disabled).
+          "cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
           "bg-(--bg-elevated) border-(--bg-border) text-(--text-primary)",
           "hover:border-(--brand)",
           open && "border-(--brand) ring-[3px] ring-(--brand-muted)",

@@ -29,8 +29,10 @@ import { DetailHeader } from "./_components/DetailHeader";
 import { DetailSummaryCards } from "./_components/DetailSummaryCards";
 import { LogoCropModal } from "./_components/LogoCropModal";
 import { TenantLifecycleActions } from "./_components/TenantLifecycleActions";
+import { TenantRoleLimitsSection } from "./_components/TenantRoleLimitsSection";
 import { useCustomerAccounts } from "@/modules/admin/customer-accounts/useCustomerAccounts";
 import { planUsersUsed } from "@/modules/admin/customer-accounts/helpers";
+import { planLabel } from "@/lib/plans";
 import { AccountModal } from "@/modules/admin/customer-accounts/_components/AccountModal";
 
 export function CustomerDetailPage() {
@@ -304,36 +306,38 @@ export function CustomerDetailPage() {
         <div className="card-body">
           {!plan ? (
             <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>No plan assigned yet.</p>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-4">
+          ) : (() => {
+            // Full subscription detail (item 4) — caps + live usage + remaining,
+            // in one readable grid. Usage excludes the tenant-admin identity
+            // (planUsersUsed), matching the enforcement count.
+            const usedUsers = planUsersUsed(tenant);
+            const usedSites = tenant.config.sites.length;
+            const field = (label: string, value: React.ReactNode, danger = false) => (
               <div>
-                <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Max Users</p>
-                <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>{plan.maxUsers}</p>
+                <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>{label}</p>
+                <p className="text-[14px] font-medium" style={{ color: danger ? "var(--danger)" : "var(--text-primary)" }}>{value}</p>
               </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Max Sites</p>
-                <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>{plan.maxSites}</p>
+            );
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-4">
+                {field("Plan", planLabel(plan.tier, plan.displayName))}
+                {field("Data Retention", `${plan.minRetentionYears} yr`)}
+                {field("Subscription Expiry", <>{dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}{planExpired ? " · expired" : ""}</>, planExpired)}
+                {field("Max Users", plan.maxUsers)}
+                {field("Current Users", usedUsers)}
+                {field("Remaining User Capacity", Math.max(0, plan.maxUsers - usedUsers))}
+                {field("Max Sites", plan.maxSites)}
+                {field("Current Sites", usedSites)}
+                {field("Remaining Site Capacity", Math.max(0, plan.maxSites - usedSites))}
               </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Min Retention</p>
-                <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>{plan.minRetentionYears} yr</p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Duration</p>
-                <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>
-                  {(() => { const y = plan.durationMonths / 12; return `${Number.isInteger(y) ? y : y.toFixed(1)} yr`; })()}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Term</p>
-                <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>
-                  {dayjs.utc(plan.startDate).format("DD MMM YYYY")} – {dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}
-                </p>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </div>
+
+      {/* Role Limits & Usage (item 2b) — effective per-role matrix; Edit Limits
+          is super-admin only (per-tenant overrides). Read-only for others. */}
+      <TenantRoleLimitsSection tenantId={tenant.id} isSuperAdmin={isSuperAdmin} />
 
       {/* Lifecycle actions (suspend / soft-delete / restore / permanent delete)
           — bottom of the page, super admin only. */}

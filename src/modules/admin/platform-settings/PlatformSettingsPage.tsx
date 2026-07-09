@@ -3,7 +3,7 @@
 import { ShieldCheck, Archive } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Toggle } from "@/components/ui/Toggle";
-import { PlanCatalogCard } from "./_components/PlanCatalogCard";
+import { SubscriptionPlansSection } from "./_components/SubscriptionPlansSection";
 
 /**
  * Platform Settings — read-mostly super_admin screen.
@@ -28,8 +28,8 @@ export function PlatformSettingsPage() {
       </div>
 
       <div className="space-y-6">
-        {/* 1. Plan Catalog */}
-        <PlanCatalogCard />
+        {/* 1. Subscription Plans — read-only per-plan reference (caps + role limits) */}
+        <SubscriptionPlansSection />
 
         {/* 2. MFA Default — no backing platform setting yet (Phase 2). Hidden
             for now (SHOW_MFA_DEFAULT_CARD); code retained for when it's wired. */}

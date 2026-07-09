@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
-import { FDA483_SIGN_ROLES, FDA483_DELETE_ROLES } from "@/lib/permissions/roleSets";
+import { FDA483_SIGN_ROLES, FDA483_DELETE_ROLES, INSPECTION_CREATE_ROLES } from "@/lib/permissions/roleSets";
 import {
   canonicalizeFDA483ResponseContent,
   computeContentHash,
@@ -111,8 +111,12 @@ export async function createFDA483Event(
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
     }
-    if (session.user.role === "viewer") {
-      return { success: false, error: "Viewers cannot perform this action." };
+    // Responsibility map - an FDA 483 / inspection event is created by QA
+    // (+ Regulatory Affairs, who owns external regulator communication):
+    // INSPECTION_CREATE_ROLES = qa_head, regulatory_affairs. super_admin is
+    // blocked above by requireGxPAuthor; functional/admin roles are rejected.
+    if (!INSPECTION_CREATE_ROLES.includes(session.user.role)) {
+      return { success: false, error: "Only QA Head or Regulatory Affairs can create an inspection event." };
     }
     const d = parsed.data;
     // Resolve the internal owner's name for the audit trail (best-effort).
@@ -1260,6 +1264,10 @@ export async function updateObservation(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
+  // Responsibility map - viewers are read-only; editing an observation rejects viewer.
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot perform this action." };
+  }
 
   try {
     const obs = await prisma.$transaction(async (tx) => {
@@ -1580,6 +1588,10 @@ export async function updateCommitment(
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  // Responsibility map - viewers are read-only; editing a commitment rejects viewer.
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot perform this action." };
   }
   try {
     const commitment = await prisma.fDA483Commitment.update({
@@ -1920,6 +1932,10 @@ export async function removeResponseDocument(
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  // Responsibility map - viewers are read-only; removing a response document rejects viewer.
+  if (session.user.role === "viewer") {
+    return { success: false, error: "Viewers cannot perform this action." };
   }
   try {
     await prisma.fDA483Document.delete({ where: { id } });

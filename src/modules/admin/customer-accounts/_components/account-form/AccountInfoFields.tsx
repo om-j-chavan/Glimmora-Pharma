@@ -1,7 +1,6 @@
 "use client";
 
-import { useRef, useMemo, useEffect } from "react";
-import { Upload, Image as ImageIcon } from "lucide-react";
+import { Upload } from "lucide-react";
 import { type AccountFormData, type AccountFormSetter } from "../../helpers";
 
 const LABEL = "block text-[11px] font-medium mb-1" as const;
@@ -26,17 +25,12 @@ interface AccountInfoFieldsProps {
   errors: Record<string, string>;
   usernameAuto: boolean;
   setUsernameAuto: (value: boolean) => void;
+  /** Open the shared crop-and-upload modal (hosted by AccountModal). The SAME
+   *  LogoCropModal the tenant View uses — pick, square-crop, zoom → 256px JPEG. */
+  onEditLogo: () => void;
 }
 
-export function AccountInfoFields({ form, set, markTouched, errorVisible, errors, usernameAuto, setUsernameAuto }: AccountInfoFieldsProps) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => set("logoFile", e.target.files?.[0] ?? null);
-
-  // Object URL for the selected logo, so we can show an actual image thumbnail.
-  // Created in render (no flash) and revoked when it changes / on unmount.
-  const logoPreview = useMemo(() => (form.logoFile ? URL.createObjectURL(form.logoFile) : null), [form.logoFile]);
-  useEffect(() => () => { if (logoPreview) URL.revokeObjectURL(logoPreview); }, [logoPreview]);
-
+export function AccountInfoFields({ form, set, markTouched, errorVisible, errors, usernameAuto, setUsernameAuto, onEditLogo }: AccountInfoFieldsProps) {
   return (
     <div>
       <h3 className="text-[11px] font-bold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>Account Information</h3>
@@ -104,35 +98,32 @@ export function AccountInfoFields({ form, set, markTouched, errorVisible, errors
           <p id="username-error" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{errors.username}</p>
         )}
       </div>
-      {/* Compact logo upload — full drop-zone overlay is on the modal root. */}
+      {/* Logo — pick + square-crop via the shared LogoCropModal (same component
+          the tenant View uses). The cropped 256px JPEG data URL lives on the
+          form and is persisted on submit. Drop-zone overlay is on the modal root. */}
       <div>
         <label className={LABEL} style={{ color: "var(--text-secondary)" }}>Logo <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(optional)</span></label>
-        {form.logoFile ? (
+        {form.logoDataUrl ? (
           <div className="flex items-center gap-3 p-2 rounded-lg" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
             <div className="w-10 h-10 rounded shrink-0 overflow-hidden flex items-center justify-center" style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}>
-              {logoPreview ? (
-                <img src={logoPreview} alt="Selected logo preview" className="w-full h-full object-cover" />
-              ) : (
-                <ImageIcon className="w-5 h-5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-              )}
+              <img src={form.logoDataUrl} alt="Selected logo preview" className="w-full h-full object-cover" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[12px] truncate" style={{ color: "var(--text-primary)" }}>{form.logoFile.name}</p>
+              <p className="text-[12px] truncate" style={{ color: "var(--text-primary)" }}>Logo selected (256×256)</p>
               <div className="flex gap-3 mt-0.5">
-                <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] font-medium border-none bg-transparent cursor-pointer p-0" style={{ color: "var(--brand)" }}>Replace</button>
-                <button type="button" onClick={() => set("logoFile", null)} className="text-[11px] font-medium border-none bg-transparent cursor-pointer p-0" style={{ color: "var(--danger)" }}>Remove</button>
+                <button type="button" onClick={onEditLogo} className="text-[11px] font-medium border-none bg-transparent cursor-pointer p-0" style={{ color: "var(--brand)" }}>Change</button>
+                <button type="button" onClick={() => set("logoDataUrl", null)} className="text-[11px] font-medium border-none bg-transparent cursor-pointer p-0" style={{ color: "var(--danger)" }}>Remove</button>
               </div>
             </div>
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium border cursor-pointer" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)", color: "var(--text-primary)" }}>
+            <button type="button" onClick={onEditLogo} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-medium border cursor-pointer" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)", color: "var(--text-primary)" }}>
               <Upload className="w-3.5 h-3.5" aria-hidden="true" /> Upload logo
             </button>
-            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>PNG or JPG, max 5MB</span>
+            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>PNG, JPEG, or WebP · square crop</span>
           </div>
         )}
-        <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFileSelect} />
       </div>
     </div>
   );

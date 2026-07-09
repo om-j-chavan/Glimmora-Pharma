@@ -27,6 +27,17 @@ export const ROLE_LABELS: Record<string, string> = {
   viewer: "Viewer",
 };
 
+/**
+ * Seat roles eligible for per-role user caps — every known role EXCEPT the
+ * platform/tenant-admin identities (super_admin / its superadmin alias /
+ * customer_admin are Tenant rows, not user seats). Lives here (pure, no server
+ * deps) so BOTH server code (roleLimits.ts re-exports it) and CLIENT components
+ * (the Create Tenant caps editor) can import it without pulling in Prisma.
+ */
+export const CAP_ELIGIBLE_ROLES: readonly string[] = Object.keys(ROLE_LABELS).filter(
+  (r) => r !== "super_admin" && r !== "superadmin" && r !== "customer_admin",
+);
+
 /** Title-case a snake_case code — last-resort label for unknown roles. */
 function humanise(code: string): string {
   return code

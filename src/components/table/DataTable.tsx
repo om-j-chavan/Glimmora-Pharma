@@ -461,7 +461,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
               <tr>
                 {bulk && (
                   <th className="w-10">
-                    <input type="checkbox" aria-label="Select all" checked={allSelected} onChange={toggleAll} className="cursor-pointer align-middle accent-(--brand)" />
+                    <input type="checkbox" aria-label="Select all" checked={allSelected} onChange={toggleAll} className="cursor-pointer disabled:cursor-not-allowed align-middle accent-(--brand)" />
                   </th>
                 )}
                 {visibleColumns.map((c) => (
@@ -502,7 +502,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                           checked={selected.has(rowKey(r))}
                           disabled={bulk.enabled ? !bulk.enabled(r) : false}
                           onChange={() => toggleOne(r)}
-                          className="cursor-pointer align-middle accent-(--brand)"
+                          className="cursor-pointer disabled:cursor-not-allowed align-middle accent-(--brand)"
                         />
                       </td>
                     )}

@@ -9,9 +9,9 @@ import { Modal } from "@/components/ui/Modal";
  */
 export const FLOW_STEPS: string[] = [
   "Create the CAPA (title, description, source, risk)",
-  "Assign action items + a driver",
+  "Assign action items + an owner",
   "Fixers do their tasks from their Worklist",
-  "Driver submits for QA review (when ready)",
+  "Owner submits for QA review (when ready)",
   "QA reviews → approves",
   "Independent QA verifies",
   "Sign & close (or reject → rework)",

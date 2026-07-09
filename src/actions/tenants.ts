@@ -9,7 +9,8 @@ import { BCRYPT_COST } from "@/lib/passwords";
 import { getTenants } from "@/lib/queries/tenants";
 import type { Tenant as ReduxTenant } from "@/store/auth.slice";
 import { sanitizeServerError } from "@/lib/errors";
-import { resolvePlanCaps, validateTailoredCaps, resolveExpiry, MIN_TAILORED_RETENTION_YEARS, type PlanTier } from "@/lib/plans";
+import { resolvePlanCaps, validateTailoredCaps, resolveExpiry, MIN_TAILORED_RETENTION_YEARS, defaultRoleCapsForPlan, type PlanTier } from "@/lib/plans";
+import { CAP_ELIGIBLE_ROLES } from "@/lib/labels/roles";
 import { generateReference } from "@/lib/reference";
 
 export async function listTenants(): Promise<ReduxTenant[]> {
@@ -649,6 +650,28 @@ export async function assignPlan(
       update: frozen,
       create: { tenantId: parsed.data.tenantId, ...frozen },
     });
+
+    // Seed this plan's per-role default caps (PlanRoleLimit) for any role that
+    // lacks one, so the role-limit resolver returns CONCRETE caps instead of
+    // falling through to "unlimited" (∞) in the tenant View. ROOT-CAUSE FIX:
+    // previously ONLY the batch seed (prisma/roleLimitsSeed.ts) wrote these, so
+    // any plan created/assigned AFTER a seed run had ZERO PlanRoleLimit rows and
+    // every cap-eligible role showed ∞. Create-MISSING only — an existing (or
+    // admin-edited) cap is never overwritten; a re-run creates nothing (idempotent).
+    // defaultRoleCapsForPlan(maxUsers) yields concrete caps summing to maxUsers,
+    // matching the batch seed's Professional/Enterprise defaults.
+    const roleDefaults = defaultRoleCapsForPlan(caps.maxUsers);
+    const existingRoles = new Set(
+      (await prisma.planRoleLimit.findMany({ where: { planId: plan.id }, select: { role: true } })).map((r) => r.role),
+    );
+    const missingRoles = CAP_ELIGIBLE_ROLES.filter((r) => !existingRoles.has(r));
+    if (missingRoles.length > 0) {
+      // SQLite has no createMany skipDuplicates — create the missing rows in one tx.
+      await prisma.$transaction(
+        missingRoles.map((role) => prisma.planRoleLimit.create({ data: { planId: plan.id, role, cap: roleDefaults[role] ?? 0 } })),
+      );
+    }
+
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,

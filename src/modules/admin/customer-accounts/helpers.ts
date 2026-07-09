@@ -206,7 +206,15 @@ export interface AccountFormData {
   newPassword: string;
   confirmPassword: string;
   plan: PlanDraft | null;
-  logoFile: File | null;
+  /** Cropped logo as a 256px-square JPEG data URL, produced by the shared
+   *  LogoCropModal (return-mode). Persisted via updateTenantLogo on submit
+   *  (Create: after the tenant row exists; Edit: alongside the account save).
+   *  null = no change / removed. */
+  logoDataUrl: string | null;
+  /** Tailored-at-creation per-role caps (role → cap, or null = unlimited). Set by
+   *  the Create Tenant modal for TAILORED plans; persisted via setTenantRoleLimits
+   *  AFTER the tenant + plan are created. Undefined for standard plans / edit. */
+  initialRoleCaps?: Record<string, number | null>;
 }
 
 /** Typed field setter shared by the drawer + its form sections. */
@@ -232,7 +240,7 @@ export function makeEmptyForm(): AccountFormData {
     newPassword: "",
     confirmPassword: "",
     plan: null,
-    logoFile: null,
+    logoDataUrl: null,
   };
 }
 

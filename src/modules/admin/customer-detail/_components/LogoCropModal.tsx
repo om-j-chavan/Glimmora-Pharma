@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Cropper, { type Area } from "react-easy-crop";
 import { Upload, Trash2, ZoomIn } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
@@ -12,13 +12,27 @@ import { updateTenantLogo } from "@/actions/tenants";
 interface LogoCropModalProps {
   open: boolean;
   onClose: () => void;
-  tenantId: string;
+  /** The tenant to write to. Required only in persist-mode (View). Omit in
+   *  return-mode (Create/Edit form) where no tenant exists yet / persistence is
+   *  deferred to the account submit. */
+  tenantId?: string;
   tenantName: string;
   /** Current logo (data URL) so "Remove" can be offered when one exists. */
   currentLogo?: string | null;
-  /** Called with the new logo (data URL) or null on removal, after the server
-   *  write succeeds — lets the caller update Redux so the View reflects it now. */
+  /** persist-mode (default): called with the new logo (data URL) or null on
+   *  removal AFTER the server write succeeds — the caller updates Redux so the
+   *  View reflects it now. return-mode (persist=false): called with the freshly
+   *  cropped data URL (or null on removal) WITHOUT any server write — the caller
+   *  persists later (Create/Edit persist on account submit). */
   onSaved: (logoUrl: string | null) => void;
+  /** When false, the modal does NOT call updateTenantLogo — it hands the cropped
+   *  data URL back via onSaved and closes, and skips the confirm gate (nothing is
+   *  persisted yet). Default true: the View writes immediately, confirmed first.
+   *  The SAME crop UI (aspect/zoom/256px JPEG output) is shared across both. */
+  persist?: boolean;
+  /** Preload an image straight into the cropper — e.g. a file dragged onto the
+   *  account modal — so drop-to-crop lands directly on the position/zoom step. */
+  initialFile?: File | null;
 }
 
 const ACCEPT = "image/png,image/jpeg,image/webp";
@@ -60,7 +74,7 @@ async function cropToDataUrl(imageSrc: string, area: Area): Promise<string> {
  * updateTenantLogo (logoUrl data URL) and hands the result back so the caller
  * refreshes Redux immediately. Intentionally NOT a media manager.
  */
-export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo, onSaved }: LogoCropModalProps) {
+export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo, onSaved, persist = true, initialFile = null }: LogoCropModalProps) {
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -90,7 +104,7 @@ export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo
     onClose();
   };
 
-  const handleFile = async (file: File | undefined) => {
+  const handleFile = useCallback(async (file: File | undefined) => {
     if (!file) return;
     if (!ACCEPT.split(",").includes(file.type)) {
       toast.error("Choose a PNG, JPEG, or WebP image.");
@@ -104,9 +118,26 @@ export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo
     } catch {
       toast.error("Could not read that image file.");
     }
-  };
+  }, [toast]);
 
-  const persist = async (logoUrl: string | null) => {
+  // Drop-to-crop: when the caller hands us a preselected file (dragged onto the
+  // account modal), load it straight into the cropper on open.
+  useEffect(() => {
+    if (open && initialFile) handleFile(initialFile);
+    // Seed once per (open, file); handleFile is stable via useCallback.
+  }, [open, initialFile, handleFile]);
+
+  const commit = async (logoUrl: string | null) => {
+    // return-mode (Create/Edit): hand the cropped data URL back; the caller
+    // persists on account submit. No server write, no confirm gate.
+    if (!persist) {
+      onSaved(logoUrl);
+      reset();
+      onClose();
+      return;
+    }
+    // persist-mode (View): write to the DB now, then update Redux via onSaved.
+    if (!tenantId) return;
     setSaving(true);
     try {
       const res = await updateTenantLogo(tenantId, logoUrl);
@@ -131,7 +162,7 @@ export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo
     if (!imageSrc || !areaPixels) return;
     try {
       const dataUrl = await cropToDataUrl(imageSrc, areaPixels);
-      await persist(dataUrl);
+      await commit(dataUrl);
     } catch (err) {
       console.error("[admin] crop failed", err);
       toast.error("Could not process the image crop.");
@@ -147,7 +178,7 @@ export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo
         <div className="flex items-center justify-between gap-3">
           <div>
             {currentLogo && !imageSrc && (
-              <Button type="button" variant="ghost" size="sm" icon={Trash2} onClick={() => setPending("remove")} disabled={saving}>
+              <Button type="button" variant="ghost" size="sm" icon={Trash2} onClick={() => (persist ? setPending("remove") : commit(null))} disabled={saving}>
                 Remove logo
               </Button>
             )}
@@ -156,8 +187,8 @@ export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo
             <Button type="button" variant="secondary" size="sm" onClick={close} disabled={saving}>
               Cancel
             </Button>
-            <Button type="button" variant="primary" size="sm" onClick={() => setPending("save")} loading={saving} disabled={!imageSrc || !areaPixels}>
-              Save logo
+            <Button type="button" variant="primary" size="sm" onClick={() => (persist ? setPending("save") : handleSave())} loading={saving} disabled={!imageSrc || !areaPixels}>
+              {persist ? "Save logo" : "Use logo"}
             </Button>
           </div>
         </div>
@@ -232,7 +263,7 @@ export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo
       <ConfirmModal
         open={pending !== null}
         onClose={() => { if (!saving) setPending(null); }}
-        onConfirm={() => { if (pending === "remove") { persist(null); } else { handleSave(); } }}
+        onConfirm={() => { if (pending === "remove") { commit(null); } else { handleSave(); } }}
         loading={saving}
         variant={pending === "remove" ? "danger" : "primary"}
         title={pending === "remove" ? "Remove logo?" : "Update logo?"}

@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, X, Info, Wrench, Send,
+  ClipboardList, X, Info, Wrench, Send, Eye, EyeOff,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { DocList } from "@/components/shared/DocList";
@@ -16,6 +16,7 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { useActiveSite } from "@/hooks/useActiveSite";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   setDeviations,
@@ -47,7 +48,7 @@ import { DocumentUpload, type LinkedDocument } from "@/components/shared/Documen
 import { PageHeader, StatCard, StatusGuide, DataTable, type Column } from "@/components/shared";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
 import {
-  STATUS_VARIANT, STATUS_LABEL, IMPACT_COLOR, CATEGORIES, AREAS, DEV_TASK_STATUS_LABEL,
+  STATUS_VARIANT, STATUS_LABEL, CATEGORIES, AREAS, DEV_TASK_STATUS_LABEL,
 } from "./DeviationPage.constants";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
 import { addSchema, type AddForm } from "./DeviationPage.schemas";
@@ -140,6 +141,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // in saveCAPADecision (qa_head OR super_admin).
   const isQADecider = currentRole === "qa_head" || currentRole === "super_admin";
   const { tenantId, org, users, allSites } = useTenantConfig();
+  // Default the create form's site to the active site (falls back to the first
+  // site). The SELECTED site drives the deviation reference prefix (bug fix).
+  const activeSite = useActiveSite();
   // Deviation-task assignee pool — active operational STAFF only (excludes
   // super_admin / customer_admin / viewer). The "people who do the work".
   const complianceUsers = useComplianceUsers();
@@ -200,6 +204,13 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  // Part 11 — reject is now an e-signature (password + message). Eye toggles for
+  // both signature password fields.
+  const [rejectPassword, setRejectPassword] = useState("");
+  const [rejectBusy, setRejectBusy] = useState(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+  const [showClosePw, setShowClosePw] = useState(false);
+  const [showRejectPw, setShowRejectPw] = useState(false);
   // Stage 4 (deviation redesign) — low-priority "Assign task" modal state.
   // Raise-CAPA confirm/preview modal (req 1).
   const [raiseConfirmOpen, setRaiseConfirmOpen] = useState(false);
@@ -256,7 +267,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     // "changing an uncontrolled input to be controlled" warning). The enum
     // dropdowns keep their seeded defaults; category stays unset (its placeholder
     // shows for "" all the same, and "" isn't a valid enum value).
-    defaultValues: { title: "", description: "", type: "unplanned", severity: "Major", area: "", immediateAction: "", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium", dueDate: "", batchesAffected: "" },
+    defaultValues: { title: "", description: "", type: "unplanned", severity: "Major", siteId: activeSite?.id ?? allSites[0]?.id ?? "", area: "", immediateAction: "", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium", dueDate: "", batchesAffected: "" },
   });
 
   function severityToRisk(s: DeviationSeverity): "Critical" | "High" | "Medium" | "Low" {
@@ -293,7 +304,10 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
         regulatoryImpact: data.regulatoryImpact,
         priority: data.priority,
         dueDate: dayjs(data.dueDate).utc().toISOString(),
-        siteId: allSites[0]?.id || undefined,
+        // BUG FIX — was `allSites[0]?.id` (always the FIRST site), so a Chennai
+        // deviation got DEV-BLR-…. Send the SELECTED site so the reference prefix
+        // is derived from it (Chennai → DEV-CHN-…).
+        siteId: data.siteId || undefined,
         batchesAffected: data.batchesAffected || undefined,
       });
       if (!result.success) {
@@ -450,7 +464,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     setCloseError(null);
     const result = await closeDeviationAction(selected.id, {
       password: closePassword,
-      notes: closeNotes || undefined,
+      notes: closeNotes, // Part 11 — closure message required (server-enforced)
     });
     setCloseBusy(false);
     if (!result.success) {
@@ -469,15 +483,19 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   }
 
   async function handleReject() {
-    if (!selected || !user || !rejectReason.trim()) return;
-    const result = await rejectDeviationAction(selected.id, { reason: rejectReason });
+    if (!selected || !user || rejectReason.trim().length < 5 || !rejectPassword) return;
+    setRejectBusy(true);
+    setRejectError(null);
+    const result = await rejectDeviationAction(selected.id, { reason: rejectReason, password: rejectPassword });
+    setRejectBusy(false);
     if (!result.success) {
-      setErrorMsg(result.error || "Failed to reject deviation. Please try again.");
-      setErrorPopup(true);
+      setRejectError(result.error || "Failed to reject deviation. Please try again.");
       return;
     }
     setRejectModal(false);
     setRejectReason("");
+    setRejectPassword("");
+    setRejectError(null);
     setSelectedId(null);
     setSuccessMsg(`${selected.reference ?? selected.id.slice(0, 8)} rejected — returned to investigation`);
     setSuccessPopup(true);
@@ -658,9 +676,18 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           header={
             <div className="shrink-0 flex items-start justify-between gap-3 px-5 py-4 border-b border-(--bg-border)">
               <p className="text-[14px] font-semibold text-(--text-primary) mt-1 truncate">{`Deviation ${selected.reference ?? selected.id.slice(0, 8)}`}</p>
-              <div className="flex items-start gap-2 shrink-0">
-                {/* Summarize — repositioned to the header top-right (collapsed it is
-                    the button; expanding renders the AI summary here). */}
+              <button type="button" onClick={() => setSelectedId(null)} aria-label="Close" className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors duration-150 shrink-0">
+                <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Badge variant={STATUS_VARIANT[selected.status]}>{STATUS_LABEL[selected.status]}</Badge>
+              <Badge variant={getSeverityVariant(selected.severity, "fda")}>{normalizeSeverityForDisplay(selected.severity, "fda") ?? selected.severity}</Badge>
+              {/* Summarize AI - top-right of the status row (moved out of the header). */}
+              <div className="ml-auto">
                 <DocumentSummaryPanel
                   title={`Deviation ${selected.reference ?? selected.id.slice(0, 8)}`}
                   recordId={selected.id}
@@ -669,26 +696,22 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                     `Title: ${selected.title}`,
                     `Description: ${selected.description}`,
                     `Category: ${selected.category}; Type: ${selected.type}; Area: ${selected.area}`,
-                    `Impact — Patient safety: ${selected.patientSafetyImpact}; Product quality: ${selected.productQualityImpact}; Regulatory: ${selected.regulatoryImpact}`,
+                    `Impact - Patient safety: ${selected.patientSafetyImpact}; Product quality: ${selected.productQualityImpact}; Regulatory: ${selected.regulatoryImpact}`,
                     selected.immediateAction ? `Immediate action: ${selected.immediateAction}` : "",
                     selected.rootCause ? `Root cause: ${selected.rootCause}` : "",
                   ].filter(Boolean).join("\n\n")}
                 />
-                <button type="button" onClick={() => setSelectedId(null)} aria-label="Close" className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors duration-150">
-                  <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
-                </button>
               </div>
             </div>
-          }
-        >
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Badge variant={STATUS_VARIANT[selected.status]}>{STATUS_LABEL[selected.status]}</Badge>
-              <Badge variant={getSeverityVariant(selected.severity, "fda")}>{normalizeSeverityForDisplay(selected.severity, "fda") ?? selected.severity}</Badge>
-            </div>
 
-            <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.title}</p>
-            <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{selected.description}</p>
+            <div>
+              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Title</p>
+              <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{selected.title}</p>
+            </div>
+            <div>
+              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>Description</p>
+              <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{selected.description}</p>
+            </div>
 
             <div className="grid grid-cols-2 gap-3 text-[11px]">
               <div><p style={{ color: "var(--text-muted)" }}>Category</p><p className="capitalize font-medium" style={{ color: "var(--text-primary)" }}>{selected.category}</p></div>
@@ -707,7 +730,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 {([["Patient safety", selected.patientSafetyImpact], ["Product quality", selected.productQualityImpact], ["Regulatory", selected.regulatoryImpact]] as const).map(([label, level]) => (
                   <div key={label} className="flex items-center justify-between text-[11px]">
                     <span style={{ color: "var(--text-secondary)" }}>{label}</span>
-                    <span className="font-semibold capitalize" style={{ color: IMPACT_COLOR[level] }}>{level}</span>
+                    <Badge variant={level === "high" ? "red" : level === "medium" ? "amber" : level === "low" ? "green" : "gray"}>{level.charAt(0).toUpperCase() + level.slice(1)}</Badge>
                   </div>
                 ))}
               </div>
@@ -761,12 +784,14 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
             {/* Documents — persisted via the shared document pipeline (#11), so
                 they survive router.refresh()/reload. Part A: attach/delete of
-                DEVIATION-level evidence is a QA action (isQAHead), matching the
-                tightened attachDeviationDocument server gate (DEVIATION_QA_ROLES).
-                The task assignee uploads to THEIR task in the worklist instead. */}
+                DEVIATION-level evidence is uploaded by the DOER (the reporter);
+                QA REVIEWS it (segregation of duties), matching the tightened
+                attachDeviationDocument server gate. The task assignee uploads to
+                THEIR task in the worklist instead. */}
             {(() => {
               const docsLocked = selected.status === "closed" || selected.status === "rejected";
-              const canManageDocs = isQAHead && !docsLocked;
+              const isReporter = !!user && !!selected.createdById && selected.createdById === user.id;
+              const canManageDocs = isReporter && !docsLocked;
               return (
                 <div className="space-y-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Documents</p>
@@ -998,13 +1023,16 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Basic information</p>
             <div className="space-y-3">
               <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Title *</p><Controller name="title" control={control} render={({ field }) => <Input id="dev-title" {...field} error={errors.title?.message} placeholder="Short descriptive title" />} /></div>
-              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Description *</p><Controller name="description" control={control} render={({ field }) => <textarea {...field} rows={3} className="input w-full resize-none" style={errors.description ? { borderColor: "#ef4444" } : undefined} placeholder="What happened?" />} />{errors.description && <p className="text-[11px] text-[#ef4444] mt-1">{errors.description.message}</p>}</div>
+              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Description *</p><Controller name="description" control={control} render={({ field }) => (<><textarea {...field} rows={3} className="input w-full resize-none" style={errors.description ? { borderColor: "#ef4444" } : undefined} placeholder="What happened?" /><p className="text-[10px] text-right mt-0.5" style={{ color: (field.value?.length ?? 0) < 10 ? "var(--danger)" : "var(--text-muted)" }}>{field.value?.length ?? 0} characters{(field.value?.length ?? 0) < 10 ? " · min 10" : ""}</p></>)} />{errors.description && <p className="text-[11px] text-[#ef4444] mt-1">{errors.description.message}</p>}</div>
               <div className="grid grid-cols-3 gap-3">
                 <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Type *</p><Controller name="type" control={control} render={({ field }) => <Dropdown options={[{ value: "planned", label: "Planned" }, { value: "unplanned", label: "Unplanned" }]} value={field.value} onChange={field.onChange} width="w-full" className={errors.type ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.type && <p className="text-[11px] text-[#ef4444] mt-1">{errors.type.message}</p>}</div>
                 <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Category *</p><Controller name="category" control={control} render={({ field }) => <Dropdown options={CATEGORIES.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select..." className={errors.category ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.category && <p className="text-[11px] text-[#ef4444] mt-1">{errors.category.message}</p>}</div>
                 <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Severity *</p><Controller name="severity" control={control} render={({ field }) => <Dropdown options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} value={field.value} onChange={(v) => { field.onChange(v); setValue("priority", severityToPriority(v as DeviationSeverity), { shouldValidate: true }); }} width="w-full" className={errors.severity ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.severity && <p className="text-[11px] text-[#ef4444] mt-1">{errors.severity.message}</p>}</div>
               </div>
-              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Area *</p><Controller name="area" control={control} render={({ field }) => <Dropdown options={AREAS.map((a) => ({ value: a, label: a }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select area..." className={errors.area ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.area && <p className="text-[11px] text-[#ef4444] mt-1">{errors.area.message}</p>}</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Area *</p><Controller name="area" control={control} render={({ field }) => <Dropdown options={AREAS.map((a) => ({ value: a, label: a }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select area..." className={errors.area ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.area && <p className="text-[11px] text-[#ef4444] mt-1">{errors.area.message}</p>}</div>
+                <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Site *</p><Controller name="siteId" control={control} render={({ field }) => <Dropdown options={allSites.map((s) => ({ value: s.id, label: s.name }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select site..." className={errors.siteId ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.siteId && <p className="text-[11px] text-[#ef4444] mt-1">{errors.siteId.message}</p>}</div>
+              </div>
             </div>
           </div>
           <div>
@@ -1024,12 +1052,16 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             </div>
           </div>
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Triage</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Scheduling</p>
+            {/* Priority removed from the report form (severity/priority dedup) - it
+                is a QA triage value DERIVED from severity (severityToPriority) and
+                filled in server-side; the reporter picks only severity. Priority
+                stays on the record and still drives the low->task / high->CAPA
+                disposition (kept in sync via the Severity onChange above). */}
             <div className="grid grid-cols-2 gap-3">
-              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Priority * <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(from severity, editable)</span></p><Controller name="priority" control={control} render={({ field }) => <Dropdown options={[{ value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select..." className={errors.priority ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.priority && <p className="text-[11px] text-[#ef4444] mt-1">{errors.priority.message}</p>}</div>
               <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Due date *</p><Controller name="dueDate" control={control} render={({ field }) => <DatePicker id="dev-due" value={field.value ?? ""} onChange={field.onChange} min={minDueDate} error={errors.dueDate?.message} />} /></div>
+              <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Batches affected (optional)</p><Controller name="batchesAffected" control={control} render={({ field }) => <Input id="dev-batches" {...field} placeholder="e.g. STB-2026-042, STB-2026-043" />} /></div>
             </div>
-            <div className="mt-2"><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Batches affected (optional, comma-separated)</p><Controller name="batchesAffected" control={control} render={({ field }) => <Input id="dev-batches" {...field} placeholder="e.g. STB-2026-042, STB-2026-043" />} /></div>
           </div>
           {/* Optional supporting document — reuses the shared DocumentUpload.
               Files are staged client-side (the deviation has no id yet) and
@@ -1068,14 +1100,14 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           </p>
           <div>
             <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
-              Closure notes
+              Closure message <span style={{ color: "var(--danger)" }}>*</span>
             </p>
             <textarea
               rows={3}
               className="input w-full resize-none"
               value={closeNotes}
               onChange={(e) => setCloseNotes(e.target.value)}
-              placeholder="Summary of investigation outcome..."
+              placeholder="Summary of investigation outcome (required, min 5 chars)..."
               disabled={closeBusy}
             />
           </div>
@@ -1087,16 +1119,21 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             >
               Confirm your password <span style={{ color: "var(--danger)" }}>*</span>
             </label>
-            <input
-              id="sign-deviation-pw"
-              type="password"
-              className="input text-[12px] w-full"
-              value={closePassword}
-              onChange={(e) => setClosePassword(e.target.value)}
-              placeholder="Re-enter your password"
-              disabled={closeBusy}
-              autoComplete="current-password"
-            />
+            <div className="relative">
+              <input
+                id="sign-deviation-pw"
+                type={showClosePw ? "text" : "password"}
+                className="input text-[12px] w-full pr-9"
+                value={closePassword}
+                onChange={(e) => setClosePassword(e.target.value)}
+                placeholder="Re-enter your password"
+                disabled={closeBusy}
+                autoComplete="current-password"
+              />
+              <button type="button" onClick={() => setShowClosePw((v) => !v)} aria-label={showClosePw ? "Hide password" : "Show password"} aria-pressed={showClosePw} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 inline-flex items-center justify-center border-none bg-transparent cursor-pointer text-(--text-muted) hover:text-(--text-primary)">
+                {showClosePw ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
+              </button>
+            </div>
             <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
               Required for identity verification under 21 CFR Part 11
             </p>
@@ -1122,7 +1159,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               variant="primary"
               icon={CheckCircle2}
               onClick={handleClose}
-              disabled={closeBusy || !closePassword}
+              disabled={closeBusy || !closePassword || closeNotes.trim().length < 5}
               loading={closeBusy}
             >
               Sign &amp; Close
@@ -1134,11 +1171,23 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       {/* ═══ REJECT MODAL ═══ */}
       <Modal open={rejectModal} onClose={() => setRejectModal(false)} title="Reject Deviation">
         <div className="space-y-4">
+          <p className="alert alert-info text-[12px]">This is a GxP electronic signature under 21 CFR Part 11. Your identity, the meaning of this signature (Rejected), and the message are recorded; your password is verified on the server.</p>
           <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Deviation <strong>{selected?.reference ?? selected?.id}</strong> will be rejected and returned to investigation.</p>
-          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason for rejection *</p><textarea rows={3} className="input w-full resize-none" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Why is this being rejected?" /></div>
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Rejection message <span style={{ color: "var(--danger)" }}>*</span></p><textarea rows={3} className="input w-full resize-none" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Why is this being rejected? (required, min 5 chars)" disabled={rejectBusy} /></div>
+          <div>
+            <label htmlFor="reject-deviation-pw" className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>Confirm your password <span style={{ color: "var(--danger)" }}>*</span></label>
+            <div className="relative">
+              <input id="reject-deviation-pw" type={showRejectPw ? "text" : "password"} className="input text-[12px] w-full pr-9" value={rejectPassword} onChange={(e) => setRejectPassword(e.target.value)} placeholder="Re-enter your password" disabled={rejectBusy} autoComplete="current-password" />
+              <button type="button" onClick={() => setShowRejectPw((v) => !v)} aria-label={showRejectPw ? "Hide password" : "Show password"} aria-pressed={showRejectPw} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 inline-flex items-center justify-center border-none bg-transparent cursor-pointer text-(--text-muted) hover:text-(--text-primary)">
+                {showRejectPw ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
+              </button>
+            </div>
+            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Verified server-side under 21 CFR Part 11</p>
+          </div>
+          {rejectError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{rejectError}</p>}
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
-            <Button variant="secondary" onClick={() => setRejectModal(false)}>Cancel</Button>
-            <Button variant="primary" disabled={!rejectReason.trim()} onClick={handleReject}>Reject</Button>
+            <Button variant="secondary" onClick={() => { setRejectModal(false); setRejectError(null); }} disabled={rejectBusy}>Cancel</Button>
+            <Button variant="primary" icon={AlertOctagon} disabled={rejectBusy || rejectReason.trim().length < 5 || !rejectPassword} loading={rejectBusy} onClick={handleReject}>Sign &amp; Reject</Button>
           </div>
         </div>
       </Modal>

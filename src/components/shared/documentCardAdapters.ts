@@ -32,7 +32,9 @@ export function evidenceDocToCardView(d: EvidenceLibraryDoc): DocumentCardView {
 /** Worklist / Gap-detail uploaded doc (WorklistDoc) → card view. Category → a
  *  badge (readable label); Author + file info + date → the meta line. */
 export function worklistDocToCardView(d: WorklistDoc): DocumentCardView {
-  const href = `/api/documents/${d.id}`;
+  // Default to the Document route; a doc may override (e.g. CAPA-action evidence
+  // is an EvidenceFile served from /api/evidence/files/{id}).
+  const href = d.href ?? `/api/documents/${d.id}`;
   const catLabel = d.category ? (EVIDENCE_CATEGORY_LABEL[d.category as EvidenceCategory] ?? d.category) : null;
   const fileInfo = d.fileSize ?? (d.fileType ?? d.fileExtension ?? null);
   return {
