@@ -25,6 +25,13 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
 import { ExportMenu, type ExportFormat } from "@/components/ui/ExportMenu";
 import type { Cell } from "@/lib/exportTable";
+import {
+  emptyState as emptyStateCls,
+  sectionBorder,
+  selectionCheckbox,
+  tableCard,
+  tableColors,
+} from "./tableTokens";
 
 /**
  * <DataTable> — the standard management table. Config for the common case,
@@ -394,7 +401,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           {/* LEFT group: search (grows) + filters */}
           <div className="flex items-center gap-2 flex-1 min-w-[200px] flex-wrap">
             {search && (
-              <div className="flex-1 min-w-[200px] max-w-sm">
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
                 <Input
                   id={searchId}
                   type="search"
@@ -404,17 +411,48 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   value={rawSearch}
                   onChange={(e) => setRawSearch(e.target.value)}
                 />
+                {/* Explicit clear affordance (Lucide X) — appears only when the box
+                    has text, so empty search boxes are unchanged. */}
+                {rawSearch && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => setRawSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer p-0.5"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                )}
               </div>
             )}
             {filters.map((f) => (
-              <Dropdown
-                key={f.key}
-                value={filterValues[f.key] ?? ""}
-                onChange={(v) => setFilterValues((prev) => ({ ...prev, [f.key]: v }))}
-                width="w-44"
-                placeholder={`All ${f.label.toLowerCase()}`}
-                options={[{ value: "", label: `All ${f.label.toLowerCase()}` }, ...f.options]}
-              />
+              // Each filter Dropdown gets its own inline clear (X), shown only when
+              // that filter is active — mirrors the search box's clear affordance.
+              <div key={f.key} className="flex items-center gap-1">
+                <Dropdown
+                  value={filterValues[f.key] ?? ""}
+                  onChange={(v) => setFilterValues((prev) => ({ ...prev, [f.key]: v }))}
+                  width="w-44"
+                  placeholder={`All ${f.label.toLowerCase()}`}
+                  options={[{ value: "", label: `All ${f.label.toLowerCase()}` }, ...f.options]}
+                />
+                {filterValues[f.key] && (
+                  <button
+                    type="button"
+                    aria-label={`Clear ${f.label} filter`}
+                    onClick={() => setFilterValues((prev) => {
+                      const next = { ...prev };
+                      delete next[f.key];
+                      return next;
+                    })}
+                    className="border-none bg-transparent cursor-pointer p-0.5"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             ))}
           </div>
           {/* RIGHT group: clear + export + column visibility */}
@@ -451,7 +489,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
       )}
 
       {/* ── the table ── */}
-      <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
+      <div className={tableCard}>
         {/* Minimum body height (item 7) keeps the layout stable with one/few
             rows — the table never collapses to a sliver. Applied in the
             primitive so every table inherits it; override via `minBodyHeight`. */}
@@ -461,7 +499,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
               <tr>
                 {bulk && (
                   <th className="w-10">
-                    <input type="checkbox" aria-label="Select all" checked={allSelected} onChange={toggleAll} className="cursor-pointer disabled:cursor-not-allowed align-middle accent-(--brand)" />
+                    <input type="checkbox" aria-label="Select all" checked={allSelected} onChange={toggleAll} className={selectionCheckbox} />
                   </th>
                 )}
                 {visibleColumns.map((c) => (
@@ -482,7 +520,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={visibleColumns.length + (bulk ? 1 : 0) + (rowMenu ? 1 : 0)}>
-                    <div className="py-10 text-center text-[13px]" style={{ color: "var(--text-muted)" }}>
+                    <div className={emptyStateCls} style={{ color: tableColors.mutedText }}>
                       {loading ? "Loading…" : emptyState ?? (anyFilter ? "No rows match the current filter." : "No rows yet.")}
                     </div>
                   </td>
@@ -502,7 +540,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                           checked={selected.has(rowKey(r))}
                           disabled={bulk.enabled ? !bulk.enabled(r) : false}
                           onChange={() => toggleOne(r)}
-                          className="cursor-pointer disabled:cursor-not-allowed align-middle accent-(--brand)"
+                          className={selectionCheckbox}
                         />
                       </td>
                     )}
@@ -525,7 +563,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
         {/* ── Show more (never pagination) ── */}
         {total > 0 && (
-          <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-(--bg-border)">
+          <div className={clsx("flex items-center justify-between gap-3 px-4 py-3 border-t", sectionBorder)}>
             <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
               Showing {shownCount} of {total}
             </span>
