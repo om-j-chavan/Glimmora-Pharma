@@ -106,6 +106,15 @@ export interface BulkAction<T> {
   guard?: (rows: T[]) => { ok: boolean; reason?: string };
 }
 
+/** Context passed to a function-form `emptyState`, so the empty copy can react
+ *  to WHY the list is empty. */
+export interface EmptyStateContext {
+  /** Any DataFilter has a non-empty selection. */
+  isFiltered: boolean;
+  /** The search box is non-empty. */
+  hasSearch: boolean;
+}
+
 export interface DataTableProps<T> {
   columns: DataColumn<T>[];
   rowKey: (row: T) => string;
@@ -120,11 +129,24 @@ export interface DataTableProps<T> {
   /** server mode: optional SSR-provided first page. */
   initialData?: { rows: T[]; total: number };
 
-  pageSize?: number; // default 10
+  pageSize?: number; // default 25
   defaultSort?: { key: string; dir: SortDir };
   /** Minimum table-body height (px) so few/one-row tables don't collapse.
    *  Applied in the primitive; default 320. */
   minBodyHeight?: number;
+  /** Minimum table WIDTH (px). When set, the table won't shrink below this —
+   *  it scrolls horizontally inside its overflow-x-auto wrapper instead of
+   *  squishing columns. Mirrors DataTableBase's `minWidth`. */
+  minWidth?: number;
+  /** How the (client-side) rows are paged. Default "show-more".
+   *   - "show-more": initial `pageSize` rows + a "Show more" button + footer.
+   *   - "pages": classic numbered controls (First / Prev / 1 2 3 … / Next / Last)
+   *     + the same footer. `pageSize` rows per page.
+   *   - "none": render EVERY row — no footer, no button, no controls.
+   *  Only ONE presentation is ever rendered (never both a "Show more" button and
+   *  page controls). Server mode always pages by append ("show-more"), since
+   *  classic per-page refetch is out of scope here. */
+  paginationMode?: "show-more" | "pages" | "none";
 
   /** Zone 2 toolbar. */
   search?: { placeholder?: string; keys?: string[] };
@@ -153,7 +175,11 @@ export interface DataTableProps<T> {
   /** Optional bulk selection + contextual bulk bar. */
   bulk?: { actions: BulkAction<T>[]; enabled?: (row: T) => boolean };
 
-  emptyState?: ReactNode;
+  /** Shown when there are no rows. Either a static node (back-compat) OR a
+   *  render function called with { isFiltered, hasSearch } so the empty copy can
+   *  react to WHY the list is empty (e.g. an "Add …" CTA when unfiltered vs a
+   *  "clear filters" hint when filtered). Resolved only when rows.length === 0. */
+  emptyState?: ReactNode | ((ctx: EmptyStateContext) => ReactNode);
   className?: string;
 }
 
@@ -214,9 +240,11 @@ export function DataTable<T>(props: DataTableProps<T>) {
     data = [],
     fetcher,
     initialData,
-    pageSize = 10,
+    pageSize = 25,
     defaultSort,
     minBodyHeight = 320,
+    minWidth,
+    paginationMode = "show-more",
     search,
     filters = [],
     exportOptions,
@@ -257,6 +285,10 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const [clientCount, setClientCount] = useState(pageSize);
   // Reset the show-more window whenever the query changes.
   useEffect(() => { if (mode === "client") setClientCount(pageSize); }, [mode, debouncedSearch, filterValues, sort, pageSize]);
+  // Classic "pages" mode: the current page (1-based). Reset to page 1 whenever the
+  // query changes (mirrors the show-more window reset). Harmless in other modes.
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [debouncedSearch, filterValues, sort, pageSize]);
 
   const clientFiltered = useMemo(() => {
     if (mode !== "client") return [];
@@ -322,10 +354,21 @@ export function DataTable<T>(props: DataTableProps<T>) {
   }, [mode, queryKey]);
 
   /* ── unified view ─────────────────────────────────────────────────────── */
-  const rows = mode === "client" ? clientFiltered.slice(0, clientCount) : serverRows;
   const total = mode === "client" ? clientFiltered.length : serverTotal;
+  // Classic-pagination geometry (client + "pages" only). currentPage is clamped
+  // so a shrinking filtered set can never strand you past the last page.
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(Math.max(1, page), pageCount);
+  const rows =
+    mode !== "client"
+      ? serverRows // server always append-paged (show-more)
+      : paginationMode === "none"
+        ? clientFiltered
+        : paginationMode === "pages"
+          ? clientFiltered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+          : clientFiltered.slice(0, clientCount); // "show-more"
   const shownCount = rows.length;
-  const hasMore = shownCount < total;
+  const hasMore = shownCount < total; // "show-more" only
   const loadMore = () => {
     if (mode === "client") setClientCount((c) => c + pageSize);
     else void runFetch(serverPage + 1, true);
@@ -385,6 +428,18 @@ export function DataTable<T>(props: DataTableProps<T>) {
   const selectedRows = rows.filter((r) => selected.has(rowKey(r)));
 
   const alignCls = (a?: DataColumn<T>["align"]) => (a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left");
+
+  // Mirror DataTableBase: a fixed min-width forces horizontal scroll inside the
+  // overflow-x-auto wrapper rather than squishing columns.
+  const tableStyle = minWidth != null ? { minWidth } : undefined;
+
+  // Resolve the empty state once (only shown when rows.length === 0). A function
+  // form gets the filter/search context so callers can branch the copy/CTA;
+  // a static ReactNode passes straight through (back-compat).
+  const resolvedEmptyState =
+    typeof emptyState === "function"
+      ? emptyState({ isFiltered: activeFilterCount > 0, hasSearch: debouncedSearch !== "" })
+      : emptyState;
 
   return (
     <div className={className}>
@@ -494,7 +549,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
             rows — the table never collapses to a sliver. Applied in the
             primitive so every table inherits it; override via `minBodyHeight`. */}
         <div className="overflow-x-auto" style={{ minHeight: minBodyHeight }}>
-          <table className="data-table w-full" aria-label={ariaLabel}>
+          <table className="data-table w-full" aria-label={ariaLabel} style={tableStyle}>
             <thead>
               <tr>
                 {bulk && (
@@ -521,7 +576,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 <tr>
                   <td colSpan={visibleColumns.length + (bulk ? 1 : 0) + (rowMenu ? 1 : 0)}>
                     <div className={emptyStateCls} style={{ color: tableColors.mutedText }}>
-                      {loading ? "Loading…" : emptyState ?? (anyFilter ? "No rows match the current filter." : "No rows yet.")}
+                      {loading ? "Loading…" : resolvedEmptyState ?? (anyFilter ? "No rows match the current filter." : "No rows yet.")}
                     </div>
                   </td>
                 </tr>
@@ -561,21 +616,71 @@ export function DataTable<T>(props: DataTableProps<T>) {
           </table>
         </div>
 
-        {/* ── Show more (never pagination) ── */}
-        {total > 0 && (
+        {/* ── Footer: "show-more" button OR classic page controls — never both.
+            "none" renders no footer at all. Server mode always uses show-more. */}
+        {paginationMode !== "none" && total > 0 && (
           <div className={clsx("flex items-center justify-between gap-3 px-4 py-3 border-t", sectionBorder)}>
             <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
               Showing {shownCount} of {total}
             </span>
-            {hasMore && (
-              <Button variant="ghost" size="sm" onClick={loadMore} loading={loading}>
-                Show more ({total - shownCount} remaining)
-              </Button>
+            {mode === "client" && paginationMode === "pages" ? (
+              <Pager page={currentPage} pageCount={pageCount} onPage={setPage} />
+            ) : (
+              hasMore && (
+                <Button variant="ghost" size="sm" onClick={loadMore} loading={loading}>
+                  Show more ({total - shownCount} remaining)
+                </Button>
+              )
             )}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/* ── classic "pages" controls ── First / Prev / 1 2 3 … / Next / Last.
+   Reuses the shared ghost Button + footer typography — no new visual language.
+   A windowed number set keeps the control compact for large page counts. */
+function getPageItems(current: number, count: number): (number | "…")[] {
+  if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1);
+  const items: (number | "…")[] = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(count - 1, current + 1);
+  if (start > 2) items.push("…");
+  for (let p = start; p <= end; p++) items.push(p);
+  if (end < count - 1) items.push("…");
+  items.push(count);
+  return items;
+}
+
+function Pager({ page, pageCount, onPage }: { page: number; pageCount: number; onPage: (p: number) => void }) {
+  if (pageCount <= 1) return null; // single page → no controls (footer count still shows)
+  const atFirst = page <= 1;
+  const atLast = page >= pageCount;
+  return (
+    <nav aria-label="Pagination" className="flex items-center gap-1 flex-wrap">
+      <Button variant="ghost" size="sm" disabled={atFirst} onClick={() => onPage(1)} aria-label="First page">« First</Button>
+      <Button variant="ghost" size="sm" disabled={atFirst} onClick={() => onPage(page - 1)} aria-label="Previous page">‹ Prev</Button>
+      {getPageItems(page, pageCount).map((it, i) =>
+        it === "…" ? (
+          <span key={`gap-${i}`} className="text-[11px] px-1" style={{ color: "var(--text-muted)" }} aria-hidden="true">…</span>
+        ) : (
+          <Button
+            key={it}
+            variant={it === page ? "secondary" : "ghost"}
+            size="sm"
+            aria-label={`Page ${it}`}
+            aria-current={it === page ? "page" : undefined}
+            onClick={() => onPage(it)}
+          >
+            {it}
+          </Button>
+        ),
+      )}
+      <Button variant="ghost" size="sm" disabled={atLast} onClick={() => onPage(page + 1)} aria-label="Next page">Next ›</Button>
+      <Button variant="ghost" size="sm" disabled={atLast} onClick={() => onPage(pageCount)} aria-label="Last page">Last »</Button>
+    </nav>
   );
 }
 
