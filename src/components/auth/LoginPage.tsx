@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { PillWithBubbles } from "@/components/animations/PillWithBubbles";
 
 // Password resets are handled manually by the Glimmora-Pharma support team
 // (no self-service reset on this 21 CFR Part 11 platform).
@@ -309,24 +310,17 @@ export function LoginPage() {
              card alone. Colour comes from .login-brand-panel, which is derived
              from var(--brand) and therefore follows the active colour theme. ── */}
       <aside className="login-brand-panel hidden lg:flex flex-col justify-between p-12 xl:p-16">
-        {/* Large, faint logo MARK as a watermark. Rendered inline with
-            fill="currentColor" rather than <img src="/favicon.svg"> because
-            that file hardcodes a purple fill, which would fight the brand. */}
-        <svg
-          viewBox="0 0 48 46"
-          aria-hidden="true"
-          className="pointer-events-none absolute -bottom-20 -left-12 w-[28rem] text-white/[0.055]"
-          fill="currentColor"
-        >
-          <path d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z" />
-        </svg>
+        {/* Background flourish: a faint tilted pill with bubbles rising from it.
+            Sits behind the copy (pill z-0, bubbles z-1); content below is z-2.
+            Replaces the former faint logo-mark watermark. */}
+        <PillWithBubbles />
 
-        <div className="relative flex items-center gap-2.5 text-white/70">
+        <div className="relative z-[2] flex items-center gap-2.5 text-white/70">
           <Shield className="w-3.5 h-3.5" aria-hidden="true" />
           <span className="text-[11px] font-medium tracking-wide uppercase">21 CFR Part 11</span>
         </div>
 
-        <div className="relative max-w-md">
+        <div className="relative z-[2] max-w-md">
           <h2 className="text-[30px] xl:text-[34px] font-bold leading-[1.15] tracking-tight text-white">
             Inspection-ready quality, every day.
           </h2>
@@ -336,7 +330,7 @@ export function LoginPage() {
           </p>
         </div>
 
-        <p className="relative text-[11px] text-white/45">
+        <p className="relative z-[2] text-[11px] text-white/45">
           &copy; {new Date().getFullYear()} Pharma Glimmora
         </p>
       </aside>

@@ -76,9 +76,10 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
   const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
   return (
-    <section aria-labelledby="agi-heading" className="space-y-6">
+    <section aria-labelledby="agi-heading" className="flex flex-col h-full min-h-0">
       <h2 id="agi-heading" className="sr-only">AGI Policy</h2>
 
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
       {/* AI Usage Policy banner */}
       <div className={clsx("rounded-xl border p-5", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.2)]" : "bg-[#eef2ff] border-[#c7d2fe]")}>
         <div className="flex items-start gap-3">
@@ -263,6 +264,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
           </Button>
         </div>
       )}
+      </div>
 
       {/* Popups */}
       <Popup

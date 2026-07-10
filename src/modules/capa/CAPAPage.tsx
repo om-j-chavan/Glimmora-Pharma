@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
-  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw,
+  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, Target,
 } from "lucide-react";
 import type { CAPA as PrismaCAPA } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
@@ -299,9 +299,11 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="QMS and CAPA tracker" className="capa-shell w-full">
       <PageLayout
         title="CAPA Tracker"
+        titleIcon={Target}
+        contentPadding={false}
+        className="capa-shell"
         description={`Track corrective and preventive actions from initiation through effectiveness. \u00b7 ${capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}`}
         actions={canCreateCAPAs ? [{ label: "New CAPA", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) }] : []}
         headerRight={
@@ -522,6 +524,5 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
       <Popup isOpen={errorPopup} variant="error" title="Action failed" description={errorMsg} onDismiss={() => setErrorPopup(false)} />
         </div>
       </PageLayout>
-    </main>
   );
 }

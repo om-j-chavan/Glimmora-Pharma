@@ -449,9 +449,9 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="Inspection readiness program" className="w-full">
       <PageLayout
         title="Inspection Readiness Program"
+        contentPadding={true}
         description={`Prepare for inspections through readiness assessments and gap closure. \u00b7 ${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready`}
         actions={role !== "viewer" ? [{ label: "Add action", variant: "primary", icon: Plus, onClick: () => setAddCardOpen(true) }] : []}
         headerRight={
@@ -1135,7 +1135,6 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
       />
         </div>
       </PageLayout>
-    </main>
   );
 }
 

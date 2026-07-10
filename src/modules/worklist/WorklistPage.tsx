@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Wrench, X, Search, Clock, ListChecks, CalendarClock } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Wrench, X, Search, Clock, ListChecks, CalendarClock, ListTodo } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Badge } from "@/components/ui/Badge";
@@ -110,10 +110,10 @@ export function WorklistPage({
   const reworkItems = visible.filter((i) => i.isRework);
 
   return (
-    <div className="capa-shell min-h-full">
-    <div className="p-6">
       <PageLayout
         title="My Worklist"
+        titleIcon={ListTodo}
+        className="capa-shell"
         description={[
           "Your assigned actions, tasks, and findings across all modules.",
           currentUserName,
@@ -267,8 +267,6 @@ export function WorklistPage({
       )}
 
       </PageLayout>
-    </div>
-    </div>
   );
 }
 

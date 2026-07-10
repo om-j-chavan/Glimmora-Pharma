@@ -7,7 +7,7 @@ import {
   ShieldCheck, AlertTriangle, Clock, Database, GraduationCap, TrendingUp,
   Grid3x3, Calendar, Bot, Activity, Info,
   CheckCircle2, Search, ClipboardCheck, FileWarning, BarChart3, ClipboardList,
-  MapPin,
+  MapPin, LayoutDashboard,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import dayjs from "@/lib/dayjs";
@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard, CardSection, SetupChecklist } from "@/components/shared";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { isOverdue } from "@/types/capa";
 import { displayUserName } from "@/lib/identity-display";
 import { regulatoryAlertSummary, driftAlertSummary } from "@/lib/ai";
@@ -345,23 +346,26 @@ export function DashboardPage({
   // page's <main id="main-content"> landmark; a nested duplicate id is an a11y
   // bug. (Recovered from commit 6c46a07, which Rung 3J accidentally reverted.)
   return (
-    <section aria-label="Executive overview dashboard" className="w-full space-y-5">
-      {/* Header */}
-      <header className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="page-title">Dashboard</h1>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <p className="page-subtitle">{currentTenant?.name || companyName || "Pharma Glimmora"} &middot; {dayjs().format("MMMM YYYY")}</p>
-            {currentTenant?.plan && <Badge variant={currentTenant.plan.tier === "ENTERPRISE" ? "green" : currentTenant.plan.tier === "PROFESSIONAL" ? "blue" : "gray"}>{planLabel(currentTenant.plan.tier, currentTenant.plan.displayName)}</Badge>}
+      <PageLayout
+        title="Dashboard"
+        titleIcon={LayoutDashboard}
+        description="Compliance KPIs, risk signals, and your 90-day action plan across every site."
+        headerRight={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Dropdown value={timeFilter} onChange={setTimeFilter} width="w-36" options={[{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "60", label: "Last 60 days" }, { value: "90", label: "Last 90 days" }, { value: "all", label: "All time" }]} />
+            {isAdmin && <Dropdown placeholder="All sites" value={siteFilter} onChange={setSiteFilter} width="w-36" options={[{ value: "", label: "All sites" }, ...visibleSites.map((s) => ({ value: s.id, label: s.name }))]} />}
+            <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-32" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} />
+            {(siteFilter || sevFilter) && <Button variant="ghost" size="sm" onClick={() => { setSiteFilter(""); setSevFilter(""); }}>Clear filters</Button>}
           </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Dropdown value={timeFilter} onChange={setTimeFilter} width="w-36" options={[{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "60", label: "Last 60 days" }, { value: "90", label: "Last 90 days" }, { value: "all", label: "All time" }]} />
-          {isAdmin && <Dropdown placeholder="All sites" value={siteFilter} onChange={setSiteFilter} width="w-36" options={[{ value: "", label: "All sites" }, ...visibleSites.map((s) => ({ value: s.id, label: s.name }))]} />}
-          <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-32" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} />
-          {(siteFilter || sevFilter) && <Button variant="ghost" size="sm" onClick={() => { setSiteFilter(""); setSevFilter(""); }}>Clear filters</Button>}
-        </div>
-      </header>
+        }
+      >
+        <div className="space-y-5">
+
+      {/* Tenant / period context (formerly the header subtitle) + plan badge. */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <p className="page-subtitle" style={{ margin: 0 }}>{currentTenant?.name || companyName || "Pharma Glimmora"} &middot; {dayjs().format("MMMM YYYY")}</p>
+        {currentTenant?.plan && <Badge variant={currentTenant.plan.tier === "ENTERPRISE" ? "green" : currentTenant.plan.tier === "PROFESSIONAL" ? "blue" : "gray"}>{planLabel(currentTenant.plan.tier, currentTenant.plan.displayName)}</Badge>}
+      </div>
 
       {/* Setup checklist */}
       <SetupChecklist />
@@ -515,6 +519,7 @@ export function DashboardPage({
           </CardSection>
         </div>
       </div>
-    </section>
+        </div>
+      </PageLayout>
   );
 }

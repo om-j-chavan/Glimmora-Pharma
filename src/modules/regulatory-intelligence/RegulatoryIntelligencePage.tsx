@@ -27,6 +27,7 @@ import {
   Sparkles,
   Radar,
   ShieldAlert,
+  Landmark,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import {
@@ -34,7 +35,8 @@ import {
   type RegulatoryGuidanceUpdate,
 } from "@/lib/ai";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { PageHeader, StatCard, CardSection } from "@/components/shared";
+import { StatCard, CardSection } from "@/components/shared";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { IMPACT_BADGE, IMPACT_LABEL, SOURCE_COLOR } from "./_shared";
@@ -73,11 +75,11 @@ export function RegulatoryIntelligencePage() {
   /* ── Agent disabled state ── */
   if (!agentActive) {
     return (
-      <section aria-label="Regulatory Intelligence" className="w-full space-y-5">
-        <PageHeader
+        <PageLayout
           title="Regulatory Intelligence"
-          subtitle="FDA/EMA guidance monitoring & change alerts"
-        />
+          titleIcon={Landmark}
+          description="FDA/EMA guidance monitoring and change alerts for your active frameworks."
+        >
         <div className="card">
           <div className="card-body flex flex-col items-center text-center py-10 gap-3">
             <Radar className="w-10 h-10" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -94,7 +96,7 @@ export function RegulatoryIntelligencePage() {
             </Button>
           </div>
         </div>
-      </section>
+        </PageLayout>
     );
   }
 
@@ -103,23 +105,13 @@ export function RegulatoryIntelligencePage() {
   const highImpact = updates.filter((u) => u.impact === "high").length;
 
   return (
-    <section aria-label="Regulatory Intelligence" className="w-full space-y-5">
-      <PageHeader
+      <PageLayout
         title="Regulatory Intelligence"
-        subtitle="FDA/EMA guidance monitoring & change alerts"
-        actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={RefreshCw}
-            onClick={scan}
-            disabled={loading}
-            aria-label="Scan agency feeds for updates"
-          >
-            {loading ? "Scanning…" : "Scan for updates"}
-          </Button>
-        }
-      />
+        titleIcon={Landmark}
+        description="FDA/EMA guidance monitoring and change alerts for your active frameworks."
+        actions={[{ label: loading ? "Scanning…" : "Scan for updates", variant: "secondary", icon: RefreshCw, onClick: scan, disabled: loading }]}
+      >
+        <div className="space-y-5">
 
       {/* AI advisory banner — agent is assistive, RA interprets. */}
       <div
@@ -267,6 +259,7 @@ export function RegulatoryIntelligencePage() {
           </ul>
         )}
       </CardSection>
-    </section>
+        </div>
+      </PageLayout>
   );
 }

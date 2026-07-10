@@ -2,6 +2,7 @@
 
 import { type ReactNode } from "react";
 import Link from "next/link";
+import clsx from "clsx";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { Button, type ButtonVariant } from "@/components/ui/Button";
 
@@ -55,6 +56,16 @@ export interface PageLayoutProps {
   breadcrumb?: PageBreadcrumb;
   children: ReactNode;
   className?: string;
+  /** When false, the content goes FULL-BLEED to the shell edges — PageLayout
+   *  cancels the app shell's page padding (p-3 sm:p-4 lg:p-5) so a tabbed page's
+   *  tab bar / borders reach both edges; the header keeps its own gutter, and
+   *  each tab panel re-adds its own padding. Default true (normal shell padding). */
+  contentPadding?: boolean;
+  /** When true, PageLayout fills the shell's available height as a flex column
+   *  (h-full min-h-0) with a shrink-0 header, so a child panel wrapper marked
+   *  `flex-1 min-h-0 overflow-y-auto` scrolls under a fixed header/tab bar.
+   *  Default false (natural flow — the shell's <main> owns the scroll). */
+  fillHeight?: boolean;
 }
 
 const asButtonVariant = (v: PageAction["variant"]): ButtonVariant =>
@@ -122,26 +133,43 @@ function Heading({ title, breadcrumb, titleIcon: TitleIcon }: { title?: string; 
   );
 }
 
-export function PageLayout({ title, titleIcon, description, actions = [], headerRight, breadcrumb, children, className }: PageLayoutProps) {
+export function PageLayout({ title, titleIcon, description, actions = [], headerRight, breadcrumb, children, className, contentPadding = true, fillHeight = false }: PageLayoutProps) {
   if (process.env.NODE_ENV !== "production" && !title && !breadcrumb) {
     console.warn("[PageLayout] rendered without a title or breadcrumb.");
   }
+  const fullBleed = !contentPadding;
   return (
-    <div className={className}>
-      {/* Header: title/breadcrumb left, headerRight + actions top-right;
-          description one line under the title; divider under the whole header. */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <Heading title={title} breadcrumb={breadcrumb} titleIcon={titleIcon} />
-          {description && <p className="text-[13px] mt-1 max-w-3xl" style={{ color: "var(--text-secondary)" }}>{description}</p>}
+    <div
+      className={clsx(
+        fillHeight && "flex flex-col h-full min-h-0",
+        // Cancel the app shell's page padding (p-3 sm:p-4 lg:p-5) so tabbed pages
+        // render full-bleed tab bars/borders. The header re-adds its gutter below.
+        fullBleed && "-m-3 sm:-m-4 lg:-m-5",
+        className,
+      )}
+    >
+      {/* Header cluster — re-guttered when full-bleed; fixed (shrink-0) when the
+          page fills height so only the child panel scrolls. Header/breadcrumb
+          left, headerRight + actions top-right; description one line under the
+          title; divider under the whole header. */}
+      <div className={clsx(fillHeight && "shrink-0", fullBleed && "px-3 sm:px-4 lg:px-5 pt-3 sm:pt-4 lg:pt-5") || undefined}>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <Heading title={title} breadcrumb={breadcrumb} titleIcon={titleIcon} />
+            {description && <p className="text-[13px] mt-1 max-w-3xl" style={{ color: "var(--text-secondary)" }}>{description}</p>}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            {headerRight}
+            <ActionBar actions={actions} />
+          </div>
         </div>
-        <div className="flex items-center gap-3 flex-wrap justify-end">
-          {headerRight}
-          <ActionBar actions={actions} />
-        </div>
+        <div className="mt-4 mb-5 border-b" style={{ borderColor: "var(--bg-border)" }} />
       </div>
-      <div className="mt-4 mb-5 border-b" style={{ borderColor: "var(--bg-border)" }} />
-      {children}
+      {fillHeight ? (
+        <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+      ) : (
+        children
+      )}
     </div>
   );
 }

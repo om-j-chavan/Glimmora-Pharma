@@ -184,7 +184,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     <>
     <aside
       aria-label="Application navigation"
-      className="w-60 h-screen flex flex-col shrink-0"
+      className="w-60 h-full flex flex-col shrink-0"
       style={{
         background: "var(--bg-surface)",
         borderRight: "1px solid var(--bg-border)",

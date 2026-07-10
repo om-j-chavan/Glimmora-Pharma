@@ -6,7 +6,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
-import { BarChart3, AlertTriangle, Download, BarChart2 } from "lucide-react";
+import { BarChart3, AlertTriangle, Download, BarChart2, Gauge } from "lucide-react";
 import type { RAIDItem as PrismaRAIDItem } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { escapeHtml } from "@/lib/escapeHtml";
@@ -289,9 +289,10 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="Governance and KPIs command center" className="w-full">
       <PageLayout
         title="Governance & KPIs"
+        titleIcon={Gauge}
+        contentPadding={true}
         description={`Monitor compliance governance, risks, and key performance indicators. · ${visibleSites.length} sites · ${capas.length} CAPAs · ${findings.length} findings · ${raidItems.length} RAID items`}
         headerRight={
           /* "Export Reports" is a menu trigger with a ref-anchored dropdown, not a
@@ -412,6 +413,5 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
       <Popup isOpen={reportGeneratedPopup} variant="success" title="Report generated \u2705" description="Exported successfully." onDismiss={() => setReportGeneratedPopup(false)} />
         </div>
       </PageLayout>
-    </main>
   );
 }

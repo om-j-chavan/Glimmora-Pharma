@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, MapPin, Users, BookOpen, Bot, Shield, CreditCard, Info } from "lucide-react";
+import { Building2, MapPin, Users, BookOpen, Bot, Shield, CreditCard, Info, Settings } from "lucide-react";
 import { OrgTab } from "./tabs/OrgTab";
 import { SitesTab } from "./tabs/SitesTab";
 import { UsersTab } from "./tabs/UsersTab";
@@ -43,22 +43,13 @@ export function SettingsPage() {
   });
 
   return (
-    <div className="flex flex-col -m-3 sm:-m-4 lg:-m-5 h-full min-h-0">
-      {/* Standardized page header. The shell is full-bleed (negative margins) and
-          the tab bar / panels supply their own gutters, so the header gets the
-          matching gutter here rather than inheriting one. `shrink-0` keeps the
-          flex chain intact so the tab panel below still owns `flex-1` scrolling.
-          PageLayout requires children; the tab bar and panels stay siblings below
-          so their full-bleed borders are untouched. */}
-      <div className="shrink-0 px-3 sm:px-4 lg:px-5 pt-3 sm:pt-4 lg:pt-5">
-        <PageLayout
-          title="Settings"
-          description="Manage organization, users, sites, frameworks, and subscription."
-        >
-          <></>
-        </PageLayout>
-      </div>
-
+    <PageLayout
+      title="Settings"
+      titleIcon={Settings}
+      description="Manage organization, users, sites, frameworks, and subscription."
+      contentPadding={true}
+      fillHeight
+    >
       {/* Read-only banner for non-admin roles */}
       {readOnly && (
         <div className="flex items-start gap-2 px-5 py-3 border-b" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
@@ -73,7 +64,7 @@ export function SettingsPage() {
       <div
         role="tablist"
         aria-label="Settings sections"
-        className="flex shrink-0 border-b border-(--bg-border) bg-(--bg-base) px-3 sm:px-4 lg:px-5 overflow-x-auto"
+        className="flex shrink-0 border-b border-(--bg-border) bg-(--bg-base) overflow-x-auto"
       >
         {visibleTabs.map((tab) => (
           <button
@@ -97,7 +88,7 @@ export function SettingsPage() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto min-h-0 p-3 sm:p-4 lg:p-5">
+      <div className="flex-1 overflow-y-auto min-h-0 py-3 sm:py-4 lg:py-5">
         {visibleTabs.map((tab) => (
           <section
             key={tab.id}
@@ -106,7 +97,7 @@ export function SettingsPage() {
             aria-labelledby={`tab-btn-${tab.id}`}
             tabIndex={0}
             hidden={active !== tab.id}
-            className="focus:outline-none"
+            className="focus:outline-none h-full"
           >
             {/* Company Details (Organisation) is Super-Admin-managed, so it is
                 view-only on the tenant side — including for customer_admin, who
@@ -126,6 +117,6 @@ export function SettingsPage() {
           </section>
         ))}
       </div>
-    </div>
+    </PageLayout>
   );
 }

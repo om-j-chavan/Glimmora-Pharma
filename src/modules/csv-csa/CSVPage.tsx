@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw } from "lucide-react";
+import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw, Monitor } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { NoSitesPopup, TabBar, DataTable, type Column } from "@/components/shared";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
@@ -361,9 +361,10 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
   ];
 
   return (
-    <main id="main-content" aria-label="CSV/CSA and systems risk register" className="w-full">
       <PageLayout
         title="CSV/CSA Validation"
+        titleIcon={Monitor}
+        contentPadding={true}
         description={`Validate computerized systems through the GxP validation lifecycle. \u00b7 ${systems.length === 0 ? "No systems registered yet" : `${systems.length} systems \u00b7 ${highRisk} high risk \u00b7 ${valOverdue} validation overdue`}`}
         actions={pageActions}
       >
@@ -557,6 +558,5 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
       <NoSitesPopup isOpen={noSitesOpen} onClose={() => setNoSitesOpen(false)} feature="CSV/CSA" />
         </div>
       </PageLayout>
-    </main>
   );
 }

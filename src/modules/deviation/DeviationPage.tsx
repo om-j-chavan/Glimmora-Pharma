@@ -529,9 +529,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     : [];
 
   return (
-    <main id="main-content" aria-label="Deviation management" className="w-full">
       <PageLayout
         title="Deviation Management"
+        titleIcon={AlertTriangle}
         description={`Report, investigate, and disposition deviations from approved procedures. \u00b7 ${tenantDevs.length === 0 ? "No deviations reported yet" : `${tenantDevs.length} deviations \u00b7 ${openCount} open \u00b7 ${investigatingCount} under investigation`}`}
         actions={pageActions}
         headerRight={
@@ -1291,6 +1291,5 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
       <Popup isOpen={errorPopup} variant="error" title="Action failed" description={errorMsg} onDismiss={() => setErrorPopup(false)} />
         </div>
       </PageLayout>
-    </main>
   );
 }

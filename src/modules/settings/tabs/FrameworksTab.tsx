@@ -87,8 +87,8 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   return (
-    <section aria-labelledby="frameworks-heading" className="space-y-6">
-      <div>
+    <section aria-labelledby="frameworks-heading" className="flex flex-col h-full min-h-0">
+      <div className="shrink-0 mb-6">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <h2 id="frameworks-heading" className="text-[15px] font-semibold text-(--text-primary)">
@@ -113,6 +113,7 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
         </p>
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
         {settings === null ? (
           <p className="text-[12px] text-(--text-muted) px-5 py-6">Loading frameworks…</p>
@@ -141,6 +142,7 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
             ))}
           </ul>
         )}
+      </div>
       </div>
 
       {/* Disable-confirm — the "existing findings stay tagged" warning, kept from

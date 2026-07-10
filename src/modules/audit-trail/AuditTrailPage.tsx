@@ -6,6 +6,7 @@
 // tamper-evidence / immutable UI claims until the schema supports them.
 
 import { useState } from "react";
+import { ScrollText } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { Badge } from "@/components/ui/Badge";
@@ -165,6 +166,7 @@ export function AuditTrailPage({ initialData, options }: Props) {
   return (
     <PageLayout
       title="Audit Log"
+      titleIcon={ScrollText}
       description="Every recorded action in your organisation — actor, timestamp, and the affected record (21 CFR Part 11). Read-only."
     >
       <DataTable<AuditTrailRow>

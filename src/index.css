@@ -385,6 +385,15 @@
 * {
   box-sizing: border-box;
 }
+/* Viewport lock — <html>/<body> are a definite 100% of the ACTUAL viewport and
+   never scroll. The app shell bounds itself off this (h-full), so it can never
+   be scrolled as a unit when 100vh exceeds the visible area (Windows 125% zoom,
+   mobile dynamic browser chrome, embedded webviews). Only <main> scrolls. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
 body {
   background: var(--bg-base);
   color: var(--text-primary);
@@ -912,6 +921,37 @@ body {
   right: 0;
   width: 1px;
   background: rgb(255 255 255 / 0.08);
+}
+
+/* ── Login brand-panel flourish: bubbles rising from a faint tilted pill ──
+   Decorative only (the <PillWithBubbles> layer is aria-hidden + pointer-events
+   none). Pure CSS keyframes; the pill itself is static. GPU-composited
+   (transform/opacity only) so idle CPU stays ~0. Bubbles are removed entirely
+   under reduced-motion (below); the pill remains for visual character. */
+@keyframes pill-bubble-rise {
+  /* Emit at the pill, scaled to ~2px, invisible. */
+  0%   { transform: translateY(0) scale(0.4); opacity: 0; }
+  /* Fade in over the first 10%. */
+  10%  { opacity: 0.15; }
+  /* Hold ~0.15 until 70%, then fade out over the last 30%. */
+  70%  { opacity: 0.15; }
+  /* Risen up the panel, grown to 5px (scale 1), faded to nothing. */
+  100% { transform: translateY(-46vh) scale(1); opacity: 0; }
+}
+.pill-bubble {
+  position: absolute;
+  bottom: 44%;                /* start near the pill (center-left of the panel) */
+  z-index: 1;                 /* above the pill (0), below the content (2) */
+  width: 5px;                 /* grows 2px (scale .4) → 5px (scale 1) over life */
+  height: 5px;
+  border-radius: 9999px;
+  background: #ffffff;        /* softness comes from the keyframe opacity, not this */
+  pointer-events: none;
+  will-change: transform, opacity;
+  animation: pill-bubble-rise var(--pb-dur, 7s) linear var(--pb-delay, 0s) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill-bubble { display: none; }
 }
 
 /* ── Login primary button: depth + hover lift ──────────────────────
