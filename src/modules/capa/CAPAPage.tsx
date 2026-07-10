@@ -28,6 +28,7 @@ import {
   reopenCAPA as reopenCAPAServer,
 } from "@/actions/capas";
 import { Button } from "@/components/ui/Button";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 import { StatusGuide } from "@/components/shared";
@@ -298,17 +299,21 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="QMS and CAPA tracker" className="capa-shell w-full space-y-5">
-      {/* Header */}
-      <header className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="page-title">CAPA Tracker</h1>
-          <p className="page-subtitle mt-1">{capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}</p>
-          <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
-        </div>
-        {canCreateCAPAs && <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>New CAPA</Button>}
-        {isCustomerAdmin && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>CAPA actions require QA Head authorization</p>}
-      </header>
+    <main id="main-content" aria-label="QMS and CAPA tracker" className="capa-shell w-full">
+      <PageLayout
+        title="CAPA Tracker"
+        description={`Track corrective and preventive actions from initiation through effectiveness. \u00b7 ${capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}`}
+        actions={canCreateCAPAs ? [{ label: "New CAPA", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) }] : []}
+        headerRight={
+          <div className="flex items-center gap-3">
+            <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
+            {isCustomerAdmin && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>CAPA actions require QA Head authorization</p>}
+          </div>
+        }
+      >
+        {/* Content below the header is unchanged; the space-y-5 that used to sit
+            on <main> now wraps the children so their spacing is preserved. */}
+        <div className="space-y-5">
 
       {/* Batch 1 — the "How a CAPA flows" strip was removed; the QMS Blueprint
           tab's 7-step lifecycle cards already teach the flow. */}
@@ -515,6 +520,8 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
       <Popup isOpen={addedPopup} variant="success" title="CAPA created" description="Added to the tracker. Open the CAPA to document RCA and corrective actions." onDismiss={() => setAddedPopup(false)} />
       <Popup isOpen={!!aiSavedPopup} variant="success" title="AI CAPA generated" description={aiSavedPopup ?? ""} onDismiss={() => setAiSavedPopup(null)} />
       <Popup isOpen={errorPopup} variant="error" title="Action failed" description={errorMsg} onDismiss={() => setErrorPopup(false)} />
+        </div>
+      </PageLayout>
     </main>
   );
 }

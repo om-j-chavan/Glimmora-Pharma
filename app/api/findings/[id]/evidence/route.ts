@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fileStorage } from "@/lib/fileStorage";
+import { findingVisibilityWhere } from "@/lib/queries/findings";
 
 /**
  * GET /api/findings/[id]/evidence
@@ -30,6 +31,23 @@ export async function GET(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;
+
+  // Phase 3 — re-check PARENT finding visibility (no IDOR on evidence bytes): a
+  // non-see-all user who is neither creator nor owner cannot read a hidden
+  // finding's evidence even by id. Mirror the route's super_admin cross-tenant
+  // exemption (visibilityWhere returns {} for see-all roles).
+  const visibleFinding = await prisma.finding.findFirst({
+    where: {
+      id,
+      deletedAt: null,
+      ...(session.user.role === "super_admin" ? {} : { tenantId: session.user.tenantId }),
+      ...findingVisibilityWhere(session),
+    },
+    select: { id: true },
+  });
+  if (!visibleFinding) {
+    return NextResponse.json({ error: "No document linked to this finding" }, { status: 404 });
+  }
 
   const doc = await prisma.document.findFirst({
     where: {

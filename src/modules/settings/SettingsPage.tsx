@@ -10,6 +10,7 @@ import { AGIPolicyTab } from "./tabs/AGIPolicyTab";
 import { PermissionsTab } from "./tabs/PermissionsTab";
 import { SubscriptionTab } from "./tabs/SubscriptionTab";
 import { usePermissions } from "@/hooks/usePermissions";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 const ALL_TABS = [
   { id: "org", label: "Organization", icon: Building2 },
@@ -43,6 +44,21 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col -m-3 sm:-m-4 lg:-m-5 h-full min-h-0">
+      {/* Standardized page header. The shell is full-bleed (negative margins) and
+          the tab bar / panels supply their own gutters, so the header gets the
+          matching gutter here rather than inheriting one. `shrink-0` keeps the
+          flex chain intact so the tab panel below still owns `flex-1` scrolling.
+          PageLayout requires children; the tab bar and panels stay siblings below
+          so their full-bleed borders are untouched. */}
+      <div className="shrink-0 px-3 sm:px-4 lg:px-5 pt-3 sm:pt-4 lg:pt-5">
+        <PageLayout
+          title="Settings"
+          description="Manage organization, users, sites, frameworks, and subscription."
+        >
+          <></>
+        </PageLayout>
+      </div>
+
       {/* Read-only banner for non-admin roles */}
       {readOnly && (
         <div className="flex items-start gap-2 px-5 py-3 border-b" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>

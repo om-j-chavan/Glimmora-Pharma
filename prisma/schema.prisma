@@ -212,11 +212,19 @@ model User {
   uploadedEvidenceFiles          EvidenceFile[]   @relation("EvidenceFileUploadedBy")
   // FDA 483 events this user owns internally (notifications/reminders target).
   fda483EventsAsOwner      FDA483Event[]    @relation("FDA483EventInternalOwner")
+  // Record-visibility (Phase 5.5) — reverse field for the FDA483Event.createdById FK.
+  createdFDA483Events      FDA483Event[]    @relation("FDA483EventCreatedBy")
   // FDA 483 first-class commitments — created / completed by this user, plus
   // evidence documents they uploaded.
   createdFDA483Commitments     FDA483Commitment[]         @relation("FDA483CommitmentCreatedBy")
   completedFDA483Commitments   FDA483Commitment[]         @relation("FDA483CommitmentCompletedBy")
   uploadedFDA483CommitmentDocs FDA483CommitmentDocument[] @relation("FDA483CommitmentDocUploadedBy")
+  // Record-visibility (Phase 0) — reverse fields for the new createdById FKs on
+  // Finding / GxPSystem / Inspection (mirrors createdDeviations). Enables
+  // creator-scoped visibility once the shared helper is adopted (Phase 2+).
+  createdFindings    Finding[]    @relation("FindingCreatedBy")
+  createdSystems     GxPSystem[]  @relation("GxPSystemCreatedBy")
+  createdInspections Inspection[] @relation("InspectionCreatedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -263,6 +271,11 @@ model Finding {
   reworkById    String?
   linkedCAPAId String?
   createdBy    String
+  // Record-visibility (Phase 0) — authoritative creator userId FK (dual-field
+  // with the createdBy display-name string, mirroring Deviation.createdById).
+  // Nullable for the backfill window; onDelete: SetNull. Reads stay unchanged
+  // until the shared visibility helper is adopted (Phase 2+).
+  createdById  String?
   // SME Section 1, Stage 6 (FULL) — recurrence linkage. Same shape as
   // Deviation.previousCAPAId. Nullable; onDelete: SetNull.
   previousCAPAId String?
@@ -279,6 +292,7 @@ model Finding {
 
   tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site   Site?         @relation(fields: [siteId], references: [id])
+  createdByUser User?  @relation("FindingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   capa   CAPA?
   system    GxPSystem? @relation(fields: [systemId], references: [id], onDelete: SetNull)
   rtmEntries RTMEntry[]
@@ -844,12 +858,17 @@ model FDA483Event {
   leadInvestigator  String?             // optional; FDA inspector name from the form
   internalOwnerId   String?             // optional in DB, required in the modal
   createdBy        String
+  // Record-visibility (Phase 5.5) — authoritative creator userId FK (dual-field
+  // with the createdBy display-name string; mirrors Deviation.createdById).
+  // Nullable for the backfill window; onDelete: SetNull.
+  createdById      String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   responseSignature SignedRecord?       @relation("FDA483ResponseSignature", fields: [responseSignatureId], references: [id])
   internalOwner     User?               @relation("FDA483EventInternalOwner", fields: [internalOwnerId], references: [id])
+  createdByUser     User?               @relation("FDA483EventCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   observations      FDA483Observation[]
   commitments       FDA483Commitment[]
   documents         FDA483Document[]
@@ -966,6 +985,9 @@ model GxPSystem {
   plannedActions   String?
   owner            String?
   createdBy        String
+  // Record-visibility (Phase 0) — authoritative creator userId FK (dual-field
+  // with createdBy; mirrors Deviation.createdById). Nullable; onDelete: SetNull.
+  createdById      String?
   // ── RUNG 1 "Stop Lying" — persistence-integrity fields ──
   // ICH Q9 risk classification (was orphaned UI-only; now persisted).
   // "Low" | "Medium" | "High"; null = fall back to gxpRelevance-derived.
@@ -1014,6 +1036,7 @@ model GxPSystem {
   updatedAt        DateTime @updatedAt
 
   tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByUser     User?             @relation("GxPSystemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   validationStages  ValidationStage[]
   rtmEntries        RTMEntry[]
   roadmapActivities RoadmapActivity[]
@@ -1323,10 +1346,14 @@ model Inspection {
   notes          String?
   linkedFDA483Id String?
   createdBy      String
+  // Record-visibility (Phase 0) — authoritative creator userId FK (dual-field
+  // with createdBy; mirrors Deviation.createdById). Nullable; onDelete: SetNull.
+  createdById    String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByUser   User?             @relation("InspectionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   actions         ReadinessAction[]
   simulations     Simulation[]
   readinessCards  ReadinessCard[]

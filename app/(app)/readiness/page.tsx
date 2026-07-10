@@ -1,7 +1,7 @@
 import { ReadinessPage } from "@/modules/readiness/ReadinessPage";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
-import { getInspections, getReadinessStats, getPlaybooks } from "@/lib/queries";
+import { getInspections, getReadinessStats, getPlaybooks, inspectionVisibilityWhere } from "@/lib/queries";
 
 export const metadata = {
   title: "Inspection Readiness — Pharma Glimmora",
@@ -10,7 +10,9 @@ export const metadata = {
 export default async function Page() {
   const session = await requireAuth();
   const [inspections, stats, playbooks] = await Promise.all([
-    getInspections(session.user.tenantId),
+    // Phase 5 record-visibility: a non-see-all user sees only inspections they
+    // created. Stats stay tenant-wide (Phase 6 aggregate deferral).
+    getInspections(session.user.tenantId, inspectionVisibilityWhere(session)),
     getReadinessStats(session.user.tenantId),
     getPlaybooks(session.user.tenantId),
   ]);

@@ -25,6 +25,7 @@ import {
 } from "@/actions/raid";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
@@ -288,12 +289,16 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="Governance and KPIs command center" className="w-full space-y-5">
-      {/* Header */}
-      <header className="flex items-start justify-between flex-wrap gap-4">
-        <div><h1 className="page-title">Governance &amp; KPIs</h1><p className="page-subtitle mt-1">{visibleSites.length} sites &middot; {capas.length} CAPAs &middot; {findings.length} findings &middot; {raidItems.length} RAID items</p></div>
-        <div className="flex items-center gap-2">
-          <div className="relative" ref={exportMenuRef}>
+    <main id="main-content" aria-label="Governance and KPIs command center" className="w-full">
+      <PageLayout
+        title="Governance & KPIs"
+        description={`Monitor compliance governance, risks, and key performance indicators. · ${visibleSites.length} sites · ${capas.length} CAPAs · ${findings.length} findings · ${raidItems.length} RAID items`}
+        headerRight={
+          /* "Export Reports" is a menu trigger with a ref-anchored dropdown, not a
+             plain PageAction (which only models label/onClick/icon/variant), so it
+             lives in headerRight. Both menu items keep their original onClick. */
+          <div className="flex items-center gap-2">
+            <div className="relative" ref={exportMenuRef}>
             <Button
               variant="secondary"
               icon={Download}
@@ -327,9 +332,13 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
                 ))}
               </div>
             )}
+            </div>
           </div>
-        </div>
-      </header>
+        }
+      >
+        {/* Content below the header is unchanged; the space-y-5 that used to sit
+            on <main> now wraps the children so their spacing is preserved. */}
+        <div className="space-y-5">
 
       {/* Tabs */}
       <div role="tablist" aria-label="Governance sections" className="flex gap-1 border-b border-(--bg-border)">
@@ -401,6 +410,8 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
       <Popup isOpen={raidClosedPopup} variant="success" title="RAID item closed" description="Resolution recorded." onDismiss={() => setRaidClosedPopup(false)} />
       <Popup isOpen={reopenedPopup} variant="success" title="RAID item reopened \u2705" description="The item is back in the active list." onDismiss={() => setReopenedPopup(false)} />
       <Popup isOpen={reportGeneratedPopup} variant="success" title="Report generated \u2705" description="Exported successfully." onDismiss={() => setReportGeneratedPopup(false)} />
+        </div>
+      </PageLayout>
     </main>
   );
 }

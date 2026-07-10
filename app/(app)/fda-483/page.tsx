@@ -5,6 +5,7 @@ import {
   getFDA483Events,
   getFDA483Stats,
   getFDA483EventAuditLogs,
+  fda483VisibilityWhere,
   getCAPAs,
 } from "@/lib/queries";
 
@@ -26,10 +27,12 @@ export default async function Page({ searchParams }: PageProps) {
   const eventId = Array.isArray(rawEventId) ? rawEventId[0] : rawEventId;
 
   const [events, stats, auditLogs, capas] = await Promise.all([
-    getFDA483Events(session.user.tenantId),
+    // Phase 5.5 record-visibility: a non-see-all user sees only FDA483 events
+    // they created OR internally own. Stats stay tenant-wide (Phase 6).
+    getFDA483Events(session.user.tenantId, fda483VisibilityWhere(session)),
     getFDA483Stats(session.user.tenantId),
     eventId
-      ? getFDA483EventAuditLogs(session.user.tenantId, eventId, 50)
+      ? getFDA483EventAuditLogs(session, eventId, 50)
       : Promise.resolve([]),
     // Hydrate the CAPA slice so the Investigation tab can resolve each
     // observation's linked CAPA (reference + status/owner/due). The slice is

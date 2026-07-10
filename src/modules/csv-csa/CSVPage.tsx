@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
-import { NoSitesPopup, TabBar, PageHeader, DataTable, type Column } from "@/components/shared";
+import { NoSitesPopup, TabBar, DataTable, type Column } from "@/components/shared";
+import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
@@ -344,22 +345,31 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
 
   /* ══════════════════════════════════════ */
 
+  // Header actions — secondaries render left→right, the single primary ("Add
+  // system") is filled and rightmost. Same gating and the same onClick bodies
+  // the inline buttons had.
+  const pageActions: PageAction[] = [
+    ...(showArchive
+      ? [{ label: "← Back to inventory", variant: "secondary" as const, onClick: () => router.push("/csv-csa") }]
+      : []),
+    ...(isAdmin && !showArchive && props.deletedSystems.length > 0
+      ? [{ label: `View archived (${props.deletedSystems.length})`, variant: "secondary" as const, icon: Archive, onClick: () => router.push("/csv-csa?view=deleted") }]
+      : []),
+    ...(!isViewOnly && !showArchive
+      ? [{ label: "Add system", variant: "primary" as const, icon: Plus, onClick: () => { if (!hasSites) { setNoSitesOpen(true); return; } setAddOpen(true); } }]
+      : []),
+  ];
+
   return (
-    <main id="main-content" aria-label="CSV/CSA and systems risk register" className="w-full space-y-5">
-      {/* Header */}
-      <PageHeader
+    <main id="main-content" aria-label="CSV/CSA and systems risk register" className="w-full">
+      <PageLayout
         title="CSV/CSA Validation"
-        subtitle={systems.length === 0 ? "No systems registered yet" : `${systems.length} systems \u00b7 ${highRisk} high risk \u00b7 ${valOverdue} validation overdue`}
-        actions={
-          <div className="flex items-center gap-2">
-            {showArchive && <Button variant="ghost" onClick={() => router.push("/csv-csa")}>← Back to inventory</Button>}
-            {isAdmin && !showArchive && props.deletedSystems.length > 0 && (
-              <Button variant="ghost" icon={Archive} onClick={() => router.push("/csv-csa?view=deleted")}>View archived ({props.deletedSystems.length})</Button>
-            )}
-            {!isViewOnly && !showArchive && <Button variant="primary" icon={Plus} onClick={() => { if (!hasSites) { setNoSitesOpen(true); return; } setAddOpen(true); }}>Add system</Button>}
-          </div>
-        }
-      />
+        description={`Validate computerized systems through the GxP validation lifecycle. \u00b7 ${systems.length === 0 ? "No systems registered yet" : `${systems.length} systems \u00b7 ${highRisk} high risk \u00b7 ${valOverdue} validation overdue`}`}
+        actions={pageActions}
+      >
+        {/* Content below the header is unchanged; the space-y-5 that used to sit
+            on <main> now wraps the children so their spacing is preserved. */}
+        <div className="space-y-5">
 
       {/* RUNG 3B — admin archive view (soft-deleted systems + restore) */}
       {showArchive ? (
@@ -545,6 +555,8 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
         ]}
       />
       <NoSitesPopup isOpen={noSitesOpen} onClose={() => setNoSitesOpen(false)} feature="CSV/CSA" />
+        </div>
+      </PageLayout>
     </main>
   );
 }

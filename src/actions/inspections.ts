@@ -81,6 +81,10 @@ export async function createInspection(
         tenantId: session.user.tenantId,
         status: "planning",
         createdBy: session.user.name,
+        // Record-visibility (Phase 0) dual-write — authoritative creator userId
+        // FK alongside the createdBy name (null for a User-less tenant-admin
+        // creator; fail-closed, admins see-all anyway).
+        createdById: actor.userId,
         expectedDate: parsed.data.expectedDate ? new Date(parsed.data.expectedDate) : null,
       },
     });

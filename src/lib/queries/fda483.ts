@@ -1,5 +1,20 @@
 import { cache } from "react";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { AuthSession } from "@/lib/auth";
+import { visibilityWhere } from "@/lib/permissions/recordVisibility";
+
+/**
+ * FDA483 (FDA483Event) record-visibility fragment — FLAT (creator + owner).
+ * Both the creator (`createdById`, Phase 5.5) AND the assignee/owner
+ * (`internalOwnerId`) are FLAT columns on the event, so — like Gap — delegate
+ * straight to the shared helper, no compose:
+ *   • see-all role → {} ;  • else → { OR: [ { createdById: uid }, { internalOwnerId: uid } ] }.
+ * Net: a non-see-all user sees only FDA483 events they CREATED or internally OWN.
+ */
+export function fda483VisibilityWhere(session: AuthSession): Prisma.FDA483EventWhereInput {
+  return visibilityWhere(session, { creatorField: "createdById", assigneeField: "internalOwnerId" }) as Prisma.FDA483EventWhereInput;
+}
 
 /**
  * Audit-trail rows scoped to a single FDA 483 event (and its child
@@ -13,11 +28,14 @@ import { prisma } from "@/lib/prisma";
  * surfaces the full timeline.
  */
 export const getFDA483EventAuditLogs = cache(
-  async (tenantId: string, eventId: string, limit = 50) => {
-    // Resolve child ids up-front so the AuditLog query can union them
-    // into the recordId filter.
+  async (session: AuthSession, eventId: string, limit = 50) => {
+    const tenantId = session.user.tenantId;
+    // Phase 5.5 — re-check PARENT-EVENT visibility so a child (this per-event
+    // audit feed) of a hidden event is not readable: a non-see-all user who is
+    // neither creator nor internal owner gets [] here. Resolve child ids up-front
+    // so the AuditLog query can union them into the recordId filter.
     const event = await prisma.fDA483Event.findFirst({
-      where: { id: eventId, tenantId },
+      where: { id: eventId, tenantId, ...fda483VisibilityWhere(session) },
       select: {
         id: true,
         observations: { select: { id: true } },
@@ -44,9 +62,11 @@ export const getFDA483EventAuditLogs = cache(
   },
 );
 
-export const getFDA483Events = cache(async (tenantId: string) => {
+export const getFDA483Events = cache(async (tenantId: string, visibility: Prisma.FDA483EventWhereInput = {}) => {
   return prisma.fDA483Event.findMany({
-    where: { tenantId },
+    // Visibility is an ADDITIONAL AND; default {} keeps the aggregate caller
+    // (getFDA483Stats) + dashboard tenant-wide until Phase 6.
+    where: { tenantId, ...visibility },
     orderBy: { createdAt: "desc" },
     include: {
       observations: { orderBy: { number: "asc" } },
@@ -66,9 +86,11 @@ export const getFDA483Events = cache(async (tenantId: string) => {
   });
 });
 
-export const getFDA483Event = cache(async (id: string, tenantId: string) => {
+export const getFDA483Event = cache(async (id: string, session: AuthSession) => {
+  // Visibility enforced in the query (no IDOR): a non-see-all/non-creator/
+  // non-owner gets null even with a valid id.
   return prisma.fDA483Event.findFirst({
-    where: { id, tenantId },
+    where: { id, tenantId: session.user.tenantId, ...fda483VisibilityWhere(session) },
     include: {
       observations: { orderBy: { number: "asc" } },
       // First-class commitments — surface source linkage (observation/CAPA),

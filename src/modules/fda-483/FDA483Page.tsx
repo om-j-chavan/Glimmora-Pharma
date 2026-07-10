@@ -32,7 +32,8 @@ import { setCAPAs } from "@/store/capa.slice";
 import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
-import { PageHeader, StatusGuide, TabBar, type Tab } from "@/components/shared";
+import { StatusGuide, TabBar, type Tab } from "@/components/shared";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { FDA483_EVENT_STATUSES } from "@/constants/statusTaxonomy";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -690,33 +691,32 @@ export function FDA483Page({
       aria-label="FDA 483 and warning letter support"
       className="w-full space-y-5"
     >
-      {/* Header — module title, list-level counts and the status-guide
-       *  legend belong ONLY on the list view; they're meaningless once a
-       *  single event is open. Shared PageHeader + StatusGuide sibling,
-       *  matching GapPage / DeviationPage (the canonical pattern). */}
       {!liveEvent && (
-        <>
-          <PageHeader
-            title="Inspections &amp; Regulatory"
-            subtitle={
-              events.length === 0
-                ? "No regulatory events logged yet"
-                : `${events.length} events · ${openCount} open · ${dueCount} response due`
-            }
-            actions={
-              fda.canCreate ? (
-                <Button
-                  variant="primary"
-                  icon={Plus}
-                  onClick={() => { if (!hasSites) { setNoSitesOpen(true); return; } setAddEventOpen(true); }}
-                >
-                  Register Event
-                </Button>
-              ) : undefined
-            }
-          />
+        /* Header — module title, list-level counts and the status-guide legend
+           belong ONLY on the list view; they're meaningless once a single event is
+           open (the detail view renders its own EventHeader). So PageLayout stays
+           INSIDE this conditional. StatusGuide, previously a sibling, is now the
+           child that renders under the header divider — same position on screen. */
+        <PageLayout
+          title="Inspections & Regulatory"
+          description={`Manage regulatory inspections, observations, and 483 responses. · ${
+            events.length === 0
+              ? "No regulatory events logged yet"
+              : `${events.length} events · ${openCount} open · ${dueCount} response due`
+          }`}
+          actions={
+            fda.canCreate
+              ? [{
+                  label: "Register Event",
+                  variant: "primary",
+                  icon: Plus,
+                  onClick: () => { if (!hasSites) { setNoSitesOpen(true); return; } setAddEventOpen(true); },
+                }]
+              : []
+          }
+        >
           <StatusGuide module="FDA 483 Events" statuses={FDA483_EVENT_STATUSES} />
-        </>
+        </PageLayout>
       )}
 
       {/* Deadline alert — LIST view only. On the detail view (liveEvent set)

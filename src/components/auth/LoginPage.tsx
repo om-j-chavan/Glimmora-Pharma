@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  AlertCircle,
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -21,6 +22,7 @@ import { setCredentials, setActiveSite, setSelectedSite, type AuthUser, type Ten
 import { login as nextAuthLogin, fetchCurrentUser } from "@/lib/authClient";
 import { flushPersist } from "@/store/persistence";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 
@@ -31,8 +33,21 @@ const SUPPORT_EMAIL = "support@glimmora-pharma.com"; // TODO: placeholder
 const SUPPORT_PHONE_DISPLAY = "+1 (555) 014-2273"; // TODO: placeholder
 const SUPPORT_PHONE_TEL = "+15550142273"; // TODO: placeholder (E.164 of the above)
 
+// The identifier field accepts EITHER an email or a bare username — the
+// NextAuth Credentials provider looks both up (Tenant.username / Tenant.email
+// are each @@unique). So we must NOT blanket-require an email shape; doing so
+// would lock out "superadmin". Instead: only once the value looks like an email
+// attempt (it contains "@") do we check it's a well-formed one. Bare usernames
+// pass through untouched, exactly as before.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const schema = z.object({
-  email: z.string().min(1, "Username or email is required"),
+  email: z
+    .string()
+    .min(1, "Username or email is required")
+    .refine((v) => !v.includes("@") || EMAIL_RE.test(v.trim()), {
+      message: "Enter a valid email address",
+    }),
   password: z.string().min(1, "Password is required"),
 });
 type FormValues = z.infer<typeof schema>;
@@ -74,6 +89,11 @@ export function LoginPage() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [loadingTenant, setLoadingTenant] = useState(false);
   const [loadingName, setLoadingName] = useState("");
+  // Duplicate-submission latch. A ref, NOT `isSubmitting`: react-hook-form sets
+  // isSubmitting via a state update, so two clicks landing in the same tick both
+  // observe the stale `false` from their render closure and both fire a sign-in
+  // request. A ref flips synchronously, so the second click is dropped.
+  const inFlightRef = useRef(false);
 
   // Session-expired toast handoff. AdminShell navigates to
   // /login?session=expired on a 401 from /api/auth/me; this effect
@@ -166,7 +186,24 @@ export function LoginPage() {
     router.push("/");
   };
 
+  /**
+   * Duplicate-submission wrapper. The Button is disabled while `loading`, but a
+   * rapid double-click (or a password manager auto-submitting) can re-enter
+   * handleSubmit before React has re-rendered the disabled state. The ref latch
+   * flips synchronously, so exactly ONE sign-in request is ever in flight.
+   * Purely a UI concern — runSignIn's auth calls are untouched.
+   */
   const onSubmit = async (data: FormValues) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    try {
+      await runSignIn(data);
+    } finally {
+      inFlightRef.current = false;
+    }
+  };
+
+  const runSignIn = async (data: FormValues) => {
     // Single source of truth: NextAuth's authorize() callback verifies
     // credentials against the Tenant / User tables (bcrypt) and applies
     // subscription + MFA gates. No fallback chains — if NextAuth rejects,
@@ -267,25 +304,70 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4" style={{ background: "var(--bg-base)" }}>
+    <div className="min-h-screen grid lg:grid-cols-2" style={{ background: "var(--bg-base)" }}>
+      {/* ── Brand panel (left). Hidden below lg, so mobile collapses to the
+             card alone. Colour comes from .login-brand-panel, which is derived
+             from var(--brand) and therefore follows the active colour theme. ── */}
+      <aside className="login-brand-panel hidden lg:flex flex-col justify-between p-12 xl:p-16">
+        {/* Large, faint logo MARK as a watermark. Rendered inline with
+            fill="currentColor" rather than <img src="/favicon.svg"> because
+            that file hardcodes a purple fill, which would fight the brand. */}
+        <svg
+          viewBox="0 0 48 46"
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-20 -left-12 w-[28rem] text-white/[0.055]"
+          fill="currentColor"
+        >
+          <path d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z" />
+        </svg>
 
-      <div className="w-full max-w-[420px] pt-12 pb-10 px-10">
-        {/* Logo — hidden during loading */}
+        <div className="relative flex items-center gap-2.5 text-white/70">
+          <Shield className="w-3.5 h-3.5" aria-hidden="true" />
+          <span className="text-[11px] font-medium tracking-wide uppercase">21 CFR Part 11</span>
+        </div>
+
+        <div className="relative max-w-md">
+          <h2 className="text-[30px] xl:text-[34px] font-bold leading-[1.15] tracking-tight text-white">
+            Inspection-ready quality, every day.
+          </h2>
+          <p className="mt-4 text-[14px] leading-relaxed text-white/70">
+            Deviations, CAPA, computerized-system validation and 483 responses — governed end to end,
+            with an immutable audit trail behind every action.
+          </p>
+        </div>
+
+        <p className="relative text-[11px] text-white/45">
+          &copy; {new Date().getFullYear()} Pharma Glimmora
+        </p>
+      </aside>
+
+      {/* ── Card column (right) ── */}
+      <div className="flex items-center justify-center px-4 py-8 sm:py-12">
+        {/* Login CARD. Tokens only (--card-bg / --card-border / --shadow-card)
+            so it tracks light + dark automatically. The `login-card-in`
+            entrance is neutralized by the global prefers-reduced-motion block. */}
+        <div
+          className="login-card-in w-full max-w-[420px] rounded-2xl border px-6 py-8 sm:px-9 sm:py-9"
+          style={{
+            background: "var(--card-bg)",
+            borderColor: "var(--card-border)",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+        {/* Branding — the logo.png wordmark already reads "Pharma Glimmora", so
+            there is deliberately NO <h1> repeating it. Logo → tagline. */}
         {!loadingTenant && (
-          <div className="flex flex-col items-start mb-8">
+          <div className="flex flex-col items-center text-center mb-6">
             <Image
               src="/logo.png"
               alt="Pharma Glimmora"
               width={220}
               height={57}
               priority
-              className="h-auto w-[220px] mb-5"
+              className="h-auto w-[185px] sm:w-[200px]"
             />
-            <h1 className="text-[28px] font-extrabold tracking-tight mb-1" style={{ color: "var(--text-primary)" }}>
-              Welcome !
-            </h1>
-            <p className="text-[14px]" style={{ color: "var(--text-secondary)" }}>
-              Log into your account
+            <p className="mt-3.5 text-[13px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+              GxP quality management, inspection-ready.
             </p>
           </div>
         )}
@@ -312,18 +394,27 @@ export function LoginPage() {
           // as ?email=…&password=…. Forcing POST keeps the values in the
           // request body even on pre-hydration submits.
           aria-label="Sign in to Pharma Glimmora"
+          aria-busy={isSubmitting || undefined}
           noValidate
-          className="w-full space-y-4 mt-8"
+          className="w-full space-y-3.5"
           style={{ display: loadingTenant ? "none" : undefined }}
         >
-          {/* Root error */}
+          {/* Root auth error — inline alert. There is no shared <Alert>
+              component in this codebase, and the guardrail is to reuse the
+              existing primitives rather than introduce a new one, so this stays
+              a token-styled role="alert" banner. The matching toast.error() call
+              in onSubmit is unchanged. */}
           {errors.root && (
-            <div role="alert" className="rounded-lg px-3 py-2.5 text-[12px] flex items-start gap-2" style={{ background: "var(--danger-bg)", border: "1px solid var(--danger)", color: "var(--danger)" }}>
-              <span aria-hidden="true" className="mt-0.5">⚠️</span>
+            <div
+              role="alert"
+              className="rounded-lg px-3 py-2.5 text-[12px] flex items-start gap-2.5"
+              style={{ background: "var(--danger-bg)", border: "1px solid var(--danger)", color: "var(--danger)" }}
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 mt-px" aria-hidden="true" />
               <div className="min-w-0">
                 <p className="font-medium">{errors.root.message}</p>
                 {process.env.NODE_ENV === "development" && (
-                  <p className="text-[11px] mt-0.5" style={{ color: "var(--danger)" }}>
+                  <p className="text-[11px] mt-0.5 opacity-90">
                     Tip: click &quot;Show dev credentials&quot; below to auto-fill a working account.
                   </p>
                 )}
@@ -331,79 +422,92 @@ export function LoginPage() {
             </div>
           )}
 
-          {/* Username / email — token-themed so it follows the active theme. */}
-          <div>
-            <label htmlFor="email" className="text-[11px] font-medium block mb-1.5" style={{ color: "var(--text-primary)" }}>
-              Email or username <span style={{ color: "var(--danger)" }} aria-hidden="true">*</span>
-              <span className="sr-only">(required)</span>
-            </label>
-            {/* suppressHydrationWarning on form fields is intentional:
-                password-manager / form-filler browser extensions (Bitwarden,
-                LastPass, 1Password, etc.) inject fdprocessedid attributes
-                post-SSR, causing a benign hydration mismatch. Do not remove. */}
-            <div className="relative">
-              <Mail className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-              <input
-                id="email"
-                type="text"
-                autoComplete="username"
-                placeholder="admin@pharmaglimmora.com or superadmin"
-                required
-                aria-required="true"
-                aria-invalid={errors.email ? true : undefined}
-                aria-describedby={errors.email ? "email-error" : undefined}
-                suppressHydrationWarning
-                {...register("email")}
-                className="w-full rounded-lg pl-9.5 pr-3 py-2.5 text-[13px] outline-none transition-all duration-150 bg-(--bg-surface) border border-(--bg-border) text-(--text-primary) placeholder:text-(--text-muted) focus:border-(--brand) focus:ring-[3px] focus:ring-(--brand-muted)"
-              />
-            </div>
-            {errors.email && (
-              <p id="email-error" role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{errors.email.message}</p>
-            )}
-          </div>
+          {/* Username / email — shared <Input>. It owns the label, the leading
+              icon, the error text + aria-invalid/aria-describedby wiring.
+              suppressHydrationWarning on form fields is intentional:
+              password-manager / form-filler browser extensions (Bitwarden,
+              LastPass, 1Password, etc.) inject fdprocessedid attributes
+              post-SSR, causing a benign hydration mismatch. Do not remove. */}
+          <Input
+            id="email"
+            type="text"
+            label="Email or username"
+            required
+            icon={Mail}
+            autoFocus
+            autoComplete="username"
+            placeholder="admin@pharmaglimmora.com or superadmin"
+            disabled={isSubmitting}
+            error={errors.email?.message}
+            suppressHydrationWarning
+            {...register("email")}
+          />
 
-          {/* Password */}
+          {/* Password. The eye lives in <Input rightAdornment>, which is the
+              component's own mechanism: when type="password" AND a rightAdornment
+              is present it applies `suppress-native-reveal`, hiding the browser's
+              native reveal control. That is what keeps this to exactly ONE eye. */}
           <div>
+            {/* Custom label row so "Forgot passcode?" can sit opposite the label.
+                <Input> is given no `label` prop here; this <label htmlFor> binds
+                to the id it renders on the field, so the association is intact. */}
             <div className="flex justify-between items-center mb-1.5">
-              <label htmlFor="password" className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>
-                Passcode <span style={{ color: "var(--danger)" }} aria-hidden="true">*</span>
+              <label htmlFor="password" className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
+                Passcode
+                <span className="text-(--danger)" aria-hidden="true"> *</span>
+                <span className="sr-only"> (required)</span>
               </label>
-              <Button type="button" variant="ghost" size="xs" onClick={() => setForgotOpen(true)} className="!h-auto !p-0 text-[11px] underline" style={{ color: "var(--brand)" }}>Forgot passcode?</Button>
-            </div>
-            <div className="relative">
-              <Lock className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-              <input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="Enter your passcode"
-                required
-                aria-required="true"
-                aria-invalid={errors.password ? true : undefined}
-                aria-describedby={errors.password ? "password-error" : undefined}
-                suppressHydrationWarning
-                {...register("password")}
-                className="w-full rounded-lg pl-9.5 pr-9 py-2.5 text-[13px] outline-none transition-all duration-150 bg-(--bg-surface) border border-(--bg-border) text-(--text-primary) placeholder:text-(--text-muted) focus:border-(--brand) focus:ring-[3px] focus:ring-(--brand-muted)"
-              />
-              <button
+              <Button
                 type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? "Hide passcode" : "Show passcode"}
-                aria-pressed={showPassword}
-                tabIndex={-1}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center min-w-[24px] min-h-[24px] rounded transition-colors hover:bg-(--bg-hover) text-(--text-muted) hover:text-(--text-primary)"
+                variant="ghost"
+                size="xs"
+                onClick={() => setForgotOpen(true)}
+                disabled={isSubmitting}
+                className="!h-auto !p-0 text-[11px] underline"
+                style={{ color: "var(--brand)" }}
               >
-                {showPassword
-                  ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
-                  : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
-              </button>
+                Forgot passcode?
+              </Button>
             </div>
-            {errors.password && (
-              <p id="password-error" role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{errors.password.message}</p>
-            )}
+            <Input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              required
+              icon={Lock}
+              autoComplete="current-password"
+              placeholder="Enter your passcode"
+              disabled={isSubmitting}
+              error={errors.password?.message}
+              suppressHydrationWarning
+              rightAdornment={
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Hide passcode" : "Show passcode"}
+                  aria-pressed={showPassword}
+                  tabIndex={-1}
+                  disabled={isSubmitting}
+                  className="inline-flex items-center justify-center min-w-[24px] min-h-[24px] rounded transition-colors hover:bg-(--bg-hover) text-(--text-muted) hover:text-(--text-primary) disabled:opacity-50 disabled:cursor-not-allowed border-none bg-transparent cursor-pointer"
+                >
+                  {showPassword
+                    ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
+                    : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
+                </button>
+              }
+              {...register("password")}
+            />
           </div>
 
-          <Button type="submit" icon={LogIn} loading={isSubmitting} fullWidth className="py-2.75" suppressHydrationWarning>
+          {/* `login-submit` adds the gradient + hover lift, scoped to this
+              button so the shared <Button> primary stays flat app-wide. */}
+          <Button
+            type="submit"
+            icon={LogIn}
+            loading={isSubmitting}
+            fullWidth
+            className="login-submit mt-2 py-2.75"
+            suppressHydrationWarning
+          >
             {isSubmitting ? "Signing in..." : "Sign in"}
           </Button>
 
@@ -413,7 +517,7 @@ export function LoginPage() {
         </form>
 
         {/* Footer */}
-        <div className="flex items-center justify-between mt-8 pt-5 border-t border-(--bg-border)" style={{ display: loadingTenant ? "none" : undefined }}>
+        <div className="flex items-center justify-between mt-7 pt-5 border-t border-(--bg-border)" style={{ display: loadingTenant ? "none" : undefined }}>
           <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-muted)" }}>
             <Shield className="w-3 h-3" aria-hidden="true" />
             21 CFR Part 11 compliant
@@ -473,6 +577,7 @@ export function LoginPage() {
           )}
         </div>
         )}
+        </div>
       </div>
 
       {/* Forgot-password → contact support. Resets are handled manually by the

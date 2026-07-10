@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fileStorage } from "@/lib/fileStorage";
+import { systemVisibilityWhere } from "@/lib/queries/systems";
 
 /**
  * GET /api/stage-documents/[id]
@@ -40,7 +41,7 @@ export async function GET(
     include: {
       validationStage: {
         include: {
-          system: { select: { tenantId: true } },
+          system: { select: { id: true, tenantId: true } },
         },
       },
     },
@@ -54,6 +55,18 @@ export async function GET(
     doc.validationStage.system.tenantId !== session.user.tenantId
   ) {
     // Don't leak existence to other tenants — same shape as 404.
+    return NextResponse.json({ error: "Document not found" }, { status: 404 });
+  }
+
+  // Phase 4 — re-check PARENT-SYSTEM visibility (no IDOR on stage-doc bytes): a
+  // non-see-all user who is neither the system's creator nor a rework-task
+  // assignee cannot read its stage documents even by doc id. systemVisibilityWhere
+  // is {} for see-all roles, so tenant scope above still governs them.
+  const visibleSystem = await prisma.gxPSystem.findFirst({
+    where: { id: doc.validationStage.system.id, ...systemVisibilityWhere(session) },
+    select: { id: true },
+  });
+  if (!visibleSystem) {
     return NextResponse.json({ error: "Document not found" }, { status: 404 });
   }
 

@@ -115,6 +115,7 @@ export function WorklistPage({
       <PageLayout
         title="My Worklist"
         description={[
+          "Your assigned actions, tasks, and findings across all modules.",
           currentUserName,
           roleLabel(currentUserRole),
           isViewer ? "read-only" : null,

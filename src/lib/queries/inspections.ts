@@ -1,6 +1,20 @@
 import { cache } from "react";
-import type { ReadinessAction } from "@prisma/client";
+import type { Prisma, ReadinessAction } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { AuthSession } from "@/lib/auth";
+import { visibilityWhere } from "@/lib/permissions/recordVisibility";
+
+/**
+ * Inspection record-visibility fragment — FLAT, CREATOR-ONLY. Inspection stores
+ * a creator (`createdById`, Phase 0) but NO real assignee id — `inspectionLead`
+ * is a display name, not a User id — so there is no `assigneeField`. Delegate
+ * straight to the shared helper (like Gap, minus the assignee branch):
+ *   • see-all role → {} ;  • otherwise → { OR: [ { createdById: uid } ] }.
+ * Net: a non-see-all user sees only inspections they CREATED.
+ */
+export function inspectionVisibilityWhere(session: AuthSession): Prisma.InspectionWhereInput {
+  return visibilityWhere(session, { creatorField: "createdById" }) as Prisma.InspectionWhereInput;
+}
 
 /**
  * Pure helper — % of ReadinessActions in "Complete" state.
@@ -26,9 +40,11 @@ export const getOverallReadiness = cache(async (tenantId: string) => {
   return Math.min(...scores);
 });
 
-export const getInspections = cache(async (tenantId: string) => {
+export const getInspections = cache(async (tenantId: string, visibility: Prisma.InspectionWhereInput = {}) => {
   return prisma.inspection.findMany({
-    where: { tenantId },
+    // Visibility is an ADDITIONAL AND; default {} keeps the aggregate caller
+    // (getReadinessStats) + dashboard tenant-wide until Phase 6.
+    where: { tenantId, ...visibility },
     orderBy: { createdAt: "desc" },
     include: {
       actions: { orderBy: { createdAt: "asc" } },
@@ -38,9 +54,10 @@ export const getInspections = cache(async (tenantId: string) => {
   });
 });
 
-export const getInspection = cache(async (id: string, tenantId: string) => {
+export const getInspection = cache(async (id: string, session: AuthSession) => {
+  // Visibility enforced in the query (no IDOR): a non-see-all/non-creator gets null.
   return prisma.inspection.findFirst({
-    where: { id, tenantId },
+    where: { id, tenantId: session.user.tenantId, ...inspectionVisibilityWhere(session) },
     include: {
       actions: { orderBy: { createdAt: "asc" } },
       simulations: { orderBy: { scheduledAt: "asc" } },

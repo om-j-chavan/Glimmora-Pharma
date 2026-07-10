@@ -1,7 +1,7 @@
 import { CSVPage } from "@/modules/csv-csa/CSVPage";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
-import { getSystems, getDeletedSystems, getSystemsStats, getRTMStats } from "@/lib/queries";
+import { getSystems, getDeletedSystems, getSystemsStats, getRTMStats, systemVisibilityWhere } from "@/lib/queries";
 
 export const metadata = {
   title: "CSV/CSA Validation — Pharma Glimmora",
@@ -10,7 +10,9 @@ export const metadata = {
 export default async function Page() {
   const session = await requireAuth();
   const [systems, stats, rtmStats] = await Promise.all([
-    getSystems(session.user.tenantId),
+    // Phase 4 record-visibility: a non-see-all user sees only systems they
+    // created OR are a rework-task assignee on. Stats stay tenant-wide (Phase 6).
+    getSystems(session.user.tenantId, systemVisibilityWhere(session)),
     getSystemsStats(session.user.tenantId),
     getRTMStats(session.user.tenantId),
   ]);

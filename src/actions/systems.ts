@@ -311,6 +311,10 @@ export async function createSystem(
               regulatoryExposure: parsed.data.regulatoryExposure ?? derivedRisk,
               diImpact: parsed.data.diImpact ?? derivedRisk,
               createdBy: session.user.name,
+              // Record-visibility (Phase 0) dual-write — authoritative creator
+              // userId FK alongside the createdBy name (null for a User-less
+              // tenant-admin creator; fail-closed, admins see-all anyway).
+              createdById: actor.userId,
             },
           });
           // CSA risk-based scoping — only the stages applicable to this GAMP

@@ -42,7 +42,8 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
-import { PageHeader, TabBar, StatCard, CardSection, DataTable, type Column } from "@/components/shared";
+import { TabBar, StatCard, CardSection, DataTable, type Column } from "@/components/shared";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { RoadmapPrismaTab } from "./RoadmapPrismaTab";
 import { TrainingPrismaTab } from "./tabs/TrainingPrismaTab";
 import { PlaybooksPrismaTab } from "./tabs/PlaybooksPrismaTab";
@@ -448,21 +449,22 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="Inspection readiness program" className="w-full space-y-5">
-      {/* Header */}
-      <PageHeader
+    <main id="main-content" aria-label="Inspection readiness program" className="w-full">
+      <PageLayout
         title="Inspection Readiness Program"
-        subtitle={`${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready`}
-        actions={
-          <div className="flex items-center gap-3">
-            <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
-              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span>
-              <span className="text-[20px] font-bold" style={{ color: rsCol }}>{`${readinessScore}%`}</span>
-            </div>
-            {role !== "viewer" && <Button variant="primary" size="sm" icon={Plus} onClick={() => setAddCardOpen(true)}>Add action</Button>}
+        description={`Prepare for inspections through readiness assessments and gap closure. \u00b7 ${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready`}
+        actions={role !== "viewer" ? [{ label: "Add action", variant: "primary", icon: Plus, onClick: () => setAddCardOpen(true) }] : []}
+        headerRight={
+          /* The readiness-score chip is a display widget, not a PageAction. */
+          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
+            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span>
+            <span className="text-[20px] font-bold" style={{ color: rsCol }}>{`${readinessScore}%`}</span>
           </div>
         }
-      />
+      >
+        {/* Content below the header is unchanged; the space-y-5 that used to sit
+            on <main> now wraps the children so their spacing is preserved. */}
+        <div className="space-y-5">
 
       {/* Inspection selector */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -1131,6 +1133,8 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         description="The inspection has been archived. Audit trail updated."
         onDismiss={() => setCompletedPopup(false)}
       />
+        </div>
+      </PageLayout>
     </main>
   );
 }

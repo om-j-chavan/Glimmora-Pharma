@@ -24,6 +24,27 @@ const EMPTY_EVIDENCE_DOCS: EvidenceDocument[] = [];
 const EMPTY_EVIDENCE_PACKS: EvidencePack[] = [];
 const EMPTY_RAID: RAIDItem[] = [];
 
+/**
+ * The tenant + accessible/selected-site predicate the slice filters below apply,
+ * exposed for consumers holding server rows OUTSIDE Redux — specifically the
+ * dashboard's tenant-wide aggregate props, which bypass the store on purpose
+ * (record CONTENT is visibility-scoped in Redux; aggregate COUNTS stay
+ * tenant-wide). Sharing one predicate keeps a site-bound user's KPIs narrowed to
+ * their sites exactly the way the Redux-backed lists are.
+ */
+export function useTenantSitePredicate() {
+  const tenantId = useAppSelector((s) => s.auth.currentTenant);
+  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
+  const { sites: accessibleSites } = useTenantConfig();
+  const accessibleSiteIds = accessibleSites.map((s) => s.id);
+  return (r: { tenantId?: string | null; siteId?: string | null }) => {
+    if (r.tenantId && r.tenantId !== tenantId) return false;
+    if (r.siteId && !accessibleSiteIds.includes(r.siteId)) return false;
+    if (selectedSiteId && r.siteId !== selectedSiteId) return false;
+    return true;
+  };
+}
+
 export function useTenantData() {
   const tenantId = useAppSelector((s) => s.auth.currentTenant);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);

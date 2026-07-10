@@ -45,7 +45,8 @@ import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
 import { useToast } from "@/components/ui/Toast";
 import { DocumentUpload, type LinkedDocument } from "@/components/shared/DocumentUpload";
-import { PageHeader, StatCard, StatusGuide, DataTable, type Column } from "@/components/shared";
+import { StatCard, StatusGuide, DataTable, type Column } from "@/components/shared";
+import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
 import {
   STATUS_VARIANT, STATUS_LABEL, CATEGORIES, AREAS, DEV_TASK_STATUS_LABEL,
@@ -170,7 +171,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   );
 
   // On-demand Deviation Intelligence — the run trigger lives in the page header
-  // (see PageHeader actions); the results card mounts only after a run.
+  // (see PageLayout headerRight); the results card mounts only after a run.
   const deviationIntel = useDeviationIntelligence(deviationIntelInput);
 
   const openCount = tenantDevs.filter((d) => d.status === "open").length;
@@ -513,19 +514,30 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     router.refresh();
   }
 
+  // Header actions \u2014 the single primary create action. StatusGuide and the
+  // intelligence run button aren't PageActions (they're custom widgets), so
+  // they go in headerRight, left of the primary.
+  const pageActions: PageAction[] = devCan.canCreate
+    ? [{ label: "Report Deviation", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) }]
+    : [];
+
   return (
-    <main id="main-content" aria-label="Deviation management" className="w-full space-y-5">
-      <PageHeader
+    <main id="main-content" aria-label="Deviation management" className="w-full">
+      <PageLayout
         title="Deviation Management"
-        subtitle={tenantDevs.length === 0 ? "No deviations reported yet" : `${tenantDevs.length} deviations \u00b7 ${openCount} open \u00b7 ${investigatingCount} under investigation`}
-        actions={
+        description={`Report, investigate, and disposition deviations from approved procedures. \u00b7 ${tenantDevs.length === 0 ? "No deviations reported yet" : `${tenantDevs.length} deviations \u00b7 ${openCount} open \u00b7 ${investigatingCount} under investigation`}`}
+        actions={pageActions}
+        headerRight={
           <div className="flex items-center gap-3">
             <StatusGuide module="Deviation Management" statuses={DEVIATION_STATUSES} />
             <DeviationIntelligenceRunButton state={deviationIntel} />
-            {devCan.canCreate ? <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>Report Deviation</Button> : <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Contact QA Head to report deviations</p>}
+            {!devCan.canCreate && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Contact QA Head to report deviations</p>}
           </div>
         }
-      />
+      >
+        {/* Content below the header is unchanged; the space-y-5 that used to sit
+            on <main> now wraps the children so their spacing is preserved. */}
+        <div className="space-y-5">
 
       {/* Info banner */}
       <div className="flex items-start gap-2 p-3 rounded-xl border" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
@@ -1270,6 +1282,8 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
       <Popup isOpen={successPopup} variant="success" title="Success" description={successMsg} onDismiss={() => setSuccessPopup(false)} />
       <Popup isOpen={errorPopup} variant="error" title="Action failed" description={errorMsg} onDismiss={() => setErrorPopup(false)} />
+        </div>
+      </PageLayout>
     </main>
   );
 }

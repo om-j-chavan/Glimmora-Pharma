@@ -19,7 +19,10 @@ export default async function SystemDetailRoute({ params }: PageProps) {
   const session = await requireAuth();
   const decoded = decodeURIComponent(reference);
 
-  const system = await getSystemByRef(decoded, session.user.tenantId);
+  // Phase 4 — visibility enforced in getSystemByRef: a non-see-all/non-creator/
+  // non-rework-assignee gets null → notFound() (no IDOR by reference/id). The
+  // related reads below are only reached for a VISIBLE system (inherit the gate).
+  const system = await getSystemByRef(decoded, session);
   if (!system) notFound();
 
   const [availableFindings, recentActivity] = await Promise.all([

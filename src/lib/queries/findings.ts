@@ -1,14 +1,33 @@
 import { cache } from "react";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AuthSession } from "@/lib/auth";
+import { visibilityWhere } from "@/lib/permissions/recordVisibility";
 
 /**
- * Cached query: all findings for a tenant, newest first.
+ * Gap (Finding) record-visibility fragment — the FLAT TEMPLATE (Inspection copies
+ * this shape). Both the creator (`createdById`, Phase 0) AND the assignee
+ * (`owner`) are FLAT columns on Finding, so — unlike Deviation/CSV — there is NO
+ * compose: delegate straight to the shared helper.
+ *   • see-all role (customer_admin/qa_head/super_admin) → `{}` (no narrowing).
+ *   • otherwise → `{ OR: [ { createdById: uid }, { owner: uid } ] }` (fail-closed uid).
+ * Net: a non-see-all user sees only findings they CREATED or OWN (are assigned to).
+ * `owner` is overwritten on reassignment, but the CREATOR keeps visibility via
+ * `createdById` (Phase 0) even after the finding is reassigned away from them.
+ */
+export function findingVisibilityWhere(session: AuthSession): Prisma.FindingWhereInput {
+  return visibilityWhere(session, { creatorField: "createdById", assigneeField: "owner" }) as Prisma.FindingWhereInput;
+}
+
+/**
+ * Cached query: all findings for a tenant, newest first. `visibility` is an
+ * ADDITIONAL AND on top of tenant + deletedAt; default `{}` keeps existing
+ * callers (dashboard/search) tenant-wide until their cross-cutting phase.
  * React cache() deduplicates within a single request.
  */
-export const getFindings = cache(async (tenantId: string) => {
+export const getFindings = cache(async (tenantId: string, visibility: Prisma.FindingWhereInput = {}) => {
   return prisma.finding.findMany({
-    where: { tenantId, deletedAt: null },
+    where: { tenantId, deletedAt: null, ...visibility },
     orderBy: { createdAt: "desc" },
     include: { edits: { orderBy: { editedAt: "asc" } } },
   });
@@ -54,11 +73,13 @@ export async function getFindingAssignees(session: AuthSession): Promise<Finding
 }
 
 /**
- * Cached query: single finding by ID (with tenant guard).
+ * Cached query: single finding by ID. Visibility enforced IN THE QUERY (no IDOR):
+ * a non-see-all user who is neither creator nor owner gets `null` (not-found)
+ * even with a valid id.
  */
-export const getFinding = cache(async (id: string, tenantId: string) => {
+export const getFinding = cache(async (id: string, session: AuthSession) => {
   return prisma.finding.findFirst({
-    where: { id, tenantId, deletedAt: null },
+    where: { id, tenantId: session.user.tenantId, deletedAt: null, ...findingVisibilityWhere(session) },
     include: { edits: { orderBy: { editedAt: "asc" } } },
   });
 });

@@ -166,6 +166,10 @@ export async function createFDA483Event(
         leadInvestigator: d.leadInvestigator ?? null,
         status: "Open",
         createdBy: session.user.name,
+        // Record-visibility (Phase 5.5) dual-write — authoritative creator userId
+        // FK alongside the createdBy name (null for a User-less tenant-admin
+        // creator; fail-closed, admins see-all anyway).
+        createdById: actor.userId,
       },
     });
     await prisma.auditLog.create({

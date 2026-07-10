@@ -1,5 +1,35 @@
 import { cache } from "react";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { AuthSession } from "@/lib/auth";
+import { canSeeAllRecords, resolveVisibilityUid } from "@/lib/permissions/recordVisibility";
+
+/**
+ * CSV/CSA (GxPSystem) record-visibility fragment — the DEEP-COMPOSE template.
+ *
+ * The creator lives on GxPSystem (`createdById`, Phase 0); the assignee lives on
+ * a DEEP-nested grandchild — `ValidationStageTask.assigneeId` reached via
+ * `validationStages` → `reworkTasks` (confirmed schema:1033 `validationStages
+ * ValidationStage[]`, schema:1068 `reworkTasks ValidationStageTask[]`,
+ * schema:1090 `assigneeId String?`). The shared helper's flat field can't express
+ * that, so compose from the two shared primitives (like Deviation, via
+ * resolveVisibilityUid — never `OR[0]`):
+ *   • see-all role → {} (no narrowing).
+ *   • otherwise → one fail-closed `uid` drives the flat creator branch AND the
+ *     nested relation assignee branch.
+ * Net: a non-see-all user sees only systems they CREATED or are a rework-task
+ * assignee on. ADDITIONAL AND on top of tenant + deletedAt.
+ */
+export function systemVisibilityWhere(session: AuthSession): Prisma.GxPSystemWhereInput {
+  if (canSeeAllRecords(session.user.role)) return {};
+  const uid = resolveVisibilityUid(session);
+  return {
+    OR: [
+      { createdById: uid },                                                        // creator (flat)
+      { validationStages: { some: { reworkTasks: { some: { assigneeId: uid } } } } }, // assignee (deep relation)
+    ],
+  };
+}
 
 // Validation stages always pull active (non-deleted) StageDocument rows.
 // Soft-deleted documents stay in the DB for audit but never render in UI.
@@ -37,9 +67,11 @@ const SYSTEM_INCLUDE = {
 
 // RUNG 3B — read paths return ACTIVE systems only (deletedAt: null). Archived
 // systems are surfaced exclusively via getDeletedSystems (admin archive view).
-export const getSystems = cache(async (tenantId: string) => {
+export const getSystems = cache(async (tenantId: string, visibility: Prisma.GxPSystemWhereInput = {}) => {
   return prisma.gxPSystem.findMany({
-    where: { tenantId, deletedAt: null },
+    // Visibility is an ADDITIONAL AND; default {} keeps dashboard/search callers
+    // tenant-wide until their cross-cutting phase.
+    where: { tenantId, deletedAt: null, ...visibility },
     orderBy: { createdAt: "desc" },
     include: SYSTEM_INCLUDE,
   });
@@ -54,18 +86,32 @@ export const getDeletedSystems = cache(async (tenantId: string) => {
   });
 });
 
-export const getSystem = cache(async (id: string, tenantId: string) => {
+export const getSystem = cache(async (id: string, session: AuthSession) => {
+  // Visibility enforced in the query (no IDOR).
   return prisma.gxPSystem.findFirst({
-    where: { id, tenantId, deletedAt: null },
+    where: { id, tenantId: session.user.tenantId, deletedAt: null, ...systemVisibilityWhere(session) },
     include: SYSTEM_INCLUDE,
   });
 });
 
 /** RUNG 2 — routed detail lookup by human reference OR raw cuid.
- *  RUNG 3B — archived systems 404 (deletedAt: null). */
-export const getSystemByRef = cache(async (refOrId: string, tenantId: string) => {
+ *  RUNG 3B — archived systems 404 (deletedAt: null).
+ *  Phase 4 — visibility enforced IN THE QUERY: a non-see-all/non-creator/non-
+ *  rework-assignee gets null even with a valid ref/id (no IDOR). */
+export const getSystemByRef = cache(async (refOrId: string, session: AuthSession) => {
   return prisma.gxPSystem.findFirst({
-    where: { tenantId, deletedAt: null, OR: [{ reference: refOrId }, { id: refOrId }] },
+    // AND-wrap: the ref/id lookup is its own OR, so the visibility fragment (also
+    // an OR for seat roles) must be ANDed as a sibling — spreading it at the top
+    // level would overwrite the ref/id OR. For see-all, systemVisibilityWhere is
+    // {} → the AND collapses to the ref/id match.
+    where: {
+      tenantId: session.user.tenantId,
+      deletedAt: null,
+      AND: [
+        { OR: [{ reference: refOrId }, { id: refOrId }] },
+        systemVisibilityWhere(session),
+      ],
+    },
     include: SYSTEM_INCLUDE,
   });
 });

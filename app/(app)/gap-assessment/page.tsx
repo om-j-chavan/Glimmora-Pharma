@@ -1,7 +1,7 @@
 import { GapPage } from "@/modules/gap-assessment/GapPage";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
-import { getFindings, getFindingEvidenceDocIds, getFindingAssignees } from "@/lib/queries";
+import { getFindings, getFindingEvidenceDocIds, getFindingAssignees, findingVisibilityWhere } from "@/lib/queries";
 
 export const metadata = {
   title: "Gap Assessment — Pharma Glimmora",
@@ -10,7 +10,9 @@ export const metadata = {
 export default async function Page() {
   const session = await requireAuth();
   const [findings, evidenceDocFindingIds, assignees] = await Promise.all([
-    getFindings(session.user.tenantId),
+    // Phase 3 record-visibility: a non-see-all user sees only findings they
+    // created OR own (are assigned to). See-all roles → {} → all tenant findings.
+    getFindings(session.user.tenantId, findingVisibilityWhere(session)),
     getFindingEvidenceDocIds(session.user.tenantId),
     // Server-scoped assignee pool (tenant + the assigner's own site) — the
     // dropdown renders exactly this, so selection can't widen scope.

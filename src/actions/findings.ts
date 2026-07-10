@@ -22,6 +22,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES, GAP_CREATE_ROLES, QA_AUTHORITY_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { findingVisibilityWhere } from "@/lib/queries/findings";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import { notify } from "@/lib/notify";
 import { fileStorage } from "@/lib/fileStorage";
@@ -166,6 +167,10 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
             // updateFinding enum, the FindingStatus type, and all read sites).
             status: "Open",
             createdBy: session.user.name,
+            // Record-visibility (Phase 0) dual-write — authoritative creator
+            // userId FK alongside the createdBy name. Null for a tenant-admin
+            // creator with no User row (fail-closed; admins see-all anyway).
+            createdById: actor.userId,
             targetDate: new Date(parsed.data.targetDate),
           },
         });
@@ -1103,8 +1108,11 @@ export async function postFindingMessage(
  *  rework ask, and the conversation. Tenant-scoped; messages oldest first. */
 export async function loadFindingReview(findingId: string): Promise<ActionResult> {
   const session = await requireAuth();
+  // Phase 3 — re-check PARENT visibility so a child (the review thread) of a
+  // hidden finding is not readable: a non-see-all user who is neither creator
+  // nor owner gets "not found" here, before any message is loaded.
   const finding = await prisma.finding.findFirst({
-    where: { id: findingId, tenantId: session.user.tenantId },
+    where: { id: findingId, tenantId: session.user.tenantId, ...findingVisibilityWhere(session) },
     select: { id: true, status: true, completionNotes: true, reworkReason: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };

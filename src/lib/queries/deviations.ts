@@ -1,10 +1,43 @@
 import { cache } from "react";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { AuthSession } from "@/lib/auth";
+import { canSeeAllRecords, resolveVisibilityUid } from "@/lib/permissions/recordVisibility";
 import type { WorklistDoc } from "@/lib/queries/worklist";
 
-export const getDeviations = cache(async (tenantId: string) => {
+/**
+ * Deviation record-visibility fragment — the COMPOSE TEMPLATE (CSV copies this).
+ *
+ * The creator lives on Deviation (`createdById`); the assignee lives on the CHILD
+ * `DeviationTask` (`assigneeId`), which the shared helper's FLAT `assigneeField`
+ * can't express. So a compose-module builds the fragment from the two shared
+ * primitives directly:
+ *   • see-all role (customer_admin/qa_head/super_admin) → `canSeeAllRecords` true
+ *     → `{}` → no narrowing (sees ALL deviations).
+ *   • otherwise → one fail-closed `uid` (from `resolveVisibilityUid`) drives BOTH
+ *     the flat creator branch `{ createdById: uid }` AND the RELATION assignee
+ *     branch `{ tasks: { some: { assigneeId: uid } } }`.
+ * Net: a non-see-all user sees only deviations they CREATED or are a TASK-ASSIGNEE
+ * on. This is an ADDITIONAL AND on top of the caller's tenant + deletedAt scope.
+ * (Phase 3 cleanup — the uid now comes from `resolveVisibilityUid`, not by
+ * reaching into `visibilityWhere`'s `OR[0]`. Behaviour is identical.)
+ */
+export function deviationVisibilityWhere(session: AuthSession): Prisma.DeviationWhereInput {
+  if (canSeeAllRecords(session.user.role)) return {}; // see-all → no narrowing
+  const uid = resolveVisibilityUid(session);          // shared fail-closed uid
+  return {
+    OR: [
+      { createdById: uid },                     // creator (flat)
+      { tasks: { some: { assigneeId: uid } } }, // task-assignee (relation)
+    ],
+  };
+}
+
+export const getDeviations = cache(async (tenantId: string, visibility: Prisma.DeviationWhereInput = {}) => {
   const rows = await prisma.deviation.findMany({
-    where: { tenantId, deletedAt: null },
+    // Visibility is an ADDITIONAL AND on top of tenant + deletedAt. Default `{}`
+    // keeps existing callers (dashboard/search) tenant-wide until their phase.
+    where: { tenantId, deletedAt: null, ...visibility },
     orderBy: { createdAt: "desc" },
     // Include the linked CAPA's human-readable reference so the list +
     // detail views can render "CAPA-…" instead of the raw cuid.
@@ -105,9 +138,11 @@ export const getDeviations = cache(async (tenantId: string) => {
   });
 });
 
-export const getDeviation = cache(async (id: string, tenantId: string) => {
+export const getDeviation = cache(async (id: string, session: AuthSession) => {
+  // Visibility enforced IN THE QUERY (no IDOR): a non-see-all user who is neither
+  // the creator nor a task-assignee gets `null` (not-found) even with a valid id.
   return prisma.deviation.findFirst({
-    where: { id, tenantId, deletedAt: null },
+    where: { id, tenantId: session.user.tenantId, deletedAt: null, ...deviationVisibilityWhere(session) },
   });
 });
 

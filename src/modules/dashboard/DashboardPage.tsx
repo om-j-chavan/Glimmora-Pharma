@@ -15,7 +15,7 @@ import { chartDefaults } from "@/lib/chartColors";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
-import { useTenantData } from "@/hooks/useTenantData";
+import { useTenantData, useTenantSitePredicate } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { setFindings } from "@/store/findings.slice";
 import { setCAPAs } from "@/store/capa.slice";
@@ -71,18 +71,32 @@ export interface DashboardPageProps {
    */
   stats?: DashboardServerStats;
   /**
-   * Raw server rows used to SEED the Redux slices the dashboard reads (findings
-   * / capas / deviations / systems), so KPIs and the heatmap render on first
-   * paint instead of waiting for another module's mount to hydrate the store.
-   * Same per-module hydration pattern as CAPAPage / DeviationPage / GapPage.
-   * (roadmap / fda483Events still have no slices post server-first migration —
-   * useTenantData returns [] for them — so they can't be seeded here; that's a
-   * separate deferred migration, not the first-paint bug.)
+   * VISIBILITY-SCOPED server rows (Phase 6). Two jobs:
+   *  1. They SEED the Redux slices, so every downstream Redux reader — GapPage,
+   *     DeviationPage, GovernancePage's exports — sees only visible records.
+   *  2. They feed this page's record-CONTENT surfaces: the 90-day action plan
+   *     and the cross-module search.
+   * `capas` is [] unless the viewer holds a CAPA-module role (CAPA has no
+   * record-level fragment; the module itself is the gate). roadmap /
+   * fda483Events still have no slices post server-first migration — useTenantData
+   * returns [] for them — so they can't be seeded here.
    */
   findings?: FindingWithEdits[];
   capas?: Parameters<typeof mapCAPAFromPrisma>[0][];
   deviations?: PrismaDeviationWithCapa[];
   systems?: Parameters<typeof adaptPrismaSystem>[0][];
+  /**
+   * TENANT-WIDE server rows (Phase 6, decision #5) — aggregates only. Never
+   * rendered as rows, never dispatched into Redux. They back the KPI cards, the
+   * 6-month trend chart, the area×site heatmap and the AGI insight counts, so a
+   * seat user and a QA head read the SAME totals. Site-filtered client-side by
+   * useTenantSitePredicate (the store's own filter can't reach them).
+   */
+  allFindings?: FindingWithEdits[];
+  allCAPAs?: Parameters<typeof mapCAPAFromPrisma>[0][];
+  allSystems?: Parameters<typeof adaptPrismaSystem>[0][];
+  /** Viewer holds a CAPA-module role → CAPA rows may appear as content. */
+  canViewCAPAs?: boolean;
 }
 
 export function DashboardPage({
@@ -91,20 +105,37 @@ export function DashboardPage({
   capas: serverCAPAs,
   deviations: serverDeviations,
   systems: serverSystems,
+  allFindings: serverAllFindings,
+  allCAPAs: serverAllCAPAs,
+  allSystems: serverAllSystems,
+  canViewCAPAs = false,
 }: DashboardPageProps = {}) {
   const router = useRouter();
   const dispatch = useAppDispatch();
   // Seed Redux from the server-fetched rows on mount / when props change. The
   // tenant/site filtering happens on READ in useTenantData (by currentTenant,
   // seeded by AppShell), so this dispatch is unconditional — identical to how
-  // every module page hydrates its own slice.
+  // every module page hydrates its own slice. These props are the VISIBILITY-
+  // SCOPED rows: the store is shared with GapPage / DeviationPage / Governance,
+  // so seeding it tenant-wide would leak hidden records into their lists and
+  // exports.
   useEffect(() => {
     if (serverFindings) dispatch(setFindings(serverFindings.map(adaptFinding)));
     if (serverCAPAs) dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
     if (serverDeviations) dispatch(setDeviations(serverDeviations.map(adaptDeviation)));
     if (serverSystems) dispatch(setSystems(serverSystems.map(adaptPrismaSystem)));
   }, [serverFindings, serverCAPAs, serverDeviations, serverSystems, dispatch]);
+  // Visibility-SCOPED (Redux). Everything rendered as a record row comes from here.
   const { findings, capas, deviations, systems, roadmap, fda483Events, tenantId } = useTenantData();
+
+  // Tenant-WIDE (props, never dispatched). Everything counted comes from here.
+  // Adapted to the slice shape so the aggregate maths below is identical
+  // whichever array it runs over, then narrowed by the same tenant/site rule
+  // useTenantData applies to the store.
+  const sitePredicate = useTenantSitePredicate();
+  const allFindings = (serverAllFindings ?? []).map(adaptFinding).filter(sitePredicate);
+  const allCAPAs = (serverAllCAPAs ?? []).map(mapCAPAFromPrisma).filter(sitePredicate);
+  const allSystems = (serverAllSystems ?? []).map(adaptPrismaSystem).filter(sitePredicate);
   const { org, sites, users } = useTenantConfig();
   const agiSettings = useAppSelector((s) => s.settings.agi);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
@@ -132,30 +163,40 @@ export function DashboardPage({
 
   const cutoff = timeFilter === "all" ? null : dayjs().subtract(parseInt(timeFilter), "day");
 
-  // Apply ALL filters to findings
-  const filteredFindings = findings.filter((f) => {
+  /* ── Filter predicates — ONE definition each, applied to both the tenant-wide
+     aggregate arrays and the visibility-scoped content arrays, so the site /
+     severity / time dropdowns act identically on counts and on rows. ── */
+  const matchesFindingFilters = (f: { siteId?: string | null; severity: string; createdAt?: string | null }) => {
     if (siteFilter && f.siteId !== siteFilter) return false;
     if (sevFilter && f.severity !== sevFilter) return false;
     if (cutoff && f.createdAt && dayjs.utc(f.createdAt).isBefore(cutoff)) return false;
     return true;
-  });
-
-  // Apply site + date filters to CAPAs
-  const filteredCAPAs = capas.filter((c) => {
+  };
+  const matchesCAPAFilters = (c: { siteId?: string | null; createdAt?: string | null }) => {
     if (siteFilter && c.siteId !== siteFilter) return false;
     if (cutoff && c.createdAt && dayjs.utc(c.createdAt).isBefore(cutoff)) return false;
     return true;
-  });
+  };
+  const matchesSystemFilters = (s: { siteId?: string | null }) => !siteFilter || s.siteId === siteFilter;
 
-  // Apply site filter to systems
-  const filteredSystems = systems.filter((s) => {
-    if (siteFilter && s.siteId !== siteFilter) return false;
-    return true;
-  });
+  /* ── Aggregate inputs — TENANT-WIDE (decision #5). Feed the KPI cards, the
+     trend chart, the heatmap and the AGI insight counts. ── */
+  const filteredFindings = allFindings.filter(matchesFindingFilters);
+  const filteredCAPAs = allCAPAs.filter(matchesCAPAFilters);
+  const filteredSystems = allSystems.filter(matchesSystemFilters);
+
+  /* ── Content inputs — VISIBILITY-SCOPED. Feed the 90-day action plan, which
+     renders requirement text / CAPA descriptions / system names and links to
+     each record. Never used for a count. ── */
+  const visibleFindings = findings.filter(matchesFindingFilters);
+  const visibleCAPAs = capas.filter(matchesCAPAFilters);
+  const visibleSystems = systems.filter(matchesSystemFilters);
 
   /* ── KPIs — all derived from filtered data ── */
   const openCAPAs = filteredCAPAs.filter((c) => c.status !== "closed");
   const overdueCAPAs = filteredCAPAs.filter(isOverdue);
+  // Content twin of `overdueCAPAs` — only the overdue CAPAs this viewer may see.
+  const visibleOverdueCAPAs = visibleCAPAs.filter(isOverdue);
   const criticalCount = filteredFindings.filter((f) => f.severity === "Critical" && f.status !== "Closed").length;
   const capaOverdueRate = openCAPAs.length === 0 ? null : Math.round((overdueCAPAs.length / openCAPAs.length) * 100);
   // CSV high risk = HIGH risk systems that are not yet validated (consistent with heatmap + action plan)
@@ -190,8 +231,10 @@ export function DashboardPage({
   // whose only records are unlinked CAPAs never registers on the heatmap and
   // shows "—" despite having real records (Bug 17). Site stays exact (CAPA
   // carries its own siteId); only the area is inferred.
-  function capaArea(c: typeof capas[number]): string {
-    const lf = findings.find((f) => f.id === c.findingId);
+  // Aggregate helper — resolves against the tenant-wide findings so a CAPA's
+  // area is stable regardless of who is looking (the heatmap is a count surface).
+  function capaArea(c: typeof allCAPAs[number]): string {
+    const lf = allFindings.find((f) => f.id === c.findingId);
     return lf ? lf.area : c.source === "483" ? "Regulatory" : c.source === "Deviation" ? "Manufacturing" : "QMS";
   }
   function getAreaScore(area: string, siteId?: string) {
@@ -209,28 +252,34 @@ export function DashboardPage({
     // "Has data" = something has actually been logged for this area+site.
     // Without this, an untouched site shows as 100% green everywhere, which
     // reads as "fully compliant" when it really means "never assessed".
-    const totalFindingsForArea = findings.filter((f) => f.area === area && (!siteId || f.siteId === siteId)).length;
-    const totalCapasForArea = capas.filter((c) => {
+    const totalFindingsForArea = allFindings.filter((f) => f.area === area && (!siteId || f.siteId === siteId)).length;
+    const totalCapasForArea = allCAPAs.filter((c) => {
       if (siteId && c.siteId !== siteId) return false;
       return capaArea(c) === area;
     }).length;
-    const totalSystemsForArea = area === "CSV/IT" ? systems.filter((s) => !siteId || s.siteId === siteId).length : 0;
+    const totalSystemsForArea = area === "CSV/IT" ? allSystems.filter((s) => !siteId || s.siteId === siteId).length : 0;
     const hasData = totalFindingsForArea + totalCapasForArea + totalSystemsForArea > 0;
     const score = Math.max(0, 100 - cr * 30 - mj * 15 - areaCapaOverdue * 20 - sysRisk * 25);
     return { score, open: af.length, critical: cr, hasData };
   }
   const displayedSites = siteFilter ? visibleSites.filter((s) => s.id === siteFilter) : visibleSites;
 
-  /* ── Action plan ── */
+  /* ── Action plan — record CONTENT, so every row is drawn from a visibility-
+     scoped array. Each row renders requirement text / a CAPA description / a
+     system name and deep-links by refId, so a row here is precisely a record the
+     viewer is allowed to open on its module page. ── */
   const actionPlan = (() => {
     const items: { id: string; priority: "Critical" | "High" | "Medium" | "Low"; area: string; action: string; owner: string; dueDate: string; status: string; module: string; refId: string; agiRisk: "High" | "Medium" | "Low" }[] = [];
-    filteredFindings.filter((f) => f.status !== "Closed" && (f.severity === "Critical" || f.severity === "High")).forEach((f) => items.push({ id: f.id, priority: f.severity, area: f.area, action: f.requirement.length > 60 ? f.requirement.slice(0, 60) + "..." : f.requirement, owner: f.owner, dueDate: f.targetDate ?? "", status: f.status, module: "gap-assessment", refId: f.id, agiRisk: f.severity === "Critical" ? "High" : "Medium" }));
-    overdueCAPAs.slice(0, 5).forEach((c) => {
+    visibleFindings.filter((f) => f.status !== "Closed" && (f.severity === "Critical" || f.severity === "High")).forEach((f) => items.push({ id: f.id, priority: f.severity, area: f.area, action: f.requirement.length > 60 ? f.requirement.slice(0, 60) + "..." : f.requirement, owner: f.owner, dueDate: f.targetDate ?? "", status: f.status, module: "gap-assessment", refId: f.id, agiRisk: f.severity === "Critical" ? "High" : "Medium" }));
+    // CAPA rows only for a CAPA-module role. Everyone else is redirected off
+    // /capa, so a CAPA row must not appear here either. (`capas` is already []
+    // for them — the guard states the intent at the point it matters.)
+    if (canViewCAPAs) visibleOverdueCAPAs.slice(0, 5).forEach((c) => {
       const linkedFinding = findings.find((f) => f.id === c.findingId);
       const area = linkedFinding?.area ?? (c.source === "483" ? "Regulatory" : c.source === "Deviation" ? "Manufacturing" : "QMS");
       items.push({ id: c.id, priority: c.risk, area, action: c.description.length > 60 ? c.description.slice(0, 60) + "..." : c.description, owner: c.owner, dueDate: c.dueDate, status: c.status, module: "capa", refId: c.id, agiRisk: c.risk === "Critical" ? "High" : "Medium" });
     });
-    filteredSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").slice(0, 3).forEach((s) => items.push({ id: s.id, priority: "High", area: "CSV/IT", action: `Validate ${s.name} \u2014 ${s.validationStatus}`, owner: s.owner, dueDate: s.nextReview ?? "", status: s.validationStatus, module: "csv-csa", refId: s.id, agiRisk: "High" }));
+    visibleSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").slice(0, 3).forEach((s) => items.push({ id: s.id, priority: "High", area: "CSV/IT", action: `Validate ${s.name} \u2014 ${s.validationStatus}`, owner: s.owner, dueDate: s.nextReview ?? "", status: s.validationStatus, module: "csv-csa", refId: s.id, agiRisk: "High" }));
     // CSV roadmap activities (non-complete, within 90 days)
     roadmap.filter((a) => a.status !== "Complete" && dayjs.utc(a.endDate).diff(dayjs(), "day") <= 90).forEach((a) => {
       const sys = systems.find((s) => s.id === a.systemId);
@@ -317,12 +366,19 @@ export function DashboardPage({
       {/* Setup checklist */}
       <SetupChecklist />
 
-      {/* Feature 2 — Plain-English Record Search (cross-module) */}
+      {/* Feature 2 — Plain-English Record Search (cross-module).
+          Phase 6: search executes CLIENT-SIDE over the records handed to it
+          (the server only translates the sentence into a filter spec), so the
+          sources ARE the scope. Each is built from the visibility-scoped Redux
+          array — a record the viewer can't open on its module page can never be
+          matched here. The CAPA source is omitted entirely for non-CAPA-module
+          roles rather than handed an empty array, so the module chip doesn't
+          advertise a scope they have no access to. */}
       <SmartRecordSearch
         title="Search"
         defaultScope="all"
         sources={[
-          buildCapaSource(capas, sites, (id) => router.push(`/capa/${id}`)),
+          ...(canViewCAPAs ? [buildCapaSource(capas, sites, (id) => router.push(`/capa/${id}`))] : []),
           buildDeviationSource(deviations, sites, () => router.push("/deviation")),
           buildFindingSource(findings, sites, () => router.push("/gap-assessment")),
         ]}
