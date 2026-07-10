@@ -5,15 +5,21 @@ import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ShieldAlert, Upload, FileText, X, Sparkles, Check } from "lucide-react";
+import { ShieldAlert, Sparkles, Check, X } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Toast";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import { DocumentUpload, uploadDocuments } from "@/components/documents/DocumentUpload";
 import { createTicket, suggestTriage, type TriageSuggestion } from "@/actions/support";
-import { createDocument } from "@/actions/documents";
-import { TICKET_CATEGORIES, TICKET_PRIORITIES, GXP_REQUEST_CATEGORIES, type TicketCategory } from "@/lib/support/constants";
-import { RELATED_MODULES } from "./_shared";
+import {
+  TICKET_CATEGORIES,
+  TICKET_PRIORITIES,
+  GXP_REQUEST_CATEGORIES,
+  SUPPORT_RELATED_MODULES,
+  type TicketCategory,
+} from "@/lib/support/constants";
 
 const schema = z.object({
   subject: z.string().min(3, "Subject is required"),
@@ -22,6 +28,11 @@ const schema = z.object({
   description: z.string().min(5, "Description is required"),
   relatedModule: z.string().optional(),
   relatedRecordRef: z.string().optional(),
+  // Optional evidence URL — accept "" so a cleared field still validates.
+  evidenceLink: z.string().url("Enter a valid URL (https://…)").optional().or(z.literal("")),
+  // Required for a customer_admin (enforced below + server-side); optional here
+  // because other roles derive their site server-side.
+  siteId: z.string().optional(),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -43,6 +54,7 @@ export function RaiseTicketModal({
   prefill,
   transcript,
   onCreated,
+  siteOptions = [],
 }: {
   open: boolean;
   onClose: () => void;
@@ -53,15 +65,20 @@ export function RaiseTicketModal({
   transcript?: string;
   /** Fired after a successful create so a caller (the assistant) can confirm. */
   onCreated?: (t: { id: string; reference: string | null }) => void;
+  /** Sites for the CA-only site picker (the caller's tenant). Empty for
+   *  non-CA callers, whose site is derived server-side. */
+  siteOptions?: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const toast = useToast();
-  const [file, setFile] = useState<File | null>(null);
+  const role = useAppSelector((s) => s.auth.user?.role) ?? "";
+  const requireSite = role === "customer_admin";
+  const [files, setFiles] = useState<File[]>([]);
 
-  const { register, handleSubmit, control, watch, reset, setValue, getValues, formState: { errors, isSubmitting } } =
+  const { register, handleSubmit, control, watch, reset, setValue, setError, trigger, getValues, formState: { errors, isSubmitting } } =
     useForm<FormValues>({
       resolver: zodResolver(schema),
-      defaultValues: { category: "Technical/Bug", priority: "Medium" },
+      defaultValues: { category: "Technical/Bug", priority: "Medium", siteId: "", evidenceLink: "" },
     });
 
   // Smart Triage (suggestion-only). Holds the latest AI suggestion + busy
@@ -85,7 +102,7 @@ export function RaiseTicketModal({
     setTriage(res.data);
   }
 
-  // Apply prefill each time the modal opens (and clear any stale file). The
+  // Apply prefill each time the modal opens (and clear any stale files). The
   // queue caller passes no prefill → blank defaults, exactly as before.
   useEffect(() => {
     if (!open) return;
@@ -96,8 +113,10 @@ export function RaiseTicketModal({
       description: prefill?.description ?? "",
       relatedModule: prefill?.relatedModule ?? "",
       relatedRecordRef: prefill?.relatedRecordRef ?? "",
+      evidenceLink: "",
+      siteId: "",
     });
-    setFile(null);
+    setFiles([]);
     setTriage(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -106,18 +125,24 @@ export function RaiseTicketModal({
   const isGxpRequest = GXP_REQUEST_CATEGORIES.has(category);
 
   function close() {
-    setFile(null);
+    setFiles([]);
     setTriage(null);
-    reset({ category: "Technical/Bug", priority: "Medium" });
+    reset({ category: "Technical/Bug", priority: "Medium", siteId: "", evidenceLink: "" });
     onClose();
   }
 
   const onSubmit = handleSubmit(async (data) => {
+    if (requireSite && !data.siteId) {
+      setError("siteId", { message: "Select a site." });
+      return;
+    }
     const res = await createTicket(
       {
         ...data,
         relatedModule: data.relatedModule || undefined,
         relatedRecordRef: data.relatedRecordRef || undefined,
+        evidenceLink: data.evidenceLink || undefined,
+        siteId: data.siteId || undefined,
         // Auto-captured context (hidden — not user inputs).
         originUrl: typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined,
         appVersion: process.env.NEXT_PUBLIC_APP_VERSION,
@@ -127,20 +152,20 @@ export function RaiseTicketModal({
     );
     if (!res.success) {
       toast.error(`Could not raise ticket: ${res.error}`);
+      if (res.fieldErrors?.siteId) setError("siteId", { message: res.fieldErrors.siteId[0] });
       return;
     }
     onCreated?.(res.data);
-    // Optional attachment via the same fileStorage pipeline as Evidence
-    // (linkedModule="Support" → surfaced on the ticket detail; downloaded via
-    // /api/documents/[id]).
-    if (file) {
-      const fd = new FormData();
-      fd.set("fileName", file.name);
-      fd.set("linkedModule", "Support");
-      fd.set("linkedRecordId", res.data.id);
-      fd.set("file", file);
-      const up = await createDocument(fd);
-      if (!up.success) toast.error("Ticket created, but the attachment failed to upload.");
+
+    // ATTACHMENTS — TICKET-FIRST ORDERING (root-cause fix). Attachments link to
+    // the ticket via linkedRecordId, so the ticket MUST exist before we upload.
+    // We create the ticket above, then persist each collected file with the
+    // returned id. Uploading before the ticket existed would orphan the files.
+    if (files.length > 0) {
+      const { failed } = await uploadDocuments(files, { module: "Support", recordId: res.data.id });
+      if (failed > 0) {
+        toast.error(`Ticket created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload.`);
+      }
     }
     toast.success(`Ticket ${res.data.reference ?? ""} raised.`);
     close();
@@ -152,29 +177,45 @@ export function RaiseTicketModal({
       open={open}
       onClose={close}
       title="Raise Ticket"
+      header={
+        // Custom header row: title left; AI Smart Triage sits immediately to the
+        // LEFT of the Close (X). Same suggestTriage call — repositioned per spec.
+        // The sr-only <h2 id="modal-title"> is still emitted by Modal for a11y.
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
+          <span className="text-[14px] font-semibold text-(--text-primary)">Raise Ticket</span>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" type="button" icon={Sparkles} loading={triageBusy} onClick={runTriage}>
+              AI Smart Triage
+            </Button>
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Close"
+              className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors duration-150"
+            >
+              <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      }
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" type="button" onClick={close}>Cancel</Button>
           {/* type=submit + form= targets the form in the scrollable body, so the
               footer stays pinned and the buttons are never pushed off-screen. */}
-          <Button variant="primary" type="submit" form="raise-ticket-form" loading={isSubmitting}>Raise Ticket</Button>
+          <Button variant="primary" type="submit" form="raise-ticket-form" loading={isSubmitting}>Create</Button>
         </div>
       }
     >
       <form id="raise-ticket-form" onSubmit={onSubmit} noValidate className="space-y-4">
-        {/* Smart Triage (suggestion-only) — recommends category + priority from
-            the subject/description. Never auto-fills; the user clicks Apply. */}
-        <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+        {/* Smart Triage suggestions — rendered once the AI has returned. The
+            trigger lives in the footer; this card shows the applyable results. */}
+        {triage && (
+          <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>
               <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--brand)" }} aria-hidden="true" /> Smart Triage
             </div>
-            <Button variant="secondary" size="sm" type="button" icon={Sparkles} loading={triageBusy} onClick={runTriage}>
-              {triage ? "Re-analyse" : "Suggest category & priority"}
-            </Button>
-          </div>
-          {triage && (
-            <div className="mt-2 space-y-2">
+            <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2 text-[12px]">
                 <SuggestionChip
                   label="Category" value={triage.category}
@@ -195,8 +236,8 @@ export function RaiseTicketModal({
               )}
               <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>AI suggestion — review before applying. Support may re-triage.</p>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <div>
           <label htmlFor="t-subject" className={lbl} style={{ color: "var(--text-muted)" }}>Subject *</label>
@@ -220,6 +261,19 @@ export function RaiseTicketModal({
           </div>
         </div>
 
+        {/* Site — required only for a customer_admin (they raise on behalf of a
+            site). Other roles derive their site server-side, so this is hidden. */}
+        {requireSite && (
+          <div>
+            <label className={lbl} style={{ color: "var(--text-muted)" }}>Site *</label>
+            <Controller name="siteId" control={control} render={({ field }) => (
+              <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select a site" width="w-full"
+                options={siteOptions.map((s) => ({ value: s.id, label: s.name }))} />
+            )} />
+            {errors.siteId && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{errors.siteId.message}</p>}
+          </div>
+        )}
+
         {isGxpRequest && (
           <div className="flex items-start gap-2 rounded-lg p-3 text-[12px]" role="note" style={{ background: "var(--warning-bg)", border: "1px solid var(--warning)", color: "var(--text-secondary)" }}>
             <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--warning)" }} aria-hidden="true" />
@@ -238,7 +292,7 @@ export function RaiseTicketModal({
             <label className={lbl} style={{ color: "var(--text-muted)" }}>Related module (optional)</label>
             <Controller name="relatedModule" control={control} render={({ field }) => (
               <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="None" width="w-full"
-                options={[{ value: "", label: "None" }, ...RELATED_MODULES.map((m) => ({ value: m, label: m }))]} />
+                options={[{ value: "", label: "None" }, ...SUPPORT_RELATED_MODULES.map((m) => ({ value: m, label: m }))]} />
             )} />
           </div>
           <div>
@@ -247,22 +301,23 @@ export function RaiseTicketModal({
           </div>
         </div>
 
+        {/* Evidence Link — optional free-text URL, validated on blur (client) and
+            by the server schema. Placed between Description and Attachments. */}
         <div>
-          <label className={lbl} style={{ color: "var(--text-muted)" }}>Attachment (optional)</label>
-          {file ? (
-            <div className="flex items-center gap-2 rounded-lg border px-3 py-2 border-(--bg-border) bg-(--bg-surface)">
-              <FileText className="w-4 h-4 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-              <span className="flex-1 min-w-0 truncate text-[12px]" style={{ color: "var(--text-primary)" }}>{file.name}</span>
-              <button type="button" onClick={() => setFile(null)} aria-label="Remove file" className="border-none bg-transparent cursor-pointer shrink-0" style={{ color: "var(--text-muted)" }}><X className="w-3.5 h-3.5" aria-hidden="true" /></button>
-            </div>
-          ) : (
-            <label htmlFor="t-file" className="flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed p-4 cursor-pointer text-center transition-colors border-(--bg-border) hover:border-(--brand)">
-              <Upload className="w-5 h-5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-              <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>Click to choose a file</span>
-              <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>PDF, PNG, JPG, DOCX, XLSX, CSV, TXT · max 10 MB</span>
-              <input id="t-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.docx,.csv,.txt" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            </label>
-          )}
+          <label htmlFor="t-evidence" className={lbl} style={{ color: "var(--text-muted)" }}>Evidence Link (optional)</label>
+          <input
+            id="t-evidence"
+            type="url"
+            className="input text-[12px]"
+            placeholder="https://…"
+            {...register("evidenceLink", { onBlur: () => { void trigger("evidenceLink"); } })}
+          />
+          {errors.evidenceLink && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{errors.evidenceLink.message}</p>}
+        </div>
+
+        <div>
+          <label className={lbl} style={{ color: "var(--text-muted)" }}>Attachments (optional)</label>
+          <DocumentUpload files={files} onChange={setFiles} onReject={(m) => toast.error(m)} />
         </div>
       </form>
     </Modal>

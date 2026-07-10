@@ -1,7 +1,8 @@
 "use client";
 
-import { ShieldCheck, Archive } from "lucide-react";
+import { ShieldCheck, Archive, Settings } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Toggle } from "@/components/ui/Toggle";
 import { SubscriptionPlansSection } from "./_components/SubscriptionPlansSection";
 
@@ -19,14 +20,12 @@ const SHOW_MFA_DEFAULT_CARD = false;
 
 export function PlatformSettingsPage() {
   return (
-    <div className="w-full max-w-[1000px] mx-auto">
-      <div className="mb-6">
-        <h1 className="text-[22px] font-bold" style={{ color: "var(--text-primary)" }}>Platform Settings</h1>
-        <p className="text-[13px] mt-1" style={{ color: "var(--text-secondary)" }}>
-          Platform-wide configuration for the admin console
-        </p>
-      </div>
-
+    <PageLayout
+      title="Platform Settings"
+      titleIcon={Settings}
+      description="Platform-wide configuration for the Glimmora admin console — the subscription plan catalog and data-retention policy."
+      className="w-full"
+    >
       <div className="space-y-6">
         {/* 1. Subscription Plans — read-only per-plan reference (caps + role limits) */}
         <SubscriptionPlansSection />
@@ -74,6 +73,6 @@ export function PlatformSettingsPage() {
           </ul>
         </Card>
       </div>
-    </div>
+    </PageLayout>
   );
 }

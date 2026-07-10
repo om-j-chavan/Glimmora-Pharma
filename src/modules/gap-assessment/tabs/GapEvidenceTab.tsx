@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
-  FolderOpen, ChevronDown, FileCheck, ExternalLink, Paperclip,
+  FolderOpen, ChevronDown, FileCheck, ExternalLink, Paperclip, Filter,
 } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import { ExportMenu } from "@/components/ui/ExportMenu";
 import { Button } from "@/components/ui/Button";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canEditFinding } from "@/lib/permissions/roleSets";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
@@ -46,6 +47,10 @@ interface GapEvidenceTabProps {
   expandedAreas: Set<string>;
   onToggleArea: (area: string) => void;  isViewOnly: boolean;
   users: UserConfig[];
+  /** The shared page-level filter dropdowns (same instance Summary/Register use)
+   *  so the Evidence Index shows — and is driven by — the same filters. */
+  renderFilters: (compact?: boolean) => ReactNode;
+  isAnyFilterActive: boolean;
   onLinkEvidence: (findingId: string, currentLink: string) => void;
   onFindingClick: (findingId: string) => void;
   onGoToRegister: () => void;
@@ -53,11 +58,13 @@ interface GapEvidenceTabProps {
 
 export function GapEvidenceTab({
   evidenceAreas, allEvidenceRows, completeCount, partialCount, missingCount,
-  expandedAreas, onToggleArea, isViewOnly, users,
+  expandedAreas, onToggleArea, isViewOnly, users, renderFilters, isAnyFilterActive,
   onLinkEvidence, onFindingClick, onGoToRegister,
 }: GapEvidenceTabProps) {
-  // Capability mirror of the server (excludes super_admin from authoring).
-  const gapCan = usePermissions("gap");
+  // Linking/updating evidence goes through updateFinding, which is QA-authority-
+  // only — gate on canEditFinding (mirrors the server), NOT the broad
+  // usePermissions("gap").canEdit, so non-QA authors don't get a dead button.
+  const { role } = usePermissions();
   function ownerName(uid: string) { return displayUserName(uid, users); }
 
   // Row selection for export, keyed by findingId (empty = export all rows)
@@ -100,6 +107,15 @@ export function GapEvidenceTab({
 
   return (
     <div role="tabpanel" id="panel-evidence" aria-labelledby="tab-evidence" tabIndex={0}>
+      {/* Same page-level filters as Summary/Register — the Evidence Index is now
+          driven by them (was previously always unfiltered). */}
+      <section aria-label="Evidence filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-xl border"
+        style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
+        <Filter className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+        <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
+        {renderFilters()}
+      </section>
+
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>Evidence index</h2>
         {allEvidenceRows.length > 0 && (
@@ -122,9 +138,18 @@ export function GapEvidenceTab({
       {allEvidenceRows.length === 0 ? (
         <div className="card p-10 text-center">
           <FolderOpen className="w-12 h-12 mx-auto mb-3" style={{ color: "#334155" }} aria-hidden="true" />
-          <p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No evidence to show yet</p>
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Log findings in the Findings Register tab. Each finding will appear here as an evidence row.</p>
-          <Button variant="ghost" size="sm" className="mt-3" onClick={onGoToRegister}>Go to Findings Register</Button>
+          {isAnyFilterActive ? (
+            <>
+              <p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No evidence matches the current filters</p>
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Adjust or clear the filters above to see more findings.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No evidence to show yet</p>
+              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Log findings in the Findings Register tab. Each finding will appear here as an evidence row.</p>
+              <Button variant="ghost" size="sm" className="mt-3" onClick={onGoToRegister}>Go to Findings Register</Button>
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -235,7 +260,7 @@ export function GapEvidenceTab({
                               srOnly: true,
                               render: (row) => (
                                 <div className="flex items-center gap-1">
-                                  {!isViewOnly && gapCan.canEdit && (
+                                  {!isViewOnly && canEditFinding(role) && (
                                     <Button variant="ghost" size="xs" icon={Paperclip}
                                       aria-label={row.evidenceLink ? `Update evidence for ${row.findingId}` : `Link evidence to ${row.findingId}`}
                                       onClick={() => onLinkEvidence(row.findingId, row.evidenceLink ?? "")} />

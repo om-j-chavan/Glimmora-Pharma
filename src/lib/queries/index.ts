@@ -23,7 +23,7 @@ export { getRAIDItems, getDocuments, getDocumentStats, getCAPAEvidenceFiles, get
 export type { AuditTrailRow, AuditTrailView, AuditTrailFilters, AuditSortKey, AuditTrailPageResult, AuditTrailFilterOptions, PlatformAuditRow, PlatformAuditResult, PlatformAuditFilters, FrameworkAuditRow, FrameworkAuditResult, FrameworkAuditScope } from "./governance";
 export { getInspections, getInspection, getReadinessStats, getOverallReadiness, getPlaybooks, computeReadinessScore, inspectionVisibilityWhere } from "./inspections";
 export { getSites, getUsers } from "./settings";
-export { getTickets, getTicketStats, getTicket, getSupportTenantOptions, getSupportAssigneeOptions, getTicketAttachments } from "./support";
+export { getTickets, getTicketStats, getTicket, getSupportTenantOptions, getTicketAttachments } from "./support";
 export type { TicketListFilters, TicketListResult, TicketStats, TicketDetail, TicketAttachment } from "./support";
 export { getDashboardStats } from "./dashboard";
 export { effectiveFrameworksForTenant, getTenantFrameworkSettings, getFrameworkCatalog } from "./frameworks";

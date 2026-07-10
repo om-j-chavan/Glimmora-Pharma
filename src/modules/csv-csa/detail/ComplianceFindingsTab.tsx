@@ -18,6 +18,7 @@ import {
   unlinkFindingFromSystem,
   raiseCAPAFromSystem,
 } from "@/actions/systems";
+import { canCreateCAPA } from "@/lib/permissions/roleSets";
 
 export interface AvailableFinding { id: string; reference?: string; requirement: string; status: string; }
 
@@ -137,7 +138,9 @@ export function ComplianceFindingsTab({ system, role, showPart11, showAnnex11, s
       {/* Linked CAPAs */}
       {show("capas") && (
       <div className="card"><div className="card-header"><div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-[#10b981]" /><span className="card-title">Linked CAPAs</span>{capas.length > 0 && <Badge variant="blue">{capas.length}</Badge>}</div>
-        {canManage && <Button variant="secondary" size="sm" icon={Plus} className="ml-auto" onClick={() => setRaiseOpen(true)}>Raise CAPA</Button>}
+        {/* Raising a CAPA is QA-only (createCAPA gate) — stricter than canManage,
+            which also allows customer_admin. Hide for everyone else. */}
+        {canCreateCAPA(role) && <Button variant="secondary" size="sm" icon={Plus} className="ml-auto" onClick={() => setRaiseOpen(true)}>Raise CAPA</Button>}
       </div><div className="card-body space-y-2">
         {capas.length === 0 ? <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No CAPAs raised against this system.</p> : capas.map((c) => (
           <div key={c.id} className="flex items-center justify-between gap-2 p-2.5 rounded-lg" style={{ background: "var(--bg-surface)" }}>
@@ -183,7 +186,17 @@ function RaiseCAPAModal({ systemId, onClose, onError, onRaised }: { systemId: st
     setBusy(true);
     const r = await raiseCAPAFromSystem(systemId, { description, risk, dueDate: dayjs(dueDate).utc().toISOString() });
     setBusy(false);
-    if (!r.success) { onError(r.error || "Failed to raise CAPA."); return; }
+    if (!r.success) {
+      // The trigger is QA-only; this guards the stale-UI / race case with a
+      // friendly, consistent message for the policy rejection.
+      if (r.error === "Only QA Head can create a CAPA.") {
+        console.warn("[csv] raise CAPA denied:", r.error);
+        onError("Only your QA Head can create a CAPA from this system.");
+      } else {
+        onError(r.error || "Failed to raise CAPA.");
+      }
+      return;
+    }
     onRaised();
   }
   return (

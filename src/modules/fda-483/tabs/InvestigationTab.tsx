@@ -30,6 +30,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import clsx from "clsx";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canCreateCAPA } from "@/lib/permissions/roleSets";
 import {
   GitBranch,
   ChevronDown,
@@ -1486,6 +1487,9 @@ export function InvestigationTab({
   const writable = role !== "viewer"
     && fdaCan.canEdit
     && !isEventLocked(liveEvent.status);
+  // Raising a CAPA is QA-only (createCAPA gate), stricter than general FDA-483
+  // write access — so the "Raise CAPA" trigger is hidden for non-QA authors.
+  const canRaiseCapa = canCreateCAPA(role);
 
   /* ── Empty states ─────────────────────────────────────────────── */
 
@@ -2179,7 +2183,7 @@ export function InvestigationTab({
                   </li>
                 </ul>
               </div>
-              {writable && (
+              {writable && canRaiseCapa && (
                 <Button
                   variant="primary"
                   icon={Plus}

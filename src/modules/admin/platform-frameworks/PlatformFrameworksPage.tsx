@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Search, X, Globe, BookOpen, Pencil, Archive, ArchiveRestore, KeyRound, ArrowRight, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Search, X, Globe, BookOpen, Pencil, Archive, ArchiveRestore, KeyRound, ArrowRight, ArrowUp, ArrowDown, BookMarked } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
@@ -269,20 +270,20 @@ export function PlatformFrameworksPage({ catalog, regions }: Props) {
     />
   );
 
-  return (
-    <div className="w-full">
-      <div className="flex items-start justify-between gap-3 mb-6 flex-wrap">
-        <div>
-          <h1 className="text-[22px] font-bold" style={{ color: "var(--text-primary)" }}>Frameworks</h1>
-          <p className="text-[13px] mt-1" style={{ color: "var(--text-secondary)" }}>
-            The regulatory framework catalog. Disabling a framework removes it from every tenant immediately.
-          </p>
-        </div>
-        {tab === "catalog" && (
-          <Button variant="primary" icon={Plus} onClick={openAdd}>Add framework</Button>
-        )}
-      </div>
+  // "Add framework" is a header action only on the Catalog tab (Activity is
+  // read-only) — pass an empty actions array otherwise so the button hides.
+  const headerActions: PageAction[] = tab === "catalog"
+    ? [{ label: "Add framework", variant: "primary", icon: Plus, onClick: openAdd }]
+    : [];
 
+  return (
+    <PageLayout
+      title="Compliance Frameworks"
+      titleIcon={BookMarked}
+      description="The master catalog of regulatory frameworks tenants can enable — archiving one removes it from every tenant immediately."
+      actions={headerActions}
+      className="w-full"
+    >
       {/* Tab bar — Catalog (manage) / Activity (read-only audit) */}
       <div role="tablist" aria-label="Framework sections" className="flex gap-1 border-b border-(--bg-border) mb-5">
         {TABS.map((t) => (
@@ -388,6 +389,6 @@ export function PlatformFrameworksPage({ catalog, regions }: Props) {
         onClose={() => setSuperseding(null)}
         onDone={() => router.refresh()}
       />
-    </div>
+    </PageLayout>
   );
 }

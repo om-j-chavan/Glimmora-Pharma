@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, LifeBuoy } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { Badge } from "@/components/ui/Badge";
@@ -22,13 +22,15 @@ interface Props {
   initialData: { rows: TicketQueueRow[]; total: number };
   stats: TicketStats;
   tenantOptions?: { id: string; name: string; customerCode: string }[];
+  /** Sites for the CA-only site picker in the Raise Ticket modal. */
+  siteOptions?: { id: string; name: string }[];
 }
 
 const PAGE_SIZE = 15;
 
-export function SupportQueue({ view, initialData, stats, tenantOptions = [] }: Props) {
+export function SupportQueue({ view, initialData, stats, tenantOptions = [], siteOptions = [] }: Props) {
   const router = useRouter();
-  const { org, tenantName } = useTenantConfig();
+  const { org } = useTenantConfig();
   const tz = org.timezone;
   const df = org.dateFormat;
   const isSA = view === "sa";
@@ -102,18 +104,10 @@ export function SupportQueue({ view, initialData, stats, tenantOptions = [] }: P
     ...(isSA ? [{ key: "tenantId", label: "tenants", options: tenantOptions.map((t) => ({ value: t.id, label: t.name })) }] : []),
   ];
 
-  const title = view === "sa" ? "Support (all tenants)" : view === "ca" ? `Support — ${tenantName}` : "Support";
-  const description =
-    view === "sa"
-      ? "Every tenant's tickets. Filter the escalated queue — the Customer-Admin → platform handoff."
-      : view === "ca"
-        ? "Your organisation's support tickets. First-line ones show “With me”; escalated ones are with platform support."
-        : "Raise a ticket and the Glimmora support team will help. Track its status here.";
-
   const actions: PageAction[] = isSA ? [] : [{ label: "Raise Ticket", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) }];
 
   return (
-    <PageLayout title={title} description={description} actions={actions}>
+    <PageLayout title="Support Center" titleIcon={LifeBuoy} description="Raise, track, and resolve issues across your compliance workflows." actions={actions}>
       <SupportStatCards stats={stats} view={view} />
       <DataTable<TicketQueueRow>
         mode="server"
@@ -130,7 +124,7 @@ export function SupportQueue({ view, initialData, stats, tenantOptions = [] }: P
         emptyState={isHandler ? "No tickets in this queue." : "You haven't raised any tickets yet."}
       />
 
-      {!isSA && <RaiseTicketModal open={addOpen} onClose={() => setAddOpen(false)} />}
+      {!isSA && <RaiseTicketModal open={addOpen} onClose={() => setAddOpen(false)} siteOptions={siteOptions} />}
     </PageLayout>
   );
 }

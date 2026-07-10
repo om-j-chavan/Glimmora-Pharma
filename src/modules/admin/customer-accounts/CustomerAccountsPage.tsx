@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, X, Save, PauseCircle, PlayCircle, Trash2, RotateCcw } from "lucide-react";
+import { Plus, Search, X, Save, PauseCircle, PlayCircle, Trash2, RotateCcw, Building2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { Button } from "@/components/ui/Button";
+import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { resolvePlanCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
@@ -29,29 +30,22 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
   // chooser opens the matching confirm before the action runs.
   const [tableConfirm, setTableConfirm] = useState<"suspend" | "delete" | "reactivate" | null>(null);
 
+  // Header actions — Restore (secondary) renders left of the single primary
+  // Create; PageLayout's ActionBar orders secondaries→primary, preserving the
+  // original left-to-right button-group order.
+  const headerActions: PageAction[] = [
+    { label: "Restore", variant: "secondary", icon: RotateCcw, onClick: ca.openRestoreList },
+    { label: "New Account", variant: "primary", icon: Plus, onClick: ca.openCreate },
+  ];
+
   return (
-    <div className="w-full max-w-[1200px] mx-auto">
-      {/* Page header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-[22px] font-bold" style={{ color: "var(--text-primary)" }}>
-            Customer Accounts
-          </h1>
-          <p className="text-[13px] mt-1" style={{ color: "var(--text-secondary)" }}>
-            Manage customer organizations and their admin accounts
-          </p>
-        </div>
-        {/* Header actions — Restore (soft-deleted list) sits left of the primary
-            Create so the two read as one button group. */}
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" icon={RotateCcw} onClick={ca.openRestoreList}>
-            Restore
-          </Button>
-          <Button variant="primary" icon={Plus} onClick={ca.openCreate}>
-            New Account
-          </Button>
-        </div>
-      </div>
+    <PageLayout
+      title="Customer Accounts"
+      titleIcon={Building2}
+      description="Manage tenant organizations, plans, and platform access across Glimmora."
+      actions={headerActions}
+      className="w-full max-w-[1200px] mx-auto"
+    >
 
       {/* Sync status banner */}
       {ca.syncing && (
@@ -329,6 +323,6 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
           <button type="button" onClick={() => ca.setSavedPopup(null)} className="ml-2 border-none bg-transparent cursor-pointer" style={{ color: "var(--success)" }} aria-label="Dismiss"><X className="w-4 h-4" /></button>
         </div>
       )}
-    </div>
+    </PageLayout>
   );
 }

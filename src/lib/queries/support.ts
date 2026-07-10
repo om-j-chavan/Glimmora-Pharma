@@ -4,7 +4,7 @@ import type { AuthSession } from "@/lib/auth";
 import {
   ticketScopeWhere,
   canViewTicket,
-  canManageSupport,
+  canHandleTicket,
   handlerTierForRole,
 } from "@/lib/support/permissions";
 
@@ -12,7 +12,6 @@ export interface TicketListFilters {
   status?: string;
   priority?: string;
   category?: string;
-  assigneeId?: string;
   /** Super-admin only; ignored for tenant-scoped roles (their scope already pins tenant). */
   tenantId?: string;
   /** Phase B routing filter — narrow to tickets currently routed to the CALLER's
@@ -50,7 +49,6 @@ export async function getTickets(
   if (f.status) where.status = f.status;
   if (f.priority) where.priority = f.priority;
   if (f.category) where.category = f.category;
-  if (f.assigneeId) where.assigneeId = f.assigneeId;
   // Tenant filter only meaningful (and only allowed to narrow) for super_admin.
   if (f.tenantId && session.user.role === "super_admin") where.tenantId = f.tenantId;
   // "Routed to my tier" — narrows to the caller's own tier on top of the base
@@ -134,7 +132,6 @@ export interface TicketQueueRow {
   status: string;
   currentHandler: string;
   requesterName: string;
-  assigneeName: string | null;
   tenantId: string;
   slaDueAt: Date | null;
   updatedAt: Date;
@@ -150,7 +147,6 @@ export function toQueueRow(t: Ticket): TicketQueueRow {
     status: t.status,
     currentHandler: t.currentHandler,
     requesterName: t.requesterName,
-    assigneeName: t.assigneeName,
     tenantId: t.tenantId,
     slaDueAt: t.slaDueAt,
     updatedAt: t.updatedAt,
@@ -174,18 +170,23 @@ export async function getTicket(session: AuthSession, id: string): Promise<Ticke
   if (!ticket) return null;
   if (!canViewTicket(session, ticket)) return null;
 
-  const isManager = canManageSupport(session.user.role);
+  // AUDIT M-1 FIX: gate internal-note + activity visibility on canHandleTicket
+  // (super_admin OR the in-tenant customer_admin handling this ticket) — NOT
+  // canManageSupport (super_admin only). A CA first-line handler both WRITES
+  // internal notes and handles the ticket, so they must also SEE their own notes
+  // and the timeline. Requesters still get neither (canHandleTicket is false).
+  const canHandle = canHandleTicket(session, ticket);
   const [allMessages, activities] = await Promise.all([
     prisma.ticketMessage.findMany({ where: { ticketId: id }, orderBy: { createdAt: "asc" } }),
-    // Activity / audit history is support-only. Gate it at the DATA layer (same
-    // as internal-note stripping below) so a regular user's response NEVER
-    // contains the activity log — not merely hidden in the UI.
-    isManager
+    // Activity / audit history is handler-only. Gate it at the DATA layer (same
+    // as internal-note stripping below) so a requester's response NEVER contains
+    // the activity log — not merely hidden in the UI.
+    canHandle
       ? prisma.ticketActivity.findMany({ where: { ticketId: id }, orderBy: { createdAt: "asc" } })
       : Promise.resolve([] as TicketActivity[]),
   ]);
 
-  const messages = isManager ? allMessages : allMessages.filter((m) => !m.isInternal);
+  const messages = canHandle ? allMessages : allMessages.filter((m) => !m.isInternal);
 
   return { ticket, messages, activities };
 }
@@ -198,19 +199,6 @@ export async function getSupportTenantOptions(
   return prisma.tenant.findMany({
     where: { role: "customer_admin" },
     select: { id: true, name: true, customerCode: true },
-    orderBy: { name: "asc" },
-  });
-}
-
-/** Assignee options for the super-admin assign control — the platform admins
- *  (the only management role today; add support_agent users here later). */
-export async function getSupportAssigneeOptions(
-  session: AuthSession,
-): Promise<{ id: string; name: string }[]> {
-  if (!canManageSupport(session.user.role)) return [];
-  return prisma.tenant.findMany({
-    where: { role: "super_admin" },
-    select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
 }
@@ -232,7 +220,7 @@ export async function getTicketAttachments(
 ): Promise<TicketAttachment[]> {
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    select: { tenantId: true, requesterId: true },
+    select: { tenantId: true, requesterId: true, escalatedAt: true },
   });
   if (!ticket || !canViewTicket(session, ticket)) return [];
   const docs = await prisma.document.findMany({

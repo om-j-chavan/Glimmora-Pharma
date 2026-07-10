@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Lock, Pencil, Archive, ArchiveRestore } from "lucide-react";
+import { Plus, Lock, Pencil, Archive, ArchiveRestore, Globe } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { DisplayId } from "@/components/ui/DisplayId";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
@@ -134,6 +134,7 @@ export function RegionsLandingPage({ rows }: { rows: RegionListRow[] }) {
   return (
     <PageLayout
       title="Regulatory Regions & Frameworks"
+      titleIcon={Globe}
       description="Regions are the landing view. Open a region to manage the frameworks that apply to it (its own links plus every Global framework)."
       actions={actions}
     >

@@ -3,68 +3,85 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Clock, Download, Lock, MessageSquare, History, Paperclip } from "lucide-react";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { ArrowLeft, Clock, Lock, History, Pencil, XCircle, ArrowUpCircle, Loader, CheckCircle2, Archive, RotateCcw, Send, type LucideIcon } from "lucide-react";
+import clsx from "clsx";
 import type { Ticket, TicketMessage, TicketActivity } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { roleLabel } from "@/lib/labels/roles";
 import type { TicketAttachment } from "@/lib/queries";
+import { DocumentCard } from "@/components/documents/DocumentCard";
 import {
   canTransition,
   RESOLUTION_CATEGORIES,
   TERMINAL_STATUSES,
+  STATUS_DESCRIPTIONS,
+  SUPPORT_RELATED_MODULE_ROUTE,
+  TICKET_CATEGORIES,
+  TICKET_PRIORITIES,
   type TicketStatus,
 } from "@/lib/support/constants";
 import {
   addTicketMessage,
-  assignTicket,
   updateTicketStatus,
   resolveTicket,
   confirmResolution,
   reopenTicket,
   cancelTicket,
   escalateTicket,
+  editTicket,
 } from "@/actions/support";
-import { statusBadge, priorityBadge, RELATED_MODULE_ROUTE } from "./_shared";
+import { statusBadge, priorityBadge } from "./_shared";
 
 interface Props {
   detail: { ticket: Ticket; messages: TicketMessage[]; activities: TicketActivity[] };
   attachments: TicketAttachment[];
-  /** canHandleTicket — reply-as-support / internal note / status / close (SA
+  /** canHandleTicket — reply-as-support / internal note / status / resolve (SA
    *  cross-tenant; CA only on CA-routed in-tenant). */
   manage: boolean;
-  /** canManageSupport — ASSIGN only (SA, cross-tenant); CA never gets assign. */
-  canAssign: boolean;
   /** canHandleFirstLine && routed-to-caller's-tier — the CA→SA escalate button. */
   canEscalate: boolean;
+  /** canEditTicket — subject/description/priority/category, only while New/Open. */
+  canEdit: boolean;
   /** The viewer's role — drives the tier badge (With me / Escalated / With CA). */
   viewerRole: string;
   /** Tenant name for the escalation trail (SA cross-tenant view). */
   tenantLabel?: string;
   currentUserId: string;
-  assigneeOptions: { id: string; name: string }[];
 }
 
-const STATUS_TARGETS: TicketStatus[] = ["Open", "In Progress", "Awaiting User"];
+type Dialog = null | "edit" | "resolve" | "close" | "escalate" | "cancel" | "reopen";
 
-export function TicketDetailView({ detail, attachments, manage, canAssign, canEscalate, viewerRole, tenantLabel, currentUserId, assigneeOptions }: Props) {
+const editSchema = z.object({
+  subject: z.string().min(3, "Subject is required"),
+  category: z.enum(TICKET_CATEGORIES),
+  priority: z.enum(TICKET_PRIORITIES),
+  description: z.string().min(5, "Description is required"),
+});
+type EditValues = z.infer<typeof editSchema>;
+
+export function TicketDetailView({ detail, attachments, manage, canEscalate, canEdit, viewerRole, tenantLabel, currentUserId }: Props) {
   const { ticket, messages, activities } = detail;
   const router = useRouter();
   const toast = useToast();
   const { org } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
+  const dtFormat = `${dateFormat} HH:mm`;
   const status = ticket.status as TicketStatus;
   const isRequester = ticket.requesterId === currentUserId;
   const isTerminal = TERMINAL_STATUSES.has(status);
   const handlerView = viewerRole === "customer_admin" || viewerRole === "super_admin";
   const backPath = viewerRole === "super_admin" ? "/admin/support" : "/support";
 
-  // Routing tier badge — separate from the lifecycle status badge.
   const viewerTier = viewerRole === "super_admin" ? "super_admin" : viewerRole === "customer_admin" ? "customer_admin" : null;
   const tierBadge = !handlerView
     ? (isTerminal ? null : <Badge variant="blue">With Support</Badge>)
@@ -74,48 +91,40 @@ export function TicketDetailView({ detail, attachments, manage, canAssign, canEs
         ? <Badge variant="amber">Escalated</Badge>
         : <Badge variant="gray">With CA</Badge>;
 
-  // Which actions are available — drives whether the Actions card renders at all
-  // (a terminal ticket like Cancelled has none, so the card is hidden rather
-  // than shown empty).
-  const showManagerControls = manage && !isTerminal;
-  const showAssign = canAssign && !isTerminal;
-  const canEscalateUi = canEscalate && !isTerminal;
-  const canConfirm = status === "Resolved" && (isRequester || manage);
+  const slaOverdue = ticket.slaDueAt && !isTerminal && status !== "Resolved" && dayjs(ticket.slaDueAt).isBefore(dayjs());
+
+  // Which lifecycle controls apply.
+  const canResolve = manage && !isTerminal && canTransition(status, "Resolved");
+  const canClose = status === "Resolved" && (isRequester || manage);
   const canReopenUi = (status === "Resolved" || status === "Closed") && (isRequester || manage);
   const canCancelUi = canTransition(status, "Cancelled") && (isRequester || manage);
-  const hasActions = showManagerControls || showAssign || canEscalateUi || canConfirm || canReopenUi || canCancelUi;
+  // Move-forward cards render (for handlers on a non-terminal ticket) always;
+  // each is gated by canTransition — disabled + tooltip when the transition
+  // isn't legal, rather than hidden — so the workflow stays visible.
+  const canMoveForward = manage && !isTerminal;
+  const showMoveSection = canMoveForward || canClose;
+  const hasStatusPanel = showMoveSection || canEscalate || canReopenUi || !isTerminal;
 
+  // Composers + dialogs.
   const [reply, setReply] = useState("");
-  const [internal, setInternal] = useState("");
+  const [replyInternal, setReplyInternal] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [assignee, setAssignee] = useState(ticket.assigneeId ?? "");
-  const [showResolve, setShowResolve] = useState(false);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [reason, setReason] = useState("");
   const [resSummary, setResSummary] = useState("");
   const [resCategory, setResCategory] = useState<string>(RESOLUTION_CATEGORIES[0]);
-  const [showEscalate, setShowEscalate] = useState(false);
-  const [escNote, setEscNote] = useState("");
-  const [reasonMode, setReasonMode] = useState<"reopen" | "cancel" | null>(null);
-  const [reason, setReason] = useState("");
 
-  // Message + Close (option a): the closing message becomes the resolution
-  // summary; category required. Reuses the existing resolve → confirm chain.
-  async function messageAndClose() {
-    if (resSummary.trim().length < 5) return;
-    setBusy(true);
-    const r1 = await resolveTicket(ticket.id, { resolutionSummary: resSummary.trim(), resolutionCategory: resCategory as (typeof RESOLUTION_CATEGORIES)[number] });
-    if (!r1.success) { setBusy(false); toast.error(`Close: ${r1.error ?? "failed"}`); return; }
-    const r2 = await confirmResolution(ticket.id);
-    setBusy(false);
-    if (!r2.success) { toast.error(`Close: ${r2.error ?? "failed"}`); router.refresh(); return; }
-    toast.success("Ticket closed."); setShowResolve(false); setResSummary(""); router.refresh();
-  }
+  const editForm = useForm<EditValues>({
+    resolver: zodResolver(editSchema),
+    defaultValues: { subject: ticket.subject, category: ticket.category as EditValues["category"], priority: ticket.priority as EditValues["priority"], description: ticket.description },
+  });
 
-  async function doEscalate() {
-    setBusy(true);
-    const res = await escalateTicket(ticket.id, escNote.trim() ? { note: escNote.trim() } : undefined);
-    setBusy(false);
-    if (!res.success) { toast.error(`Escalate: ${res.error ?? "failed"}`); return; }
-    toast.success("Escalated to platform support."); setShowEscalate(false); setEscNote(""); router.refresh();
+  function openDialog(d: Dialog) {
+    setReason("");
+    setResSummary("");
+    setResCategory(RESOLUTION_CATEGORIES[0]);
+    if (d === "edit") editForm.reset({ subject: ticket.subject, category: ticket.category as EditValues["category"], priority: ticket.priority as EditValues["priority"], description: ticket.description });
+    setDialog(d);
   }
 
   async function run(label: string, fn: () => Promise<{ success: boolean; error?: string }>) {
@@ -123,19 +132,33 @@ export function TicketDetailView({ detail, attachments, manage, canAssign, canEs
     const res = await fn();
     setBusy(false);
     if (!res.success) { toast.error(`${label}: ${res.error ?? "failed"}`); return false; }
+    setDialog(null);
     router.refresh();
     return true;
   }
 
-  const slaOverdue = ticket.slaDueAt && !isTerminal && status !== "Resolved" && dayjs(ticket.slaDueAt).isBefore(dayjs());
+  const onEdit = editForm.handleSubmit(async (data) => {
+    if (await run("Edit", () => editTicket(ticket.id, data))) toast.success("Ticket updated.");
+  });
 
   return (
     <main id="main-content" aria-label={`Ticket ${ticket.reference ?? ""}`} className="w-full space-y-4">
-      <Button variant="secondary" size="sm" icon={ArrowLeft} onClick={() => router.push(backPath)}>
-        Back to {manage ? "queue" : "my tickets"}
-      </Button>
+      {/* Page header row — Back on the left; Edit + Cancel are the header actions. */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <Button variant="secondary" size="sm" icon={ArrowLeft} onClick={() => router.push(backPath)}>
+          Back to {manage ? "queue" : "my tickets"}
+        </Button>
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <Button variant="secondary" size="sm" icon={Pencil} disabled={busy} onClick={() => openDialog("edit")}>Edit ticket</Button>
+          )}
+          {canCancelUi && (
+            <Button variant="danger-ghost" size="sm" icon={XCircle} disabled={busy} onClick={() => openDialog("cancel")}>Cancel ticket</Button>
+          )}
+        </div>
+      </div>
 
-      {/* Header */}
+      {/* Header card — single row: ID, status, tier, priority, SLA + the title. */}
       <div className="card"><div className="card-body flex flex-col gap-1">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-mono text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>{ticket.reference ?? ticket.id.slice(0, 8)}</span>
@@ -145,11 +168,17 @@ export function TicketDetailView({ detail, attachments, manage, canAssign, canEs
           {ticket.slaDueAt && !isTerminal && status !== "Resolved" && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium" style={{ background: slaOverdue ? "var(--danger-bg)" : "var(--bg-elevated)", color: slaOverdue ? "var(--danger)" : "var(--text-secondary)" }}>
               <Clock className="w-3 h-3" aria-hidden="true" />
-              SLA {slaOverdue ? "breached" : "due"} {dayjs.utc(ticket.slaDueAt).tz(timezone).format(dateFormat)}
+              SLA {slaOverdue ? "breached" : "due"} {dayjs.utc(ticket.slaDueAt).tz(timezone).format(dtFormat)}
             </span>
           )}
         </div>
         <p className="text-[14px] font-medium" style={{ color: "var(--text-primary)" }}>{ticket.subject}</p>
+        {ticket.lastEditedAt && (
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            Last edited {dayjs.utc(ticket.lastEditedAt).tz(timezone).format(dtFormat)}
+            {ticket.lastEditedByName ? ` · ${ticket.lastEditedByName}` : ""}
+          </p>
+        )}
       </div></div>
 
       {/* Escalation trail — visible once a CA has escalated to the SA tier. */}
@@ -158,160 +187,189 @@ export function TicketDetailView({ detail, attachments, manage, canAssign, canEs
           <span className="font-semibold" style={{ color: "var(--warning)" }}>Escalated to platform support</span>
           <span style={{ color: "var(--text-primary)" }}> — by {ticket.escalatedByName ?? "Customer Admin"}</span>
           {tenantLabel && <span style={{ color: "var(--text-secondary)" }}> · {tenantLabel}</span>}
-          <span style={{ color: "var(--text-muted)" }}> · {dayjs.utc(ticket.escalatedAt).tz(timezone).format(`${dateFormat} HH:mm`)}</span>
+          <span style={{ color: "var(--text-muted)" }}> · {dayjs.utc(ticket.escalatedAt).tz(timezone).format(dtFormat)}</span>
         </div>
       )}
 
-      {/* Cancellation banner — keeps the canceled record fully visible. */}
+      {/* Cancelled — prominent read-only block with the reason. */}
       {status === "Cancelled" && (
-        <div className="rounded-lg p-3 text-[12px]" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
-          <span className="font-semibold" style={{ color: "var(--text-primary)" }}>Cancelled</span>
-          {ticket.cancelledAt && <span style={{ color: "var(--text-muted)" }}> · {dayjs.utc(ticket.cancelledAt).tz(timezone).format(dateFormat)}</span>}
-          {ticket.cancelReason && <span style={{ color: "var(--text-primary)" }}> — {ticket.cancelReason}</span>}
+        <div className="rounded-lg p-4 flex items-start gap-3" style={{ background: "var(--danger-bg)", border: "1px solid var(--danger)" }}>
+          <XCircle className="w-5 h-5 mt-0.5 shrink-0" style={{ color: "var(--danger)" }} aria-hidden="true" />
+          <div>
+            <p className="text-[13px] font-semibold" style={{ color: "var(--danger)" }}>
+              This ticket was cancelled — it is now read-only.
+            </p>
+            {ticket.cancelledAt && <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>{dayjs.utc(ticket.cancelledAt).tz(timezone).format(dtFormat)}</p>}
+            {ticket.cancelReason && <p className="text-[12px] mt-1" style={{ color: "var(--text-primary)" }}>Reason: {ticket.cancelReason}</p>}
+          </div>
         </div>
       )}
 
-      {/* Metadata */}
+      {/* Reopened — surface the reopen reason in its own block. */}
+      {ticket.reopenReason && status !== "Cancelled" && (
+        <div className="rounded-lg p-3 text-[12px]" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+          <span className="font-semibold" style={{ color: "var(--text-primary)" }}>Reopened</span>
+          <span style={{ color: "var(--text-primary)" }}> — {ticket.reopenReason}</span>
+        </div>
+      )}
+
+      {/* Metadata + Description */}
       <div className="card"><div className="card-body">
         <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-3 text-[12px]">
           <Meta label="Category">{ticket.category}</Meta>
           <Meta label="Requester">{ticket.requesterName}{ticket.requesterRole ? ` · ${roleLabel(ticket.requesterRole)}` : ""}</Meta>
-          <Meta label="Assignee">{ticket.assigneeName ?? <span style={{ color: "var(--text-muted)" }}>Unassigned</span>}</Meta>
-          <Meta label="Created">{dayjs.utc(ticket.createdAt).tz(timezone).format(dateFormat)}</Meta>
+          <Meta label="Created">{dayjs.utc(ticket.createdAt).tz(timezone).format(dtFormat)}</Meta>
           {ticket.relatedRecordRef && (
             <Meta label="Related record">
-              {ticket.relatedModule && RELATED_MODULE_ROUTE[ticket.relatedModule] ? (
-                <Link href={RELATED_MODULE_ROUTE[ticket.relatedModule]} className="font-mono underline" style={{ color: "var(--brand)" }}>{ticket.relatedRecordRef}</Link>
+              {ticket.relatedModule && SUPPORT_RELATED_MODULE_ROUTE[ticket.relatedModule] ? (
+                <Link href={SUPPORT_RELATED_MODULE_ROUTE[ticket.relatedModule]} className="font-mono underline" style={{ color: "var(--brand)" }}>{ticket.relatedRecordRef}</Link>
               ) : (
                 <span className="font-mono">{ticket.relatedRecordRef}</span>
               )}
               {ticket.relatedModule && <span style={{ color: "var(--text-muted)" }}> ({ticket.relatedModule})</span>}
             </Meta>
           )}
-          {ticket.resolvedAt && <Meta label="Resolved">{dayjs.utc(ticket.resolvedAt).tz(timezone).format(dateFormat)}{ticket.resolutionCategory ? ` · ${ticket.resolutionCategory}` : ""}</Meta>}
+          {ticket.resolvedAt && <Meta label="Resolved">{dayjs.utc(ticket.resolvedAt).tz(timezone).format(dtFormat)}{ticket.resolutionCategory ? ` · ${ticket.resolutionCategory}` : ""}</Meta>}
         </dl>
-        <p className="text-[12px] mt-3 whitespace-pre-wrap" style={{ color: "var(--text-primary)" }}>{ticket.description}</p>
+
+        <p className="text-[10px] font-semibold uppercase tracking-wider mt-4 mb-1" style={{ color: "var(--text-muted)" }}>Description</p>
+        <p className="text-[12px] whitespace-pre-wrap" style={{ color: "var(--text-primary)" }}>{ticket.description}</p>
+
         {ticket.resolutionSummary && (
           <div className="mt-3 rounded-lg p-3 text-[12px]" style={{ background: "var(--success-bg)", border: "1px solid var(--success)" }}>
             <span className="font-semibold" style={{ color: "var(--success)" }}>Resolution: </span>
             <span style={{ color: "var(--text-primary)" }}>{ticket.resolutionSummary}</span>
           </div>
         )}
+
         {attachments.length > 0 && (
-          <div className="mt-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Attachments</p>
-            <ul className="space-y-1">
+          <div className="mt-4">
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Attachments</p>
+            <div className="space-y-2">
               {attachments.map((a) => (
-                <li key={a.id} className="flex items-center gap-2 text-[12px]">
-                  <Paperclip className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                  {a.hasFile ? (
-                    <a href={`/api/documents/${a.id}`} className="underline inline-flex items-center gap-1" style={{ color: "var(--brand)" }}>
-                      {a.originalFileName ?? a.fileName} <Download className="w-3 h-3" aria-hidden="true" />
-                    </a>
-                  ) : (
-                    <span style={{ color: "var(--text-secondary)" }}>{a.fileName}</span>
-                  )}
-                </li>
+                <DocumentCard key={a.id} doc={a} />
               ))}
-            </ul>
+            </div>
           </div>
         )}
       </div></div>
 
-      {/* Actions — hidden entirely when none apply (e.g. a Cancelled ticket),
-          so the canceled record shows read-only with no empty action card. */}
-      {hasActions && (
-      <div className="card"><div className="card-body space-y-3">
-        {/* Handler controls (canHandleTicket) — status + Message+Close + Escalate.
-            Assign is SEPARATE (canManageSupport / SA only). */}
-        {(showManagerControls || showAssign || canEscalateUi) && (
-          <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-(--bg-border)">
-            {showAssign && (
-              <>
-                <Dropdown placeholder="Assign to…" value={assignee} onChange={setAssignee} width="w-48"
-                  options={[{ value: "", label: "Unassigned" }, ...assigneeOptions.map((a) => ({ value: a.id, label: a.name }))]} />
-                <Button variant="secondary" size="sm" disabled={busy || !assignee || assignee === (ticket.assigneeId ?? "")}
-                  onClick={() => run("Assign", () => assignTicket(ticket.id, { assigneeId: assignee, assigneeName: assigneeOptions.find((a) => a.id === assignee)?.name ?? assignee }))}>
-                  Assign
+      {/* Status Management panel — clickable action cards, grouped. Hidden on a
+          terminal ticket with nothing actionable. */}
+      {hasStatusPanel && (
+        <div className="card"><div className="card-body space-y-5">
+          <span className="card-title">Status management</span>
+
+          {/* MOVE FORWARD — 2-column grid of clickable cards. canTransition gates
+              each card: disabled + tooltip when the transition isn't legal. */}
+          {showMoveSection && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Move forward</p>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Working on it — collapses New→In Progress and Open→In Progress
+                    into one card. Hidden once the ticket is In Progress or beyond. */}
+                {canMoveForward && (status === "New" || status === "Open") && (
+                  <ActionCard
+                    icon={Loader}
+                    title="Working on it"
+                    description="Accept the ticket and actively work on it."
+                    disabled={busy}
+                    onClick={() => run("Working on it", () => updateTicketStatus(ticket.id, { status: "In Progress" }))}
+                  />
+                )}
+                {canMoveForward && (
+                  <ActionCard
+                    icon={CheckCircle2}
+                    title="Resolve"
+                    description="Mark this ticket as resolved."
+                    disabled={busy || !canResolve}
+                    disabledReason={!canResolve ? `Cannot resolve from "${status}".` : undefined}
+                    onClick={() => openDialog("resolve")}
+                  />
+                )}
+                {canClose && (
+                  <ActionCard
+                    icon={Archive}
+                    title="Close"
+                    description={STATUS_DESCRIPTIONS.Closed}
+                    disabled={busy}
+                    onClick={() => openDialog("close")}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ESCALATE — full-width card (CA first-line only, mandatory reason). */}
+          {canEscalate && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Escalate</p>
+              <ActionCard
+                fullWidth
+                icon={ArrowUpCircle}
+                title="Escalate to Super Admin"
+                description="Hand this ticket to the platform support team. A reason is required."
+                disabled={busy}
+                onClick={() => openDialog("escalate")}
+              />
+            </div>
+          )}
+
+          {/* REPLY WITH A MESSAGE — one textarea + internal-note checkbox + Send.
+              The checkbox (handlers only) flips isInternal; same addTicketMessage. */}
+          {!isTerminal && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Reply with a message</p>
+              <textarea
+                rows={3}
+                className="input text-[12px] resize-none w-full"
+                placeholder={replyInternal ? "Add an internal note…" : "Write a reply…"}
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                style={replyInternal ? { borderColor: "var(--warning)" } : undefined}
+              />
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                {manage ? (
+                  <label className="inline-flex items-center gap-1.5 text-[11px] cursor-pointer" style={{ color: "var(--text-secondary)" }}>
+                    <input type="checkbox" className="cursor-pointer accent-(--brand)" checked={replyInternal} onChange={(e) => setReplyInternal(e.target.checked)} />
+                    <Lock className="w-3 h-3" aria-hidden="true" /> Internal note — never shown to the requester
+                  </label>
+                ) : <span />}
+                <Button
+                  variant="primary" size="sm" icon={Send}
+                  disabled={busy || reply.trim().length === 0}
+                  onClick={async () => {
+                    const isInternal = manage && replyInternal;
+                    if (await run(isInternal ? "Internal note" : "Reply", () => addTicketMessage(ticket.id, { body: reply.trim(), isInternal }))) {
+                      setReply(""); setReplyInternal(false);
+                    }
+                  }}
+                >
+                  Send
                 </Button>
-              </>
-            )}
-            {showManagerControls && STATUS_TARGETS.filter((s) => s !== status && canTransition(status, s)).map((s) => (
-              <Button key={s} variant="ghost" size="sm" disabled={busy} onClick={() => run("Status", () => updateTicketStatus(ticket.id, { status: s as "Open" | "In Progress" | "Awaiting User" }))}>
-                Mark {s}
-              </Button>
-            ))}
-            {/* Escalate to Super Admin — CA first-line only, on a CA-routed ticket. */}
-            {canEscalateUi && (
-              <Button variant="secondary" size="sm" disabled={busy} onClick={() => { setShowEscalate((v) => !v); setShowResolve(false); }}>Escalate to Super Admin</Button>
-            )}
-            {showManagerControls && canTransition(status, "Resolved") && (
-              <Button variant="primary" size="sm" disabled={busy} onClick={() => { setShowResolve((v) => !v); setShowEscalate(false); }}>Message + Close</Button>
-            )}
-          </div>
-        )}
-
-        {/* Escalate panel — optional note for the SA tier. */}
-        {canEscalateUi && showEscalate && (
-          <div className="rounded-lg p-3 space-y-2" style={{ background: "var(--warning-bg)", border: "1px dashed var(--warning)" }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--warning)" }}>Escalate to platform support</p>
-            <textarea rows={2} className="input text-[12px] resize-none w-full" placeholder="Optional note for the platform team (internal)…" value={escNote} onChange={(e) => setEscNote(e.target.value)} />
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setShowEscalate(false)}>Cancel</Button>
-              <Button variant="primary" size="sm" disabled={busy} onClick={doEscalate}>Escalate</Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Message + Close panel (option a): closing message → resolution summary. */}
-        {showManagerControls && showResolve && (
-          <div className="rounded-lg p-3 space-y-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
-            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Message + Close</p>
-            <Dropdown value={resCategory} onChange={setResCategory} width="w-full" options={RESOLUTION_CATEGORIES.map((c) => ({ value: c, label: c }))} />
-            <textarea rows={3} className="input text-[12px] resize-none w-full" placeholder="Closing message — becomes the resolution summary (required)" value={resSummary} onChange={(e) => setResSummary(e.target.value)} />
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setShowResolve(false)}>Cancel</Button>
-              <Button variant="primary" size="sm" disabled={busy || resSummary.trim().length < 5} onClick={messageAndClose}>Close ticket</Button>
+          {/* REOPEN — full-width card (Resolved / Closed only, mandatory reason). */}
+          {canReopenUi && (
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Reopen</p>
+              <ActionCard
+                fullWidth
+                icon={RotateCcw}
+                title="Reopen ticket"
+                description="Start a fresh SLA window. A reason is required."
+                disabled={busy}
+                onClick={() => openDialog("reopen")}
+              />
             </div>
-          </div>
-        )}
-
-        {/* Requester / shared lifecycle */}
-        <div className="flex flex-wrap items-center gap-2">
-          {status === "Resolved" && (isRequester || manage) && (
-            <Button variant="primary" size="sm" disabled={busy} onClick={() => run("Confirm", () => confirmResolution(ticket.id))}>Confirm resolution</Button>
           )}
-          {(status === "Resolved" || status === "Closed") && (isRequester || manage) && (
-            <Button variant="secondary" size="sm" disabled={busy} onClick={() => { setReasonMode("reopen"); setReason(""); }}>Reopen</Button>
-          )}
-          {canTransition(status, "Cancelled") && (isRequester || manage) && (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => { setReasonMode("cancel"); setReason(""); }}>Cancel ticket</Button>
-          )}
-        </div>
-
-        {reasonMode && (
-          <div className="rounded-lg p-3 space-y-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
-            <textarea rows={2} className="input text-[12px] resize-none w-full" placeholder={reasonMode === "reopen" ? "Why are you reopening this?" : "Why are you cancelling this?"} value={reason} onChange={(e) => setReason(e.target.value)} />
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setReasonMode(null)}>Cancel</Button>
-              <Button variant="primary" size="sm" disabled={busy || reason.trim().length < 3}
-                onClick={async () => {
-                  const ok = reasonMode === "reopen"
-                    ? await run("Reopen", () => reopenTicket(ticket.id, { reason: reason.trim() }))
-                    : await run("Cancel", () => cancelTicket(ticket.id, { reason: reason.trim() }));
-                  if (ok) setReasonMode(null);
-                }}>
-                {reasonMode === "reopen" ? "Reopen ticket" : "Cancel ticket"}
-              </Button>
-            </div>
-          </div>
-        )}
-      </div></div>
+        </div></div>
       )}
 
-      {/* Conversation thread */}
+      {/* Message thread (no "Conversation" heading per spec) */}
       <div className="card"><div className="card-body">
-        <div className="flex items-center gap-2 mb-3"><MessageSquare className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" /><span className="card-title">Conversation</span></div>
         {messages.length === 0 ? (
           <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No messages yet.</p>
         ) : (
@@ -324,45 +382,17 @@ export function TicketDetailView({ detail, attachments, manage, canAssign, canEs
                   <span className="font-medium" style={{ color: "var(--text-primary)" }}>{m.authorName}</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-(--bg-surface)" style={{ color: "var(--text-secondary)" }}>{roleLabel(m.authorRole)}</span>
                   {m.isInternal && <Badge variant="amber">Internal note</Badge>}
-                  <span className="ml-auto font-mono" style={{ color: "var(--text-muted)" }}>{dayjs.utc(m.createdAt).tz(timezone).format(`${dateFormat} HH:mm`)}</span>
+                  <span className="ml-auto font-mono" style={{ color: "var(--text-muted)" }}>{dayjs.utc(m.createdAt).tz(timezone).format(dtFormat)}</span>
                 </div>
                 <p className="text-[12px] whitespace-pre-wrap" style={{ color: "var(--text-primary)" }}>{m.body}</p>
               </li>
             ))}
           </ul>
         )}
-
-        {/* Reply composer (hidden on terminal states) */}
-        {!isTerminal && (
-          <div className="mt-3 space-y-2">
-            <textarea rows={3} className="input text-[12px] resize-none w-full" placeholder="Write a reply…" value={reply} onChange={(e) => setReply(e.target.value)} />
-            <div className="flex justify-end">
-              <Button variant="primary" size="sm" disabled={busy || reply.trim().length === 0}
-                onClick={async () => { if (await run("Reply", () => addTicketMessage(ticket.id, { body: reply.trim() }))) setReply(""); }}>
-                Send reply
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Internal note composer — managers only, visually distinct */}
-        {manage && !isTerminal && (
-          <div className="mt-3 space-y-2 rounded-lg p-3" style={{ background: "var(--warning-bg)", border: "1px dashed var(--warning)" }}>
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: "var(--warning)" }}><Lock className="w-3 h-3" aria-hidden="true" /> Internal note — never shown to the requester</div>
-            <textarea rows={2} className="input text-[12px] resize-none w-full" placeholder="Add an internal note…" value={internal} onChange={(e) => setInternal(e.target.value)} />
-            <div className="flex justify-end">
-              <Button variant="secondary" size="sm" disabled={busy || internal.trim().length === 0}
-                onClick={async () => { if (await run("Internal note", () => addTicketMessage(ticket.id, { body: internal.trim(), isInternal: true }))) setInternal(""); }}>
-                Add internal note
-              </Button>
-            </div>
-          </div>
-        )}
       </div></div>
 
-      {/* Activity / audit history — support managers ONLY. The data layer
-          (getTicket) already returns [] for non-managers; this UI gate matches
-          so a regular user never sees the panel. */}
+      {/* Activity / audit history — handlers ONLY. getTicket returns [] for
+          non-handlers (data layer), and this UI gate matches. */}
       {manage && (
         <div className="card"><div className="card-body">
           <div className="flex items-center gap-2 mb-3"><History className="w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><span className="card-title">Activity</span></div>
@@ -372,7 +402,7 @@ export function TicketDetailView({ detail, attachments, manage, canAssign, canEs
             <ul className="space-y-2">
               {activities.map((a) => (
                 <li key={a.id} className="flex items-start gap-2 text-[11px]">
-                  <span className="font-mono shrink-0" style={{ color: "var(--text-muted)" }}>{dayjs.utc(a.createdAt).tz(timezone).format(`${dateFormat} HH:mm`)}</span>
+                  <span className="font-mono shrink-0" style={{ color: "var(--text-muted)" }}>{dayjs.utc(a.createdAt).tz(timezone).format(dtFormat)}</span>
                   <span style={{ color: "var(--text-primary)" }}>{a.summary} <span style={{ color: "var(--text-muted)" }}>· {a.actorName}</span></span>
                 </li>
               ))}
@@ -380,7 +410,148 @@ export function TicketDetailView({ detail, attachments, manage, canAssign, canEs
           )}
         </div></div>
       )}
+
+      {/* ── Dialogs ── */}
+
+      {/* Edit ticket — reuses the raise-modal field set. */}
+      <Modal open={dialog === "edit"} onClose={() => setDialog(null)} title="Edit ticket"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" type="button" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button variant="primary" type="submit" form="edit-ticket-form" loading={busy}>Save changes</Button>
+          </div>
+        }>
+        <form id="edit-ticket-form" onSubmit={onEdit} noValidate className="space-y-4">
+          <div>
+            <label htmlFor="e-subject" className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Subject *</label>
+            <input id="e-subject" className="input text-[12px]" {...editForm.register("subject")} />
+            {editForm.formState.errors.subject && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{editForm.formState.errors.subject.message}</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Category *</label>
+              <Controller name="category" control={editForm.control} render={({ field }) => (
+                <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={TICKET_CATEGORIES.map((c) => ({ value: c, label: c }))} />
+              )} />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Priority *</label>
+              <Controller name="priority" control={editForm.control} render={({ field }) => (
+                <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={TICKET_PRIORITIES.map((p) => ({ value: p, label: p }))} />
+              )} />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="e-desc" className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Description *</label>
+            <textarea id="e-desc" rows={4} className="input text-[12px] resize-none" {...editForm.register("description")} />
+            {editForm.formState.errors.description && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{editForm.formState.errors.description.message}</p>}
+          </div>
+        </form>
+      </Modal>
+
+      {/* Resolve — summary + category (min 5, server re-checks). */}
+      <Modal open={dialog === "resolve"} onClose={() => setDialog(null)} title="Resolve ticket"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" type="button" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button variant="primary" disabled={busy || resSummary.trim().length < 5}
+              onClick={() => run("Resolve", () => resolveTicket(ticket.id, { resolutionSummary: resSummary.trim(), resolutionCategory: resCategory as (typeof RESOLUTION_CATEGORIES)[number] }))}>
+              Resolve
+            </Button>
+          </div>
+        }>
+        <div className="space-y-3">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Resolution category</label>
+            <Dropdown value={resCategory} onChange={setResCategory} width="w-full" options={RESOLUTION_CATEGORIES.map((c) => ({ value: c, label: c }))} />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Resolution summary *</label>
+            <textarea rows={3} className="input text-[12px] resize-none w-full" placeholder="What was done to resolve this? (min 5 characters)" value={resSummary} onChange={(e) => setResSummary(e.target.value)} />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Close — confirmation only, no reason (spec). */}
+      <Modal open={dialog === "close"} onClose={() => setDialog(null)} title="Close ticket"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" type="button" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button variant="primary" disabled={busy} onClick={() => run("Close", () => confirmResolution(ticket.id))}>Close ticket</Button>
+          </div>
+        }>
+        <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>Confirm the resolution and close this ticket? It can still be reopened later if needed.</p>
+      </Modal>
+
+      {/* Escalate / Cancel / Reopen — mandatory reason (min 5, server re-checks). */}
+      <Modal
+        open={dialog === "escalate" || dialog === "cancel" || dialog === "reopen"}
+        onClose={() => setDialog(null)}
+        title={dialog === "escalate" ? "Escalate to Super Admin" : dialog === "cancel" ? "Cancel ticket" : "Reopen ticket"}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" type="button" onClick={() => setDialog(null)}>Back</Button>
+            <Button variant="primary" disabled={busy || reason.trim().length < 5}
+              onClick={() => {
+                const r = reason.trim();
+                if (dialog === "escalate") return void run("Escalate", () => escalateTicket(ticket.id, { reason: r }));
+                if (dialog === "cancel") return void run("Cancel", () => cancelTicket(ticket.id, { reason: r }));
+                return void run("Reopen", () => reopenTicket(ticket.id, { reason: r }));
+              }}>
+              {dialog === "escalate" ? "Escalate" : dialog === "cancel" ? "Cancel ticket" : "Reopen ticket"}
+            </Button>
+          </div>
+        }>
+        <div className="space-y-2">
+          <label className="text-[11px] font-semibold uppercase tracking-wider block" style={{ color: "var(--text-muted)" }}>Reason * (min 5 characters)</label>
+          <textarea rows={3} className="input text-[12px] resize-none w-full" placeholder="Explain why…" value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+        </div>
+      </Modal>
     </main>
+  );
+}
+
+/** A clickable action card: brand-tinted Lucide icon + title + 1–2 line
+ *  description. Disabled cards stay visible (greyed) with a tooltip reason. */
+function ActionCard({
+  icon: Icon,
+  title,
+  description,
+  onClick,
+  disabled,
+  disabledReason,
+  fullWidth,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  onClick: () => void;
+  disabled?: boolean;
+  disabledReason?: string;
+  fullWidth?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
+      className={clsx(
+        "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+        "border-(--bg-border) bg-(--bg-elevated)",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+        "enabled:cursor-pointer enabled:hover:border-(--brand)",
+        fullWidth && "w-full",
+      )}
+    >
+      <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "var(--brand-muted)" }}>
+        <Icon className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{title}</span>
+        <span className="block text-[10px] mt-0.5 leading-snug" style={{ color: "var(--text-muted)" }}>{description}</span>
+      </span>
+    </button>
   );
 }
 

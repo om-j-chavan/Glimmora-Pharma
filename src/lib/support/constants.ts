@@ -45,6 +45,18 @@ export function canTransition(from: TicketStatus, to: TicketStatus): boolean {
   return STATUS_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
+/** One-line description of what each status MEANS — surfaced as helper text under
+ *  the status-action buttons so a handler knows the effect before clicking. */
+export const STATUS_DESCRIPTIONS: Record<TicketStatus, string> = {
+  New: "Just raised — not yet triaged by support.",
+  Open: "Accepted by support and queued for work.",
+  "In Progress": "Support is actively working on this ticket.",
+  "Awaiting User": "Waiting for the requester to respond.",
+  Resolved: "A resolution was provided — awaiting the requester's confirmation.",
+  Closed: "Resolution confirmed (or auto-closed). No further action.",
+  Cancelled: "Withdrawn — read-only. No further changes are possible.",
+};
+
 /* ── Priority ── */
 export const TICKET_PRIORITIES = ["Low", "Medium", "High", "Urgent"] as const;
 export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
@@ -119,7 +131,7 @@ export function computeSlaDueAt(priority: TicketPriority, from: Date = new Date(
 /* ── Activity types ── */
 export type TicketActivityType =
   | "CREATED"
-  | "ASSIGNED"
+  | "EDITED"
   | "STATUS_CHANGED"
   | "PRIORITY_CHANGED"
   | "REPLY"
@@ -135,3 +147,44 @@ export type TicketActivityType =
 
 /** Central AuditLog module string for Support (matches Audit Trail filters). */
 export const SUPPORT_AUDIT_MODULE = "Support";
+
+/* ── Related modules ──
+ * The domain modules a ticket can REFERENCE (display/navigation only — a ticket
+ * never mutates the linked record; Data-Correction / Compliance-Concern requests
+ * go through the proper CAPA/Deviation/Change-Control flow with their own
+ * e-signature). Mirrors the feature modules under src/modules/. This is the
+ * single source of truth — the Raise Ticket modal and the detail view both read
+ * it (replacing the old ad-hoc list in _shared.tsx). */
+export const SUPPORT_RELATED_MODULES = [
+  "CAPA",
+  "Deviation",
+  "FDA 483",
+  "CSV/CSA",
+  "Change Control",
+  "Findings",
+  "Documents",
+  "Evidence",
+  "Inspections",
+  "RAID",
+  "Frameworks",
+  "Settings",
+] as const;
+export type SupportRelatedModule = (typeof SUPPORT_RELATED_MODULES)[number];
+
+/** Route each related module deep-links to (navigation only). Modules with no
+ *  standalone route are intentionally absent → the detail view renders the ref
+ *  as plain text rather than a link. */
+export const SUPPORT_RELATED_MODULE_ROUTE: Record<string, string> = {
+  CAPA: "/capa",
+  Deviation: "/deviation",
+  "FDA 483": "/fda-483",
+  "CSV/CSA": "/csv-csa",
+  "Change Control": "/change-control",
+  Findings: "/gap-assessment",
+  Documents: "/evidence",
+  Evidence: "/evidence",
+  Inspections: "/inspection",
+  RAID: "/governance",
+  Frameworks: "/admin/frameworks",
+  Settings: "/settings",
+};

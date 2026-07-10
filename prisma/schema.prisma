@@ -1925,6 +1925,11 @@ model Ticket {
   id        String  @id @default(cuid())
   reference String? @unique // TKT-<year>-<NNNNN> (flat, global — not tenant/region coded)
   tenantId  String
+  // Site the ticket was raised for. Required for a customer_admin (chosen in the
+  // Raise modal); derived from the requester's User row for other roles.
+  siteId    String?
+  // Optional evidence link (free-text URL) supplied by the requester.
+  evidenceLink String?
 
   subject     String
   category    String
@@ -1937,10 +1942,6 @@ model Ticket {
   requesterId   String
   requesterName String
   requesterRole String
-
-  // Null = Unassigned. Manual assignment only (no auto-routing).
-  assigneeId   String?
-  assigneeName String?
 
   // Routing tier (Phase A foundation) — WHO currently holds the ticket. SEPARATE
   // from `status` (which is lifecycle). Values: "customer_admin" | "super_admin".
@@ -1976,6 +1977,12 @@ model Ticket {
   originUrl  String?
   userAgent  String?
 
+  // Edit tracking — set when subject/description/priority/category are edited
+  // (only while New/Open). Null until the first edit.
+  lastEditedAt     DateTime?
+  lastEditedById   String?
+  lastEditedByName String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1983,7 +1990,6 @@ model Ticket {
   activities TicketActivity[]
 
   @@index([tenantId, status])
-  @@index([assigneeId])
   @@index([status])
   @@index([slaDueAt])
   @@index([tenantId, createdAt])
