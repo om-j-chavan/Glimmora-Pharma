@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import clsx from "clsx";
+import { motion } from "framer-motion";
+import { usePrefersReducedMotion } from "@/lib/motion/useReducedMotion";
+import { DURATION, EASE } from "@/lib/motion/tokens";
 
 /**
  * Right-side slide-over panel. API naming mirrors Modal.tsx
@@ -38,24 +41,17 @@ const WIDTHS: Record<DrawerWidth, string> = {
 export function Drawer({ open, onClose, title, children, footer, width = "md", persistent }: DrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  // Drives the slide-in: render off-screen (translate-x-full), then flip to 0.
-  const [shown, setShown] = useState(false);
+  const reduced = usePrefersReducedMotion();
 
   useEffect(() => {
     if (open) {
       previousFocusRef.current = document.activeElement as HTMLElement;
       const prev = document.body.style.overflow;
       document.body.style.overflow = "hidden";
-      // Next frame so the transition runs from the off-screen start position.
-      const raf = requestAnimationFrame(() => {
-        setShown(true);
-        panelRef.current?.focus();
-      });
-      return () => {
-        cancelAnimationFrame(raf);
-        document.body.style.overflow = prev;
-        setShown(false);
-      };
+      // framer renders the panel at its off-screen start (x: 100%) immediately,
+      // so we can focus right away — no RAF flip needed anymore.
+      panelRef.current?.focus();
+      return () => { document.body.style.overflow = prev; };
     } else {
       previousFocusRef.current?.focus();
     }
@@ -74,14 +70,14 @@ export function Drawer({ open, onClose, title, children, footer, width = "md", p
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={persistent ? undefined : onClose}>
-      <div
-        className={clsx(
-          "absolute inset-0 bg-black/50 transition-opacity duration-200",
-          shown ? "opacity-100" : "opacity-0",
-        )}
+      <motion.div
+        className="absolute inset-0 bg-black/50"
         aria-hidden="true"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: DURATION.base, ease: EASE.standard }}
       />
-      <div
+      <motion.div
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
@@ -91,11 +87,12 @@ export function Drawer({ open, onClose, title, children, footer, width = "md", p
         className={clsx(
           "relative h-full w-full flex flex-col border-l shadow-2xl",
           "bg-(--bg-elevated) border-(--bg-border)",
-          "transition-transform duration-200 ease-out will-change-transform",
-          "focus:outline-none",
+          "will-change-transform focus:outline-none",
           WIDTHS[width],
-          shown ? "translate-x-0" : "translate-x-full",
         )}
+        initial={reduced ? { opacity: 0 } : { x: "100%" }}
+        animate={reduced ? { opacity: 1 } : { x: 0 }}
+        transition={{ duration: DURATION.moderate, ease: EASE.out }}
       >
         <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
           <h2 id="drawer-title" className="text-[14px] font-semibold text-(--text-primary)">{title}</h2>
@@ -114,7 +111,7 @@ export function Drawer({ open, onClose, title, children, footer, width = "md", p
             {footer}
           </div>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

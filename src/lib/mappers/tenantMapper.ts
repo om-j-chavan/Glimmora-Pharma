@@ -32,7 +32,6 @@ type PrismaTenantRow = {
     name: string;
     location: string | null;
     gmpScope: string | null;
-    risk: string;
     isActive: boolean;
   }>;
   users?: Array<{
@@ -53,7 +52,6 @@ function mapSite(site: NonNullable<PrismaTenantRow["sites"]>[number]): TenantSit
     name: site.name,
     location: site.location ?? "",
     gmpScope: site.gmpScope ?? "",
-    risk: (site.risk === "HIGH" || site.risk === "MEDIUM" || site.risk === "LOW") ? site.risk : "MEDIUM",
     status: site.isActive ? "Active" : "Inactive",
   };
 }

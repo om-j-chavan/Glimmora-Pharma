@@ -19,8 +19,6 @@ export default async function Page() {
       <WorklistPage
         worklist={worklist}
         currentUserId={session.user.id}
-        currentUserName={session.user.name}
-        currentUserRole={session.user.role}
       />
     </ErrorBoundary>
   );

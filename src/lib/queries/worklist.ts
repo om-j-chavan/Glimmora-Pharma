@@ -2,10 +2,13 @@ import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 
 /**
- * Phase 5 — the Worklist data loader (read-only). Returns the action items
- * assigned to the user PLUS the CAPAs they drive (ownerId), so a driver with
- * no personally-assigned items still sees their CAPA group. All writes happen
- * through the existing Phase-3/4/5 owner/driver server paths; this only reads.
+ * Phase 5 — the Worklist data loader (read-only). Aggregates everything assigned
+ * to the user across modules: CAPA action items (CAPAActionItem.ownerId),
+ * low-priority deviation tasks and CSV/CSA stage tasks (assigneeId), and gap
+ * findings still owned by the user (Finding.owner) that have NOT yet moved to a
+ * CAPA. It does NOT query whole CAPAs by CAPA.ownerId — a CAPA reaches the
+ * Worklist ONLY via its assigned action items. All writes happen through the
+ * existing owner/driver server paths; this only reads.
  *
  * Serialised (Dates → ISO) so it can cross the server→client boundary directly.
  */
@@ -35,6 +38,10 @@ export interface WorklistActionItem {
   /** This action's evidence files (EvidenceFile), as WorklistDocs served from
    *  /api/evidence/files/{id}. */
   docs: WorklistDoc[];
+  /** Item 6 — the SOURCE-module docs (gap finding / deviation that spawned the
+   *  parent CAPA), read-only, served from /api/documents/{id}. Shown in the
+   *  worklist detail's "Related documents" section (View + Download). */
+  relatedDocs: WorklistDoc[];
   /** The parent CAPA's evidence categories (id + category) so the work modal can
    *  map a chosen upload category → its EvidenceItem. */
   evidenceItems: { id: string; category: string }[];
@@ -189,6 +196,9 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
           select: {
             id: true, reference: true, description: true, status: true,
             dueDate: true, risk: true, ownerId: true,
+            // Item 6 — source links so the worker can see the originating
+            // gap-finding / deviation docs on the action item (read-only).
+            findingId: true, deviationId: true, source: true,
           },
         },
       },
@@ -236,7 +246,10 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     // source; mirrors the deviation-task block above. Active statuses only
     // (FINDING_ACTIVE_STATUSES); "Closed" drops off.
     prisma.finding.findMany({
-      where: { owner: userId, tenantId, deletedAt: null, status: { in: FINDING_ACTIVE_STATUSES } },
+      // linkedCAPAId: null — once a CAPA is raised from a finding, remediation
+      // moves to the CAPA lifecycle, so the finding drops off the owner's
+      // Worklist (it still renders In Progress + linked in Gap Assessment).
+      where: { owner: userId, tenantId, deletedAt: null, linkedCAPAId: null, status: { in: FINDING_ACTIVE_STATUSES } },
       orderBy: { targetDate: "asc" },
       select: {
         id: true, reference: true, requirement: true, framework: true, area: true, severity: true,
@@ -306,6 +319,65 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     evItemsByCapa.set(e.capaId, arr);
   }
 
+  // Item 6 — the SOURCE-module docs behind each assigned CAPA action item: the
+  // gap finding (linkedModule "Gap Assessment") or the deviation (+ its tasks)
+  // that spawned the parent CAPA. ONE tenant-scoped query (mirrors the deviation-
+  // task + finding branches below), grouped per source, then attached to each
+  // action via its parent CAPA. Read-only, served from /api/documents/{id}.
+  const srcFindingIds = [...new Set(items.map((it) => it.capa.findingId).filter((v): v is string => !!v))];
+  const srcDeviationIds = [...new Set(items.map((it) => it.capa.deviationId).filter((v): v is string => !!v))];
+  const srcDevTasks = srcDeviationIds.length
+    ? await prisma.deviationTask.findMany({ where: { deviationId: { in: srcDeviationIds }, tenantId }, select: { id: true, deviationId: true } })
+    : [];
+  const taskIdToDev = new Map(srcDevTasks.map((t) => [t.id, t.deviationId]));
+  const srcTaskIds = srcDevTasks.map((t) => t.id);
+  const srcDocs = (srcFindingIds.length || srcDeviationIds.length)
+    ? await prisma.document.findMany({
+        where: {
+          tenantId, deletedAt: null,
+          OR: [
+            ...(srcFindingIds.length ? [{ linkedModule: "Gap Assessment", linkedRecordId: { in: srcFindingIds } }] : []),
+            ...(srcDeviationIds.length ? [{ linkedModule: "Deviation Management", linkedRecordId: { in: srcDeviationIds } }] : []),
+            ...(srcTaskIds.length ? [{ linkedModule: "Deviation Task", linkedRecordId: { in: srcTaskIds } }] : []),
+          ],
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true, fileName: true, originalFileName: true, fileType: true, fileExtension: true,
+          fileSize: true, uploadedBy: true, uploadedAt: true, createdAt: true, category: true,
+          linkedModule: true, linkedRecordId: true,
+        },
+      })
+    : [];
+  const srcDocsByFinding = new Map<string, WorklistDoc[]>();
+  const srcDocsByDeviation = new Map<string, WorklistDoc[]>();
+  for (const d of srcDocs) {
+    if (!d.linkedRecordId) continue;
+    const row: WorklistDoc = {
+      id: d.id,
+      fileName: d.originalFileName ?? d.fileName,
+      fileType: d.fileType,
+      fileExtension: d.fileExtension,
+      fileSize: d.fileSize,
+      uploadedBy: d.uploadedBy,
+      uploadedAt: (d.uploadedAt ?? d.createdAt).toISOString(),
+      category: d.category,
+    };
+    if (d.linkedModule === "Gap Assessment") {
+      const arr = srcDocsByFinding.get(d.linkedRecordId) ?? []; arr.push(row); srcDocsByFinding.set(d.linkedRecordId, arr);
+    } else if (d.linkedModule === "Deviation Management") {
+      const arr = srcDocsByDeviation.get(d.linkedRecordId) ?? []; arr.push(row); srcDocsByDeviation.set(d.linkedRecordId, arr);
+    } else if (d.linkedModule === "Deviation Task") {
+      const devId = taskIdToDev.get(d.linkedRecordId);
+      if (!devId) continue;
+      const arr = srcDocsByDeviation.get(devId) ?? []; arr.push(row); srcDocsByDeviation.set(devId, arr);
+    }
+  }
+  const relatedDocsForCapa = (findingId: string | null, deviationId: string | null): WorklistDoc[] => [
+    ...(findingId ? srcDocsByFinding.get(findingId) ?? [] : []),
+    ...(deviationId ? srcDocsByDeviation.get(deviationId) ?? [] : []),
+  ];
+
   const EDITABLE_CAPA_STATUSES = new Set(["open", "in_progress"]);
   const assignedActions: WorklistActionItem[] = items.map((it) => ({
     id: it.id,
@@ -321,6 +393,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     completionNotes: it.completionNotes,
     reworkReason: it.reworkReason,
     docs: evByAction.get(it.id) ?? [],
+    relatedDocs: relatedDocsForCapa(it.capa.findingId, it.capa.deviationId),
     evidenceItems: evItemsByCapa.get(it.capaId) ?? [],
     messages: commentsByAction.get(it.id) ?? [],
   }));

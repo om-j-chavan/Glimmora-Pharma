@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  Shield,
   Users,
   SlidersHorizontal,
   ScrollText,
@@ -189,13 +189,16 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
           }`}
           style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)" }}
         >
-          {/* Logo */}
+          {/* Logo — fixed height matches the admin Topbar (h-16 = 64px) so the
+              sidebar header and topbar share one continuous bottom edge across
+              the top of the admin shell. alignItems centers the brand vertically. */}
           <div
             style={{
               display: "flex",
               alignItems: "center",
               gap: 10,
-              padding: "14px 16px",
+              height: 64,
+              padding: "0 16px",
               borderBottom: "1px solid var(--sidebar-border)",
             }}
           >
@@ -207,12 +210,10 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
                 justifyContent: "center",
                 width: 32,
                 height: 32,
-                borderRadius: 8,
-                background: "#f0a500",
                 flexShrink: 0,
               }}
             >
-              <Shield size={16} style={{ color: "#ffffff" }} aria-hidden="true" />
+              <Image src="/app-icon.png" alt="" width={32} height={32} className="object-contain" aria-hidden="true" />
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{ color: "var(--sidebar-text)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>

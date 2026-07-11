@@ -27,7 +27,6 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { CAPA_MODULE_VIEW_ROLES } from "@/lib/permissions/roleSets";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
-import { useActiveSite } from "@/hooks/useActiveSite";
 import { logout } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
@@ -97,7 +96,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
   const toast = useToast();
   const pathname = usePathname();
-  const activeSite = useActiveSite();
   const { allowedPaths, role } = useRole();
   const { setupNeeded, completedCount, totalSteps } = useSetupStatus();
 
@@ -191,36 +189,31 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       }}
     >
       {/* ── Logo ── */}
+      {/* Fixed height matches the Topbar (h-14 = 56px) so the sidebar header and
+          topbar share one continuous bottom edge across the top of the app.
+          justifyContent centers the logo vertically. */}
       <div
         style={{
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-start",
+          justifyContent: "center",
           gap: 6,
-          padding: "16px 16px 14px",
+          height: 56,
+          padding: "0 29px",
           borderBottom: "1px solid var(--bg-border)",
         }}
       >
+        {/* h-10 caps the rendered height at 40px so it sits comfortably inside the
+            56px header; w-auto keeps the real 2.69:1 aspect (props match it). */}
         <Image
-          src="/logo.png"
+          src="/app-logo.png"
           alt="Pharma Glimmora"
-          width={180}
-          height={47}
+          width={108}
+          height={40}
           priority
-          className="h-auto w-full max-w-[180px]"
+          className="h-10 w-auto"
         />
-        <div
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 11,
-            maxWidth: "100%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {activeSite?.name ?? "All sites"}
-        </div>
       </div>
 
       {/* ── Nav groups ── */}
@@ -364,7 +357,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           }}
         >
           <span>© {new Date().getFullYear()} Glimmora International</span>
-          <span>v2.0</span>
+          {/* <span>v2.0</span> */}
         </div>
       </div>
     </aside>

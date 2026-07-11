@@ -27,7 +27,7 @@ export function SiteFilterBanner() {
       <MapPin className="w-3.5 h-3.5 text-[#0ea5e9] flex-shrink-0" aria-hidden="true" />
       <span style={{ color: "var(--text-secondary)" }}>Showing data for</span>
       <span className="font-semibold text-[#0ea5e9]">{site.name}</span>
-      <span style={{ color: "var(--text-muted)" }}>&middot; {site.location} &middot; {site.risk} risk</span>
+      <span style={{ color: "var(--text-muted)" }}>&middot; {site.location}</span>
       <button
         type="button"
         onClick={() => dispatch(setSelectedSite(null))}

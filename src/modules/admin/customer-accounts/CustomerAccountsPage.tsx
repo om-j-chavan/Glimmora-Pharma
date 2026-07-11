@@ -1,19 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Search, X, Save, PauseCircle, PlayCircle, Trash2, RotateCcw, Building2 } from "lucide-react";
+import { motion } from "framer-motion";
+import { Plus, X, Save, PauseCircle, PlayCircle, Trash2, RotateCcw, Building2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { Button } from "@/components/ui/Button";
-import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { usePrefersReducedMotion } from "@/lib/motion/useReducedMotion";
+import { DURATION, EASE } from "@/lib/motion/tokens";
 import { resolvePlanCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
 import dayjs from "@/lib/dayjs";
 import { type Tenant } from "@/store/auth.slice";
 import { useCustomerAccounts } from "./useCustomerAccounts";
 import { AccountStatCards } from "./_components/AccountStatCards";
-import { AccountFiltersBar } from "./_components/AccountFiltersBar";
 import { AccountsTable } from "./_components/AccountsTable";
 import { AccountModal } from "./_components/AccountModal";
 import { RestoreTenantsModal } from "./_components/RestoreTenantsModal";
@@ -24,27 +26,44 @@ interface CustomerAccountsPageProps {
   isSuperAdmin?: boolean;
 }
 
+// Subtle press/hover feedback for page-local buttons (Phase 1 tempo). Spread
+// onto a motion element only when reduced motion is OFF.
+const PRESS = {
+  whileHover: { scale: 1.02 },
+  whileTap: { scale: 0.97 },
+  transition: { duration: DURATION.fast, ease: EASE.standard },
+} as const;
+
 export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdminProp }: CustomerAccountsPageProps = {}) {
   const ca = useCustomerAccounts({ initialTenants, isSuperAdmin: isSuperAdminProp });
   // Second-step confirm for the table's Manage-Status chooser — an option in the
   // chooser opens the matching confirm before the action runs.
   const [tableConfirm, setTableConfirm] = useState<"suspend" | "delete" | "reactivate" | null>(null);
-
-  // Header actions — Restore (secondary) renders left of the single primary
-  // Create; PageLayout's ActionBar orders secondaries→primary, preserving the
-  // original left-to-right button-group order.
-  const headerActions: PageAction[] = [
-    { label: "Restore", variant: "secondary", icon: RotateCcw, onClick: ca.openRestoreList },
-    { label: "New Account", variant: "primary", icon: Plus, onClick: ca.openCreate },
-  ];
+  // Bumped to remount the DataTable widget so "Clear filters" wipes its internal
+  // search / column-filter / sort / show-more state alongside the card filter.
+  const [tableResetKey, setTableResetKey] = useState(0);
+  const clearAllFilters = () => { ca.clearAllFilters(); setTableResetKey((k) => k + 1); };
+  const reduced = usePrefersReducedMotion();
 
   return (
     <PageLayout
       title="Customer Accounts"
       titleIcon={Building2}
       description="Manage tenant organizations, plans, and platform access across Glimmora."
-      actions={headerActions}
-      className="w-full max-w-[1200px] mx-auto"
+      // Header actions rendered here (instead of via `actions`) so each Button
+      // can carry a subtle hover/tap press. Order preserved: Restore then the
+      // primary New Account. The Button component itself is untouched.
+      headerRight={
+        <div className="flex items-center gap-2">
+          <motion.div className="inline-flex" {...(reduced ? {} : PRESS)}>
+            <Button variant="secondary" size="sm" icon={RotateCcw} onClick={ca.openRestoreList}>Restore</Button>
+          </motion.div>
+          <motion.div className="inline-flex" {...(reduced ? {} : PRESS)}>
+            <Button variant="primary" size="sm" icon={Plus} onClick={ca.openCreate}>New Account</Button>
+          </motion.div>
+        </div>
+      }
+      className="w-full"
     >
 
       {/* Sync status banner */}
@@ -74,54 +93,25 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
         onSelect={ca.selectCardFilter}
       />
 
-      {/* Search — sits below the stat cards, above the table */}
-      <div className="mb-4 max-w-lg">
-        <div className="relative">
-          <Search
-            className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-            style={{ color: "var(--text-muted)" }}
-            aria-hidden="true"
-          />
-          <input
-            type="search"
-            placeholder="Search organizations…"
-            value={ca.searchQuery}
-            onChange={(e) => ca.setSearchQuery(e.target.value)}
-            className="w-full rounded-lg py-2 pl-9 pr-3 text-[13px] outline-none transition-all"
-            style={{
-              background: "var(--bg-surface)",
-              border: "1px solid var(--bg-border)",
-              color: "var(--text-primary)",
-            }}
-          />
-          {ca.searchQuery && (
-            <button
-              type="button"
-              onClick={() => ca.setSearchQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 border-none bg-transparent cursor-pointer"
-              style={{ color: "var(--text-muted)" }}
-              aria-label="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+      {/* Page-level "Clear filters" — resets the stat-card quick-filter AND
+          remounts the widget to wipe its own search + column filters. Shown only
+          when a stat card is active; the widget has its own inline Clear for its
+          search/filters. */}
+      {ca.hasActiveFilters && (
+        <div className="flex justify-end mb-3">
+          <Button variant="ghost" size="sm" icon={X} onClick={clearAllFilters}>
+            Clear filters
+          </Button>
         </div>
-      </div>
+      )}
 
-      {/* Column filters — sit with the search, above the table */}
-      <AccountFiltersBar
-        filters={ca.filters}
-        setFilter={ca.setFilter}
-        hasActiveFilters={ca.hasActiveFilters}
-        onClear={ca.clearAllFilters}
-      />
-
-      {/* Table */}
+      {/* Table — the canonical DataTable widget. Search + the five column filters
+          live in its toolbar; the stat-card quick-filter pre-filters `data`. */}
       <AccountsTable
-        rows={ca.filtered}
-        totalCount={ca.tenants.length}
+        data={ca.cardFilteredTenants}
         isSuperAdmin={ca.isSuperAdmin}
-        isFiltered={ca.hasActiveFilters}
+        cardFilterActive={ca.cardFilter !== null}
+        resetKey={tableResetKey}
         onEdit={ca.openEdit}
         onSuspend={(t) => ca.requestSuspend(t)}
         onCreate={ca.openCreate}
@@ -161,30 +151,30 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
               </div>
 
               {isActive ? (
-                <button type="button" onClick={() => setTableConfirm("suspend")} className={optClass} style={{ borderColor: "var(--warning)", background: "var(--warning-bg)" }}>
+                <motion.button type="button" onClick={() => setTableConfirm("suspend")} className={optClass} style={{ borderColor: "var(--warning)", background: "var(--warning-bg)" }} {...(reduced ? {} : PRESS)}>
                   <PauseCircle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "var(--warning)" }} aria-hidden="true" />
                   <div>
                     <p className="text-[13px] font-semibold" style={{ color: "var(--warning)" }}>Suspend</p>
                     <p className="text-[12px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Blocks login for the tenant and all its users. Fully reversible — reactivate any time. No data is touched.</p>
                   </div>
-                </button>
+                </motion.button>
               ) : (
-                <button type="button" onClick={() => setTableConfirm("reactivate")} className={optClass} style={{ borderColor: "var(--brand-border)", background: "var(--brand-muted)" }}>
+                <motion.button type="button" onClick={() => setTableConfirm("reactivate")} className={optClass} style={{ borderColor: "var(--brand-border)", background: "var(--brand-muted)" }} {...(reduced ? {} : PRESS)}>
                   <PlayCircle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "var(--brand)" }} aria-hidden="true" />
                   <div>
                     <p className="text-[13px] font-semibold" style={{ color: "var(--brand)" }}>Reactivate</p>
                     <p className="text-[12px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Returns the account to Active. The tenant and all its users can log in again.</p>
                   </div>
-                </button>
+                </motion.button>
               )}
 
-              <button type="button" onClick={() => setTableConfirm("delete")} className={optClass} style={{ borderColor: "var(--danger)", background: "var(--danger-bg)" }}>
+              <motion.button type="button" onClick={() => setTableConfirm("delete")} className={optClass} style={{ borderColor: "var(--danger)", background: "var(--danger-bg)" }} {...(reduced ? {} : PRESS)}>
                 <Trash2 className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "var(--danger)" }} aria-hidden="true" />
                 <div>
                   <p className="text-[13px] font-semibold" style={{ color: "var(--danger)" }}>Soft delete</p>
                   <p className="text-[12px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Moves the account to the recoverable <strong>Restore</strong> list. Login is blocked; all data is retained until you permanently delete.</p>
                 </div>
-              </button>
+              </motion.button>
             </div>
           </Modal>
         );

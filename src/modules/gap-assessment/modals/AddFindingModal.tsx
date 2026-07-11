@@ -18,6 +18,7 @@ import { DocumentCard } from "@/components/shared/DocumentCard";
 import { rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
 import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
 import { frameworkLabel } from "@/constants/frameworks";
+import { canEditFinding } from "@/lib/permissions/roleSets";
 
 const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
 
@@ -76,14 +77,24 @@ interface AddFindingModalProps {
    *  Retained for API stability; the create form no longer renders an Owner field. */
   currentUserName?: string;
   currentUserRole?: string;
+  /** The caller's own assigned site. Used to auto-scope the finding for non-QA
+   *  users (who don't see the Site field). Null when the caller has no assigned
+   *  site — the server then rejects on the missing siteId (edge case). */
+  currentUserSiteId?: string | null;
   /** Gates the AI "Suggest classification" action (AGI mode + CAPA agent on). */
   aiEnabled?: boolean;
 }
 
-export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, aiEnabled = true }: AddFindingModalProps) {
+export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, currentUserRole, currentUserSiteId, aiEnabled = true }: AddFindingModalProps) {
+  // The Site field is QA-only. `canEditFinding` is the finding-author / QA
+  // authority set (qa_head today) — the same client mirror the rest of Gap
+  // Assessment gates on. Non-QA users don't pick a site: the finding is scoped
+  // to their OWN assigned site (set as the default + pinned by the effect
+  // below); the server stays authoritative on the final siteId.
+  const isQA = canEditFinding(currentUserRole ?? "");
   const { register: reg, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } = useForm<FindingForm>({
     resolver: zodResolver(findingSchema),
-    defaultValues: { severity: "High", siteId: lockedSiteId ?? "", raiseCapaImmediately: false },
+    defaultValues: { severity: "High", siteId: isQA ? (lockedSiteId ?? "") : (currentUserSiteId ?? ""), raiseCapaImmediately: false },
   });
   // Multi-file staged evidence — uploaded to the finding post-create. Each
   // carries the real File + a local object URL (for the View button).
@@ -189,6 +200,13 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     }
   }, [watchArea, watchFramework, activeFrameworks, setValue]);
 
+  // Non-QA users never see the Site field, so keep siteId pinned to their own
+  // assigned site — covers the prop arriving after mount and a post-reset reopen,
+  // so the hidden field always submits the correct value.
+  useEffect(() => {
+    if (!isQA) setValue("siteId", currentUserSiteId ?? "", { shouldValidate: true });
+  }, [isQA, currentUserSiteId, setValue]);
+
   function onSubmit(data: FindingForm) {
     // Serialize the structured RCA: rootCause = readable mirror (shared
     // rcaDetailToText), rcaDetail = JSON source. Mirrors CAPA's create modal.
@@ -229,8 +247,9 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     >
       <form onSubmit={handleSubmit(onSubmit)} aria-label="Add new finding" className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          {/* Site + Area on one row (Site hidden for non-admin — auto from login). */}
-          {!lockedSiteId && (
+          {/* Site + Area on one row. The Site field is QA-only; non-QA users
+              don't see it — their finding is auto-scoped to their assigned site. */}
+          {isQA && (
             <div>
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p>
               <Dropdown placeholder="Select site..." value={watch("siteId") ?? ""} onChange={(v) => setValue("siteId", v, { shouldValidate: true })} width="w-full"
@@ -238,7 +257,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               {errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}
             </div>
           )}
-          <div className={lockedSiteId ? "col-span-2" : ""}>
+          <div className={!isQA ? "col-span-2" : ""}>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Area <span className="text-(--danger)">*</span></p>
             <Dropdown placeholder="Select area..." value={watch("area") ?? ""} onChange={(v) => setValue("area", v, { shouldValidate: true })} width="w-full"
               options={AREAS.map((a) => ({ value: a, label: a }))} />

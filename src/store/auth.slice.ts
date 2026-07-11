@@ -35,7 +35,6 @@ export interface TenantSiteConfig {
   name: string;
   location: string;
   gmpScope: string;
-  risk: "HIGH" | "MEDIUM" | "LOW";
   status: "Active" | "Inactive";
 }
 

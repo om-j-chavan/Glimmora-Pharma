@@ -11,6 +11,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
 import { displayUserName } from "@/lib/identity-display";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
 
 /* ── Helpers (pure, no Redux) ── */
 
@@ -120,33 +121,38 @@ export function SystemInventoryTab({
   onAddOpen, onSelectSystem, onEditSystem, onRemoveSystem,
 }: SystemInventoryTabProps) {
   return (
-    <>
-      {/* Tiles */}
-      <section aria-label="System statistics" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="stat-card" role="region" aria-label="Total systems">
-          <div className="flex items-center gap-2 mb-2"><Database className="w-5 h-5 text-[#0ea5e9]" aria-hidden="true" /><span className="stat-label mb-0">Total systems</span></div>
-          <div className="stat-value">{systems.length}</div>
-          <div className="stat-sub">{systems.length === 0 ? "Add your first GxP system to get started" : `across ${[...new Set(systems.map((s) => s.siteId))].length} sites`}</div>
-        </div>
-        <div className="stat-card" role="region" aria-label="High risk systems">
-          <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">High risk</span></div>
-          <div className={clsx("stat-value", highRisk > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{highRisk}</div>
-          <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Require immediate attention"}</div>
-        </div>
-        <div className="stat-card" role="region" aria-label="Validation overdue">
-          <div className="flex items-center gap-2 mb-2"><Clock className="w-5 h-5 text-[#f59e0b]" aria-hidden="true" /><span className="stat-label mb-0">Validation overdue</span></div>
-          <div className={clsx("stat-value", valOverdue > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{valOverdue}</div>
-          <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Past revalidation date"}</div>
-        </div>
-        <div className="stat-card" role="region" aria-label="Non-compliant systems">
-          <div className="flex items-center gap-2 mb-2"><ShieldAlert className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">Non-compliant</span></div>
-          <div className={clsx("stat-value", nonCompliant > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{nonCompliant}</div>
-          <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Part 11 or Annex 11 gap"}</div>
-        </div>
-      </section>
+    /* Entrance cascade — KPI row → filters → table. The tab panel stays mounted
+       (parent toggles `hidden`), so this reveal plays once on page mount and
+       never replays on tab-switch; filter/search changes don't remount it. */
+    <MotionList>
+      {/* Tiles — nested list so the four cards cascade within the row. */}
+      <MotionListItem>
+        <MotionList aria-label="System statistics" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <MotionListItem className="stat-card" role="region" aria-label="Total systems">
+            <div className="flex items-center gap-2 mb-2"><Database className="w-5 h-5 text-[#0ea5e9]" aria-hidden="true" /><span className="stat-label mb-0">Total systems</span></div>
+            <div className="stat-value">{systems.length}</div>
+            <div className="stat-sub">{systems.length === 0 ? "Add your first GxP system to get started" : `across ${[...new Set(systems.map((s) => s.siteId))].length} sites`}</div>
+          </MotionListItem>
+          <MotionListItem className="stat-card" role="region" aria-label="High risk systems">
+            <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">High risk</span></div>
+            <div className={clsx("stat-value", highRisk > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{highRisk}</div>
+            <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Require immediate attention"}</div>
+          </MotionListItem>
+          <MotionListItem className="stat-card" role="region" aria-label="Validation overdue">
+            <div className="flex items-center gap-2 mb-2"><Clock className="w-5 h-5 text-[#f59e0b]" aria-hidden="true" /><span className="stat-label mb-0">Validation overdue</span></div>
+            <div className={clsx("stat-value", valOverdue > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{valOverdue}</div>
+            <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Past revalidation date"}</div>
+          </MotionListItem>
+          <MotionListItem className="stat-card" role="region" aria-label="Non-compliant systems">
+            <div className="flex items-center gap-2 mb-2"><ShieldAlert className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">Non-compliant</span></div>
+            <div className={clsx("stat-value", nonCompliant > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{nonCompliant}</div>
+            <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Part 11 or Annex 11 gap"}</div>
+          </MotionListItem>
+        </MotionList>
+      </MotionListItem>
 
       {/* Filters */}
-      <section aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
+      <MotionListItem aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
         <Filter className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         <Dropdown placeholder="All sites" value={siteFilter} onChange={onSiteFilterChange} width="w-36" options={[{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]} />
@@ -158,9 +164,10 @@ export function SystemInventoryTab({
           <input type="search" className="input pl-8 text-[12px]" placeholder="Search systems…" value={searchQ} onChange={(e) => onSearchChange(e.target.value)} aria-label="Search systems" />
         </div>
         {anyFilter && <Button variant="ghost" size="sm" onClick={onClearFilters}>Clear filters</Button>}
-      </section>
+      </MotionListItem>
 
       {/* Table */}
+      <MotionListItem>
       {systems.length === 0 ? (
         <div className="card p-10 text-center">
           <Database className="w-12 h-12 mx-auto mb-3" style={{ color: "#334155" }} aria-hidden="true" />
@@ -298,6 +305,7 @@ export function SystemInventoryTab({
           />
         </div>
       )}
-    </>
+      </MotionListItem>
+    </MotionList>
   );
 }

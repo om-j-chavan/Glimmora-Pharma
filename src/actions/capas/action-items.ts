@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
-import { QA_AUTHORITY_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { QA_AUTHORITY_ROLES, isAssignedToTask, canExecuteCAPA } from "@/lib/permissions/roleSets";
 import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
 import {
   ACTION_ITEMS_AUDIT_MODULE,
@@ -34,7 +34,7 @@ import { notify } from "@/lib/notify";
  * actions.
  *
  * Lock states (CAPA-level â†’ action-item-level):
- *   open / in_progress       â†’ full editor (add / edit / delete / reorder / status)
+ *   open / in_progress       â†’ full editor (add / edit / delete / status)
  *   pending_qa_review        â†’ status-only updates (complete / skipped)
  *   pending_verification     â†’ status-only updates (complete / skipped)
  *   closed / rejected        â†’ read-only
@@ -47,13 +47,34 @@ import { notify } from "@/lib/notify";
 
 type TxClient = Prisma.TransactionClient | PrismaClient;
 
+// â”€â”€ Due-date helpers (Item 5 â€” past-date rejection) â”€â”€
+//
+// Due dates are persisted as `new Date(dueDate)` where the client transmits the
+// picked calendar day as local-midnight→UTC (dayjs(pick).utc().toISOString()).
+// For positive-offset timezones that lands on the PREVIOUS UTC day, so a strict
+// start-of-day-UTC comparison would false-reject a legitimate "today" pick. We
+// therefore compare on UTC calendar days with a one-day grace to absorb that
+// skew; the client DatePicker `min` enforces the strict same-day rule in the UI.
+const DAY_MS = 24 * 60 * 60 * 1000;
+function utcDayMs(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+/** True when `value` is today or later (UTC day, with the 1-day skew grace). A
+ *  malformed string returns true so the `.min(1)`/format check owns that error. */
+function isNotPastDueDate(value: string): boolean {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return true;
+  return utcDayMs(d) >= utcDayMs(new Date()) - DAY_MS;
+}
+
 // â”€â”€ Schemas â”€â”€
 
 const AddActionItemSchema = z.object({
   description: z.string().min(3, "Description must be at least 3 characters").max(2000),
   owner: z.string().min(1, "Owner is required"),
   ownerId: z.string().optional(),
-  dueDate: z.string().min(1, "Due date is required"),
+  // Item 5 — a NEW action item can never be given a past due date.
+  dueDate: z.string().min(1, "Due date is required").refine(isNotPastDueDate, "Due date can't be in the past."),
   sequence: z.number().int().positive().optional(),
 });
 
@@ -68,10 +89,6 @@ const UpdateActionItemSchema = z.object({
 
 const DeleteActionItemSchema = z.object({
   reason: z.string().min(5, "Reason must be at least 5 characters").max(2000),
-});
-
-const ReorderSchema = z.object({
-  orderedIds: z.array(z.string().min(1)).min(1, "orderedIds must be non-empty"),
 });
 
 // â”€â”€ Internal helpers â”€â”€
@@ -172,6 +189,20 @@ export async function addActionItem(
   // status-only (isAssignedToTask), not by authoring.
   if (!QA_AUTHORITY_ROLES.includes(session.user.role)) {
     return { success: false, error: "Only QA Head can add (assign) a CAPA action item." };
+  }
+  // Item 4 — the ASSIGNEE must hold a CAPA-executor role (mirrors the client
+  // `ownerOptions` filter + CAPA_EXECUTE_ROLES). Blocks assigning QA Head /
+  // Customer Admin / super_admin (assign ≠ execute) even if a client bypasses
+  // the dropdown, preserving the "UI mirrors server" invariant.
+  if (parsed.data.ownerId) {
+    const assignee = await prisma.user.findFirst({
+      where: { id: parsed.data.ownerId, tenantId: session.user.tenantId },
+      select: { role: true },
+    });
+    if (!assignee) return { success: false, error: "Assignee not found." };
+    if (!canExecuteCAPA(assignee.role)) {
+      return { success: false, error: "That person's role can't be assigned CAPA actions — choose a CAPA executor." };
+    }
   }
   try {
     const created = await prisma.$transaction(async (tx) => {
@@ -306,7 +337,7 @@ export async function updateActionItem(
 
   // Phase 3 — authorization: author-role OR assigned-owner path. The owner
   // path permits ONLY a status-only update to pending|in_progress|complete
-  // (+ completionNotes). Structural edits (description/owner/dueDate/reorder/
+  // (+ completionNotes). Structural edits (description/owner/dueDate/
   // delete) and the skipped/rework statuses stay author-only. requireGxPAuthor
   // (platform-admin block, above) and the viewer hard-stop baked into
   // isAssignedToTask both precede this check.
@@ -372,6 +403,34 @@ export async function updateActionItem(
     existing.status === "complete" &&
     (descChanged || ownerChanged || dueDateChanged) &&
     parsed.data.status === undefined;
+
+  // Item 4 — a reassignment must target a CAPA-executor role (mirrors addAction
+  // Item + the client `ownerOptions` filter). Only checked when a non-null
+  // ownerId is being set; the owner's own status-only path never sends ownerId.
+  if (parsed.data.ownerId) {
+    const assignee = await prisma.user.findFirst({
+      where: { id: parsed.data.ownerId, tenantId: session.user.tenantId },
+      select: { role: true },
+    });
+    if (!assignee) return { success: false, error: "Assignee not found." };
+    if (!canExecuteCAPA(assignee.role)) {
+      return { success: false, error: "That person's role can't be assigned CAPA actions — choose a CAPA executor." };
+    }
+  }
+
+  // Item 5 — block CHANGING the due date to a past day. A legacy item whose
+  // stored due date is already past stays editable as long as its date isn't
+  // moved: the Edit modal re-sends the existing day (which can shift by ±1 day
+  // via the local-midnight→UTC transform), so only a move of MORE than one UTC
+  // day counts as a real edit — and only then is the past-date rule enforced.
+  if (parsed.data.dueDate !== undefined) {
+    const nextMs = utcDayMs(new Date(parsed.data.dueDate));
+    const prevMs = utcDayMs(existing.dueDate);
+    const meaningfullyChanged = Math.abs(nextMs - prevMs) > DAY_MS;
+    if (meaningfullyChanged && !isNotPastDueDate(parsed.data.dueDate)) {
+      return { success: false, error: "Due date can't be in the past." };
+    }
+  }
 
   // Build the update payload incrementally.
   const data: Prisma.CAPAActionItemUpdateInput = {};
@@ -653,103 +712,6 @@ export async function restoreActionItem(itemId: string): Promise<ActionResult> {
   } catch (err) {
     console.error("[action] restoreActionItem failed:", err);
     return { success: false, error: sanitizeServerError(err, "Failed to restore action item") };
-  }
-}
-
-/**
- * Bulk reorder. Accepts a complete or partial id list â€” items present
- * are renumbered 1..N in the supplied order; items omitted keep their
- * existing sequence (shifted to start at N+1). Blocked once CAPA is in
- * LOCKED_CAPA_STATUSES.
- */
-export async function reorderActionItems(
-  capaId: string,
-  input: z.input<typeof ReorderSchema>,
-): Promise<ActionResult> {
-  const session = await requireAuth();
-  const parsed = ReorderSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      success: false,
-      error: "Validation failed",
-      fieldErrors: parsed.error.flatten().fieldErrors,
-    };
-  }
-
-  const lookup = await getCAPAForActionItemOp(capaId, session.user.tenantId);
-  if (!lookup.ok) return { success: false, error: lookup.error };
-  const { capa } = lookup;
-
-  if (LOCKED_CAPA_STATUSES.has(capa.status)) {
-    return {
-      success: false,
-      error: isTerminalStatus(capa.status)
-        ? ACTION_ITEMS_TERMINAL_MESSAGE
-        : ACTION_ITEMS_LOCKED_MESSAGE,
-    };
-  }
-
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
-  }
-  if (!COMPLIANCE_AUTHOR_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Your role does not permit this action." };
-  }
-  try {
-    await prisma.$transaction(async (tx) => {
-      // Verify all ids belong to this CAPA + tenant before mutating.
-      const items = await tx.cAPAActionItem.findMany({
-        where: { capaId, tenantId: session.user.tenantId, deletedAt: null },
-        select: { id: true },
-      });
-      const tenantItemIds = new Set(items.map((i) => i.id));
-      for (const id of parsed.data.orderedIds) {
-        if (!tenantItemIds.has(id)) {
-          throw new Error(`Action item ${id} does not belong to this CAPA`);
-        }
-      }
-      // Renumber: ordered ids get 1..N. The two-pass dance avoids hitting
-      // the (capaId, sequence) implicit ordering during the update.
-      // Phase 1: temporarily set them to negative numbers so unique-like
-      // conflicts can't fire even if a future @@unique is added.
-      for (let i = 0; i < parsed.data.orderedIds.length; i++) {
-        await tx.cAPAActionItem.update({
-          where: { id: parsed.data.orderedIds[i] },
-          data: { sequence: -(i + 1) },
-        });
-      }
-      // Phase 2: flip to the positive target sequences.
-      for (let i = 0; i < parsed.data.orderedIds.length; i++) {
-        await tx.cAPAActionItem.update({
-          where: { id: parsed.data.orderedIds[i] },
-          data: { sequence: i + 1 },
-        });
-      }
-      await syncCorrectiveActions(tx, capaId, session.user.tenantId);
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: ACTION_ITEMS_AUDIT_MODULE,
-        action: "CAPA_ACTION_ITEM_REORDERED",
-        recordId: capaId,
-        recordTitle: (capa.reference ?? capa.description).slice(0, 80),
-        newValue: JSON.stringify({ newOrder: parsed.data.orderedIds }),
-      },
-    });
-
-    revalidatePath("/capa");
-    revalidatePath(`/capa/${capaId}`);
-    return { success: true, data: null };
-  } catch (err) {
-    console.error("[action] reorderActionItems failed:", err);
-    return { success: false, error: sanitizeServerError(err, "Failed to reorder action items") };
   }
 }
 

@@ -169,6 +169,28 @@ export const FDA483_DELETE_ROLES: readonly string[] = ["qa_head", "customer_admi
  *   unchanged (Phases 3-5 own those). */
 export const CAPA_MODULE_VIEW_ROLES: readonly string[] = ["qa_head", "customer_admin"];
 
+/* ── CAPA action EXECUTORS ── Who may be ASSIGNED a CAPA action item (drives the
+ *  "Assigned To" dropdown AND the addActionItem/updateActionItem server gate).
+ *  Deliberately EXCLUDES qa_head (QA AUTHORITY assigns/approves work — it does
+ *  not execute it) and customer_admin / super_admin (admins ≠ doers). What's
+ *  left is the functional executor set — i.e. GAP_CREATE_ROLES minus qa_head.
+ *  `qa` (execution-level QA) IS assignable here: it authors nothing, but the app
+ *  already lets it WORK tasks addressed to it (isAssignedToTask), and an assignee
+ *  executes an action item via a status-only updateActionItem. Client filter +
+ *  server validation share this ONE set so the UI can't be bypassed and the two
+ *  can never drift. */
+export const CAPA_EXECUTE_ROLES: readonly string[] = [
+  "qa",
+  "csv_val_lead",
+  "qc_lab_director",
+  "regulatory_affairs",
+  "it_cdo",
+  "operations_head",
+];
+export function canExecuteCAPA(role: string): boolean {
+  return CAPA_EXECUTE_ROLES.includes(role);
+}
+
 /* ── Documents (documents.ts) ── approve/sign/reject = qa_head. Delete mirrors
  *   the app-wide GxP delete policy (qa_head + customer_admin, same as
  *   FDA483_DELETE_ROLES). super_admin is walled from every document write by

@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, X, Info, Wrench, Send, Eye, EyeOff,
+  ClipboardList, X, Info, Wrench, Send, Eye, EyeOff, Sparkles,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { DocList } from "@/components/shared/DocList";
@@ -45,8 +45,11 @@ import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
 import { useToast } from "@/components/ui/Toast";
 import { DocumentUpload, type LinkedDocument } from "@/components/shared/DocumentUpload";
-import { StatCard, StatusGuide, DataTable, type Column } from "@/components/shared";
+import { StatCard, StatusGuide } from "@/components/shared";
+import { DataTable, type DataColumn, type DataFilter } from "@/components/table/DataTable";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
+import { Drawer } from "@/components/ui/Drawer";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
 import { DEVIATION_STATUSES } from "@/constants/statusTaxonomy";
 import {
   STATUS_VARIANT, STATUS_LABEL, CATEGORIES, AREAS, DEV_TASK_STATUS_LABEL,
@@ -173,6 +176,19 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // On-demand Deviation Intelligence — the run trigger lives in the page header
   // (see PageLayout headerRight); the results card mounts only after a run.
   const deviationIntel = useDeviationIntelligence(deviationIntelInput);
+  // Mirrors the panel's own show condition (DeviationIntelligencePanel returns
+  // null otherwise) — used to keep it OUT of the entrance sequence until it's
+  // actually shown, so the staggered list never has an empty slot before a run.
+  const intelVisible = deviationIntel.available && (deviationIntel.loading || deviationIntel.hasRun || !!deviationIntel.error);
+
+  // Phase-3 entrance — the page-level MotionLists below reveal their sections on
+  // mount. This single-page module needs NO explicit "seen" ref guard: framer
+  // runs the initial→visible entrance only on MOUNT, never on re-render, so
+  // filter/search state changes never replay it. (Gap needed refs only because
+  // its tab bodies remount on tab switch inside a persistent parent; a route-level
+  // page like this remounts wholesale on navigation, which is the desired replay.
+  // A component-scoped ref couldn't survive that remount anyway, and reading a ref
+  // during render is disallowed by react-hooks/refs.)
 
   const openCount = tenantDevs.filter((d) => d.status === "open").length;
   const investigatingCount = tenantDevs.filter((d) => d.status === "under_investigation").length;
@@ -195,6 +211,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // is hit it surfaces via the server error string in handleClose.
   const capaRequired = !!selected && normalizeSeverityForDisplay(selected.severity, "fda") === "Critical" && !selected.linkedCAPAId;
   const [addOpen, setAddOpen] = useState(false);
+  // "Ask AI" slide-out — the plain-language Deviation Search (was a card atop the
+  // page) now lives in a Drawer opened from the header.
+  const [askAiOpen, setAskAiOpen] = useState(false);
   // Documents staged in the create modal (optional). Attached to the new
   // deviation after it's created (onReport), via attachDeviationDocument.
   const [pendingDocs, setPendingDocs] = useState<LinkedDocument[]>([]);
@@ -242,19 +261,11 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // close modal); this popup covers everything else.
   const [errorPopup, setErrorPopup] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [sevFilter, setSevFilter] = useState("");
-  const [catFilter, setCatFilter] = useState("");
-
-  const filtered = useMemo(() => {
-    let r = tenantDevs;
-    if (searchQuery) { const q = searchQuery.toLowerCase(); r = r.filter((d) => d.id.toLowerCase().includes(q) || d.title.toLowerCase().includes(q)); }
-    if (statusFilter) r = r.filter((d) => d.status === statusFilter);
-    if (sevFilter) r = r.filter((d) => normalizeSeverityForDisplay(d.severity, "fda") === sevFilter);
-    if (catFilter) r = r.filter((d) => d.category === catFilter);
-    return r;
-  }, [tenantDevs, searchQuery, statusFilter, sevFilter, catFilter]);
+  // Filter / search / sort now live INSIDE the DataTable widget (self-contained
+  // mode) — it filters `tenantDevs` in its own toolbar, replacing the page's old
+  // filter-state + `filtered` memo + hand-rolled predicates. The KPI cards and the
+  // Intelligence panel deliberately keep reading the UNFILTERED `tenantDevs`
+  // (unchanged by this migration).
 
   const { control, handleSubmit, reset, setError, setValue, formState: { errors, isValid, isSubmitting } } = useForm<AddForm>({
     resolver: zodResolver(addSchema),
@@ -524,15 +535,18 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // Header actions \u2014 the single primary create action. StatusGuide and the
   // intelligence run button aren't PageActions (they're custom widgets), so
   // they go in headerRight, left of the primary.
-  const pageActions: PageAction[] = devCan.canCreate
-    ? [{ label: "Report Deviation", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) }]
-    : [];
+  const pageActions: PageAction[] = [
+    { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+  ];
+  if (devCan.canCreate) {
+    pageActions.push({ label: "Report Deviation", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) });
+  }
 
   return (
       <PageLayout
         title="Deviation Management"
         titleIcon={AlertTriangle}
-        description={`Report, investigate, and disposition deviations from approved procedures. \u00b7 ${tenantDevs.length === 0 ? "No deviations reported yet" : `${tenantDevs.length} deviations \u00b7 ${openCount} open \u00b7 ${investigatingCount} under investigation`}`}
+        description="Report, investigate, and disposition deviations from approved procedures."
         actions={pageActions}
         headerRight={
           <div className="flex items-center gap-3">
@@ -545,139 +559,81 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
         {/* Content below the header is unchanged; the space-y-5 that used to sit
             on <main> now wraps the children so their spacing is preserved. */}
         <div className="space-y-5">
+      {/* Phase-3 entrance sequence: KPI cards → filters → table, revealed one
+          after another via MotionList/MotionListItem (reduced-motion aware; all
+          tempo from the motion tokens — nothing hardcoded). The KPI row nests its
+          own MotionList so the cards cascade. The on-demand Deviation Intelligence
+          card joins the sequence only when it's actually shown. Modals + the Ask AI
+          drawer stay OUTSIDE the list. (The plain-language search moved to the Ask
+          AI drawer; the old intro banner was removed.) */}
+      <MotionList className="space-y-5">
+        {/* 1 — KPI cards (inner card cascade). */}
+        <MotionListItem>
+          <MotionList className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={ClipboardList} color="#0ea5e9" label="Total" value={String(tenantDevs.length)} sub="All deviations" /></MotionListItem>
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={AlertTriangle} color="#f59e0b" label="Open" value={String(openCount)} sub="Needs investigation" /></MotionListItem>
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={Search} color="#6366f1" label="Under investigation" value={String(investigatingCount)} sub="In progress" /></MotionListItem>
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={Clock} color={overdueCount > 0 ? "#ef4444" : "#10b981"} label="Overdue" value={String(overdueCount)} sub={overdueCount > 0 ? "Needs attention" : "On track"} /></MotionListItem>
+          </MotionList>
+        </MotionListItem>
 
-      {/* Info banner */}
-      <div className="flex items-start gap-2 p-3 rounded-xl border" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
-        <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-        <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-          Deviations are unexpected events that may or may not require a CAPA. Every deviation needs investigation. CAPAs are raised when root cause requires systematic correction.
-        </p>
-      </div>
+        {/* 2 — Deviation Intelligence — on-demand AGI pattern clustering (read-only
+            analysis, triggered by the header run button). Joins the sequence only
+            when actually shown, so there's no empty slot before a run. */}
+        {intelVisible && (
+          <MotionListItem>
+            <DeviationIntelligencePanel
+              state={deviationIntel}
+              onOpenDeviation={setSelectedId}
+            />
+          </MotionListItem>
+        )}
 
-      {/* Feature 2 — Plain-English Record Search */}
-      <SmartRecordSearch
-        title="Deviation Search"
-        sources={[buildDeviationSource(tenantDevs, allSites, setSelectedId)]}
-      />
-
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard icon={ClipboardList} color="#0ea5e9" label="Total" value={String(tenantDevs.length)} sub="All deviations" />
-        <StatCard icon={AlertTriangle} color="#f59e0b" label="Open" value={String(openCount)} sub="Needs investigation" />
-        <StatCard icon={Search} color="#6366f1" label="Under investigation" value={String(investigatingCount)} sub="In progress" />
-        <StatCard icon={Clock} color={overdueCount > 0 ? "#ef4444" : "#10b981"} label="Overdue" value={String(overdueCount)} sub={overdueCount > 0 ? "Needs attention" : "On track"} />
-      </div>
-
-      {/* Deviation Intelligence — AGI pattern clustering (read-only analysis).
-          On demand: triggered by the header run button, this card mounts only
-          while analysis is running or once it has results. */}
-      <DeviationIntelligencePanel
-        state={deviationIntel}
-        onOpenDeviation={setSelectedId}
-      />
-
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-[300px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-          <input type="text" className="input pl-9 w-full text-[12px]" placeholder="Search deviations…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-        </div>
-        <Dropdown placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} width="w-44" options={[{ value: "", label: "All statuses" }, ...Object.entries(STATUS_LABEL).map(([v, l]) => ({ value: v, label: l }))]} />
-        <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-36" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />
-        <Dropdown placeholder="All categories" value={catFilter} onChange={setCatFilter} width="w-40" options={[{ value: "", label: "All categories" }, ...CATEGORIES.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) }))]} />
-        {(searchQuery || statusFilter || sevFilter || catFilter) && <Button variant="ghost" size="sm" icon={X} onClick={() => { setSearchQuery(""); setStatusFilter(""); setSevFilter(""); setCatFilter(""); }}>Clear filters</Button>}
-      </div>
-
-      {/* Main content — table (full-width). Detail lives in a centered
-          modal below, matching the CAPA detail container pattern. */}
-      <div className="grid gap-4 grid-cols-1">
-        {/* Table */}
-        <div className="card overflow-hidden">
+        {/* 3 — Table (canonical DataTable widget). It owns search + filters + sort
+            in its OWN toolbar (self-contained), replacing the page's old filter
+            row + `filtered` memo + hand-rolled predicates. Compact density for the
+            data-heavy register. The KPI cards + Intelligence panel above read the
+            UNFILTERED `tenantDevs`, so they are unaffected. The widget renders its
+            own card — no wrapping card div needed. */}
+        <MotionListItem>
           <DataTable
             ariaLabel="Deviation register"
             caption="List of deviations with status and severity"
+            density="compact"
             minWidth={800}
-            data={filtered}
+            data={tenantDevs}
             rowKey={(dev) => dev.id}
             onRowClick={(dev) => setSelectedId(dev.id)}
             rowClassName={(dev) => clsx(selected?.id === dev.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))}
             rowStyle={(dev) => (dev.status === "closed" ? { opacity: 0.6 } : undefined)}
-            emptyState={
-              <div className="text-center py-8"><AlertTriangle className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{tenantDevs.length === 0 ? "No deviations reported yet" : "No deviations match filters"}</p></div>
-            }
+            search={{ keys: ["id", "title"], placeholder: "Search deviations…" }}
+            filters={[
+              { key: "status", label: "statuses", options: Object.entries(STATUS_LABEL).map(([v, l]) => ({ value: v, label: l })), match: (dev, v) => dev.status === v },
+              { key: "severity", label: "severities", options: [{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }], match: (dev, v) => normalizeSeverityForDisplay(dev.severity, "fda") === v },
+              { key: "category", label: "categories", options: CATEGORIES.map((c) => ({ value: c, label: c.charAt(0).toUpperCase() + c.slice(1) })), match: (dev, v) => dev.category === v },
+            ] satisfies DataFilter<DeviationItem>[]}
+            emptyState={(ctx) => (
+              <div className="text-center py-8"><AlertTriangle className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ctx.isFiltered || ctx.hasSearch ? "No deviations match filters" : "No deviations reported yet"}</p></div>
+            )}
             columns={[
-              {
-                key: "id",
-                header: "ID",
-                cellClassName: "font-mono text-[11px] text-(--brand)",
-                render: (dev) => dev.reference ?? dev.id.slice(0, 8),
-              },
-              {
-                key: "title",
-                header: "Title",
-                cellClassName: "text-[12px] font-medium max-w-[180px] truncate text-(--text-primary)",
-                render: (dev) => dev.title,
-              },
-              {
-                key: "category",
-                header: "Category",
-                cellClassName: "text-[11px] capitalize text-(--text-secondary)",
-                render: (dev) => dev.category,
-              },
-              {
-                key: "severity",
-                header: "Severity",
-                render: (dev) => <Badge variant={getSeverityVariant(dev.severity, "fda")}>{normalizeSeverityForDisplay(dev.severity, "fda") ?? dev.severity}</Badge>,
-              },
-              {
-                key: "area",
-                header: "Area",
-                cellClassName: "text-[11px] text-(--text-secondary)",
-                render: (dev) => dev.area,
-              },
-              {
-                key: "detected",
-                header: "Detected",
-                cellClassName: "text-[11px] text-(--text-secondary)",
-                render: (dev) => dayjs.utc(dev.detectedDate).tz(timezone).format("DD MMM"),
-              },
-              {
-                key: "owner",
-                header: "Owner",
-                cellClassName: "text-[11px] text-(--text-secondary)",
-                render: (dev) => ownerName(dev.owner),
-              },
-              {
-                key: "due",
-                header: "Due",
-                render: (dev) => {
-                  const isOd = dev.status !== "closed" && dev.status !== "rejected" && dayjs.utc(dev.dueDate).isBefore(dayjs());
-                  return (
-                    <span className="text-[11px]" style={{ color: isOd ? "#ef4444" : "var(--text-secondary)" }}>{dayjs.utc(dev.dueDate).tz(timezone).format("DD MMM")}{isOd && <span className="block text-[9px] text-[#ef4444]">Overdue</span>}</span>
-                  );
-                },
-              },
-              {
-                key: "capa",
-                header: "CAPA",
-                render: (dev) => dev.linkedCAPAId ? <Badge variant="blue">{dev.linkedCAPARef ?? dev.linkedCAPAId.slice(0, 8)}</Badge> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>—</span>,
-              },
-              {
-                key: "status",
-                header: "Status",
-                render: (dev) => <Badge variant={STATUS_VARIANT[dev.status]}>{STATUS_LABEL[dev.status]}</Badge>,
-              },
-              {
-                key: "open",
-                header: "Open",
-                srOnly: true,
-                render: () => <ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />,
-              },
-            ] satisfies Column<DeviationItem>[]}
+              { key: "id", label: "ID", sortable: true, sortValue: (dev) => dev.reference ?? dev.id, cellClassName: "font-mono text-[11px] text-(--brand)", render: (dev) => dev.reference ?? dev.id.slice(0, 8) },
+              { key: "title", label: "Title", sortable: true, cellClassName: "text-[12px] font-medium max-w-[180px] truncate text-(--text-primary)", render: (dev) => dev.title },
+              { key: "category", label: "Category", sortable: true, cellClassName: "text-[11px] capitalize text-(--text-secondary)", render: (dev) => dev.category },
+              { key: "severity", label: "Severity", sortable: true, sortValue: (dev) => normalizeSeverityForDisplay(dev.severity, "fda") ?? dev.severity, render: (dev) => <Badge variant={getSeverityVariant(dev.severity, "fda")}>{normalizeSeverityForDisplay(dev.severity, "fda") ?? dev.severity}</Badge> },
+              { key: "area", label: "Area", sortable: true, cellClassName: "text-[11px] text-(--text-secondary)", render: (dev) => dev.area },
+              { key: "detected", label: "Detected", sortable: true, sortValue: (dev) => dayjs.utc(dev.detectedDate).valueOf(), cellClassName: "text-[11px] text-(--text-secondary)", render: (dev) => dayjs.utc(dev.detectedDate).tz(timezone).format("DD MMM") },
+              { key: "owner", label: "Owner", sortable: true, sortValue: (dev) => ownerName(dev.owner), cellClassName: "text-[11px] text-(--text-secondary)", render: (dev) => ownerName(dev.owner) },
+              { key: "due", label: "Due", sortable: true, sortValue: (dev) => dayjs.utc(dev.dueDate).valueOf(), render: (dev) => {
+                const isOd = dev.status !== "closed" && dev.status !== "rejected" && dayjs.utc(dev.dueDate).isBefore(dayjs());
+                return (<span className="text-[11px]" style={{ color: isOd ? "#ef4444" : "var(--text-secondary)" }}>{dayjs.utc(dev.dueDate).tz(timezone).format("DD MMM")}{isOd && <span className="block text-[9px] text-[#ef4444]">Overdue</span>}</span>);
+              } },
+              { key: "capa", label: "CAPA", render: (dev) => dev.linkedCAPAId ? <Badge variant="blue">{dev.linkedCAPARef ?? dev.linkedCAPAId.slice(0, 8)}</Badge> : <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>—</span> },
+              { key: "status", label: "Status", sortable: true, sortValue: (dev) => STATUS_LABEL[dev.status], render: (dev) => <Badge variant={STATUS_VARIANT[dev.status]}>{STATUS_LABEL[dev.status]}</Badge> },
+              { key: "open", label: "Open", headerSrOnly: true, render: () => <ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /> },
+            ] satisfies DataColumn<DeviationItem>[]}
           />
-        </div>
-
-      </div>
+        </MotionListItem>
+      </MotionList>
 
       {/* Detail modal — shared detail-modal frame (max-w-2xl,
           centered, dimmed backdrop, Escape + outside-click close via
@@ -1289,6 +1245,16 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
       <Popup isOpen={successPopup} variant="success" title="Success" description={successMsg} onDismiss={() => setSuccessPopup(false)} />
       <Popup isOpen={errorPopup} variant="error" title="Action failed" description={errorMsg} onDismiss={() => setErrorPopup(false)} />
+
+      {/* Ask AI — the plain-language Deviation Search, moved out of the primary
+          layout into a slide-out Drawer (mirrors Gap Assessment). Selecting a
+          result opens that deviation's detail modal and closes the drawer. */}
+      <Drawer open={askAiOpen} onClose={() => setAskAiOpen(false)} title="Ask AI · Deviation Search" width="lg">
+        <SmartRecordSearch
+          title="Deviation Search"
+          sources={[buildDeviationSource(tenantDevs, allSites, (id) => { setSelectedId(id); setAskAiOpen(false); })]}
+        />
+      </Drawer>
         </div>
       </PageLayout>
   );

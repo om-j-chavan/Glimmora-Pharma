@@ -18,16 +18,15 @@ export const metadata: Metadata = {
     siteName: SEO.siteName,
     title: SEO.defaultTitle,
     description: SEO.defaultDescription,
-    images: [{ url: "/og-image.png", width: 1200, height: 630 }],
+    images: [{ url: "/app-logo.png", width: 1535, height: 1024 }],
   },
   twitter: {
     card: "summary_large_image",
     site: SEO.twitterHandle,
   },
-  icons: {
-    icon: "/favicon.ico",
-    apple: "/apple-touch-icon.png",
-  },
+  // Favicon + apple-touch-icon are served automatically by Next from the
+  // app/icon.png and app/apple-icon.png convention files (sourced from
+  // app-icon.png) — no manual `icons` entries needed.
   manifest: "/manifest.json",
   other: {
     "theme-color": "#0F6E56",

@@ -91,7 +91,7 @@ const UpdateCAPASchema = z.object({
   rcaDetail: z.string().optional(),
   // SME Section 1, Stage 4 (FULL) â€” correctiveActions is now managed
   // via the structured CAPAActionItem rows (addActionItem /
-  // updateActionItem / deleteActionItem / reorderActionItems). The
+  // updateActionItem / deleteActionItem). The
   // field stays on the CAPA model as a denormalised cache rebuilt by
   // syncCorrectiveActions, but direct writes are blocked here so the
   // structured surface is the only path. updateCAPA refuses payloads
@@ -476,30 +476,15 @@ export async function createCAPA(
                 select: { id: true, reference: true, requirement: true, framework: true, owner: true, rootCause: true },
               })
             : null;
-          // Resolve the finding owner to a REAL User. finding.owner is a raw
-          // userId string (Step 1) that may NOT correspond to a User row (e.g. a
-          // finding created by an admin whose session id has no User record), so
-          // it must NOT be written straight into CAPA.ownerId (a User FK) — that
-          // throws P2003 "foreign key constraint failed". We use the RESOLVED
-          // User's id (guaranteed valid), else fall back to the raising QA.
-          const findingOwnerUser = sourceFinding?.owner
-            ? await tx.user.findFirst({ where: { id: sourceFinding.owner, tenantId: session.user.tenantId }, select: { id: true, name: true } })
-            : null;
-
-          // Step 3/5 — the single assigned worker for CAPA.ownerId. Deviation-
-          // raised: the deviation WORKER (activeTask.assigneeId). Finding-raised:
-          // the finding's OWNER (the assigned worker). Else (manual): the
-          // QA-picked owner input. Each falls back to the raising QA.
-          const ownerId = linkedDeviationId
-            ? (activeTask?.assigneeId ?? actor.userId)
-            : linkedFindingId
-              ? (findingOwnerUser?.id ?? actor.userId)
-              : ownerIdInput;
-          const ownerName = linkedDeviationId
-            ? (activeTask?.assignee ?? actor.displayName)
-            : linkedFindingId
-              ? (findingOwnerUser?.name ?? actor.displayName)
-              : (rest.owner ?? "");
+          // A CAPA raised FROM a finding or deviation is created UNASSIGNED
+          // (driver null): remediation is tracked on the CAPA, and QA assigns the
+          // work later via addActionItem (which lands in the assignee's Worklist).
+          // Only a MANUAL create (no linked record) carries the QA-picked owner.
+          // This matches the "created Unassigned" spec and keeps the raise out of
+          // everyone's Worklist (no CAPA-by-ownerId Worklist source exists).
+          const isRaisedFromLinkedRecord = Boolean(linkedFindingId) || Boolean(linkedDeviationId);
+          const ownerId = isRaisedFromLinkedRecord ? null : ownerIdInput;
+          const ownerName = isRaisedFromLinkedRecord ? "" : (rest.owner ?? "");
 
           // SME Section 1 (last rung) â€” site-scoped reference prefix.
           // Format is now "CAPA-{siteCode}-{year}-{NNN}". Site code is
@@ -832,7 +817,7 @@ export async function updateCAPA(
     return {
       success: false,
       error:
-        "Direct writes to correctiveActions are deprecated. Use the structured Action Items API (addActionItem / updateActionItem / deleteActionItem / reorderActionItems) on the Actions tab instead.",
+        "Direct writes to correctiveActions are deprecated. Use the structured Action Items API (addActionItem / updateActionItem / deleteActionItem) on the Actions tab instead.",
     };
   }
 

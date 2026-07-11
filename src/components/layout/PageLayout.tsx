@@ -5,6 +5,7 @@ import Link from "next/link";
 import clsx from "clsx";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { Button, type ButtonVariant } from "@/components/ui/Button";
+import { MotionDiv } from "@/components/motion/Motion";
 
 /**
  * <PageLayout> — the shared header shell for every management page.
@@ -139,7 +140,8 @@ export function PageLayout({ title, titleIcon, description, actions = [], header
   }
   const fullBleed = !contentPadding;
   return (
-    <div
+    <MotionDiv
+      variant="fadeUp"
       className={clsx(
         fillHeight && "flex flex-col h-full min-h-0",
         // Cancel the app shell's page padding (p-3 sm:p-4 lg:p-5) so tabbed pages
@@ -170,7 +172,7 @@ export function PageLayout({ title, titleIcon, description, actions = [], header
       ) : (
         children
       )}
-    </div>
+    </MotionDiv>
   );
 }
 

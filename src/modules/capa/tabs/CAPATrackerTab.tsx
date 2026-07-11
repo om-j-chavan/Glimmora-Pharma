@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import clsx from "clsx";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { ClipboardCheck, Plus, Search, ChevronRight, Link2, CheckCircle2, Sparkles, RotateCcw, Clock, AlertTriangle, TrendingUp } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -12,6 +13,8 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
+import { StatCard } from "@/components/shared/StatCard";
+import { MotionHoverCard } from "@/components/motion/Motion";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
@@ -78,6 +81,20 @@ function hasReworkItem(c: CAPA): boolean {
   return (c.actionItems ?? []).some((a) => a.status === "rework");
 }
 
+/* ── Triage stat cards ──
+ * The three former queue strips (Waiting on you / Effectiveness checks due /
+ * Overdue) are now compact, clickable StatCards that filter the table below —
+ * same reusable StatCard + click-to-filter pattern as Customer Accounts. Colors
+ * keep the old strip tones: waiting → amber, effectiveness → blue (active),
+ * overdue → red (blocked). */
+type CapaCardFilter = "waiting" | "effectiveness" | "overdue";
+
+const TRIAGE_CARDS: Array<{ key: CapaCardFilter; label: string; icon: LucideIcon; color: string; sub: string }> = [
+  { key: "waiting", label: "Waiting on you", icon: Clock, color: "var(--status-waiting)", sub: "Requires your action" },
+  { key: "effectiveness", label: "Effectiveness checks due", icon: TrendingUp, color: "var(--status-active)", sub: "Verification due" },
+  { key: "overdue", label: "Overdue", icon: AlertTriangle, color: "var(--status-blocked)", sub: "Past due date" },
+];
+
 export function CAPATrackerTab({
   capas, filteredCAPAs, selectedCAPA, onSelectCAPA,
   isDark, isViewOnly, users, user, sites, timezone, dateFormat,
@@ -101,9 +118,13 @@ export function CAPATrackerTab({
   const [statusFilter, setStatusFilter] = useState("");
   const [riskFilter, setRiskFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+  // Page-level triage-card filter (waiting / effectiveness / overdue). Sits
+  // ABOVE the dropdown chain — a selected card constrains the set first, the
+  // dropdowns/search refine within it. Null = no card filter.
+  const [cardFilter, setCardFilter] = useState<CapaCardFilter | null>(null);
 
-  const anyFilterActive = !!(search || siteFilter || statusFilter || riskFilter || sourceFilter || assignedFilter);
-  function clearFilters() { setSearch(""); setSiteFilter(""); setStatusFilter(""); setRiskFilter(""); setSourceFilter(""); setAssignedFilter(""); }
+  const anyFilterActive = !!(search || siteFilter || statusFilter || riskFilter || sourceFilter || assignedFilter || cardFilter);
+  function clearFilters() { setSearch(""); setSiteFilter(""); setStatusFilter(""); setRiskFilter(""); setSourceFilter(""); setAssignedFilter(""); setCardFilter(null); }
 
   // Phase 6 — distinct CAPA owners (drivers) for the "assigned" filter dropdown.
   const assignedOptions = Array.from(new Set(capas.map((c) => c.owner).filter(Boolean)))
@@ -129,12 +150,28 @@ export function CAPATrackerTab({
   // OVERDUE: CAPA past due, or any of its action items overdue.
   const overdueQueue = capas.filter((c) => c.status !== "closed" && (isOverdue(c) || hasOverdueActionItem(c)));
 
+  // Triage sets → card counts + the table's card-filter predicate. These reuse
+  // the SAME derived arrays that feed the cards (no re-computation): the card
+  // shows N, and selecting it constrains the table to exactly those N ids.
+  const triageCounts: Record<CapaCardFilter, number> = {
+    waiting: waitingOnYou.length,
+    effectiveness: effectivenessDue.length,
+    overdue: overdueQueue.length,
+  };
+  const cardIds: Record<CapaCardFilter, Set<string>> = {
+    waiting: new Set(waitingOnYou.map((w) => w.c.id)),
+    effectiveness: new Set(effectivenessDue.map((e) => e.id)),
+    overdue: new Set(overdueQueue.map((c) => c.id)),
+  };
+
   // Defense-in-depth: dedupe by id alongside the filter pass. The slice's
   // addCAPA reducer already upserts on id (see capa.slice.ts), so dupes
   // shouldn't reach here — but per the AI integration spec a table-level
   // Set guard is mandated as a belt-and-braces against any future regression.
   const seenIds = new Set<string>();
   const displayed = filteredCAPAs.filter((c) => {
+    // Page-level card filter takes precedence over the dropdown chain.
+    if (cardFilter && !cardIds[cardFilter].has(c.id)) return false;
     if (siteFilter && c.siteId !== siteFilter) return false;
     if (statusFilter && c.status !== statusFilter) return false;
     if (riskFilter && c.risk !== riskFilter) return false;
@@ -158,26 +195,32 @@ export function CAPATrackerTab({
 
   return (
     <div role="tabpanel" id="panel-tracker" aria-labelledby="tab-tracker" tabIndex={0}>
-      {/* ── Queues (always shown, each with its own empty state) ── */}
-      <div className="grid gap-3 mb-5 md:grid-cols-3">
-        <QueueCard title="Waiting on you" Icon={Clock} tone="waiting" count={waitingOnYou.length} emptyText="Nothing waiting on you.">
-          {waitingOnYou.slice(0, 6).map(({ c, why }) => (
-            <QueueRow key={`w-${c.id}-${why}`} label={c.reference ?? c.id.slice(0, 8)} sub={why} onClick={() => go(c.id)} />
-          ))}
-        </QueueCard>
-        <QueueCard title="Effectiveness checks due" Icon={TrendingUp} tone="active" count={effectivenessDue.length} emptyText="No effectiveness checks due.">
-          {effectivenessDue.slice(0, 6).map((e) => (
-            <QueueRow key={e.id} label={e.reference ?? e.id.slice(0, 8)}
-              sub={`Due ${e.effectivenessDate ? dayjs.utc(e.effectivenessDate).tz(timezone).format("DD MMM") : "—"}`}
-              onClick={() => go(e.id)} />
-          ))}
-        </QueueCard>
-        <QueueCard title="Overdue" Icon={AlertTriangle} tone="blocked" count={overdueQueue.length} emptyText="Nothing overdue.">
-          {overdueQueue.slice(0, 6).map((c) => (
-            <QueueRow key={c.id} label={c.reference ?? c.id.slice(0, 8)}
-              sub={isOverdue(c) ? "CAPA past due" : "Action item overdue"} onClick={() => go(c.id)} />
-          ))}
-        </QueueCard>
+      {/* ── Triage cards — compact, clickable; each filters the table below to
+          its set. Selecting the active card again clears the filter. Same
+          StatCard + click-to-filter pattern as Customer Accounts. ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+        {TRIAGE_CARDS.map((card) => {
+          const count = triageCounts[card.key];
+          const active = cardFilter === card.key;
+          return (
+            // h-full through the wrapper keeps the cards equal-height in the grid.
+            <MotionHoverCard key={card.key} className="h-full rounded-xl">
+              <button
+                type="button"
+                onClick={() => setCardFilter((prev) => (prev === card.key ? null : card.key))}
+                aria-pressed={active}
+                className={clsx(
+                  "w-full h-full text-left rounded-xl transition",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-(--brand)",
+                  active && "ring-2 ring-(--brand)",
+                  count === 0 && "opacity-60",
+                )}
+              >
+                <StatCard icon={card.icon} color={card.color} label={card.label} value={String(count)} sub={card.sub} />
+              </button>
+            </MotionHoverCard>
+          );
+        })}
       </div>
 
       {/* Toolbar */}
@@ -343,63 +386,7 @@ export function CAPATrackerTab({
       </div>
 
       {/* Phase 6 — detail is now a full page at /capa/[id]; the modal is
-       *  retired. Row + queue clicks navigate there. */}
+       *  retired. Row + triage-card clicks navigate / filter here. */}
     </div>
-  );
-}
-
-/* ── Phase 6 queue card + row ── */
-// Queue cards keep their identity via STATUS tokens (no brand gold): waiting-on-you
-// → waiting (amber), effectiveness → active (blue), overdue → blocked (red). The
-// tone is a subtle accent (left border + icon tint), not a heavy fill.
-const QUEUE_TONE: Record<"waiting" | "active" | "blocked", { fg: string; bg: string }> = {
-  waiting: { fg: "var(--status-waiting)", bg: "var(--status-waiting-bg)" },
-  active: { fg: "var(--status-active)", bg: "var(--status-active-bg)" },
-  blocked: { fg: "var(--status-blocked)", bg: "var(--status-blocked-bg)" },
-};
-
-function QueueCard({
-  title, Icon, tone, count, emptyText, children,
-}: {
-  title: string;
-  Icon: LucideIcon;
-  tone: "waiting" | "active" | "blocked";
-  count: number;
-  emptyText: string;
-  children: React.ReactNode;
-}) {
-  const t = QUEUE_TONE[tone];
-  return (
-    <section className="capa-card overflow-hidden flex flex-col" aria-label={title} style={{ padding: 0, borderLeft: `3px solid ${t.fg}` }}>
-      {/* Header: icon (tinted) + title + big count */}
-      <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: "1px solid var(--card-border, var(--bg-border))" }}>
-        <span className="w-7 h-7 rounded-lg inline-flex items-center justify-center shrink-0" style={{ background: t.bg }}>
-          <Icon className="w-4 h-4" style={{ color: t.fg }} aria-hidden="true" />
-        </span>
-        <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{title}</span>
-        <span className="ml-auto text-[18px] font-bold leading-none" style={{ color: count > 0 ? t.fg : "var(--text-muted)" }}>{count}</span>
-      </div>
-      {count === 0 ? (
-        <p className="text-[11px] px-3 py-5 text-center" style={{ color: "var(--text-muted)" }}>{emptyText}</p>
-      ) : (
-        <ul className="list-none p-1.5 m-0 space-y-0.5">{children}</ul>
-      )}
-    </section>
-  );
-}
-
-function QueueRow({ label, sub, onClick }: { label: string; sub: string; onClick: () => void }) {
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={onClick}
-        className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md border-none cursor-pointer bg-transparent transition-colors hover:bg-(--bg-hover)"
-      >
-        <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0" style={{ color: "var(--text-secondary)", borderColor: "var(--card-border, var(--bg-border))", background: "var(--bg-elevated)" }}>{label}</span>
-        <span className="text-[11px] truncate" style={{ color: "var(--text-secondary)" }}>{sub}</span>
-        <ChevronRight className="w-3.5 h-3.5 ml-auto shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-      </button>
-    </li>
   );
 }

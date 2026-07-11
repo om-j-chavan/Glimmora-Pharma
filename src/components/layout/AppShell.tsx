@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 
+import Image from "next/image";
 import { Mail } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
@@ -149,12 +150,14 @@ export function AppShell({ children, initialTenant, initialUser, initialFramewor
             "bg-(--bg-elevated) border-(--bg-border)",
           )}
         >
-          <div
+          <Image
+            src="/app-icon.png"
+            alt=""
+            width={64}
+            height={64}
             aria-hidden="true"
-            className="w-16 h-16 rounded-2xl bg-[#0ea5e9] flex items-center justify-center mx-auto mb-6 text-white text-[20px] font-bold"
-          >
-            PG
-          </div>
+            className="w-16 h-16 object-contain mx-auto mb-6"
+          />
 
           <p className="text-[13px] font-semibold text-[#0ea5e9] mb-2">
             {tenantName}

@@ -19,7 +19,6 @@ const CreateSiteSchema = z.object({
   name: z.string().min(2),
   location: z.string().optional(),
   gmpScope: z.string().optional(),
-  risk: z.string().default("MEDIUM"),
 });
 
 const UpdateSiteSchema = CreateSiteSchema.partial().extend({

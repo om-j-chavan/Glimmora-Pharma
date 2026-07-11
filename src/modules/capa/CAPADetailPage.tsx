@@ -67,9 +67,11 @@ export interface CAPADetailPageProps {
   auditTrail: CapaAuditEntry[];
   /** Req 4 — read-only deviation+task doc references when raised from a deviation. */
   originDocs?: CAPAOriginDoc[];
+  /** Item 1 — read-only gap-finding doc references when raised from a finding. */
+  findingDocs?: CAPAOriginDoc[];
 }
 
-export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail, originDocs = [] }: CAPADetailPageProps) {
+export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail, originDocs = [], findingDocs = [] }: CAPADetailPageProps) {
   const router = useRouter();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
   const capaCan = usePermissions("capa", { capaRisk: capa.risk });
@@ -510,7 +512,7 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
           <OverviewBody capa={capa} isDark={isDark} users={users} timezone={timezone} dateFormat={dateFormat}
             showMigrationNotice={false} onDismissNotice={() => undefined}
             onNavigateGap={(fid) => router.push(`/gap-assessment?openFindingId=${encodeURIComponent(fid)}`)}
-            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} originDocs={originDocs} />
+            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} originDocs={originDocs} findingDocs={findingDocs} />
           {/* Phase D — wrap the relocated (protected) sections in a card; internals untouched. */}
           <section id="capa-discussion" className="capa-card"><DiscussionSection capa={capa} onCommentsChange={() => setDiscussionVersion((v) => v + 1)} /></section>
           {/* Verification retired — Approvals stands alone (full width). Anchor

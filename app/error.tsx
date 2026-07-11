@@ -8,7 +8,7 @@ import { AlertTriangle, RotateCcw, Home } from "lucide-react";
 // Brand mark — single source so swapping in a dark-mode variant or an SVG later
 // is a one-line change. Rendered on a subtle surface plate so the flat PNG
 // stays legible on both the light (cream) and dark (charcoal) backgrounds.
-const LOGO_SRC = "/logo.png";
+const LOGO_SRC = "/app-logo.png";
 
 // Root error boundary. Renders inside the root layout, so theme tokens and the
 // global component classes (.btn-primary / .btn-secondary) are available.

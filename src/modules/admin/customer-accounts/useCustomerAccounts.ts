@@ -21,7 +21,6 @@ import { useToast } from "@/components/ui/Toast";
 import {
   type AccountFormData,
   type AccountCardFilter,
-  type AccountFilters,
   type PlanDraft,
   type SaveResult,
   makeEmptyForm,
@@ -30,9 +29,6 @@ import {
   draftToPlanConfig,
   mapCustomerError,
   matchesCardFilter,
-  matchesFilters,
-  filtersActive,
-  DEFAULT_ACCOUNT_FILTERS,
   isExpiringSoon,
   isNearCap,
   hasNoPlan,
@@ -59,10 +55,8 @@ export function useCustomerAccounts({
   const reduxRole = useAppSelector((s) => s.auth.user?.role);
   const isSuperAdmin = isSuperAdminProp ?? reduxRole === "super_admin";
 
-  const [searchQuery, setSearchQuery] = useState("");
-  // The five column dropdown filters (Account / Plan / Subscription / MFA / Created).
-  const [filters, setFilters] = useState<AccountFilters>(DEFAULT_ACCOUNT_FILTERS);
   // Active stat-card filter (null = show all). Toggling the same card clears it.
+  // Search + the five column dropdown filters now live inside the DataTable widget.
   const [cardFilter, setCardFilter] = useState<AccountCardFilter | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
@@ -142,33 +136,23 @@ export function useCustomerAccounts({
   const selectCardFilter = (filter: AccountCardFilter) =>
     setCardFilter((current) => (current === filter ? null : filter));
 
-  const setFilter = <K extends keyof AccountFilters>(key: K, value: AccountFilters[K]) =>
-    setFilters((prev) => ({ ...prev, [key]: value }));
+  // Clears the page-level stat-card quick-filter. The widget owns (and clears)
+  // its own search + column filters; the page also remounts the widget on
+  // "Clear filters" to wipe that internal state alongside this.
+  const clearAllFilters = () => setCardFilter(null);
 
-  // One affordance to reset everything narrowing the list — the five dropdowns,
-  // the stat-card quick-filter, and the search box.
-  const clearAllFilters = () => {
-    setFilters(DEFAULT_ACCOUNT_FILTERS);
-    setCardFilter(null);
-    setSearchQuery("");
-  };
-
-  const hasActiveFilters = filtersActive(filters) || cardFilter !== null || searchQuery.trim() !== "";
+  const hasActiveFilters = cardFilter !== null;
 
   // Soft-deleted tenants belong in the Restore modal, NOT the active table —
   // exclude them so the main list only shows ACTIVE + SUSPENDED accounts (whose
   // row actions differ by status). deletedTenants (below) feeds the Restore modal.
   const activeAndSuspended = tenants.filter((t) => !t.deletedAt);
 
-  // Narrowing composes (AND): search → stat-card quick-filter → the five dropdowns.
-  const filtered = activeAndSuspended
-    .filter(
-      (t) =>
-        t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.adminEmail.toLowerCase().includes(searchQuery.toLowerCase()),
-    )
-    .filter((t) => (cardFilter ? matchesCardFilter(t, cardFilter) : true))
-    .filter((t) => matchesFilters(t, filters));
+  // Page-level narrowing = the stat-card quick-filter only. Search and the five
+  // column filters are applied inside the DataTable widget on top of this set.
+  const cardFilteredTenants = activeAndSuspended.filter((t) =>
+    cardFilter ? matchesCardFilter(t, cardFilter) : true,
+  );
 
   const openCreate = () => {
     setEditingTenant(null);
@@ -644,19 +628,14 @@ export function useCustomerAccounts({
 
   return {
     tenants,
-    filtered,
+    cardFilteredTenants,
     isSuperAdmin,
-    searchQuery,
-    setSearchQuery,
     syncing,
     syncError,
     // actionable stat-card filters
     stats,
     cardFilter,
     selectCardFilter,
-    // column dropdown filters
-    filters,
-    setFilter,
     clearAllFilters,
     hasActiveFilters,
     // create/edit drawer

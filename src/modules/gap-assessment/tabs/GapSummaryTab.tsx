@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import clsx from "clsx";
 import { chartDefaults } from "@/lib/chartColors";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
 
 interface GapSummaryTabProps {
   findingsTotal: number;
@@ -21,24 +22,43 @@ interface GapSummaryTabProps {
   topDrivers: { name: string; count: number; critical: number; high: number }[];
   severityData: { name: string; value: number; fill: string }[];  renderFilters: (compact?: boolean) => ReactNode;
   lastClosedFinding?: { id: string; closedAt?: string } | null;
+  /** Phase-3 entrance — play the filters → tiles → charts reveal only on the
+   *  FIRST mount; GapPage passes false on tab-return remounts so it doesn't
+   *  replay. Defaults to true. */
+  playEntrance?: boolean;
 }
 
 export function GapSummaryTab({
   findingsTotal, baseCount, criticalCount, highCount, lowCount,
   openCount, closedCount, overdueCount, topDrivers, severityData, renderFilters, lastClosedFinding,
+  playEntrance = true,
 }: GapSummaryTabProps) {
+  // Phase-3 entrance — spread onto each MotionList; initial=false pins the
+  // resting state on tab-return remounts, otherwise the primitive's own
+  // initial="hidden" stands. All tempo comes from the motion tokens.
+  const entranceProps: { initial?: false } = playEntrance ? {} : { initial: false };
   return (
     <div role="tabpanel" id="panel-summary" aria-labelledby="tab-summary" tabIndex={0}>
-      {/* Filters */}
+      {/* Phase-3 entrance sequence: filters \u2192 tiles \u2192 charts, revealed one after
+          another via MotionList/MotionListItem (reduced-motion aware; all tempo
+          from the motion tokens \u2014 nothing hardcoded). The tiles row and the
+          charts row each nest their OWN MotionList so their cards cascade
+          individually. Only this tab's first mount plays (playEntrance guard in
+          GapPage); returning to the tab renders instantly. */}
+      <MotionList {...entranceProps}>
+        {/* 1 \u2014 Filters */}
+        <MotionListItem>
       <section aria-label="Finding filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-xl border"
         style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
         <Filter className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         {renderFilters()}
       </section>
+        </MotionListItem>
 
-      {/* Tiles */}
-      <section aria-label="Finding statistics" className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        {/* 2 \u2014 Tiles (inner card cascade) */}
+        <MotionListItem>
+          <MotionList {...entranceProps} aria-label="Finding statistics" className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         {[
           { icon: ClipboardList, iconCls: "text-[#0ea5e9]", label: "Total findings", value: baseCount, color: "", sub: findingsTotal === 0 ? "Log your first finding to get started" : `${openCount} open \u00b7 ${closedCount} closed` },
           { icon: AlertCircle, iconCls: "text-[#ef4444]", label: "Critical", value: criticalCount, color: "text-[#ef4444]", sub: criticalCount > 0 ? "Immediate action required" : "None" },
@@ -46,20 +66,23 @@ export function GapSummaryTab({
           { icon: Info, iconCls: "text-[#10b981]", label: "Low", value: lowCount, color: "text-[#10b981]", sub: "Low inspection risk" },
           { icon: Clock, iconCls: overdueCount > 0 ? "text-[#ef4444]" : "text-[#10b981]", label: "Overdue", value: overdueCount, color: overdueCount > 0 ? "text-[#ef4444]" : "text-[#10b981]", sub: overdueCount > 0 ? "Past target date" : "All on track" },
         ].map((tile) => (
-          <div key={tile.label} className="stat-card" role="region" aria-label={tile.label}>
+          <MotionListItem key={tile.label} className="stat-card" role="region" aria-label={tile.label}>
             <div className="flex items-center gap-2 mb-2">
               <tile.icon className={clsx("w-5 h-5", tile.iconCls)} aria-hidden="true" />
               <span className="stat-label mb-0">{tile.label}</span>
             </div>
             <div className={clsx("stat-value", tile.color)}>{tile.value}</div>
             <div className="stat-sub">{tile.sub}</div>
-          </div>
+          </MotionListItem>
         ))}
-      </section>
+          </MotionList>
+        </MotionListItem>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <section aria-labelledby="drivers-title" className="card lg:col-span-2">
+        {/* 3 \u2014 Charts (inner card cascade) */}
+        <MotionListItem>
+          <MotionList {...entranceProps} className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <MotionListItem className="lg:col-span-2">
+        <section aria-labelledby="drivers-title" className="card">
           <div className="card-header"><h2 id="drivers-title" className="card-title">Top 5 risk drivers</h2></div>
           <div className="card-body">
             {topDrivers.length === 0 ? (
@@ -94,7 +117,8 @@ export function GapSummaryTab({
             )}
           </div>
         </section>
-
+        </MotionListItem>
+        <MotionListItem>
         <section aria-labelledby="donut-title" className="card">
           <div className="card-header"><h2 id="donut-title" className="card-title">Severity breakdown</h2></div>
           <div className="card-body">
@@ -121,7 +145,10 @@ export function GapSummaryTab({
             )}
           </div>
         </section>
-      </div>
+        </MotionListItem>
+          </MotionList>
+        </MotionListItem>
+      </MotionList>
     </div>
   );
 }

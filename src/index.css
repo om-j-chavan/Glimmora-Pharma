@@ -13,18 +13,19 @@
   --bg-border: #e8e4dd;
   --bg-hover: #f5f3ef;
   --text-primary: #302d29;
-  /* Merge resolution (devAI ← feat/plan-model): take feat/plan-model's amber
-     brand rebrand (design-system), but PRESERVE 936f86e's WCAG-AA contrast
-     tuning on the muted + warning text tokens (they don't collide with the
-     brand identity). */
+  /* Merge resolution (devAI ← feat/plan-model): PRESERVE 936f86e's WCAG-AA
+     contrast tuning on the muted + warning text tokens (they don't collide with
+     the brand identity). */
   --text-secondary: #6b655c;
   --text-muted: #6b6258; /* 936f86e AA tuning (~5.4:1 on bg-base); kept over feat's lighter #857e74 */
-  /* Brand = the amber identity, SAME as dark mode (was the brown #8b6914 which
-     muted the primary button to bronze in light). */
-  --brand: #c9a84c;
-  --brand-hover: #b8902c;
-  --brand-muted: rgba(201, 168, 76, 0.12);
-  --brand-border: rgba(201, 168, 76, 0.30);
+  /* Brand = emerald green — the app-wide DEFAULT, SAME as dark mode. Values match
+     the [data-color-theme="emerald"] accent block below, so selecting Emerald in
+     the picker is identical to the base; other palettes still override the brand
+     family via their own data-color-theme block. */
+  --brand: #10b981;
+  --brand-hover: #0e9d6e;
+  --brand-muted: rgba(16, 185, 129, 0.10);
+  --brand-border: rgba(16, 185, 129, 0.25);
   --success: #059669;
   --success-bg: #f0fdf4;
   --warning: #b45309; /* 936f86e AA tuning (~4.8:1 on warning-bg); kept over feat's #b8860b */
@@ -94,10 +95,10 @@
   --text-primary: #f4ede6;
   --text-secondary: #d5bfb2;
   --text-muted: #ab9d8d; /* was #9c8e80 (~4.0:1 — under AA); now ~6.1:1 on dark surfaces */
-  --brand: #c9a84c;
-  --brand-hover: #dbb85a;
-  --brand-muted: rgba(201, 168, 76, 0.15);
-  --brand-border: rgba(201, 168, 76, 0.3);
+  --brand: #10b981;
+  --brand-hover: #0e9d6e;
+  --brand-muted: rgba(16, 185, 129, 0.15);
+  --brand-border: rgba(16, 185, 129, 0.3);
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.15);
   --warning: #c9a84c;
@@ -929,23 +930,26 @@ body {
    (transform/opacity only) so idle CPU stays ~0. Bubbles are removed entirely
    under reduced-motion (below); the pill remains for visual character. */
 @keyframes pill-bubble-rise {
-  /* Emit at the pill, scaled to ~2px, invisible. */
-  0%   { transform: translateY(0) scale(0.4); opacity: 0; }
-  /* Fade in over the first 10%. */
-  10%  { opacity: 0.15; }
-  /* Hold ~0.15 until 70%, then fade out over the last 30%. */
-  70%  { opacity: 0.15; }
-  /* Risen up the panel, grown to 5px (scale 1), faded to nothing. */
+  /* Emit at the pill at half size, invisible. */
+  0%   { transform: translateY(0) scale(0.5); opacity: 0; }
+  /* Fade in to full presence over the first 12%. */
+  12%  { opacity: 0.32; }
+  /* Hold near-peak until 70%, then fade out over the last 30%. */
+  70%  { opacity: 0.3; }
+  /* Risen up the panel, grown to full size, faded to nothing. */
   100% { transform: translateY(-46vh) scale(1); opacity: 0; }
 }
 .pill-bubble {
   position: absolute;
-  bottom: 44%;                /* start near the pill (center-left of the panel) */
-  z-index: 1;                 /* above the pill (0), below the content (2) */
-  width: 5px;                 /* grows 2px (scale .4) → 5px (scale 1) over life */
-  height: 5px;
+  bottom: 46%;                /* start near the (now more central) pill */
+  z-index: 1;                 /* above the pill (0), below grain/content */
+  /* --pb-size is set per-bubble (12–18px); scale .5→1 over life → ~8–18px. */
+  width: var(--pb-size, 14px);
+  height: var(--pb-size, 14px);
   border-radius: 9999px;
-  background: #ffffff;        /* softness comes from the keyframe opacity, not this */
+  /* Radial fill = a soft glowing bead, not a flat dot. */
+  background: radial-gradient(circle at 35% 30%, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.4) 60%, rgb(255 255 255 / 0) 100%);
+  filter: drop-shadow(0 0 4px rgb(255 255 255 / 0.55));   /* halo / glow */
   pointer-events: none;
   will-change: transform, opacity;
   animation: pill-bubble-rise var(--pb-dur, 7s) linear var(--pb-delay, 0s) infinite;
