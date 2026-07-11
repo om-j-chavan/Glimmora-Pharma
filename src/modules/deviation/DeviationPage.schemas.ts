@@ -10,9 +10,10 @@ export const addSchema = z.object({
   type: z.enum(["planned", "unplanned"]),
   category: z.enum(["process", "equipment", "material", "environmental", "personnel", "documentation", "system", "other"]),
   severity: z.enum(FDA_SEVERITY),
-  // The SELECTED site — drives the DEV-<siteCode>-… reference prefix at creation.
-  // (Bug fix: the form previously ignored this and always sent allSites[0].)
-  siteId: z.string().min(1, "Site required"),
+  // OPTIONAL on the base schema: only super_admin / customer_admin see and pick
+  // the Site field (crossSiteAddSchema makes it required for them); every other
+  // role has it hidden and the server auto-sets it from their assigned site.
+  siteId: z.string().optional(),
   area: z.string().min(1, "Area required"),
   immediateAction: z.string().min(5, "Immediate action required"),
   patientSafetyImpact: z.enum(["high", "medium", "low", "none"]),
@@ -25,3 +26,5 @@ export const addSchema = z.object({
   batchesAffected: z.string().optional(),
 });
 export type AddForm = z.infer<typeof addSchema>;
+/** Cross-site authors (super_admin / customer_admin) must pick a Site. */
+export const crossSiteAddSchema = addSchema.extend({ siteId: z.string().min(1, "Site required") });

@@ -376,7 +376,7 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
 
       {/* Modals — edit/sign moved to the detail page (/capa/[id]); this list
           page keeps create / AI / reopen only. */}
-      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} lockedSiteId={selectedSiteId} gapFindings={gapFindings} deviations={deviations} />
+      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} currentUserRole={user?.role ?? ""} currentUserSiteId={users.find((u) => u.id === user?.id)?.assignedSites?.[0] ?? null} gapFindings={gapFindings} deviations={deviations} />
 
       {/* RUNG 3D-CAPA — reopen a closed/rejected CAPA (reason required) */}
       <Modal

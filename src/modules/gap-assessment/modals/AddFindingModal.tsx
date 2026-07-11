@@ -18,15 +18,18 @@ import { DocumentCard } from "@/components/shared/DocumentCard";
 import { rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
 import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
 import { frameworkLabel } from "@/constants/frameworks";
-import { canEditFinding } from "@/lib/permissions/roleSets";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 
 const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
 
 /** Today (YYYY-MM-DD) for the target-date min. */
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+// siteId is OPTIONAL on the base schema: only super_admin / customer_admin see
+// and pick the Site field (crossSiteFindingSchema makes it required for them);
+// every other role has it hidden and the server auto-sets it from their site.
 const findingSchema = z.object({
-  siteId: z.string().min(1, "Site required"),
+  siteId: z.string().optional(),
   area: z.string().min(1, "Area required"),
   requirement: z.string().min(10, "Add the requirement (at least 10 characters)"),
   purpose: z.string().optional(),
@@ -44,6 +47,8 @@ const findingSchema = z.object({
   raiseCapaImmediately: z.boolean().optional(),
 });
 type FindingForm = z.infer<typeof findingSchema>;
+/** Cross-site authors (super_admin / customer_admin) must pick a Site. */
+const crossSiteFindingSchema = findingSchema.extend({ siteId: z.string().min(1, "Site required") });
 
 /** A single evidence file STAGED in the create modal (before the finding
  *  exists). Holds the real `File` so GapPage can upload it via
@@ -85,16 +90,15 @@ interface AddFindingModalProps {
   aiEnabled?: boolean;
 }
 
-export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, currentUserRole, currentUserSiteId, aiEnabled = true }: AddFindingModalProps) {
-  // The Site field is QA-only. `canEditFinding` is the finding-author / QA
-  // authority set (qa_head today) — the same client mirror the rest of Gap
-  // Assessment gates on. Non-QA users don't pick a site: the finding is scoped
-  // to their OWN assigned site (set as the default + pinned by the effect
-  // below); the server stays authoritative on the final siteId.
-  const isQA = canEditFinding(currentUserRole ?? "");
+export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, currentUserRole, aiEnabled = true }: AddFindingModalProps) {
+  // Site-field rule (shared canCreateAcrossSites): only super_admin /
+  // customer_admin see and MUST pick a Site. Every other role has the field
+  // hidden — the server auto-scopes the finding to their own assigned site — so
+  // the form carries no siteId for them.
+  const crossSite = canCreateAcrossSites(currentUserRole ?? "");
   const { register: reg, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } = useForm<FindingForm>({
-    resolver: zodResolver(findingSchema),
-    defaultValues: { severity: "High", siteId: isQA ? (lockedSiteId ?? "") : (currentUserSiteId ?? ""), raiseCapaImmediately: false },
+    resolver: zodResolver(crossSite ? crossSiteFindingSchema : findingSchema),
+    defaultValues: { severity: "High", siteId: "", raiseCapaImmediately: false },
   });
   // Multi-file staged evidence — uploaded to the finding post-create. Each
   // carries the real File + a local object URL (for the View button).
@@ -200,13 +204,6 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     }
   }, [watchArea, watchFramework, activeFrameworks, setValue]);
 
-  // Non-QA users never see the Site field, so keep siteId pinned to their own
-  // assigned site — covers the prop arriving after mount and a post-reset reopen,
-  // so the hidden field always submits the correct value.
-  useEffect(() => {
-    if (!isQA) setValue("siteId", currentUserSiteId ?? "", { shouldValidate: true });
-  }, [isQA, currentUserSiteId, setValue]);
-
   function onSubmit(data: FindingForm) {
     // Serialize the structured RCA: rootCause = readable mirror (shared
     // rcaDetailToText), rcaDetail = JSON source. Mirrors CAPA's create modal.
@@ -247,9 +244,10 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     >
       <form onSubmit={handleSubmit(onSubmit)} aria-label="Add new finding" className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          {/* Site + Area on one row. The Site field is QA-only; non-QA users
-              don't see it — their finding is auto-scoped to their assigned site. */}
-          {isQA && (
+          {/* Site + Area on one row. The Site field shows ONLY for cross-site
+              authors (super_admin / customer_admin); every other role has it
+              hidden — the server auto-scopes the finding to their assigned site. */}
+          {crossSite && (
             <div>
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p>
               <Dropdown placeholder="Select site..." value={watch("siteId") ?? ""} onChange={(v) => setValue("siteId", v, { shouldValidate: true })} width="w-full"
@@ -257,7 +255,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               {errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}
             </div>
           )}
-          <div className={!isQA ? "col-span-2" : ""}>
+          <div className={!crossSite ? "col-span-2" : ""}>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Area <span className="text-(--danger)">*</span></p>
             <Dropdown placeholder="Select area..." value={watch("area") ?? ""} onChange={(v) => setValue("area", v, { shouldValidate: true })} width="w-full"
               options={AREAS.map((a) => ({ value: a, label: a }))} />

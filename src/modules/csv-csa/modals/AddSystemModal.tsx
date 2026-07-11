@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
 import { roleLabel } from "@/lib/labels/roles";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 
 /* ── Constants ── */
 
@@ -31,17 +32,22 @@ const STAGE_PREVIEW: Record<string, string[]> = {
  * server-defaulted or auto-derived (createSystem derives the 4 risk levels +
  * riskLevel from gxpRelevance) and filled progressively on the detail page.
  * The Edit modal still carries the full field set. */
+// siteId is OPTIONAL on the base schema: only super_admin / customer_admin see
+// and pick the Site field (crossSiteSystemSchema makes it required for them);
+// every other role has it hidden and the server auto-sets it from their site.
 const addSystemSchema = z.object({
   name: z.string().min(2, "Name required"),
   type: z.enum(["QMS", "LIMS", "ERP", "CDS", "SCADA", "MES", "CMMS", "Other"]),
   vendor: z.string().min(1, "Vendor required"),
   version: z.string().min(1, "Version required"),
-  siteId: z.string().min(1, "Site required"),
+  siteId: z.string().optional(),
   owner: z.string().min(1, "Owner required"),
   gxpRelevance: z.enum(["Critical", "Major", "Minor"]),
   gamp5Category: z.enum(["1", "3", "4", "5"]),
 });
 export type SystemForm = z.infer<typeof addSystemSchema>;
+/** Cross-site authors (super_admin / customer_admin) must pick a Site. */
+const crossSiteSystemSchema = addSystemSchema.extend({ siteId: z.string().min(1, "Site required") });
 
 /* ── Props ── */
 
@@ -51,17 +57,21 @@ export interface AddSystemModalProps {
   users: UserConfig[];
   onSave: (data: SystemForm) => void;
   onClose: () => void;
-  lockedSiteId?: string | null;
+  /** Current user's role — drives the shared Site-field-visibility rule. */
+  currentUserRole: string;
 }
 
-export function AddSystemModal({ open, sites, users, onSave, onClose, lockedSiteId }: AddSystemModalProps) {
+export function AddSystemModal({ open, sites, users, onSave, onClose, currentUserRole }: AddSystemModalProps) {
+  // Site-field rule (shared): only super_admin / customer_admin see and MUST
+  // pick a Site; every other role has it hidden + server auto-set from their site.
+  const crossSite = canCreateAcrossSites(currentUserRole);
   const form = useForm<SystemForm>({
-    resolver: zodResolver(addSystemSchema),
+    resolver: zodResolver(crossSite ? crossSiteSystemSchema : addSystemSchema),
     defaultValues: {
       type: "LIMS",
       gxpRelevance: "Major",
       gamp5Category: "4",
-      siteId: lockedSiteId ?? "",
+      siteId: "",
     },
   });
 
@@ -105,10 +115,10 @@ export function AddSystemModal({ open, sites, users, onSave, onClose, lockedSite
             <input id="sys-ver" className="input text-[12px]" placeholder="e.g. 8.7" {...register("version")} />
             {errors.version && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{errors.version.message}</p>}
           </div>
-          {!lockedSiteId && (
+          {crossSite && (
             <div>
               <label className={lbl} style={{ color: "var(--text-muted)" }}>Site *</label>
-              <Controller name="siteId" control={control} render={({ field }) => (<Dropdown value={field.value} onChange={field.onChange} placeholder="Select site" width="w-full" options={activeSites.map((s) => ({ value: s.id, label: s.name }))} />)} />
+              <Controller name="siteId" control={control} render={({ field }) => (<Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select site" width="w-full" options={activeSites.map((s) => ({ value: s.id, label: s.name }))} />)} />
               {errors.siteId && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{errors.siteId.message}</p>}
             </div>
           )}

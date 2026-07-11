@@ -14,6 +14,7 @@ import { getServerSession } from "next-auth/next";
 import { redirect } from "next/navigation";
 import { authOptions } from "../../app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 
 export interface AuthSession {
   user: {
@@ -55,6 +56,51 @@ export async function requireAuth(): Promise<AuthSession> {
   const session = await auth();
   if (!session) redirect("/login");
   return session;
+}
+
+export type ResolveSiteResult =
+  | { ok: true; siteId: string }
+  | { ok: false; error: string };
+
+/**
+ * Enforce the SITE-FIELD rule server-side for the four Add flows (Gap /
+ * Deviation / CSV / CAPA). Single authority so client and server can't drift:
+ *
+ *  - super_admin / customer_admin (canCreateAcrossSites) CHOOSE a site — the
+ *    provided id is REQUIRED and validated to belong to the caller's tenant.
+ *  - Every other role is AUTO-SCOPED to its OWN assigned site; the client-
+ *    supplied siteId is IGNORED (defense in depth — never trust the client).
+ *    The session token carries no siteId, so the actor's site is read from the
+ *    User row. A non-admin with no site assignment is rejected with a clear
+ *    message rather than silently creating a site-less record.
+ *
+ * Returns a discriminated result the ActionResult callers surface directly.
+ */
+export async function resolveCreateSiteId(
+  session: AuthSession,
+  providedSiteId: string | null | undefined,
+): Promise<ResolveSiteResult> {
+  const { id, role, tenantId } = session.user;
+
+  if (canCreateAcrossSites(role)) {
+    if (!providedSiteId) return { ok: false, error: "Site is required." };
+    const site = await prisma.site.findFirst({
+      where: { id: providedSiteId, tenantId },
+      select: { id: true },
+    });
+    if (!site) return { ok: false, error: "Selected site is not part of your organization." };
+    return { ok: true, siteId: site.id };
+  }
+
+  // Non-admins: ignore whatever the client sent; scope to the actor's own site.
+  const user = await prisma.user.findFirst({
+    where: { id, tenantId },
+    select: { siteId: true },
+  });
+  if (!user?.siteId) {
+    return { ok: false, error: "Your account is not assigned to a site. Contact your admin." };
+  }
+  return { ok: true, siteId: user.siteId };
 }
 
 /* ════════════════════════════════════════════════════════════════════

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
+import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import {
   CSV_STAGE_REVIEW_ROLES as STAGE_REVIEW_ROLES,
   CSV_SYSTEM_WRITE_ROLES as SYSTEM_WRITE_ROLES,
@@ -275,13 +275,20 @@ export async function createSystem(
       return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
     }
 
+    // Site-field rule (shared): super_admin / customer_admin pick a site
+    // (required + tenant-validated); every other role is auto-scoped to their
+    // own assigned site and the client siteId is ignored. See resolveCreateSiteId.
+    const siteRes = await resolveCreateSiteId(session, parsed.data.siteId);
+    if (!siteRes.ok) return { success: false, error: siteRes.error };
+    const siteId = siteRes.siteId;
+
     // RUNG 2.7 — allocate a human-readable SYS-<SITE_CODE>-<NNNN> reference.
     // Site.code is canonical (same source every other module's reference
     // uses); a name-derived 3-letter code is the fallback for a misconfigured
     // site so creation never blocks.
-    const site = parsed.data.siteId
+    const site = siteId
       ? await prisma.site.findFirst({
-          where: { id: parsed.data.siteId, tenantId: session.user.tenantId },
+          where: { id: siteId, tenantId: session.user.tenantId },
           select: { code: true, name: true },
         })
       : null;
@@ -300,6 +307,9 @@ export async function createSystem(
               // Re-assert required fields (toSystemData is typed Partial<>).
               name: parsed.data.name,
               type: parsed.data.type,
+              // Authoritative siteId from the site-field rule (overrides any
+              // client value spread in by toSystemData).
+              siteId,
               tenantId: session.user.tenantId,
               reference,
               // Fresh systems have all stages "not_started"; status is always

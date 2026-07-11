@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
+import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, CAPA_CREATE_ROLES, DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { getCAPAReadiness } from "@/lib/capa-readiness";
 import { fileStorage } from "@/lib/fileStorage";
@@ -413,6 +413,13 @@ export async function createCAPA(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
+  // Site-field rule (shared): super_admin / customer_admin pick a site
+  // (required + tenant-validated); every other role is auto-scoped to their own
+  // assigned site and the client siteId is ignored. See resolveCreateSiteId.
+  const siteRes = await resolveCreateSiteId(session, parsed.data.siteId);
+  if (!siteRes.ok) return { success: false, error: siteRes.error };
+  const siteId = siteRes.siteId;
+
   try {
     const {
       linkedFindingId,
@@ -494,9 +501,9 @@ export async function createCAPA(
           // CAPA has no site (siteId optional on the schema) or when
           // the site has no code yet (backfill window).
           let siteCode: string | null = null;
-          if (parsed.data.siteId) {
+          if (siteId) {
             const site = await tx.site.findUnique({
-              where: { id: parsed.data.siteId },
+              where: { id: siteId },
               select: { code: true },
             });
             siteCode = site?.code ?? null;
@@ -528,6 +535,9 @@ export async function createCAPA(
           const created = await tx.cAPA.create({
             data: {
               ...rest,
+              // Authoritative siteId from the site-field rule (overrides the
+              // client value spread in via ...rest).
+              siteId,
               // owner is now zod-optional; the Prisma column is still non-null.
               // Step 3 — the single assigned worker (resolved as ownerName above).
               owner: ownerName,

@@ -108,7 +108,6 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
   // Effective enabled frameworks for this tenant (server-resolved, non-persisted).
   const frameworkList = useAppSelector((s) => s.frameworks.list);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { hasSites } = useSetupStatus();
 
   // Drift Detection — AGI continuous-monitoring. One hook drives the header
@@ -518,7 +517,7 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
 
       {/* ── Modals ── */}
       <DriftDetectionModal open={driftOpen} onClose={() => setDriftOpen(false)} drift={drift} />
-      <AddSystemModal open={addOpen} sites={sites} users={complianceUsers} onSave={onAddSave} onClose={() => setAddOpen(false)} lockedSiteId={selectedSiteId} />
+      <AddSystemModal open={addOpen} sites={sites} users={complianceUsers} onSave={onAddSave} onClose={() => setAddOpen(false)} currentUserRole={role} />
       <EditSystemModal open={editOpen} system={selectedSystem} sites={sites} users={complianceUsers} onSave={onEditSave} onClose={() => setEditOpen(false)} />
       <AddActivityModal open={addActivityOpen} systems={systems} users={users} onSave={onActivitySave} onClose={() => setAddActivityOpen(false)} />
 

@@ -20,7 +20,7 @@ import { revalidatePath } from "next/cache";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
+import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES, GAP_CREATE_ROLES, QA_AUTHORITY_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
 import { findingVisibilityWhere } from "@/lib/queries/findings";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
@@ -125,12 +125,19 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
     return { success: false, error: "Your role cannot create a gap assessment." };
   }
 
+  // Site-field rule (shared): super_admin / customer_admin pick a site
+  // (required + tenant-validated); every other role is auto-scoped to their own
+  // assigned site and the client siteId is ignored. See resolveCreateSiteId.
+  const siteRes = await resolveCreateSiteId(session, parsed.data.siteId);
+  if (!siteRes.ok) return { success: false, error: siteRes.error };
+  const siteId = siteRes.siteId;
+
   // SME final rung â€” site-scoped reference allocation. Same retry-on-
   // P2002 shape as createDeviation / createCAPA.
   let siteCodeForRef: string | null = null;
-  if (parsed.data.siteId) {
+  if (siteId) {
     const site = await prisma.site.findUnique({
-      where: { id: parsed.data.siteId },
+      where: { id: siteId },
       select: { code: true },
     });
     siteCodeForRef = site?.code ?? null;
@@ -158,6 +165,9 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
         const created = await tx.finding.create({
           data: {
             ...parsed.data,
+            // Authoritative siteId from the site-field rule (client value is
+            // only honored for super_admin / customer_admin; auto-set otherwise).
+            siteId,
             reference,
             tenantId: session.user.tenantId,
             // Owner = the creator, stamped from the session (never the client

@@ -16,7 +16,6 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { useActiveSite } from "@/hooks/useActiveSite";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
   setDeviations,
@@ -55,7 +54,8 @@ import {
   STATUS_VARIANT, STATUS_LABEL, CATEGORIES, AREAS, DEV_TASK_STATUS_LABEL,
 } from "./DeviationPage.constants";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
-import { addSchema, type AddForm } from "./DeviationPage.schemas";
+import { addSchema, crossSiteAddSchema, type AddForm } from "./DeviationPage.schemas";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 import { adaptDeviation, type PrismaDeviationWithCapa } from "./DeviationPage.adapter";
 import { InvestigationSection, CapaDecisionSection } from "./DeviationInvestigation";
 import {
@@ -147,7 +147,10 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const { tenantId, org, users, allSites } = useTenantConfig();
   // Default the create form's site to the active site (falls back to the first
   // site). The SELECTED site drives the deviation reference prefix (bug fix).
-  const activeSite = useActiveSite();
+  // Site-field rule (shared): only super_admin / customer_admin see and MUST
+  // pick a Site in the report modal; every other role has it hidden and the
+  // server auto-scopes the deviation to their own assigned site.
+  const crossSite = canCreateAcrossSites(currentRole);
   // Deviation-task assignee pool — active operational STAFF only (excludes
   // super_admin / customer_admin / viewer). The "people who do the work".
   const complianceUsers = useComplianceUsers();
@@ -268,7 +271,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // (unchanged by this migration).
 
   const { control, handleSubmit, reset, setError, setValue, formState: { errors, isValid, isSubmitting } } = useForm<AddForm>({
-    resolver: zodResolver(addSchema),
+    resolver: zodResolver(crossSite ? crossSiteAddSchema : addSchema),
     // Validate on blur (and re-validate on change once touched) so required-
     // field misses surface inline before submit, and isValid can gate the
     // submit button.
@@ -279,7 +282,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     // "changing an uncontrolled input to be controlled" warning). The enum
     // dropdowns keep their seeded defaults; category stays unset (its placeholder
     // shows for "" all the same, and "" isn't a valid enum value).
-    defaultValues: { title: "", description: "", type: "unplanned", severity: "Major", siteId: activeSite?.id ?? allSites[0]?.id ?? "", area: "", immediateAction: "", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium", dueDate: "", batchesAffected: "" },
+    defaultValues: { title: "", description: "", type: "unplanned", severity: "Major", siteId: "", area: "", immediateAction: "", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium", dueDate: "", batchesAffected: "" },
   });
 
   function severityToRisk(s: DeviationSeverity): "Critical" | "High" | "Medium" | "Low" {
@@ -1005,8 +1008,13 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Severity *</p><Controller name="severity" control={control} render={({ field }) => <Dropdown options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} value={field.value} onChange={(v) => { field.onChange(v); setValue("priority", severityToPriority(v as DeviationSeverity), { shouldValidate: true }); }} width="w-full" className={errors.severity ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.severity && <p className="text-[11px] text-[#ef4444] mt-1">{errors.severity.message}</p>}</div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Area *</p><Controller name="area" control={control} render={({ field }) => <Dropdown options={AREAS.map((a) => ({ value: a, label: a }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select area..." className={errors.area ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.area && <p className="text-[11px] text-[#ef4444] mt-1">{errors.area.message}</p>}</div>
-                <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Site *</p><Controller name="siteId" control={control} render={({ field }) => <Dropdown options={allSites.map((s) => ({ value: s.id, label: s.name }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select site..." className={errors.siteId ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.siteId && <p className="text-[11px] text-[#ef4444] mt-1">{errors.siteId.message}</p>}</div>
+                {/* Site field shows ONLY for cross-site authors (super_admin /
+                    customer_admin); everyone else has it hidden and the server
+                    auto-scopes to their site, so Area takes the full width. */}
+                <div className={crossSite ? undefined : "col-span-2"}><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Area *</p><Controller name="area" control={control} render={({ field }) => <Dropdown options={AREAS.map((a) => ({ value: a, label: a }))} value={field.value} onChange={field.onChange} width="w-full" placeholder="Select area..." className={errors.area ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.area && <p className="text-[11px] text-[#ef4444] mt-1">{errors.area.message}</p>}</div>
+                {crossSite && (
+                <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Site *</p><Controller name="siteId" control={control} render={({ field }) => <Dropdown options={allSites.map((s) => ({ value: s.id, label: s.name }))} value={field.value ?? ""} onChange={field.onChange} width="w-full" placeholder="Select site..." className={errors.siteId ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors.siteId && <p className="text-[11px] text-[#ef4444] mt-1">{errors.siteId.message}</p>}</div>
+                )}
               </div>
             </div>
           </div>

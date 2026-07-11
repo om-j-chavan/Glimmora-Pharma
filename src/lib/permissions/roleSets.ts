@@ -63,6 +63,22 @@ export function roleRequiresSite(role: string): boolean {
   return !SITELESS_ROLES.includes(role);
 }
 
+/**
+ * SITE-FIELD-VISIBILITY / cross-site authoring rule — SINGLE SOURCE OF TRUTH.
+ *
+ * Only the two tenant-wide admin identities may CHOOSE a site when creating a
+ * record (they legitimately create across all sites). Every other role — regular
+ * seat users, QA of any level, csv_val_lead, etc. — has exactly ONE assigned
+ * site, so a picker is dead UI for them: the Add modals HIDE the Site field and
+ * the create server actions AUTO-SET siteId from the actor's own assignment.
+ *
+ * Read by all four Add modals (field visibility) and by the create actions
+ * (required-and-validated vs ignored-and-auto-set) so client and server agree.
+ */
+export function canCreateAcrossSites(role: string): boolean {
+  return role === "super_admin" || role === "customer_admin";
+}
+
 /* ── Tenant lifecycle access (single source of truth) ───────────────────────
  * Answers "may this account access the app, given its tenant's lifecycle
  * status?". super_admin (any PLATFORM_ADMIN_ROLES) is the PLATFORM account, not
