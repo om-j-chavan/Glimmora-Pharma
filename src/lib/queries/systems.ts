@@ -86,14 +86,6 @@ export const getDeletedSystems = cache(async (tenantId: string) => {
   });
 });
 
-export const getSystem = cache(async (id: string, session: AuthSession) => {
-  // Visibility enforced in the query (no IDOR).
-  return prisma.gxPSystem.findFirst({
-    where: { id, tenantId: session.user.tenantId, deletedAt: null, ...systemVisibilityWhere(session) },
-    include: SYSTEM_INCLUDE,
-  });
-});
-
 /** RUNG 2 — routed detail lookup by human reference OR raw cuid.
  *  RUNG 3B — archived systems 404 (deletedAt: null).
  *  Phase 4 — visibility enforced IN THE QUERY: a non-see-all/non-creator/non-

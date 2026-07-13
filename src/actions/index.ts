@@ -13,4 +13,3 @@ export * from "./auditLogs";
 export * from "./settings";
 export * from "./tenants";
 export * from "./rtm";
-export * from "./agiConsole";

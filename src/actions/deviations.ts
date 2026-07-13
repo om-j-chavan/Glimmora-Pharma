@@ -156,7 +156,7 @@ const CreateDeviationSchema = z.object({
 
 // RUNG 3D-Deviation — status intentionally removed (was the bypass that
 // accepted any non-protected status string). Transitions go through dedicated
-// guarded actions (startInvestigation / submitDeviationForReview /
+// guarded actions (startInvestigation / completeInvestigation /
 // closeDeviation / rejectDeviation).
 const UpdateDeviationSchema = CreateDeviationSchema.partial().extend({
   rootCause: z.string().optional(),
@@ -343,12 +343,12 @@ export async function createDeviation(
 // is removed: updateDeviation no longer accepts a status field at all, so there
 // is nothing to guard. "closed"/"rejected" remain owned by closeDeviation /
 // rejectDeviation; the new pre-terminal transitions are startInvestigation /
-// submitDeviationForReview.
+// completeInvestigation.
 
 // NOTE: status field intentionally NOT accepted (Rung 3D-Deviation). Status
 // changes route through dedicated guarded transitions:
 //   open -> under_investigation:            startInvestigation
-//   under_investigation -> pending_qa_review: submitDeviationForReview
+//   under_investigation -> pending_qa_review: completeInvestigation
 //   -> closed:   closeDeviation
 //   -> rejected: rejectDeviation
 // See AUDIT-GLOBAL-PATTERNS.md Finding #4.
@@ -935,70 +935,6 @@ export async function startInvestigation(id: string): Promise<ActionResult> {
       recordId: id,
       oldValue: "open",
       newValue: "under_investigation",
-    },
-  });
-  revalidatePath("/deviation");
-  return { success: true, data: null };
-}
-
-/**
- * RUNG 3D-Deviation — guarded under_investigation -> pending_qa_review
- * transition (was the UI "Submit for QA review" button). Optimistic-locked;
- * viewers blocked. QA's segregation of duties (decider/closer != reporter !=
- * investigator) is enforced downstream at guardCapaDecision / closeDeviation.
- *
- * ACCOUNTABILITY HANDOFF — submitting is an attestation that the investigation
- * is complete, so it is restricted to the investigation OWNER (or a qa_head
- * submitting on QA's behalf). This mirrors the DeviationPage UI gate
- * (`user.id === selected.owner || isQAHead`) so there is no UI/server drift,
- * and is enforced SERVER-SIDE because an accountability control must not be
- * UI-deep — a direct API call must not let one author submit another's
- * investigation. `deviation.owner` stores a userId; for site users the session
- * id IS their User.id, the same identity the UI compares.
- */
-export async function submitDeviationForReview(id: string): Promise<ActionResult> {
-  const session = await requireAuth();
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot submit a deviation for review." };
-  }
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
-  }
-  // Owner-or-qa_head gate — enforced here, not just in the UI. The investigation
-  // owner attests completion; a qa_head may submit on QA's behalf.
-  const deviation = await prisma.deviation.findFirst({
-    where: { id, tenantId: session.user.tenantId },
-    select: { owner: true },
-  });
-  if (!deviation) {
-    return { success: false, error: "Deviation not found." };
-  }
-  const isOwner = session.user.id === deviation.owner;
-  const isQAHead = session.user.role === "qa_head";
-  if (!isOwner && !isQAHead) {
-    return { success: false, error: "Only the investigation owner can submit for review." };
-  }
-  const updated = await prisma.deviation.updateMany({
-    where: { id, tenantId: session.user.tenantId, status: "under_investigation" },
-    data: { status: "pending_qa_review" },
-  });
-  if (updated.count === 0) {
-    return { success: false, error: "Only a deviation under investigation can be submitted for QA review." };
-  }
-  await prisma.auditLog.create({
-    data: {
-      tenantId: session.user.tenantId,
-      userId: actor.userId,
-      userName: actor.displayName,
-      userRole: actor.role,
-      module: "Deviation Management",
-      action: "DEVIATION_SUBMITTED_FOR_REVIEW",
-      recordId: id,
-      oldValue: "under_investigation",
-      newValue: "pending_qa_review",
     },
   });
   revalidatePath("/deviation");

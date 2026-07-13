@@ -66,5 +66,3 @@ export {
   recordEffectivenessReview,
   revokeEffectivenessReview,
 } from "./capas/effectiveness";
-
-export { loadSuggestedRecurrenceMatches } from "./capas/recurrence";

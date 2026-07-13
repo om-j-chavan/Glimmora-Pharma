@@ -183,7 +183,6 @@ export const SUPPORT_RELATED_MODULE_ROUTE: Record<string, string> = {
   Findings: "/gap-assessment",
   Documents: "/evidence",
   Evidence: "/evidence",
-  Inspections: "/inspection",
   RAID: "/governance",
   Frameworks: "/admin/frameworks",
   Settings: "/settings",
