@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
@@ -34,6 +34,7 @@ import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { assignDeviationTask, reworkDeviationTask, postDeviationTaskMessage } from "@/actions/deviation-tasks";
 import { TaskThread, GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
 import { deleteDocument } from "@/actions/documents";
+import { RaisedFromRiskBanner } from "@/components/shared/RaisedFromRiskBanner";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
 import { Button } from "@/components/ui/Button";
@@ -184,10 +185,25 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
   // State
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  /* Open one deviation from `?open=<id>` — used by the risk-conversion "view →"
+     link. Deviations have no per-id route; the detail is this modal. Opens once,
+     after the tenant list has loaded. */
+  const searchParams = useSearchParams();
+  const openIdParam = searchParams.get("open");
+  const openedRef = useRef(false);
   const selected = useMemo(
     () => (selectedId ? tenantDevs.find((d) => d.id === selectedId) ?? null : null),
     [tenantDevs, selectedId],
   );
+
+  useEffect(() => {
+    if (!openIdParam || openedRef.current) return;
+    if (tenantDevs.some((d) => d.id === openIdParam)) {
+      openedRef.current = true;
+      setSelectedId(openIdParam);
+    }
+  }, [openIdParam, tenantDevs]);
   // SME Section 1, Stage 1 — CAPA Decision Gate (client mirror).
   // Server enforces the same rule in closeDeviation (incl. the orphan-link
   // case where linkedCAPAId is set but the CAPA was hard-deleted). The
@@ -702,6 +718,9 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           }
         >
           <div className="space-y-4">
+            {/* Governance Phase 2 — provenance when this deviation was raised by converting a Risk. */}
+            <RaisedFromRiskBanner target="Deviation" recordId={selected.id} />
+
             <div className="flex items-center gap-2">
               <Badge variant={STATUS_VARIANT[selected.status]}>{STATUS_LABEL[selected.status]}</Badge>
               <Badge variant={getSeverityVariant(selected.severity, "fda")}>{normalizeSeverityForDisplay(selected.severity, "fda") ?? selected.severity}</Badge>

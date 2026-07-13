@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { RaisedFromRiskBanner } from "@/components/shared/RaisedFromRiskBanner";
 import {
   ArrowLeft, Pencil, Send, ShieldCheck, AlertTriangle, Lock, Clock, Link2, Users, Check, History, TrendingUp,
 } from "lucide-react";
@@ -409,6 +410,11 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
       <button type="button" onClick={() => router.push("/capa")} className="text-[12px] inline-flex items-center gap-1 bg-transparent border-none cursor-pointer mb-3" style={{ color: "var(--text-secondary)" }}>
         <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" /> Back to CAPA Tracker
       </button>
+
+      {/* Governance Phase 2 — provenance when this CAPA was raised by converting a Risk. */}
+      <div className="mb-3">
+        <RaisedFromRiskBanner target="CAPA" recordId={capa.id} />
+      </div>
 
       {/* ── ONE HEADER CARD (Phase J): identity + readiness line + rail merged
           into a single card. Replaces the old separate header band, banner, and

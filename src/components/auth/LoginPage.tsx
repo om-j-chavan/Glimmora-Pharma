@@ -315,9 +315,12 @@ export function LoginPage() {
             Replaces the former faint logo-mark watermark. */}
         <PillWithBubbles />
 
+        {/* Region-neutral badge: no US-only framing (Part 11 is FDA, Annex 11 is
+            EU, GxP is global). Not `uppercase` — the strings are cased on purpose
+            ("GxP", not "GXP"). */}
         <div className="relative z-[2] flex items-center gap-2.5 text-white/70">
           <Shield className="w-3.5 h-3.5" aria-hidden="true" />
-          <span className="text-[11px] font-medium tracking-wide uppercase">21 CFR Part 11</span>
+          <span className="text-[11px] font-medium tracking-wide">GxP · Part 11 · Annex 11</span>
         </div>
 
         <div className="relative z-[2] max-w-md">
@@ -325,8 +328,8 @@ export function LoginPage() {
             Inspection-ready quality, every day.
           </h2>
           <p className="mt-4 text-[14px] leading-relaxed text-white/70">
-            Deviations, CAPA, computerized-system validation and 483 responses — governed end to end,
-            with an immutable audit trail behind every action.
+            One platform for deviations, CAPA, validation, and inspection response — with an
+            immutable audit trail behind every regulated action.
           </p>
         </div>
 

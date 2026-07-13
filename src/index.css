@@ -929,23 +929,28 @@ body {
    (transform/opacity only) so idle CPU stays ~0. Bubbles are removed entirely
    under reduced-motion (below); the pill remains for visual character. */
 @keyframes pill-bubble-rise {
-  /* Emit at the pill, scaled to ~2px, invisible. */
-  0%   { transform: translateY(0) scale(0.4); opacity: 0; }
+  /* Emit at the pill, scaled to 4px, invisible. */
+  0%   { transform: translateY(0) scale(0.5); opacity: 0; }
   /* Fade in over the first 10%. */
-  10%  { opacity: 0.15; }
-  /* Hold ~0.15 until 70%, then fade out over the last 30%. */
-  70%  { opacity: 0.15; }
-  /* Risen up the panel, grown to 5px (scale 1), faded to nothing. */
+  10%  { opacity: 0.35; }
+  /* Hold ~0.35 until 70%, then fade out over the last 30%. */
+  70%  { opacity: 0.35; }
+  /* Risen up the panel, grown to 8px (scale 1), faded to nothing. */
   100% { transform: translateY(-46vh) scale(1); opacity: 0; }
 }
 .pill-bubble {
   position: absolute;
   bottom: 44%;                /* start near the pill (center-left of the panel) */
   z-index: 1;                 /* above the pill (0), below the content (2) */
-  width: 5px;                 /* grows 2px (scale .4) → 5px (scale 1) over life */
-  height: 5px;
+  width: 8px;                 /* grows 4px (scale .5) → 8px (scale 1) over life */
+  height: 8px;
   border-radius: 9999px;
-  background: #ffffff;        /* softness comes from the keyframe opacity, not this */
+  /* Solid white here + a 0.35 peak in the keyframe = an effective
+     rgba(255,255,255,0.35) at full fade-in. Deliberately NOT a brand tint: a
+     theme-derived fill washes out against the lighter palettes (green, amber),
+     white at a fixed alpha reads on all 14. Keep the alpha in the keyframe, not
+     in this colour, or the two multiply and the bubbles vanish again. */
+  background: #ffffff;
   pointer-events: none;
   will-change: transform, opacity;
   animation: pill-bubble-rise var(--pb-dur, 7s) linear var(--pb-delay, 0s) infinite;

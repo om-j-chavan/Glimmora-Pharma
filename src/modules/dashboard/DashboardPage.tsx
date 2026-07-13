@@ -33,7 +33,6 @@ import { PageLayout } from "@/components/layout/PageLayout";
 import { isOverdue } from "@/types/capa";
 import { displayUserName } from "@/lib/identity-display";
 import { regulatoryAlertSummary, driftAlertSummary } from "@/lib/ai";
-import { planLabel } from "@/lib/plans";
 import { ActionPlanTable } from "./ActionPlanTable";
 import { SmartRecordSearch } from "@/components/search/SmartRecordSearch";
 import { buildCapaSource, buildDeviationSource, buildFindingSource } from "@/lib/searchSources";
@@ -127,7 +126,7 @@ export function DashboardPage({
     if (serverSystems) dispatch(setSystems(serverSystems.map(adaptPrismaSystem)));
   }, [serverFindings, serverCAPAs, serverDeviations, serverSystems, dispatch]);
   // Visibility-SCOPED (Redux). Everything rendered as a record row comes from here.
-  const { findings, capas, deviations, systems, roadmap, fda483Events, tenantId } = useTenantData();
+  const { findings, capas, deviations, systems, roadmap, fda483Events } = useTenantData();
 
   // Tenant-WIDE (props, never dispatched). Everything counted comes from here.
   // Adapted to the slice shape so the aggregate maths below is identical
@@ -142,8 +141,6 @@ export function DashboardPage({
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
-  const companyName = org.companyName;
-  const tenants = useAppSelector((s) => s.auth.tenants);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { role } = useRole();
   const isAdmin = role === "super_admin" || role === "customer_admin";
@@ -154,7 +151,6 @@ export function DashboardPage({
     ? sites.filter((s) => s.id === selectedSiteId)
     : sites;
 
-  const currentTenant = tenants.find((t) => t.id === tenantId);
   function ownerName(id: string) { return displayUserName(id, users); }
 
   /* ── State ── */
@@ -360,12 +356,6 @@ export function DashboardPage({
         }
       >
         <div className="space-y-5">
-
-      {/* Tenant / period context (formerly the header subtitle) + plan badge. */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <p className="page-subtitle" style={{ margin: 0 }}>{currentTenant?.name || companyName || "Pharma Glimmora"} &middot; {dayjs().format("MMMM YYYY")}</p>
-        {currentTenant?.plan && <Badge variant={currentTenant.plan.tier === "ENTERPRISE" ? "green" : currentTenant.plan.tier === "PROFESSIONAL" ? "blue" : "gray"}>{planLabel(currentTenant.plan.tier, currentTenant.plan.displayName)}</Badge>}
-      </div>
 
       {/* Setup checklist */}
       <SetupChecklist />

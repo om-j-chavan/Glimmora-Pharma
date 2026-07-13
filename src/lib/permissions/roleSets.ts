@@ -184,8 +184,115 @@ export const AGI_MANAGE_ROLES: readonly string[] = ["customer_admin", "super_adm
 export const SETTINGS_MANAGE_ROLES: readonly string[] = ["super_admin", "customer_admin"];
 export const PERMISSION_MATRIX_EDIT_ROLES: readonly string[] = ["super_admin"];
 
-/* ── Governance (RAID) ── non-GxP; create = any non-viewer; manage = admin/QA ── */
+/* ══════════════════════════════════════════════════════════════════════════
+ * Governance / Risk Register — non-GxP. ONE role set for the whole module.
+ *
+ * The retired `RAID_MANAGE_ROLES` (a private `Set` inside the old
+ * src/actions/raid.ts, membership {customer_admin, qa_head}) DISAGREED with
+ * this set — it omitted super_admin, so `usePermissions("governance")` told a
+ * super_admin they could edit while the server rejected them. That divergence
+ * is gone: RAID_MANAGE_ROLES no longer exists anywhere, and every governance
+ * gate — server action, capability map, and UI — now reads GOVERNANCE_MANAGE_ROLES.
+ *
+ * THE CREATE-vs-MANAGE RULE (Risk Register):
+ *   • CREATE (raise a risk)  — any non-viewer. A seat/functional role
+ *     (qa, csv_val_lead, operations_head, …) CAN raise a risk. `viewer` cannot.
+ *   • MANAGE (edit / archive someone else's risk) — GOVERNANCE_MANAGE_ROLES only.
+ *   • A non-manage creator/owner may still edit THEIR OWN risk (creator OR owner),
+ *     but may NEVER archive — archive is manage-only, for anyone's risk.
+ * Governance is non-GxP, so `requireGxPAuthor` does NOT apply and super_admin
+ * is a legitimate manager here (unlike the GxP-authoring modules).
+ * ══════════════════════════════════════════════════════════════════════════ */
 export const GOVERNANCE_MANAGE_ROLES: readonly string[] = ["customer_admin", "super_admin", "qa_head"];
+
+/** MANAGE: edit/archive ANY risk in the tenant. Mirrors the server gate. */
+export function canManageGovernance(role: string): boolean {
+  return GOVERNANCE_MANAGE_ROLES.includes(role);
+}
+
+/** CREATE: raise a risk. Any non-viewer — seat roles included, by design. */
+export function canCreateRisk(role: string): boolean {
+  return role !== "viewer";
+}
+
+/* ── Management Decisions (Governance Phase 3) ──────────────────────────────
+ * The SAME create-vs-manage split as the Risk Register, on the same
+ * GOVERNANCE_MANAGE_ROLES set. Management review is non-GxP, so `requireGxPAuthor`
+ * does not apply and super_admin is a legitimate manager here.
+ *
+ *   • CREATE (minute a meeting)          — any non-viewer.
+ *   • EDIT   (amend a meeting + items)   — a manage role, OR the meeting's creator.
+ *   • ARCHIVE                            — manage roles ONLY, for any meeting.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** CREATE: minute a management review. Any non-viewer — seat roles included. */
+export function canCreateManagementDecision(role: string): boolean {
+  return role !== "viewer";
+}
+
+/**
+ * EDIT one specific meeting: a manage role edits anything; otherwise the actor
+ * must be its creator. A meeting has no "owner" axis (unlike a Risk), so the
+ * creator is the only non-manage editor. Pure + id-keyed, so the client mirror
+ * and the `updateManagementDecision` server gate call the SAME function.
+ * NOTE: EDIT only. ARCHIVE is `canManageGovernance` alone.
+ */
+export function canEditManagementDecision(
+  role: string,
+  actorUserId: string | null | undefined,
+  decision: { createdById?: string | null },
+): boolean {
+  if (canManageGovernance(role)) return true;
+  if (role === "viewer") return false;
+  if (!actorUserId) return false; // fail-closed: never match a null column
+  return decision.createdById === actorUserId;
+}
+
+/**
+ * CONVERT a risk into a Gap / Deviation / CAPA (Governance Phase 2).
+ *
+ * TWO gates, both required:
+ *   1. `canManageGovernance` — conversion is a governance action.
+ *   2. The TARGET's own create gate — because conversion calls the target's REAL
+ *      create action, which enforces its own role set plus the `requireGxPAuthor`
+ *      bright line. Mirrored here so the UI hides exactly what the server rejects.
+ *
+ * The intersection today is `qa_head` ALONE: `customer_admin` is in no create set
+ * ("admin ≠ doer") and `super_admin` cannot author GxP records. Conversion mints a
+ * real GxP record, so it must be authored by a real quality authority. We narrow
+ * the governance set here; we never widen the GxP one.
+ *
+ * Pure — the server action and the client both call this exact function.
+ */
+export function canConvertRiskTo(target: "Gap" | "Deviation" | "CAPA", role: string): boolean {
+  if (!canManageGovernance(role)) return false;
+  if (target === "Gap") return GAP_CREATE_ROLES.includes(role) && canAuthorGxP(role);
+  if (target === "Deviation") return canReportDeviation(role) && canAuthorGxP(role);
+  return canCreateCAPA(role); // already folds in canAuthorGxP
+}
+
+/** True when the actor may convert a risk into AT LEAST ONE target (shows the section). */
+export function canConvertRiskToAny(role: string): boolean {
+  return canConvertRiskTo("Gap", role) || canConvertRiskTo("Deviation", role) || canConvertRiskTo("CAPA", role);
+}
+
+/**
+ * EDIT one specific risk: a manage role edits anything; otherwise the actor must
+ * be the risk's creator or its owner. Pure + id-keyed, so the client capability
+ * mirror and the `updateRisk` server gate call the SAME function.
+ * NOTE: this governs EDIT only. ARCHIVE is `canManageGovernance` alone.
+ */
+export function canEditRisk(
+  role: string,
+  actorUserId: string | null | undefined,
+  risk: { createdById?: string | null; ownerId?: string | null },
+): boolean {
+  if (canManageGovernance(role)) return true;
+  if (role === "viewer") return false;
+  // Fail-closed: an unresolvable actor id never matches a null column.
+  if (!actorUserId) return false;
+  return risk.createdById === actorUserId || risk.ownerId === actorUserId;
+}
 
 /* ── Inspection Readiness ── non-GxP; admin actions = QA Head / admins ── */
 export const READINESS_ADMIN_ROLES: readonly string[] = ["qa_head", "customer_admin", "super_admin"];

@@ -47,7 +47,8 @@ model Tenant {
   fda483Events  FDA483Event[]
   systems       GxPSystem[]
   documents       Document[]
-  raidItems       RAIDItem[]
+  risks           Risk[]
+  managementDecisions ManagementDecision[]
   auditLogs       AuditLog[]
   inspections     Inspection[]
   playbooks       Playbook[]
@@ -157,6 +158,7 @@ model Site {
   findings   Finding[]
   capas      CAPA[]
   deviations Deviation[]
+  risks      Risk[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, code])
@@ -207,6 +209,13 @@ model User {
   ownedCAPAs               CAPA[]           @relation("CAPAOwner")
   // Phase 4 — reverse field for the CAPA.rejectedById FK.
   rejectedCAPAs            CAPA[]           @relation("CAPARejectedBy")
+  // Governance Phase 1 — reverse fields for the two Risk record-visibility FKs.
+  ownedRisks               Risk[]           @relation("RiskOwner")
+  createdRisks             Risk[]           @relation("RiskCreatedBy")
+  // Governance Phase 3 — reverse fields for the ManagementDecision FKs.
+  createdManagementDecisions ManagementDecision[] @relation("ManagementDecisionCreatedBy")
+  chairedManagementDecisions ManagementDecision[] @relation("ManagementDecisionChair")
+  ownedDecisionItems         DecisionItem[]       @relation("DecisionItemOwner")
   // Phase 2 — reverse fields for the new nullable FKs.
   reworkRequestedCAPAActionItems CAPAActionItem[] @relation("CAPAActionItemReworkRequestedBy")
   uploadedEvidenceFiles          EvidenceFile[]   @relation("EvidenceFileUploadedBy")
@@ -279,6 +288,13 @@ model Finding {
   // SME Section 1, Stage 6 (FULL) — recurrence linkage. Same shape as
   // Deviation.previousCAPAId. Nullable; onDelete: SetNull.
   previousCAPAId String?
+
+  /// Governance Phase 2 — REVERSE half of the risk-conversion bidirectional link.
+  /// Non-null only when this record was created by converting a Risk. The FORWARD
+  /// half is Risk.convertedToType/convertedToId. Nullable + additive: every record
+  /// raised the normal way keeps it null. onDelete: SetNull — archiving the source
+  /// risk must never cascade into a GxP record.
+  raisedFromRiskId String?
   // RUNG 2 — real FK to the GxP system this finding is raised against
   // (replaces the former Redux-only linkedSystemId soft reference).
   systemId       String?
@@ -299,6 +315,7 @@ model Finding {
   // SME Section 1, Stage 6 (FULL) — FK to the prior CAPA whose
   // recurrence this Finding represents.
   previousCAPA CAPA? @relation("FindingRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
+  raisedFromRisk Risk? @relation("FindingRaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
   edits  FindingEdit[]
   messages FindingMessage[]
 
@@ -494,6 +511,12 @@ model CAPA {
   // regulatory record that must survive User deletion.
   createdBy          String
   createdById        String?
+
+  /// Governance Phase 2 — REVERSE half of the risk-conversion bidirectional link.
+  /// Non-null only when this CAPA was created by converting a Risk. The FORWARD
+  /// half is Risk.convertedToType/convertedToId. Nullable + additive; onDelete:
+  /// SetNull — archiving the source risk must never cascade into a GxP record.
+  raisedFromRiskId   String?
   // Phase 3 — authoritative CAPA driver/owner userId FK (the owner dropdown
   // already selects a userId; createCAPA/updateCAPA capture it here). The
   // legacy `owner` string stays as the denormalised display value. Nullable +
@@ -516,6 +539,7 @@ model CAPA {
   deletionReason     String?
 
   tenant                 Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  raisedFromRisk         Risk?                        @relation("CAPARaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
   site                   Site?                        @relation(fields: [siteId], references: [id])
   finding                Finding?                     @relation(fields: [findingId], references: [id])
   closureSignature       SignedRecord?                @relation("CAPAClosureSignature", fields: [closureSignatureId], references: [id])
@@ -688,6 +712,13 @@ model Deviation {
   // — most Deviations have no recurrence link. onDelete: SetNull so
   // the Deviation survives if the prior CAPA is hard-deleted.
   previousCAPAId       String?
+
+  /// Governance Phase 2 — REVERSE half of the risk-conversion bidirectional link.
+  /// Non-null only when this record was created by converting a Risk. The FORWARD
+  /// half is Risk.convertedToType/convertedToId. Nullable + additive: every record
+  /// raised the normal way keeps it null. onDelete: SetNull — archiving the source
+  /// risk must never cascade into a GxP record.
+  raisedFromRiskId      String?
   // ── Tier 2, Item 4 — Investigation (RCA performed AFTER the report, by
   //    someone other than the reporter; SoD enforced via createdById vs
   //    investigationCompletedById). rcaMethod + rootCause above are reused:
@@ -729,6 +760,7 @@ model Deviation {
   // SME Section 1, Stage 6 (FULL) — FK to the prior CAPA whose
   // recurrence this Deviation represents.
   previousCAPA      CAPA?          @relation("DeviationRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
+  raisedFromRisk     Risk? @relation("DeviationRaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
   // SME Section 1, Stage 2 (FULL) — virtual reverse field for the
   // CAPA↔Deviation 1:1 relation. Carries no column of its own (the FK
   // lives on CAPA.deviationId); Prisma uses this for include/select
@@ -1305,28 +1337,201 @@ model Document {
 
 // ── GOVERNANCE ──
 
-model RAIDItem {
-  id           String    @id @default(cuid())
-  tenantId     String
-  type         String
-  title        String
-  description  String
-  priority     String
-  owner        String
-  dueDate      DateTime?
-  status       String    @default("Open")
-  impact       String?
-  mitigation   String?
-  closedBy     String?
-  closedAt     DateTime?
-  reopenedBy   String?
-  reopenedAt   DateTime?
-  reopenReason String?
-  createdBy    String
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+/// Risk Register (Governance Phase 1). Replaces the retired `RAIDItem` table,
+/// which was a single polymorphic Risk/Action/Issue/Decision log. RAIDItem held
+/// ZERO rows in every environment, so it was dropped rather than migrated.
+///
+/// Enumerations are plain Strings (the project-wide convention — SQLite in dev,
+/// no Prisma enums anywhere in this schema). The authoritative value sets and
+/// the legal status transitions live in `src/constants/risk.ts`, and every
+/// mutation validates against them with Zod before touching the DB.
+///   category   ∈ Supplier | Process | DataIntegrity | Equipment | Regulatory | Other
+///   severity   ∈ Critical | High | Medium | Low
+///   likelihood ∈ Rare | Unlikely | Possible | Likely | AlmostCertain
+///   status     ∈ Open | Mitigating | Closed | Converted
+///
+/// Record-visibility is built in from the start (NOT retrofitted): `createdById`
+/// (creator) + `ownerId` (assignee) are the two id-keyed columns that
+/// `visibilityWhere` ORs on. See `src/lib/queries/risks.ts`.
+///
+/// Supporting documents reuse the shared polymorphic `Document` model — there is
+/// no `RiskDocument` child table. A risk's docs are the Document rows where
+/// `sourceModule = "risk-register"` AND `sourceId = risk.id` (dual-written to the
+/// legacy `linkedModule`/`linkedRecordId` pointers, exactly as Gap Assessment
+/// does). Document has no hard FK to its parent, so no Prisma relation field is
+/// possible here — this mirrors every other module.
+model Risk {
+  id          String @id @default(cuid())
+  /// Human-readable per-tenant per-site per-year reference: "RISK-CHN-2026-001".
+  /// Globally @unique (matches CAPA/Finding); the create action retries on P2002.
+  /// Nullable only so the column can be added additively.
+  reference   String? @unique
+  tenantId    String
+  /// Drives the <SITE> segment of `reference`. Nullable — a tenant-level risk
+  /// falls back to the 2-segment "RISK-2026-001" form (see buildReferencePrefix).
+  siteId      String?
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  category    String
+  severity    String
+  likelihood  String
+  status      String @default("Open")
+
+  /// Assignee. Id-keyed User FK — one half of the record-visibility OR.
+  ownerId     String?
+  /// Creator. Id-keyed User FK — the other half of the record-visibility OR.
+  /// Null for a tenant-admin creator with no User row (fail-closed; admins
+  /// are see-all anyway). Paired with the `createdBy` display-name string.
+  createdById String?
+  createdBy   String
+
+  targetDate     DateTime?
+  mitigationPlan String?
+
+  /// ── CONVERSION (Phase 2) — the FORWARD half of the bidirectional link ──
+  /// Set together with `status = "Converted"` when the risk is escalated into a
+  /// real record. Deliberately NOT a Prisma relation: the target is polymorphic
+  /// across three models. The REVERSE half is `raisedFromRiskId` on each target,
+  /// which IS a real FK (see the `raisedFindings` / `raisedDeviations` /
+  /// `raisedCAPAs` back-relations below).
+  ///   convertedToType ∈ Gap | Deviation | CAPA
+  ///   convertedToId   = the created Finding.id / Deviation.id / CAPA.id
+  /// Both are null until conversion; once set, `status` is terminal-Converted and
+  /// the risk can never be converted again (see convertRisk* in
+  /// src/actions/risk-conversion.ts).
+  convertedToType String?
+  convertedToId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Soft delete — "Archive" in the UI. Rows are never hard-deleted (ALCOA+).
+  deletedAt      DateTime?
+  deletedBy      String?
+  deletionReason String?
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site          Site?  @relation(fields: [siteId], references: [id])
+  owner         User?  @relation("RiskOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdByUser User?  @relation("RiskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  /// Reverse side of each target's `raisedFromRiskId` FK. A risk converts at most
+  /// ONCE, so in practice each list holds 0 or 1 row; they are lists only because
+  /// Prisma models the FK side as optional-to-many. The single-conversion
+  /// invariant is enforced by the terminal `status = "Converted"` guard, not by
+  /// a DB constraint.
+  raisedFindings   Finding[]   @relation("FindingRaisedFromRisk")
+  raisedDeviations Deviation[] @relation("DeviationRaisedFromRisk")
+  raisedCAPAs      CAPA[]      @relation("CAPARaisedFromRisk")
+
+  @@index([tenantId, status])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, createdById])
+  @@index([tenantId, convertedToType, convertedToId])
+  @@index([deletedAt])
+}
+
+/// Management Decisions (Governance Phase 3) — the minuted record of a management
+/// review meeting: what was discussed, who attended, and every decision or action
+/// item that came out of it.
+///
+/// The MEETING is the durable record ("complete history for future reference"):
+/// rows are never hard-deleted (soft-delete only) and every edit writes an
+/// AuditLog row, so the trail of what was decided — and what was later amended —
+/// is reconstructable.
+///
+/// Enumerations are plain Strings, matching the project-wide convention. The
+/// authoritative sets live in `src/constants/managementDecision.ts`.
+///
+/// Record-visibility is built in from the start. A meeting has no single
+/// "assignee", so the axes are: creator (`createdById`) OR see-all role OR the
+/// owner of ANY of its action items (the relation branch — an action item you own
+/// on a meeting you cannot open would be a broken assignment). See
+/// `src/lib/queries/managementDecisions.ts`.
+///
+/// Supporting documents reuse the shared polymorphic `Document` model — no child
+/// document table. A meeting's docs are the Document rows where
+/// `sourceModule = "management-decisions"` AND `sourceId = decision.id`.
+model ManagementDecision {
+  id        String @id @default(cuid())
+  /// Human-readable per-tenant per-year reference: "MGT-2026-001". Globally
+  /// @unique (matches CAPA/Finding/Risk); the create action retries on P2002.
+  /// TENANT-level, not site-scoped — a management review is not a site record —
+  /// so the reference has no <SITE> segment, unlike RISK-<SITE>-<year>-<n>.
+  reference String? @unique
+  tenantId  String
+
+  topic       String
+  meetingDate DateTime
+  /// Free text, one attendee per line. Deliberately NOT a User relation: a
+  /// management review routinely includes people with no account (external
+  /// auditors, consultants, board members).
+  attendees   String
+
+  /// Who chaired. Nullable User FK — the chair is usually a tenant user, but a
+  /// meeting minuted before the chair had an account still records fine.
+  chairedById String?
+
+  /// Creator. Id-keyed User FK — the primary record-visibility axis. Null for a
+  /// tenant-admin creator with no User row (fail-closed; admins are see-all).
+  /// Paired with the `createdBy` display-name string.
+  createdById String?
+  createdBy   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Soft delete — "Archive" in the UI. Never hard-deleted (ALCOA+).
+  deletedAt      DateTime?
+  deletedBy      String?
+  deletionReason String?
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  chairedBy     User?  @relation("ManagementDecisionChair", fields: [chairedById], references: [id], onDelete: SetNull)
+  createdByUser User?  @relation("ManagementDecisionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  items DecisionItem[]
+
+  @@index([tenantId, meetingDate])
+  @@index([tenantId, createdById])
+  @@index([deletedAt])
+}
+
+/// One decision or action item minuted at a management review. The nested child of
+/// ManagementDecision — this is the "decisions & action items" list.
+///
+/// A pure DECISION is an item with no owner and no due date ("approved the 2026
+/// validation master plan"). An ACTION ITEM adds an owner and/or a due date. The
+/// two share one row shape rather than one table each: they are the same minuted
+/// statement, differing only in whether someone was tasked with it.
+model DecisionItem {
+  id         String @id @default(cuid())
+  decisionId String
+
+  /// The minuted statement itself.
+  text String
+
+  /// Assigned owner, if this is an action item. Id-keyed User FK — ALSO the
+  /// relation branch of the parent's record-visibility rule.
+  ownerId String?
+  dueDate DateTime?
+
+  /// open | done. A pure decision (no owner, no due date) stays "open" and the
+  /// UI renders it as a decision rather than a task.
+  status String @default("open")
+
+  /// Preserves the order the items were minuted in.
+  position Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  decision ManagementDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  owner    User?              @relation("DecisionItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([decisionId])
+  @@index([ownerId])
 }
 
 // ── INSPECTION READINESS ──

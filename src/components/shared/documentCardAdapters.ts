@@ -3,6 +3,7 @@ import type { DocumentCardView } from "./DocumentCard";
 import type { EvidenceLibraryDoc, DocOrigin } from "@/lib/queries/evidenceLibrary";
 import type { WorklistDoc } from "@/lib/queries/worklist";
 import { EVIDENCE_CATEGORY_LABEL, type EvidenceCategory } from "@/lib/queries/evidence";
+import { RISK_DOC_CATEGORY_LABEL, type RiskDocCategory } from "@/constants/risk";
 
 /**
  * Per-source adapters → the shared <DocumentCard>'s normalized DocumentCardView.
@@ -35,7 +36,13 @@ export function worklistDocToCardView(d: WorklistDoc): DocumentCardView {
   // Default to the Document route; a doc may override (e.g. CAPA-action evidence
   // is an EvidenceFile served from /api/evidence/files/{id}).
   const href = d.href ?? `/api/documents/${d.id}`;
-  const catLabel = d.category ? (EVIDENCE_CATEGORY_LABEL[d.category as EvidenceCategory] ?? d.category) : null;
+  // Documents carried over from a converted Risk keep the risk-register category
+  // vocabulary, so fall back to that map before printing the raw SCREAMING_SNAKE.
+  const catLabel = d.category
+    ? (EVIDENCE_CATEGORY_LABEL[d.category as EvidenceCategory]
+       ?? RISK_DOC_CATEGORY_LABEL[d.category as RiskDocCategory]
+       ?? d.category)
+    : null;
   const fileInfo = d.fileSize ?? (d.fileType ?? d.fileExtension ?? null);
   return {
     id: d.id,

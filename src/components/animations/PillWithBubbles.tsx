@@ -38,17 +38,29 @@ const BUBBLES: { left: number; dur: number; delay: number }[] = [
 export function PillWithBubbles() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      {/* Layer 1 — the static tilted pill (~320×90, rotate(-45deg), opacity 0.05).
-          No animation on the pill itself; it just sits behind the copy. */}
+      {/* Layer 1 — the static tilted pill. Sized as a fraction of the panel
+          (width: 50% + aspect-ratio) rather than fixed px, so it stays
+          proportional at every breakpoint. `border-radius: 9999px` on a 3.5:1
+          box gives a true capsule, so no SVG is needed.
+
+          The fill is white at a fixed low alpha — NOT the `opacity` property and
+          not a brand tint — so it reads identically against every one of the 14
+          colour themes the panel gradient can take. Anchored at left 22% (not
+          15%) because at this size a 15% anchor pushed ~a third of the capsule
+          past the panel's left edge. No animation on the pill itself. */}
       <div
         className="absolute"
-        style={{ left: "15%", top: "46%", transform: "translate(-50%, -50%) rotate(-45deg)", opacity: 0.05, zIndex: 0 }}
-      >
-        <svg width="320" height="90" viewBox="0 0 320 90" fill="none">
-          {/* rx = height/2 → a true capsule. */}
-          <rect x="1" y="1" width="318" height="88" rx="44" ry="44" fill="#ffffff" />
-        </svg>
-      </div>
+        style={{
+          left: "22%",
+          top: "46%",
+          width: "50%",
+          aspectRatio: "3.5 / 1",
+          transform: "translate(-50%, -50%) rotate(-45deg)",
+          borderRadius: "9999px",
+          background: "rgba(255, 255, 255, 0.09)",
+          zIndex: 0,
+        }}
+      />
 
       {/* Layer 2 — bubbles rising straight up (gravity; they don't inherit the
           pill's tilt). Size / opacity / lifetime all live in the CSS keyframe. */}

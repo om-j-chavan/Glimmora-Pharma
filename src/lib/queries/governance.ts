@@ -18,12 +18,10 @@ export interface AuditLogQueryResult {
   limit: number;
 }
 
-export const getRAIDItems = cache(async (tenantId: string) => {
-  return prisma.rAIDItem.findMany({
-    where: { tenantId },
-    orderBy: { createdAt: "desc" },
-  });
-});
+// Governance Phase 1 — `getRAIDItems` was removed together with the RAIDItem
+// table. The Risk Register's reads live in ./risks.ts, where every one of them
+// is scoped by `riskVisibilityWhere(session)`; this loader was tenant-wide and
+// carried no record-visibility narrowing at all.
 
 export const getDocuments = cache(async (tenantId: string) => {
   // Soft-deleted documents are retained but hidden from the library view.

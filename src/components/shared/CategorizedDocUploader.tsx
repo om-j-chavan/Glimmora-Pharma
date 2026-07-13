@@ -51,6 +51,12 @@ export interface CategorizedDocUploaderProps {
   emptyText?: string;
   /** Categories offered per document. Defaults to the shared EVIDENCE_CATEGORIES. */
   categories?: readonly string[];
+  /** Display labels for `categories`, keyed by the raw stored value. Defaults to
+   *  EVIDENCE_CATEGORY_LABEL. A module with its OWN category vocabulary (e.g. the
+   *  Risk Register's RISK_DOC_CATEGORIES) passes its own map so the dropdown and
+   *  the card badge read as prose instead of raw SCREAMING_SNAKE values. Any key
+   *  not present falls back to the raw value, so this stays optional. */
+  categoryLabels?: Record<string, string>;
   /** Optional label for the Add button (default "Add Document"). */
   addLabel?: string;
 }
@@ -69,6 +75,7 @@ export function CategorizedDocUploader({
   readOnly = false,
   emptyText = "No documents yet.",
   categories = EVIDENCE_CATEGORIES,
+  categoryLabels,
   addLabel = "Add Document",
 }: CategorizedDocUploaderProps) {
   const [addOpen, setAddOpen] = useState(false);
@@ -78,7 +85,10 @@ export function CategorizedDocUploader({
   const [pendingDelete, setPendingDelete] = useState<WorklistDoc | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
-  const catOptions = categories.map((c) => ({ value: c, label: EVIDENCE_CATEGORY_LABEL[c as EvidenceCategory] ?? c }));
+  /** Raw stored value → display label. Caller's map wins; Evidence is the default. */
+  const labelFor = (c: string) =>
+    categoryLabels?.[c] ?? EVIDENCE_CATEGORY_LABEL[c as EvidenceCategory] ?? c;
+  const catOptions = categories.map((c) => ({ value: c, label: labelFor(c) }));
   const allHaveCategory = entries.length > 0 && entries.every((e) => e.category);
 
   function addFiles(files: FileList | null) {
@@ -126,7 +136,14 @@ export function CategorizedDocUploader({
             // this view (e.g. own docs shown read-only), WITHOUT a misleading lock.
             const foreign = canDelete ? !canDelete(d) : false;
             const deletable = !readOnly && !!onRemove && !foreign;
-            const view = worklistDocToCardView(d);
+            const base = worklistDocToCardView(d);
+            // The adapter labels the category badge from EVIDENCE_CATEGORY_LABEL.
+            // When the caller supplies its own vocabulary, relabel the badge with
+            // the same `labelFor` the dropdown uses, so both read identically.
+            const view =
+              categoryLabels && d.category
+                ? { ...base, badge: { label: labelFor(d.category), tone: "blue" as const } }
+                : base;
             return (
               <DocumentCard
                 key={d.id}

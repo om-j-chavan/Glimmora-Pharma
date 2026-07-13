@@ -163,8 +163,31 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   TICKET_CANCELLED: "Ticket cancelled",
   TICKET_AUTO_CLOSED: "Ticket auto-closed",
 
+  // Governance — Risk Register (Phase 1). The RAID_ITEM_* family retired with
+  // the RAIDItem table. Historical AuditLog rows keep their raw action string
+  // and fall through to the humanised default, so no audit history is lost.
+  RISK_CREATED: "Risk raised",
+  RISK_UPDATED: "Risk updated",
+  RISK_STATUS_CHANGED: "Risk status changed",
+  RISK_ARCHIVED: "Risk archived",
+  RISK_DOCUMENT_ADDED: "Risk document added",
+  RISK_DOCUMENT_REMOVED: "Risk document removed",
+  // Governance Phase 2 — conversion. RISK_CONVERTED lands on the risk;
+  // RECORD_RAISED_FROM_RISK lands on the created Gap / Deviation / CAPA.
+  RISK_CONVERTED: "Risk converted",
+  RECORD_RAISED_FROM_RISK: "Raised from risk",
+  RISK_DOCUMENTS_CARRIED_OVER: "Risk documents carried over",
+  RISK_CONVERSION_ROLLED_BACK: "Risk conversion rolled back",
+  // Governance Phase 3 — Management Decisions. The meeting is the durable record;
+  // every amendment carries what was removed, so the minuted history survives edits.
+  MANAGEMENT_DECISION_CREATED: "Management decision recorded",
+  MANAGEMENT_DECISION_UPDATED: "Management decision amended",
+  MANAGEMENT_DECISION_ARCHIVED: "Management decision archived",
+  MANAGEMENT_DECISION_DOCUMENT_ADDED: "Meeting document added",
+  MANAGEMENT_DECISION_DOCUMENT_REMOVED: "Meeting document removed",
+  DECISION_ITEM_STATUS_CHANGED: "Action item status changed",
+
   // Other governance records
-  RAID_ITEM_CREATED: "RAID item created",
   INSPECTION_CREATED: "Inspection created",
   INSPECTION_COMPLETED: "Inspection completed",
   RTM_ENTRY_CREATED: "RTM entry created",

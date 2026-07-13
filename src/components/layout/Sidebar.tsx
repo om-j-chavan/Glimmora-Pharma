@@ -26,8 +26,6 @@ import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { CAPA_MODULE_VIEW_ROLES } from "@/lib/permissions/roleSets";
-import { useSetupStatus } from "@/hooks/useSetupStatus";
-import { useActiveSite } from "@/hooks/useActiveSite";
 import { logout } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
@@ -97,9 +95,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
   const toast = useToast();
   const pathname = usePathname();
-  const activeSite = useActiveSite();
   const { allowedPaths, role } = useRole();
-  const { setupNeeded, completedCount, totalSteps } = useSetupStatus();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(pathname ?? "")]),
@@ -209,18 +205,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           priority
           className="h-auto w-full max-w-[180px]"
         />
-        <div
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 11,
-            maxWidth: "100%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {activeSite?.name ?? "All sites"}
-        </div>
       </div>
 
       {/* ── Nav groups ── */}
@@ -317,14 +301,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                           >
                             <item.icon className="w-4 h-4" aria-hidden="true" />
                             {item.label}
-                            {item.path === "settings" && setupNeeded && (
-                              <span
-                                className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#0ea5e9] text-white min-w-[32px] text-center"
-                                aria-label={`Setup: ${completedCount} of ${totalSteps} complete`}
-                              >
-                                {completedCount}/{totalSteps}
-                              </span>
-                            )}
                             {isActive && (
                               <span className="sr-only">(current page)</span>
                             )}

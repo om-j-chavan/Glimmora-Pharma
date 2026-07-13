@@ -5,7 +5,6 @@ import themeReducer from "./theme.slice";
 import findingsReducer from "./findings.slice";
 import capaReducer from "./capa.slice";
 import evidenceReducer from "./evidence.slice";
-import raidReducer from "./raid.slice";
 import permissionsReducer from "./permissions.slice";
 import notificationsReducer from "./notifications.slice";
 import readinessReducer from "./readiness.slice";
@@ -22,7 +21,6 @@ const combinedReducer = combineReducers({
   findings: findingsReducer,
   capa: capaReducer,
   evidence: evidenceReducer,
-  raid: raidReducer,
   permissions: permissionsReducer,
   notifications: notificationsReducer,
   readiness: readinessReducer,

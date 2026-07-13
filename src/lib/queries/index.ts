@@ -19,7 +19,7 @@ export {
 export { getDeviations, getDeviation, deviationVisibilityWhere } from "./deviations";
 export { getFDA483Events, getFDA483Event, getFDA483Stats, getFDA483EventAuditLogs, fda483VisibilityWhere } from "./fda483";
 export { getSystems, getDeletedSystems, getSystem, getSystemsStats, getRTMStats, getSystemByRef, getLinkableFindings, getSystemRecentActivity, systemVisibilityWhere } from "./systems";
-export { getRAIDItems, getDocuments, getDocumentStats, getCAPAEvidenceFiles, getValidationStageDocuments, getFDA483EvidenceDocuments, getAuditLogs, getAuditTrailView, getAuditTrailPage, getAuditTrailFilterOptions, getAGIActivityLogs, getPlatformAuditLogs, getPlatformAuditActions, getFrameworkAuditLogs } from "./governance";
+export { getDocuments, getDocumentStats, getCAPAEvidenceFiles, getValidationStageDocuments, getFDA483EvidenceDocuments, getAuditLogs, getAuditTrailView, getAuditTrailPage, getAuditTrailFilterOptions, getAGIActivityLogs, getPlatformAuditLogs, getPlatformAuditActions, getFrameworkAuditLogs } from "./governance";
 export type { AuditTrailRow, AuditTrailView, AuditTrailFilters, AuditSortKey, AuditTrailPageResult, AuditTrailFilterOptions, PlatformAuditRow, PlatformAuditResult, PlatformAuditFilters, FrameworkAuditRow, FrameworkAuditResult, FrameworkAuditScope } from "./governance";
 export { getInspections, getInspection, getReadinessStats, getOverallReadiness, getPlaybooks, computeReadinessScore, inspectionVisibilityWhere } from "./inspections";
 export { getSites, getUsers } from "./settings";

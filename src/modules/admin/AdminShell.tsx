@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import {
-  Shield,
   Users,
   SlidersHorizontal,
   ScrollText,
@@ -189,49 +189,37 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
           }`}
           style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)" }}
         >
-          {/* Logo */}
+          {/* Logo — same asset + sizing as the customer-app Sidebar. */}
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "14px 16px",
+              flexDirection: "column",
+              alignItems: "flex-start",
+              gap: 6,
+              padding: "16px 16px 14px",
               borderBottom: "1px solid var(--sidebar-border)",
             }}
           >
+            <Image
+              src="/logo.png"
+              alt="Pharma Glimmora"
+              width={180}
+              height={47}
+              priority
+              className="h-auto w-full max-w-[180px]"
+            />
             <div
-              aria-hidden="true"
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                background: "#f0a500",
-                flexShrink: 0,
+                fontSize: 10,
+                fontWeight: 600,
+                padding: "1px 8px",
+                borderRadius: 20,
+                display: "inline-block",
+                background: "var(--danger-bg)",
+                color: "var(--danger)",
               }}
             >
-              <Shield size={16} style={{ color: "#ffffff" }} aria-hidden="true" />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ color: "var(--sidebar-text)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
-                Pharma Glimmora
-              </div>
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  marginTop: 3,
-                  padding: "1px 8px",
-                  borderRadius: 20,
-                  display: "inline-block",
-                  background: "var(--danger-bg)",
-                  color: "var(--danger)",
-                }}
-              >
-                Platform Admin
-              </div>
+              Platform Admin
             </div>
           </div>
 

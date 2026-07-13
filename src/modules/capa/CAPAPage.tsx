@@ -302,7 +302,7 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
       <PageLayout
         title="CAPA Tracker"
         titleIcon={Target}
-        contentPadding={false}
+        contentPadding={true}
         className="capa-shell"
         description={`Track corrective and preventive actions from initiation through effectiveness. \u00b7 ${capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}`}
         actions={canCreateCAPAs ? [{ label: "New CAPA", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) }] : []}
