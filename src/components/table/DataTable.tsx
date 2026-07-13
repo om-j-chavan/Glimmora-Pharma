@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -20,6 +21,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import clsx from "clsx";
+import { motion } from "framer-motion";
+import { usePrefersReducedMotion } from "@/lib/motion/useReducedMotion";
+import { DURATION, EASE, STAGGER } from "@/lib/motion/tokens";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
@@ -50,11 +54,24 @@ export type SortDir = "asc" | "desc";
 
 export interface DataColumn<T> {
   key: string;
+  /** Plain-text column name. ALWAYS a string — it backs the CSV/PDF/Excel
+   *  export header, the sort control's accessible label, and the column-toggle
+   *  menu entry. For rich <th> DISPLAY content, set `header` (below); `label`
+   *  is never widened. */
   label: string;
+  /** Optional rich header content rendered in the <th> INSTEAD of `label`.
+   *  Display-only — `label` is still used for export/sort/column-toggle text.
+   *  When omitted, the <th> falls back to `label`. */
+  header?: ReactNode;
   sortable?: boolean;
   align?: "left" | "right" | "center";
   width?: string;
   headerSrOnly?: boolean;
+  /** Per-column class hook for the <th>. Composes with alignment + `width`. */
+  headerClassName?: string;
+  /** Per-column class hook for each <td>: a static string or a per-row
+   *  function. Composes with (does not replace) the column's alignment class. */
+  cellClassName?: string | ((row: T) => string);
   /** Escape hatch: custom cell (also how inline Toggle cells are declared —
    *  return a <Toggle> that persists on change). Defaults to String(row[key]). */
   render?: (row: T) => ReactNode;
@@ -138,6 +155,13 @@ export interface DataTableProps<T> {
    *  it scrolls horizontally inside its overflow-x-auto wrapper instead of
    *  squishing columns. Mirrors DataTableBase's `minWidth`. */
   minWidth?: number;
+  /** Row DENSITY for THIS table instance. "default" keeps the current behavior
+   *  (0.75rem vertical row padding, inheriting the global topbar density);
+   *  "compact" pins the instance to 0.375rem vertical padding — the SAME value
+   *  the app's [data-density="compact"] / --row-py uses — for shorter rows + a
+   *  shorter header. Every other visual token (horizontal padding, borders,
+   *  hover, zebra, alignment) is unchanged. Additive: omit for current behavior. */
+  density?: "default" | "compact";
   /** How the (client-side) rows are paged. Default "show-more".
    *   - "show-more": initial `pageSize` rows + a "Show more" button + footer.
    *   - "pages": classic numbered controls (First / Prev / 1 2 3 … / Next / Last)
@@ -180,6 +204,18 @@ export interface DataTableProps<T> {
    *  react to WHY the list is empty (e.g. an "Add …" CTA when unfiltered vs a
    *  "clear filters" hint when filtered). Resolved only when rows.length === 0. */
   emptyState?: ReactNode | ((ctx: EmptyStateContext) => ReactNode);
+
+  /** Per-row class hook for the <tr>: a static string or a (row, index)
+   *  function. Composes with (does not replace) the widget's own row classes —
+   *  the row-click `cursor-pointer`, etc. */
+  rowClassName?: string | ((row: T, index: number) => string);
+  /** Per-row inline style for the <tr>, merged OVER the widget's own row style
+   *  (the widget sets none today, so this simply applies). Called per rendered
+   *  row with the row and its index. */
+  rowStyle?: (row: T, index: number) => CSSProperties | undefined;
+  /** Screen-reader-only table caption, rendered as an sr-only <caption> inside
+   *  the <table>. Only emitted when provided. */
+  caption?: string;
   className?: string;
 }
 
@@ -244,6 +280,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     defaultSort,
     minBodyHeight = 320,
     minWidth,
+    density = "default",
     paginationMode = "show-more",
     search,
     filters = [],
@@ -254,10 +291,14 @@ export function DataTable<T>(props: DataTableProps<T>) {
     rowMenu,
     bulk,
     emptyState,
+    rowClassName,
+    rowStyle,
+    caption,
     className,
   } = props;
 
   const searchId = useId();
+  const reduced = usePrefersReducedMotion();
   const [rawSearch, setRawSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
@@ -431,7 +472,34 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
   // Mirror DataTableBase: a fixed min-width forces horizontal scroll inside the
   // overflow-x-auto wrapper rather than squishing columns.
-  const tableStyle = minWidth != null ? { minWidth } : undefined;
+  // Per-instance density: override the density-driven `--row-py` that the global
+  // `.data-table th`/`td` read (padding-block: var(--row-py)). "compact" pins
+  // THIS table to 0.375rem — the same value [data-density="compact"] uses — so
+  // its rows + header are shorter; "default" sets nothing, so th/td keep
+  // inheriting the global topbar density (byte-identical to before).
+  const tableStyle: CSSProperties | undefined =
+    minWidth != null || density === "compact"
+      ? ({
+          ...(minWidth != null ? { minWidth } : null),
+          ...(density === "compact" ? { "--row-py": "0.375rem" } : null),
+        } as CSSProperties)
+      : undefined;
+
+  // Sticky ⋮ column: pin the auto-generated rowMenu column to the right edge so
+  // it stays visible while the rest of the table scrolls horizontally. Only
+  // engaged when `minWidth` (the thing that triggers horizontal scroll) is set
+  // AND a rowMenu column exists — otherwise no sticky and no visual change. The
+  // header cell is a sticky top+right corner at a higher z than the sticky-top
+  // data headers; the body cell rides above the horizontally-scrolling data
+  // cells. Opaque bg (the token the cells/card sit on) so scrolled content never
+  // shows through; a left border reads it as its own column when scrolled.
+  const stickyRowMenu = minWidth != null && !!rowMenu;
+  const stickyMenuHeadStyle: CSSProperties | undefined = stickyRowMenu
+    ? { position: "sticky", right: 0, zIndex: 2, background: "var(--card-bg)", borderLeft: "1px solid var(--bg-border)" }
+    : undefined;
+  const stickyMenuCellStyle: CSSProperties | undefined = stickyRowMenu
+    ? { position: "sticky", right: 0, zIndex: 1, background: "var(--card-bg)", borderLeft: "1px solid var(--bg-border)" }
+    : undefined;
 
   // Resolve the empty state once (only shown when rows.length === 0). A function
   // form gets the filter/search context so callers can branch the copy/CTA;
@@ -550,6 +618,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
             primitive so every table inherits it; override via `minBodyHeight`. */}
         <div className="overflow-x-auto" style={{ minHeight: minBodyHeight }}>
           <table className="data-table w-full" aria-label={ariaLabel} style={tableStyle}>
+            {caption && <caption className="sr-only">{caption}</caption>}
             <thead>
               <tr>
                 {bulk && (
@@ -558,17 +627,17 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   </th>
                 )}
                 {visibleColumns.map((c) => (
-                  <th key={c.key} className={clsx(alignCls(c.align), c.width)} scope="col">
+                  <th key={c.key} className={clsx(alignCls(c.align), c.width, c.headerClassName)} scope="col">
                     {c.headerSrOnly ? (
-                      <span className="sr-only">{c.label}</span>
+                      <span className="sr-only">{c.header ?? c.label}</span>
                     ) : c.sortable ? (
-                      <SortHeader label={c.label} state={sortState(c.key)} onClick={() => cycleSort(c.key)} />
+                      <SortHeader label={c.header ?? c.label} state={sortState(c.key)} onClick={() => cycleSort(c.key)} />
                     ) : (
-                      c.label
+                      c.header ?? c.label
                     )}
                   </th>
                 ))}
-                {rowMenu && <th className="w-12"><span className="sr-only">Actions</span></th>}
+                {rowMenu && <th className="w-12" style={stickyMenuHeadStyle}><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -581,11 +650,25 @@ export function DataTable<T>(props: DataTableProps<T>) {
                   </td>
                 </tr>
               ) : (
-                rows.map((r) => (
-                  <tr
+                rows.map((r, i) => (
+                  <motion.tr
                     key={rowKey(r)}
                     onClick={onRowClick ? () => onRowClick(r) : undefined}
-                    className={onRowClick ? "cursor-pointer" : undefined}
+                    className={clsx(
+                      onRowClick && "cursor-pointer",
+                      typeof rowClassName === "function" ? rowClassName(r, i) : rowClassName,
+                    ) || undefined}
+                    style={rowStyle?.(r, i)}
+                    // Subtle, fast row-entrance fade. Stagger delay is CAPPED at
+                    // 0.12s so even a 50-row page finishes revealing quickly and
+                    // never feels like it's gating the data. Opacity only — no
+                    // transform — so table layout is untouched. Reduced motion →
+                    // rows render instantly (no fade, no stagger). Rows keyed by
+                    // rowKey animate only when they (re)mount: initial paint,
+                    // filter add, and show-more — not on unchanged re-renders.
+                    initial={reduced ? false : { opacity: 0 }}
+                    animate={reduced ? undefined : { opacity: 1 }}
+                    transition={reduced ? undefined : { duration: DURATION.fast, ease: EASE.standard, delay: Math.min(i * STAGGER.fast, 0.12) }}
                   >
                     {bulk && (
                       <td onClick={(e) => e.stopPropagation()}>
@@ -600,16 +683,22 @@ export function DataTable<T>(props: DataTableProps<T>) {
                       </td>
                     )}
                     {visibleColumns.map((c) => (
-                      <td key={c.key} className={alignCls(c.align)}>
+                      <td
+                        key={c.key}
+                        className={clsx(
+                          alignCls(c.align),
+                          typeof c.cellClassName === "function" ? c.cellClassName(r) : c.cellClassName,
+                        ) || undefined}
+                      >
                         {c.render ? c.render(r) : String((r as Record<string, unknown>)[c.key] ?? "")}
                       </td>
                     ))}
                     {rowMenu && (
-                      <td className="text-right">
+                      <td className="text-right" style={stickyMenuCellStyle}>
                         <RowMenu items={rowMenu(r)} />
                       </td>
                     )}
-                  </tr>
+                  </motion.tr>
                 ))
               )}
             </tbody>

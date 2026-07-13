@@ -150,7 +150,10 @@ export function actionToWorkItem(a: WorklistActionItem, fmt: Fmt): WorkItem {
     description: a.description,
     reworkReason: a.reworkReason,
     notes: a.completionNotes ?? "",
-    myDocs: a.docs, relatedDocs: [], messages: a.messages,
+    // Item 6 — myDocs = the worker's own evidence uploads (editable); relatedDocs
+    // = the source-module docs (gap finding / deviation) that spawned the CAPA,
+    // read-only (the origin boundary). The modal renders relatedDocs read-only.
+    myDocs: a.docs, relatedDocs: a.relatedDocs, messages: a.messages,
     link: { href: `/capa/${a.capaId}`, label: capaRef },
     closureMessage: null, closedDate: null,
     raw: a,

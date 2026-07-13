@@ -2,7 +2,6 @@ import { type PlanConfig, type Tenant } from "@/store/auth.slice";
 import { resolvePlanCaps, resolveExpiry, type PlanTier } from "@/lib/plans";
 import { TenantApiError } from "@/lib/tenantApi";
 import { friendlyAiError } from "@/lib/friendlyError";
-import { planState } from "@/lib/tenantStatus";
 import dayjs from "@/lib/dayjs";
 
 /* ── Actionable stat-card filters ── */
@@ -59,71 +58,6 @@ export function matchesCardFilter(t: Tenant, filter: AccountCardFilter): boolean
     case "noplan": return hasNoPlan(t);
     case "suspended": return isSuspendedTenant(t);
   }
-}
-
-/* ── Column filters (the five Dropdown controls) ── */
-
-export interface AccountFilters {
-  /** Account lifecycle (tenant.active). */
-  accountStatus: "all" | "active" | "suspended";
-  /** Plan tier ("ESSENTIALS"…/"TAILORED"), or "noplan". */
-  plan: string;
-  /** Subscription status from planState (active = ok / expired / none). */
-  subStatus: "all" | "active" | "expired" | "none";
-  /** MFA flag (tenant.mfaEnabled). */
-  mfa: "all" | "enabled" | "disabled";
-  /** Created within the last N days. */
-  created: "all" | "7" | "30" | "90";
-}
-
-export const DEFAULT_ACCOUNT_FILTERS: AccountFilters = {
-  accountStatus: "all",
-  plan: "all",
-  subStatus: "all",
-  mfa: "all",
-  created: "all",
-};
-
-/** True when any non-default dropdown filter is selected. */
-export function filtersActive(f: AccountFilters): boolean {
-  return f.accountStatus !== "all" || f.plan !== "all" || f.subStatus !== "all" || f.mfa !== "all" || f.created !== "all";
-}
-
-/**
- * AND-combine all dropdown filters against one tenant. Each filter reads from
- * its REAL source — lifecycle (tenant.active), plan tier, planState
- * (subscription), mfaEnabled, createdAt — never derived from one another.
- */
-export function matchesFilters(t: Tenant, f: AccountFilters): boolean {
-  // Account status — lifecycle (tenant.active).
-  if (f.accountStatus !== "all" && (f.accountStatus === "active") !== (t.active !== false)) return false;
-
-  // Plan tier (or no-plan).
-  if (f.plan !== "all") {
-    if (f.plan === "noplan") {
-      if (t.plan) return false;
-    } else if (t.plan?.tier !== f.plan) {
-      return false;
-    }
-  }
-
-  // Subscription status — planState, independent of account status.
-  if (f.subStatus !== "all") {
-    const st = planState({ plan: t.plan ?? null }); // "ok" | "expired" | "none"
-    const want = f.subStatus === "active" ? "ok" : f.subStatus;
-    if (st !== want) return false;
-  }
-
-  // MFA.
-  if (f.mfa !== "all" && (f.mfa === "enabled") !== !!t.mfaEnabled) return false;
-
-  // Created within the last N days.
-  if (f.created !== "all") {
-    if (!t.createdAt) return false;
-    if (dayjs(t.createdAt).isBefore(dayjs().subtract(Number(f.created), "day"))) return false;
-  }
-
-  return true;
 }
 
 /* ── Plan draft (Subscription Phase A) ── */

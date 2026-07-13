@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BarChart3, ClipboardCheck, ClipboardList, FolderOpen, Plus } from "lucide-react";
+import { BarChart3, ClipboardCheck, ClipboardList, FolderOpen, Plus, Sparkles } from "lucide-react";
 import type { Finding as PrismaFinding } from "@prisma/client";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
@@ -36,6 +36,7 @@ import { linkFindingToSystem as linkFindingToSystemAction } from "@/actions/syst
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
+import { Drawer } from "@/components/ui/Drawer";
 import { useToast } from "@/components/ui/Toast";
 
 import { GapSummaryTab } from "./tabs/GapSummaryTab";
@@ -75,7 +76,7 @@ type TabId = "summary" | "register" | "evidence";
 const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
   { id: "summary", label: "Summary", Icon: BarChart3 },
   { id: "register", label: "Findings Register", Icon: ClipboardList },
-  { id: "evidence", label: "Evidence Index", Icon: FolderOpen },
+  { id: "evidence", label: "Documents Index", Icon: FolderOpen },
 ];
 
 /* ── Helpers ── */
@@ -163,6 +164,9 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   const [evidenceLinkedPopup, setEvidenceLinkedPopup] = useState(false);
   const [noSitesOpen, setNoSitesOpen] = useState(false);
   const [planLimitOpen, setPlanLimitOpen] = useState(false);
+  // "Ask AI" slide-out — the plain-English Findings Search (was a large card
+  // atop the Register tab) now lives in a Drawer opened from the header.
+  const [askAiOpen, setAskAiOpen] = useState(false);
 
   const isAnyFilterActive = !!(siteFilter || areaFilter || frameworkFilter || severityFilter || statusFilter);
   function clearFilters() { setSiteFilter(""); setAreaFilter(""); setFrameworkFilter(""); setSeverityFilter(""); setStatusFilter(""); }
@@ -195,6 +199,28 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   useEffect(() => {
     setSelectedFinding((prev) => (prev ? findings.find((f) => f.id === prev.id) ?? null : prev));
   }, [findings]);
+
+  /* ── Per-tab entrance guards (Phase 3) ──
+     Tab bodies are conditionally rendered, so returning to a tab REMOUNTS it and
+     would replay its entrance reveal. These refs (persisting because GapPage
+     stays mounted across tab switches) suppress the replay: play a tab's reveal
+     on its first mount, then never again. We flip a tab's ref when the user
+     LEAVES it — not on enter — so React StrictMode's dev remount can't
+     prematurely mark it seen and skip the first reveal. (The "evidence" ref keeps
+     its id-based name — the tab id + file are unchanged; only the label renamed.) */
+  const summaryEntranceSeen = useRef(false);
+  const registerEntranceSeen = useRef(false);
+  const evidenceEntranceSeen = useRef(false);
+  const prevTabRef = useRef(activeTab);
+  useEffect(() => {
+    const left = prevTabRef.current;
+    if (left !== activeTab) {
+      if (left === "summary") summaryEntranceSeen.current = true;
+      else if (left === "register") registerEntranceSeen.current = true;
+      else if (left === "evidence") evidenceEntranceSeen.current = true;
+    }
+    prevTabRef.current = activeTab;
+  }, [activeTab]);
 
   /* ── Filtered ── */
   const baseFindings = useMemo(() =>
@@ -449,24 +475,28 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
 
   /* ══════════════════════════════════════ */
 
-  // Header subtitle preserved verbatim as PageLayout's description (live counts).
-  const headerDescription =
-    findings.length === 0
-      ? "No findings logged yet"
-      : `${findings.length} findings \u00b7 ${criticalCount} critical \u00b7 ${openCount} open`;
-  // "Report Gap" preserved as a PageAction (same gates: no-sites / plan-limit).
-  const headerActions: PageAction[] = gapCan.canCreate
-    ? [{
-        label: "Report Gap",
-        variant: "primary",
-        icon: Plus,
-        onClick: () => {
-          if (!hasSites) { setNoSitesOpen(true); return; }
-          if (atFindingLimit) { setPlanLimitOpen(true); return; }
-          setAddOpen(true);
-        },
-      }]
-    : [];
+  // One-line module description for the header (the live stats now live in the
+  // KPI cards on the Register tab, so the subtitle is no longer a stats line).
+  const headerDescription = "Identify, track, and close compliance gaps across your GxP frameworks.";
+  // Header actions — "Ask AI" (secondary) opens the Findings Search drawer;
+  // "Report Gap" stays the single primary (same gates: no-sites / plan-limit).
+  // ActionBar renders secondaries left of the primary, so Ask AI sits to the
+  // left of Report Gap (Support-pattern header).
+  const headerActions: PageAction[] = [
+    { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+  ];
+  if (gapCan.canCreate) {
+    headerActions.push({
+      label: "Report Gap",
+      variant: "primary",
+      icon: Plus,
+      onClick: () => {
+        if (!hasSites) { setNoSitesOpen(true); return; }
+        if (atFindingLimit) { setPlanLimitOpen(true); return; }
+        setAddOpen(true);
+      },
+    });
+  }
 
   return (
     <PageLayout
@@ -474,17 +504,20 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       titleIcon={ClipboardCheck}
       description={headerDescription}
       actions={headerActions}
+      // headerRight renders LEFT of the actions cluster, so the header reads
+      // [Status Guide] [Ask AI] [+ Report Gap] left→right (Report Gap stays the
+      // rightmost primary).
+      headerRight={<StatusGuide module="Gap Assessment" statuses={FINDING_STATUSES} />}
       className="w-full"
     >
       <div className="space-y-5">
-      <StatusGuide module="Gap Assessment" statuses={FINDING_STATUSES} />
-
       {/* Tab bar */}
       <TabBar tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as TabId)} ariaLabel="Gap assessment sections" />
 
       {/* Tab panels */}
       {activeTab === "summary" && (
         <GapSummaryTab
+          playEntrance={!summaryEntranceSeen.current}
           findingsTotal={findings.length} baseCount={baseFindings.length}
           criticalCount={criticalCount} highCount={highCount} lowCount={lowCount}
           openCount={openCount} closedCount={closedCount} overdueCount={overdueCount}
@@ -499,31 +532,23 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       )}
 
       {activeTab === "register" && (
-        <div className="space-y-4">
-          {/* Feature 2 — Plain-English Record Search */}
-          <SmartRecordSearch
-            title="Findings Search"
-            sources={[buildFindingSource(findings, sites, (fid) => {
-              const f = findings.find((x) => x.id === fid);
-              if (f) setSelectedFinding(f);
-            })]}
-          />
-          <GapRegisterTab
-            filteredFindings={baseFindings} findingsTotal={findings.length}
-            assignees={assignees}
-            selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding} isViewOnly={isViewOnly} users={users}
-            timezone={timezone} dateFormat={dateFormat} capas={capas}
-            agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
-            renderFilters={renderFilters} onClearFilters={clearFilters}
-            onAddOpen={() => setAddOpen(true)} onRaiseCapa={handleRaiseCapa}
-            onNavigateCapa={() => router.push("/capa")}
-            onManageEvidence={(fid, link) => { setEvidenceFindingId(fid); setEvidenceCurrentLink(link); setEvidenceModalOpen(true); }}
-          />
-        </div>
+        <GapRegisterTab
+          playEntrance={!registerEntranceSeen.current}
+          filteredFindings={baseFindings} findingsTotal={findings.length}
+          assignees={assignees}
+          selectedFinding={selectedFinding} onSelectFinding={setSelectedFinding} isViewOnly={isViewOnly} users={users}
+          timezone={timezone} dateFormat={dateFormat} capas={capas}
+          agiMode={agiMode} agiCapa={agiCapa} isAnyFilterActive={isAnyFilterActive}
+          renderFilters={renderFilters} onClearFilters={clearFilters}
+          onAddOpen={() => setAddOpen(true)} onRaiseCapa={handleRaiseCapa}
+          onNavigateCapa={() => router.push("/capa")}
+          onManageEvidence={(fid, link) => { setEvidenceFindingId(fid); setEvidenceCurrentLink(link); setEvidenceModalOpen(true); }}
+        />
       )}
 
       {activeTab === "evidence" && (
         <GapEvidenceTab
+          playEntrance={!evidenceEntranceSeen.current}
           evidenceAreas={evidenceAreas} allEvidenceRows={allEvidenceRows}
           completeCount={completeCount} partialCount={partialCount} missingCount={missingCount}
           renderFilters={renderFilters} isAnyFilterActive={isAnyFilterActive}
@@ -540,6 +565,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
         sites={sites} systems={systems} activeFrameworks={activeFrameworks as string[]}
         lockedSiteId={selectedSiteId}
         currentUserName={authUser?.name ?? ""} currentUserRole={authUser?.role ?? ""}
+        currentUserSiteId={users.find((u) => u.id === authUser?.id)?.assignedSites?.[0] ?? null}
         aiEnabled={agiMode !== "manual" && agiCapa}
       />
 
@@ -550,6 +576,20 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
         onUpload={handleUploadEvidence}
         findingId={evidenceFindingId} currentLink={evidenceCurrentLink}
         finding={findings.find((f) => f.id === evidenceFindingId)} />
+
+      {/* Ask AI — the plain-English Findings Search, moved out of the Register
+          tab's primary layout into a slide-out Drawer (Support-pattern). Opening
+          a result jumps to the finding: switch to the Register tab (its detail
+          modal lives there), select it, and close the drawer. */}
+      <Drawer open={askAiOpen} onClose={() => setAskAiOpen(false)} title="Ask AI · Findings Search" width="lg">
+        <SmartRecordSearch
+          title="Findings Search"
+          sources={[buildFindingSource(findings, sites, (fid) => {
+            const f = findings.find((x) => x.id === fid);
+            if (f) { setActiveTab("register"); setSelectedFinding(f); setAskAiOpen(false); }
+          })]}
+        />
+      </Drawer>
 
       {/* Popups */}
       <Popup isOpen={addedPopup} variant="success" title="Finding logged" description="Added to the register. Raise a CAPA if corrective action is needed." onDismiss={() => setAddedPopup(false)} />

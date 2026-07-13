@@ -52,6 +52,8 @@ interface OverviewBodyProps {
   editAllowed: boolean;
   /** Req 4 — read-only deviation+task doc references (when raised from a deviation). */
   originDocs?: CAPAOriginDoc[];
+  /** Item 1 — read-only gap-finding doc references (when raised from a finding). */
+  findingDocs?: CAPAOriginDoc[];
 }
 
 export function OverviewBody({
@@ -66,6 +68,7 @@ export function OverviewBody({
   onEditOpen,
   editAllowed,
   originDocs = [],
+  findingDocs = [],
 }: OverviewBodyProps) {
   const router = useRouter();
   const baseVariant = getSeverityVariant(capa.risk, "generic");
@@ -203,6 +206,28 @@ export function OverviewBody({
               downloadHref: `/api/documents/${d.id}`,
               uploadedBy: d.uploadedBy,
               badge: { label: d.source === "task" ? "Task" : "Deviation", tone: d.source === "task" ? "amber" : "gray" },
+            }))}
+          />
+        </div>
+      )}
+
+      {/* Item 1 — "Raised from finding X" linked-document references. The gap
+          finding's uploaded docs, read-only (download via /api/documents/[id]);
+          NOT copied into evidence categories and not attachable here — they live
+          on the originating finding. Mirrors the deviation block above. */}
+      {capa.finding && findingDocs.length > 0 && (
+        <div className="capa-card">
+          <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
+            Raised from finding {capa.finding.reference ?? "—"} — {findingDocs.length} linked document{findingDocs.length === 1 ? "" : "s"}
+          </p>
+          <p className="text-[11px] mt-0.5 mb-2" style={{ color: "var(--text-muted)" }}>Read-only references to the originating finding (not copied into evidence).</p>
+          <DocList
+            docs={findingDocs.map((d) => ({
+              id: d.id,
+              fileName: d.fileName,
+              downloadHref: `/api/documents/${d.id}`,
+              uploadedBy: d.uploadedBy,
+              badge: { label: "Gap", tone: "gray" },
             }))}
           />
         </div>

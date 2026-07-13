@@ -11,6 +11,9 @@ import {
 import { createPortal } from "react-dom";
 import { ChevronDown, Check, Search } from "lucide-react";
 import clsx from "clsx";
+import { motion } from "framer-motion";
+import { usePrefersReducedMotion } from "@/lib/motion/useReducedMotion";
+import { DURATION, EASE } from "@/lib/motion/tokens";
 
 export interface DropdownOption {
   value: string;
@@ -86,6 +89,7 @@ export function Dropdown({
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const reduced = usePrefersReducedMotion();
 
   const allSections: DropdownSection[] =
     sections ?? (options ? [{ options }] : []);
@@ -222,7 +226,7 @@ export function Dropdown({
   }
 
   const menu = open && (
-    <div
+    <motion.div
       ref={menuRef}
       role="listbox"
       aria-multiselectable={multi || undefined}
@@ -233,7 +237,14 @@ export function Dropdown({
         left: menuPos.left,
         minWidth: menuPos.width,
         maxHeight: Math.min(256, window.innerHeight - menuPos.top - 8),
+        transformOrigin: "top",
       }}
+      // Fast fade + subtle scale on open. Transform (scale) doesn't affect the
+      // offsetWidth/offsetHeight the positioner reads, so imperative placement is
+      // unaffected. Reduced motion → opacity only.
+      initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+      animate={reduced ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+      transition={{ duration: DURATION.fast, ease: EASE.out }}
       className={clsx(
         "z-9999 rounded-[10px] border p-1 shadow-lg",
         "overflow-y-auto",
@@ -349,7 +360,7 @@ export function Dropdown({
           })}
         </div>
       ))}
-    </div>
+    </motion.div>
   );
 
   return (

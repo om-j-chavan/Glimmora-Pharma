@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, MapPin, Save, Lock } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Save, Lock, Eye, Power } from "lucide-react";
 import clsx from "clsx";
 import { titleCase } from "@/lib/strings";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -29,32 +29,20 @@ import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import { Dropdown } from "@/components/ui/Dropdown";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
 import { PasswordConfirmModal } from "@/components/ui/PasswordConfirmModal";
-import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
+import { useToast } from "@/components/ui/Toast";
 
 const siteSchema = z.object({
   name: z.string().min(2, "Site name is required"),
   location: z.string().min(1, "Location is required"),
   gmpScope: z.string().min(1, "GMP scope is required"),
-  risk: z.enum(["HIGH", "MEDIUM", "LOW"]),
   status: z.enum(["Active", "Inactive"]),
 });
 
 type SiteFormValues = z.infer<typeof siteSchema>;
-
-const RISK_OPTIONS = [
-  { value: "HIGH", label: "HIGH", badge: "HIGH", badgeVariant: "red" as const },
-  {
-    value: "MEDIUM",
-    label: "MEDIUM",
-    badge: "MED",
-    badgeVariant: "amber" as const,
-  },
-  { value: "LOW", label: "LOW", badge: "LOW", badgeVariant: "green" as const },
-];
 
 function SiteForm({
   defaultValues,
@@ -109,17 +97,6 @@ function SiteForm({
         />
         <div>
           <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">
-            Risk Level
-          </p>
-          <Dropdown
-            options={RISK_OPTIONS}
-            value={watch("risk")}
-            onChange={(v) => setValue("risk", v as SiteFormValues["risk"])}
-            width="w-full"
-          />
-        </div>
-        <div>
-          <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">
             Status
           </p>
           <div className="flex items-center h-[42px]">
@@ -135,7 +112,11 @@ function SiteForm({
       </div>
 
       <div className="flex justify-end gap-2 pt-3 border-t border-(--bg-border)">
-        <Button variant="secondary" onClick={onCancel}>
+        {/* type="button" is REQUIRED — without it a <button> inside a <form>
+            defaults to type="submit", so Cancel would submit the form (silently
+            saving in edit mode / firing validation in add mode) instead of just
+            closing. */}
+        <Button type="button" variant="secondary" onClick={onCancel}>
           Cancel
         </Button>
         <Button icon={submitIcon} type="submit" loading={isSubmitting}>
@@ -146,8 +127,23 @@ function SiteForm({
   );
 }
 
+/** Read-only "View site" detail row. */
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border) last:border-b-0">
+      <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">
+        {label}
+      </span>
+      <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">
+        {children}
+      </span>
+    </div>
+  );
+}
+
 export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
+  const toast = useToast();
   const { allSitesIncludingInactive: sites, tenantId } = useTenantConfig();
   useTenantData();
   const { isAtLimit, isNearLimit, getCount, getLimit, tenantPlan } =
@@ -169,6 +165,15 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
   const [siteToDelete, setSiteToDelete] = useState<TenantSiteConfig | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  // The site being VIEWED (read-only detail modal). Stored by id and derived
+  // from the live `sites` list so a status change made from inside the modal is
+  // reflected immediately without re-opening it.
+  const [viewSiteId, setViewSiteId] = useState<string | null>(null);
+  const viewSite = viewSiteId ? sites.find((s) => s.id === viewSiteId) ?? null : null;
+  // The site pending a status-change confirmation (from the View modal).
+  const [statusConfirmSite, setStatusConfirmSite] = useState<TenantSiteConfig | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+
   const handleAdd = async (data: SiteFormValues) => {
     setSyncError(null);
     // Auto-capitalize (title-case) the location on save.
@@ -177,7 +182,6 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
       name: data.name,
       location,
       gmpScope: data.gmpScope,
-      risk: data.risk,
     });
     if (!result.success) {
       console.error("[settings/sites] createSite failed:", {
@@ -202,7 +206,6 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
           name: data.name,
           location,
           gmpScope: data.gmpScope,
-          risk: data.risk,
           status: data.status,
         },
       }),
@@ -225,7 +228,6 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
       name: data.name,
       location,
       gmpScope: data.gmpScope,
-      risk: data.risk,
       isActive: data.status === "Active",
     });
     if (!result.success) {
@@ -246,8 +248,9 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
 
   // Row-level status toggle. Optimistic: mirror to Redux immediately, then write
   // through the existing audited updateSite action (SITE_UPDATED). Revert on
-  // failure so the row never shows a status that wasn't persisted.
-  const handleRowStatusToggle = async (site: TenantSiteConfig, active: boolean) => {
+  // failure so the row never shows a status that wasn't persisted. Returns
+  // success so callers (e.g. the View modal confirm) can toast/gate on it.
+  const handleRowStatusToggle = async (site: TenantSiteConfig, active: boolean): Promise<boolean> => {
     setSyncError(null);
     const prevStatus = site.status;
     const nextStatus = active ? "Active" : "Inactive";
@@ -256,6 +259,23 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
     if (!result.success) {
       dispatch(updateTenantSite({ tenantId, siteId: site.id, patch: { status: prevStatus } }));
       setSyncError(result.error ?? "Failed to update site status.");
+      return false;
+    }
+    return true;
+  };
+
+  // Confirm the status change requested from the View modal. Reuses the existing
+  // audited status action; on success shows a toast. The View modal stays open
+  // and re-renders with the new status (derived from the live `sites` list).
+  const confirmStatusChange = async () => {
+    if (!statusConfirmSite) return;
+    const nextActive = statusConfirmSite.status !== "Active";
+    setStatusBusy(true);
+    const ok = await handleRowStatusToggle(statusConfirmSite, nextActive);
+    setStatusBusy(false);
+    setStatusConfirmSite(null);
+    if (ok) {
+      toast.success(nextActive ? "Site reactivated." : "Site suspended.");
     }
   };
 
@@ -303,11 +323,14 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
           </Button>
         )}
       </div>
-        <p className="mt-1 text-[12px] text-(--text-secondary) max-w-2xl">
-          Sites are the manufacturing plants, labs and facilities you operate.
-          Manage each site&apos;s location, GMP scope, risk level and active
-          status here — they feed the site pickers, the dashboard risk heatmap
-          and every location-scoped compliance record across the platform.
+        {/* Single-line description: truncates with an ellipsis and exposes the
+            full text via the native tooltip so the header never wraps. */}
+        <p
+          className="mt-1 text-[12px] text-(--text-secondary) truncate"
+          title="Sites are the manufacturing plants, labs and facilities you operate — manage each site's location, GMP scope and active status here."
+        >
+          Sites are the manufacturing plants, labs and facilities you operate —
+          manage each site&apos;s location, GMP scope and active status here.
         </p>
       </div>
 
@@ -342,7 +365,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
         <DataTable<TenantSiteConfig>
           variant="table-fixed"
           ariaLabel="Configured GMP sites"
-          caption="List of registered facilities with risk level and status"
+          caption="List of registered facilities with location, GMP scope and status"
           keyFn={(s) => s.id}
           data={sites}
           emptyState={
@@ -360,7 +383,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
             {
               key: "name",
               header: "Site name",
-              width: "w-[22%]",
+              width: "w-[24%]",
               render: (s) => (
                 <span className="text-[12px] font-semibold text-(--text-primary) truncate">
                   {s.name}
@@ -370,7 +393,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
             {
               key: "location",
               header: "Location",
-              width: "w-[18%]",
+              width: "w-[22%]",
               render: (s) => (
                 <span className="text-[12px] text-(--text-primary) truncate">
                   {s.location}
@@ -380,7 +403,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
             {
               key: "gmpScope",
               header: "GMP scope",
-              width: "w-[20%]",
+              width: "w-[22%]",
               render: (s) => (
                 <span className="text-[12px] text-(--text-primary) truncate">
                   {s.gmpScope}
@@ -388,19 +411,9 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
               ),
             },
             {
-              key: "risk",
-              header: "Risk",
-              width: "w-[12%]",
-              render: (s) => (
-                <Badge variant={getSeverityVariant(s.risk, "generic")}>
-                  {normalizeSeverityForDisplay(s.risk, "generic") ?? s.risk}
-                </Badge>
-              ),
-            },
-            {
               key: "status",
               header: "Status",
-              width: "w-[12%]",
+              width: "w-[14%]",
               render: (s) => (
                 <div className="flex items-center gap-2">
                   <Toggle
@@ -417,35 +430,42 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
                 </div>
               ),
             },
-            ...(!readOnly
-              ? [
-                  {
-                    key: "actions",
-                    header: "Actions",
-                    srOnly: true,
-                    width: "w-[16%]",
-                    align: "right" as const,
-                    render: (s: TenantSiteConfig) => (
-                      <div className="inline-flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={Pencil}
-                          aria-label={`Edit ${s.name}`}
-                          onClick={() => openEdit(s)}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={Trash2}
-                          aria-label={`Delete ${s.name}`}
-                          onClick={() => setSiteToDelete(s)}
-                        />
-                      </div>
-                    ),
-                  },
-                ]
-              : []),
+            {
+              key: "actions",
+              header: "Actions",
+              srOnly: true,
+              width: "w-[18%]",
+              align: "right" as const,
+              render: (s: TenantSiteConfig) => (
+                <div className="inline-flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Eye}
+                    aria-label={`View ${s.name}`}
+                    onClick={() => setViewSiteId(s.id)}
+                  />
+                  {!readOnly && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Pencil}
+                        aria-label={`Edit ${s.name}`}
+                        onClick={() => openEdit(s)}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Trash2}
+                        aria-label={`Delete ${s.name}`}
+                        onClick={() => setSiteToDelete(s)}
+                      />
+                    </>
+                  )}
+                </div>
+              ),
+            },
           ]}
         />
       </div>
@@ -461,7 +481,6 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
             name: "",
             location: "",
             gmpScope: "",
-            risk: "MEDIUM",
             status: "Active",
           }}
           onSubmit={handleAdd}
@@ -487,7 +506,6 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
               name: editingSite.name,
               location: editingSite.location,
               gmpScope: editingSite.gmpScope,
-              risk: editingSite.risk,
               status: editingSite.status,
             }}
             onSubmit={handleEdit}
@@ -500,6 +518,75 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
           />
         )}
       </Modal>
+
+      {/* View site modal — read-only details + Change Status / Delete actions,
+          each gated behind its own confirmation. */}
+      <Modal
+        open={!!viewSite}
+        onClose={() => setViewSiteId(null)}
+        title="Site details"
+        footer={
+          !readOnly && viewSite ? (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                icon={Power}
+                onClick={() => setStatusConfirmSite(viewSite)}
+              >
+                {viewSite.status === "Active" ? "Suspend site" : "Reactivate site"}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                icon={Trash2}
+                onClick={() => setSiteToDelete(viewSite)}
+              >
+                Delete site
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {viewSite && (
+          <div className="space-y-0">
+            <DetailRow label="Site name">{viewSite.name}</DetailRow>
+            <DetailRow label="Location">{viewSite.location || "—"}</DetailRow>
+            <DetailRow label="GMP scope">{viewSite.gmpScope || "—"}</DetailRow>
+            <DetailRow label="Status">
+              <Badge variant={viewSite.status === "Active" ? "green" : "gray"}>
+                {viewSite.status}
+              </Badge>
+            </DetailRow>
+          </div>
+        )}
+      </Modal>
+
+      {/* Change-status confirmation (from the View modal) */}
+      <ConfirmModal
+        open={!!statusConfirmSite}
+        onClose={() => setStatusConfirmSite(null)}
+        onConfirm={() => void confirmStatusChange()}
+        loading={statusBusy}
+        icon={Power}
+        variant={statusConfirmSite?.status === "Active" ? "warning" : "primary"}
+        title={statusConfirmSite?.status === "Active" ? "Suspend this site?" : "Reactivate this site?"}
+        confirmLabel={statusConfirmSite?.status === "Active" ? "Suspend" : "Reactivate"}
+        message={
+          statusConfirmSite?.status === "Active" ? (
+            <>
+              Suspending <strong>{statusConfirmSite?.name}</strong> makes it
+              Inactive — it disappears from the site pickers. Existing records
+              are preserved and it can be reactivated any time.
+            </>
+          ) : (
+            <>
+              Reactivating <strong>{statusConfirmSite?.name}</strong> makes it
+              Active again across all site pickers.
+            </>
+          )
+        }
+      />
 
       {/* Popups */}
       <PlanLimitPopup
@@ -524,11 +611,17 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
         onDismiss={() => setSavedPopup(false)}
       />
       {/* Password-gated delete. Confirmation + Customer Admin password in one
-          dialog; the password is verified server-side before the delete runs. */}
+          dialog; the password is verified server-side before the delete runs.
+          On success, also close the View modal (if the delete was triggered
+          from inside it) and toast. */}
       <PasswordConfirmModal
         open={!!siteToDelete}
         onClose={() => setSiteToDelete(null)}
         onConfirm={handleDeleteWithPassword}
+        onSuccess={() => {
+          setViewSiteId(null);
+          toast.success("Site deleted.");
+        }}
         title="Remove this site?"
         confirmLabel="Delete site"
         variant="danger"

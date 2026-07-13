@@ -53,6 +53,20 @@ function getInitialColorTheme(): ColorTheme {
   }
 }
 
+// Mirrors persistTheme / persistDensity: write BOTH the localStorage key the
+// pre-paint bootstrap script (app/layout.tsx) reads AND the live DOM attribute
+// the CSS accent blocks (src/index.css) select on, so a colour change sticks
+// across reload (localStorage) and takes effect immediately (data-color-theme).
+function persistColorTheme(next: ColorTheme) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("glimmora-color-theme", next);
+    document.documentElement.setAttribute("data-color-theme", next);
+  } catch {
+    // ignore
+  }
+}
+
 function getInitialDensity(): Density {
   if (typeof window === "undefined") return "comfortable";
   try {
@@ -93,6 +107,7 @@ const themeSlice = createSlice({
     },
     setColorTheme(state, { payload }: PayloadAction<ColorTheme>) {
       state.colorTheme = payload;
+      persistColorTheme(payload);
     },
     toggleDensity(state) {
       const next: Density = state.density === "compact" ? "comfortable" : "compact";

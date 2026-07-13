@@ -189,37 +189,45 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
           }`}
           style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)" }}
         >
-          {/* Logo — same asset + sizing as the customer-app Sidebar. */}
+          {/* Brand header — keeps the product name prominent while preserving the
+              admin-shell spacing and role label. */}
           <div
             style={{
               display: "flex",
-              flexDirection: "column",
-              alignItems: "flex-start",
-              gap: 6,
-              padding: "16px 16px 14px",
+              alignItems: "center",
+              gap: 10,
+              height: 64,
+              padding: "0 16px",
               borderBottom: "1px solid var(--sidebar-border)",
             }}
           >
             <Image
-              src="/logo.png"
-              alt="Pharma Glimmora"
-              width={180}
-              height={47}
+              src="/app-icon.png"
+              alt=""
+              width={32}
+              height={32}
               priority
-              className="h-auto w-full max-w-[180px]"
+              className="object-contain"
+              aria-hidden="true"
             />
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                padding: "1px 8px",
-                borderRadius: 20,
-                display: "inline-block",
-                background: "var(--danger-bg)",
-                color: "var(--danger)",
-              }}
-            >
-              Platform Admin
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: "var(--sidebar-text)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
+                Pharma Glimmora
+              </div>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  marginTop: 3,
+                  padding: "1px 8px",
+                  borderRadius: 20,
+                  display: "inline-block",
+                  background: "var(--danger-bg)",
+                  color: "var(--danger)",
+                }}
+              >
+                Platform Admin
+              </div>
             </div>
           </div>
 

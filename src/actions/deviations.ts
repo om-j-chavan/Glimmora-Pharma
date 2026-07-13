@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES } from "@/lib/auth";
+import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES, canReportDeviation } from "@/lib/permissions/roleSets";
 import { createDocument } from "@/actions/documents";
 import {
@@ -215,10 +215,17 @@ export async function createDeviation(
   // creates compute the same NNN. Site code resolved per call; falls
   // back to legacy "DEV-{year}-{NNN}" format when the deviation has no
   // siteId or the site has no code populated (backfill window).
+  // Site-field rule (shared): super_admin / customer_admin pick a site
+  // (required + tenant-validated); every other role is auto-scoped to their own
+  // assigned site and the client siteId is ignored. See resolveCreateSiteId.
+  const siteRes = await resolveCreateSiteId(session, parsed.data.siteId);
+  if (!siteRes.ok) return { success: false, error: siteRes.error };
+  const siteId = siteRes.siteId;
+
   let siteCodeForRef: string | null = null;
-  if (parsed.data.siteId) {
+  if (siteId) {
     const site = await prisma.site.findUnique({
-      where: { id: parsed.data.siteId },
+      where: { id: siteId },
       select: { code: true },
     });
     siteCodeForRef = site?.code ?? null;
@@ -263,7 +270,8 @@ export async function createDeviation(
             // "Unknown user" and left selected.owner blank.
             owner: session.user.id,
             priority: parsed.data.priority ?? severityToPriority(parsed.data.severity),
-            siteId: parsed.data.siteId ?? null,
+            // Authoritative siteId from the site-field rule.
+            siteId,
             batchesAffected: parsed.data.batchesAffected ?? null,
             tenantId: session.user.tenantId,
             status: "open",

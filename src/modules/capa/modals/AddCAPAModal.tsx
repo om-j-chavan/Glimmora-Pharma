@@ -13,8 +13,12 @@ import { RcaMethodFields, rcaDetailToText, type RcaDetail } from "./components/R
 import type { LinkableRecord } from "@/lib/queries/capas";
 import { roleLabel } from "@/lib/labels/roles";
 import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 
 // Phase A field set + Batch 2 method-driven RCA (optional at creation).
+// siteId is OPTIONAL on the base schema: only super_admin / customer_admin see
+// and pick the Site field (crossSiteCapaSchema makes it required for them);
+// every other role has it hidden and the server auto-sets it from their site.
 const capaSchema = z.object({
   title: z.string().min(1, "Title required").max(120, "Title must be 120 characters or fewer"),
   description: z.string().min(10, "Description required"),
@@ -22,7 +26,7 @@ const capaSchema = z.object({
   findingId: z.string().optional(),
   deviationId: z.string().optional(),
   risk: z.enum(["Critical", "High", "Medium", "Low"]),
-  siteId: z.string().min(1, "Site required"),
+  siteId: z.string().optional(),
   owner: z.string().optional(),
   dueDate: z.string().min(1, "Due date required"),
   diGate: z.boolean(),
@@ -31,13 +35,20 @@ const capaSchema = z.object({
   rcaDetail: z.string().optional(),
 });
 type CAPAForm = z.infer<typeof capaSchema>;
+/** Cross-site authors (super_admin / customer_admin) must pick a Site. */
+const crossSiteCapaSchema = capaSchema.extend({ siteId: z.string().min(1, "Site required") });
 
 interface AddCAPAModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (data: CAPAForm) => void;
   users: UserConfig[];
-  sites: SiteConfig[];  lockedSiteId?: string | null;
+  sites: SiteConfig[];
+  /** Current user's role — drives the shared Site-field-visibility rule. */
+  currentUserRole: string;
+  /** Current user's own assigned site. Used to scope the linked-record picker
+   *  for single-site authors (who don't see the Site field). */
+  currentUserSiteId?: string | null;
   defaultDescription?: string;
   defaultSource?: CAPAForm["source"];
   defaultDiGate?: boolean;
@@ -47,10 +58,13 @@ interface AddCAPAModalProps {
   deviations?: LinkableRecord[];
 }
 
-export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSiteId, defaultDescription, defaultSource, defaultDiGate, defaultRisk, gapFindings = [], deviations = [] }: AddCAPAModalProps) {
+export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, currentUserRole, currentUserSiteId, defaultDescription, defaultSource, defaultDiGate, defaultRisk, gapFindings = [], deviations = [] }: AddCAPAModalProps) {
+  // Site-field rule (shared): only super_admin / customer_admin see and MUST
+  // pick a Site; every other role has it hidden + server auto-set from their site.
+  const crossSite = canCreateAcrossSites(currentUserRole);
   const { register: reg, handleSubmit, reset, control, watch, setValue, formState: { errors, isSubmitting } } = useForm<CAPAForm>({
-    resolver: zodResolver(capaSchema),
-    defaultValues: { title: "", source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "High", siteId: lockedSiteId ?? "", diGate: defaultDiGate ?? false, description: defaultDescription ?? "" },
+    resolver: zodResolver(crossSite ? crossSiteCapaSchema : capaSchema),
+    defaultValues: { title: "", source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "High", siteId: "", diGate: defaultDiGate ?? false, description: defaultDescription ?? "" },
   });
   const [detail, setDetail] = useState<RcaDetail>({});
   const [descTouched, setDescTouched] = useState(false);
@@ -63,10 +77,14 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSite
   const draftDescription = watch("description");
   const descReg = reg("description");
 
-  // Batch 2b #3 — source-aware linkable records (OPEN + selected-site only).
+  // Batch 2b #3 — source-aware linkable records (OPEN + scoped-site only).
+  // Cross-site authors scope by the site they pick; single-site authors (Site
+  // field hidden) scope by their OWN assigned site, so the picker keeps working
+  // without a visible Site field.
+  const pickerSiteId = crossSite ? (siteId ?? "") : (currentUserSiteId ?? "");
   const recordsForSource: LinkableRecord[] =
     source === "Gap Assessment" ? gapFindings : source === "Deviation" ? deviations : [];
-  const records = recordsForSource.filter((r) => (siteId ? r.siteId === siteId : false));
+  const records = recordsForSource.filter((r) => (pickerSiteId ? r.siteId === pickerSiteId : false));
   const showRecordPicker = source === "Gap Assessment" || source === "Deviation";
 
   function handlePickRecord(id: string) {
@@ -81,13 +99,13 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSite
 
   useEffect(() => {
     if (isOpen) {
-      reset({ title: "", source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "High", siteId: lockedSiteId ?? "", diGate: defaultDiGate ?? false, description: defaultDescription ?? "", owner: "", dueDate: "" });
+      reset({ title: "", source: defaultSource ?? "Gap Assessment", risk: defaultRisk ?? "High", siteId: "", diGate: defaultDiGate ?? false, description: defaultDescription ?? "", owner: "", dueDate: "" });
       setDetail({});
       setDescTouched(false);
       setSelectedRecordId("");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, defaultSource, defaultRisk, defaultDiGate, defaultDescription, lockedSiteId]);
+  }, [isOpen, defaultSource, defaultRisk, defaultDiGate, defaultDescription]);
 
   // Changing Source (or site) drops a stale record selection + link fields.
   useEffect(() => {
@@ -139,7 +157,7 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSite
           <div>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Linked {source === "Deviation" ? "deviation" : "finding"} {showRecordPicker ? "(optional)" : ""}</p>
             {showRecordPicker ? (
-              !siteId ? (
+              !pickerSiteId ? (
                 <Dropdown value="" onChange={() => undefined} width="w-full" options={[]} placeholder="Select a site first" disabled />
               ) : (
                 <Dropdown value={selectedRecordId} onChange={handlePickRecord} width="w-full"
@@ -151,8 +169,8 @@ export function AddCAPAModal({ isOpen, onClose, onSave, users, sites, lockedSite
             )}
           </div>
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Risk <span className="text-(--danger)">*</span></p><Controller name="risk" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} />} /></div>
-          {!lockedSiteId && (
-            <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p><Controller name="siteId" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select site" width="w-full" options={sites.filter((s) => s.status === "Active").map((s) => ({ value: s.id, label: s.name }))} />} />{errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}</div>
+          {crossSite && (
+            <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p><Controller name="siteId" control={control} render={({ field }) => <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="Select site" width="w-full" options={sites.filter((s) => s.status === "Active").map((s) => ({ value: s.id, label: s.name }))} />} />{errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}</div>
           )}
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Assigned to</p><Controller name="owner" control={control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select assignee (optional)" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />} />{errors.owner && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.owner.message}</p>}</div>
           <div><label htmlFor="capa-due" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Due date <span className="text-(--danger)">*</span></label><input id="capa-due" type="date" className="input text-[12px]" {...reg("dueDate")} />{errors.dueDate && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.dueDate.message}</p>}</div>

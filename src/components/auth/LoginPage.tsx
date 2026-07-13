@@ -324,12 +324,18 @@ export function LoginPage() {
         </div>
 
         <div className="relative z-[2] max-w-md">
-          <h2 className="text-[30px] xl:text-[34px] font-bold leading-[1.15] tracking-tight text-white">
+          <h2
+            className="text-[30px] xl:text-[34px] font-bold leading-[1.2] tracking-tight text-white"
+            style={{ textShadow: "0 2px 14px rgb(0 0 0 / 0.14)" }}
+          >
             Inspection-ready quality, every day.
           </h2>
-          <p className="mt-4 text-[14px] leading-relaxed text-white/70">
-            One platform for deviations, CAPA, validation, and inspection response — with an
-            immutable audit trail behind every regulated action.
+          <p
+            className="mt-4 text-[14px] leading-[1.7] text-white/70"
+            style={{ textShadow: "0 1px 8px rgb(0 0 0 / 0.1)" }}
+          >
+            One platform for deviations, CAPA, validation, and inspection response —
+            with an immutable audit trail behind every regulated action.
           </p>
         </div>
 
@@ -356,7 +362,7 @@ export function LoginPage() {
         {!loadingTenant && (
           <div className="flex flex-col items-center text-center mb-6">
             <Image
-              src="/logo.png"
+              src="/app-logo.png"
               alt="Pharma Glimmora"
               width={220}
               height={57}
@@ -522,11 +528,11 @@ export function LoginPage() {
           <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Privacy · Terms</span>
         </div>
 
-        {/* Dev credentials toggle — gated to non-production builds so production
-            users never see seed passwords. NODE_ENV is inlined at build time so
-            this entire block (plus CRED_ROWS data downstream) is tree-shaken
-            out of the production bundle. */}
-        {process.env.NODE_ENV !== "production" && (
+        {/* Dev credentials toggle — gated to the development build ONLY so no
+            seed passwords surface in production OR staging. NODE_ENV is inlined
+            at build time, so this entire block (plus CRED_ROWS data downstream)
+            is tree-shaken out of any non-development bundle. */}
+        {process.env.NODE_ENV === "development" && (
         <div className="mt-4" style={{ display: loadingTenant ? "none" : undefined }}>
           <button
             type="button"

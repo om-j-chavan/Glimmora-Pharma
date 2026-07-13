@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw, Monitor } from "lucide-react";
+import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw, Monitor, ShieldAlert } from "lucide-react";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { NoSitesPopup, TabBar, DataTable, type Column } from "@/components/shared";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
@@ -32,7 +32,9 @@ import { displayUserName } from "@/lib/identity-display";
 import { AddSystemModal, type SystemForm } from "./modals/AddSystemModal";
 import { EditSystemModal, type SystemForm as EditSystemForm } from "./modals/EditSystemModal";
 import { AddActivityModal, type ActivityForm } from "./modals/AddActivityModal";
-import { DriftDetectionPanel } from "./DriftDetectionPanel";
+import { useDriftDetection, DriftDetectionModal } from "./DriftDetectionPanel";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
+import { Badge } from "@/components/ui/Badge";
 
 /* ── Constants ── */
 
@@ -106,8 +108,11 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
   // Effective enabled frameworks for this tenant (server-resolved, non-persisted).
   const frameworkList = useAppSelector((s) => s.frameworks.list);
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { hasSites } = useSetupStatus();
+
+  // Drift Detection — AGI continuous-monitoring. One hook drives the header
+  // button's count badge AND the modal body (replaces the old inline strip).
+  const drift = useDriftDetection();
 
   const hasFramework = (key: string) => frameworkList.some((f) => f.key === key);
   const showPart11 = hasFramework("p11");
@@ -129,6 +134,7 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
   const [rmSysFilter, setRmSysFilter] = useState("");
   const [rmTypeFilter, setRmTypeFilter] = useState("");
   const [rmStatusFilter, setRmStatusFilter] = useState("");
+  const [driftOpen, setDriftOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [addedPopup, setAddedPopup] = useState(false);
@@ -355,6 +361,8 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
     ...(isAdmin && !showArchive && props.deletedSystems.length > 0
       ? [{ label: `View archived (${props.deletedSystems.length})`, variant: "secondary" as const, icon: Archive, onClick: () => router.push("/csv-csa?view=deleted") }]
       : []),
+    // Drift Detection lives in `headerRight` (not here) so its label can carry a
+    // count-pill badge — a PageAction only accepts a plain string label.
     ...(!isViewOnly && !showArchive
       ? [{ label: "Add system", variant: "primary" as const, icon: Plus, onClick: () => { if (!hasSites) { setNoSitesOpen(true); return; } setAddOpen(true); } }]
       : []),
@@ -367,6 +375,24 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
         contentPadding={true}
         description={`Validate computerized systems through the GxP validation lifecycle. \u00b7 ${systems.length === 0 ? "No systems registered yet" : `${systems.length} systems \u00b7 ${highRisk} high risk \u00b7 ${valOverdue} validation overdue`}`}
         actions={pageActions}
+        headerRight={
+          // Drift Detection \u2014 same secondary/sm framing as the "Ask AI" buttons
+          // on Gap/Deviation/CAPA, but rendered as a real Button (not a
+          // PageAction) so the label can carry a count-pill badge. Icon stays
+          // ShieldAlert. Critical count lives in the modal, not here.
+          !showArchive && drift.agentActive ? (
+            <Button variant="secondary" size="sm" icon={ShieldAlert} onClick={() => setDriftOpen(true)} aria-label="Open Drift Detection">
+              <span className="inline-flex items-center gap-1.5">
+                Drift Detection
+                {drift.loading && drift.alerts.length === 0 ? (
+                  <span className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" aria-hidden="true" />
+                ) : drift.openCount > 0 ? (
+                  <Badge variant="red">{drift.openCount}</Badge>
+                ) : null}
+              </span>
+            </Button>
+          ) : undefined
+        }
       >
         {/* Content below the header is unchanged; the space-y-5 that used to sit
             on <main> now wraps the children so their spacing is preserved. */}
@@ -424,29 +450,32 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
           />
         </div>
       ) : (
-      <>
+      /* Entrance cascade. The tabs use `hidden` toggling (all three panels stay
+         mounted — switching never remounts), so framer's mount-only reveal plays
+         ONCE here and cannot replay on tab-switch; no per-tab entrance guards are
+         needed. Filter/search changes don't remount this list, so they don't
+         retrigger it either. */
+      <MotionList className="space-y-5">
 
       {/* Framework banner */}
       {!showPart11 && !showAnnex11 && !showGAMP5 && (
-        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
+        <MotionListItem className={clsx("flex items-start gap-2 p-3 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1">
             <p className="text-[12px] font-medium text-[#f59e0b]">No compliance frameworks active</p>
             <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Enable Part 11, Annex 11, or GAMP 5 in Settings &rarr; Frameworks to show compliance columns.</p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => router.push("/settings")}>Go to Settings</Button>
-        </div>
+        </MotionListItem>
       )}
 
-      {/* Drift Detection — AGI continuous-monitoring panel (read-only alerts).
-          Renders only when the `drift` agent is on. */}
-      <DriftDetectionPanel />
-
-      {/* Tabs */}
-      <TabBar tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as TabId)} ariaLabel="CSV/CSA sections" />
+      {/* Tabs — Drift Detection moved to a header button + modal (see pageActions). */}
+      <MotionListItem>
+        <TabBar tabs={TABS} activeTab={activeTab} onChange={(id) => setActiveTab(id as TabId)} ariaLabel="CSV/CSA sections" />
+      </MotionListItem>
 
       {/* ═══════════ INVENTORY TAB ═══════════ */}
-      <div role="tabpanel" id="panel-inventory" aria-labelledby="tab-inventory" tabIndex={0} hidden={activeTab !== "inventory"}>
+      <MotionListItem role="tabpanel" id="panel-inventory" aria-labelledby="tab-inventory" tabIndex={0} hidden={activeTab !== "inventory"}>
         <SystemInventoryTab
           systems={systems} filteredSystems={filteredSystems}
           highRisk={highRisk} valOverdue={valOverdue} nonCompliant={nonCompliant}
@@ -461,10 +490,10 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
           onEditSystem={(sys) => { setSelectedSystem(sys); setEditOpen(true); }}
           onRemoveSystem={(id) => { setSystemToRemove(id); setDeleteReason(""); setDeleteError(null); }}
         />
-      </div>
+      </MotionListItem>
 
       {/* ═══════════ ROADMAP TAB ═══════════ */}
-      <div role="tabpanel" id="panel-roadmap" aria-labelledby="tab-roadmap" tabIndex={0} hidden={activeTab !== "roadmap"}>
+      <MotionListItem role="tabpanel" id="panel-roadmap" aria-labelledby="tab-roadmap" tabIndex={0} hidden={activeTab !== "roadmap"}>
         <CSVRoadmapTab
           systems={systems} roadmap={roadmap} roadmapGrouped={roadmapGrouped} users={users}
           role={role}
@@ -475,19 +504,20 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
           onGoToInventory={() => setActiveTab("inventory")}
           onCompleteActivity={handleCompleteActivity}
         />
-      </div>
+      </MotionListItem>
 
       {/* ═══ RTM TAB ═══ */}
-      <div role="tabpanel" id="panel-rtm" aria-labelledby="tab-rtm" tabIndex={0} hidden={activeTab !== "rtm"}>
+      <MotionListItem role="tabpanel" id="panel-rtm" aria-labelledby="tab-rtm" tabIndex={0} hidden={activeTab !== "rtm"}>
         <RTMTab entries={rtmEntries} systemsOverride={systems} />
-      </div>
-      </>
+      </MotionListItem>
+      </MotionList>
       )}
 
       {/* System detail is now a routed page: /csv-csa/systems/[reference]. */}
 
       {/* ── Modals ── */}
-      <AddSystemModal open={addOpen} sites={sites} users={complianceUsers} onSave={onAddSave} onClose={() => setAddOpen(false)} lockedSiteId={selectedSiteId} />
+      <DriftDetectionModal open={driftOpen} onClose={() => setDriftOpen(false)} drift={drift} />
+      <AddSystemModal open={addOpen} sites={sites} users={complianceUsers} onSave={onAddSave} onClose={() => setAddOpen(false)} currentUserRole={role} />
       <EditSystemModal open={editOpen} system={selectedSystem} sites={sites} users={complianceUsers} onSave={onEditSave} onClose={() => setEditOpen(false)} />
       <AddActivityModal open={addActivityOpen} systems={systems} users={users} onSave={onActivitySave} onClose={() => setAddActivityOpen(false)} />
 

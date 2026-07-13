@@ -10,6 +10,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { canEditFinding } from "@/lib/permissions/roleSets";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 import type { FindingSeverity } from "@/store/findings.slice";
 import type { UserConfig } from "@/store/settings.slice";
@@ -54,13 +55,22 @@ interface GapEvidenceTabProps {
   onLinkEvidence: (findingId: string, currentLink: string) => void;
   onFindingClick: (findingId: string) => void;
   onGoToRegister: () => void;
+  /** Phase-3 entrance — play the filters → header → per-area reveal only on the
+   *  FIRST mount; GapPage passes false on tab-return remounts so it doesn't
+   *  replay. Defaults to true. */
+  playEntrance?: boolean;
 }
 
 export function GapEvidenceTab({
   evidenceAreas, allEvidenceRows, completeCount, partialCount, missingCount,
   expandedAreas, onToggleArea, isViewOnly, users, renderFilters, isAnyFilterActive,
   onLinkEvidence, onFindingClick, onGoToRegister,
+  playEntrance = true,
 }: GapEvidenceTabProps) {
+  // Phase-3 entrance — spread onto the MotionList; initial=false pins the resting
+  // state on tab-return remounts, otherwise the primitive's own initial="hidden"
+  // stands. All tempo comes from the motion tokens.
+  const entranceProps: { initial?: false } = playEntrance ? {} : { initial: false };
   // Linking/updating evidence goes through updateFinding, which is QA-authority-
   // only — gate on canEditFinding (mirrors the server), NOT the broad
   // usePermissions("gap").canEdit, so non-QA authors don't get a dead button.
@@ -107,25 +117,35 @@ export function GapEvidenceTab({
 
   return (
     <div role="tabpanel" id="panel-evidence" aria-labelledby="tab-evidence" tabIndex={0}>
-      {/* Same page-level filters as Summary/Register — the Evidence Index is now
-          driven by them (was previously always unfiltered). */}
+      {/* Phase-3 entrance sequence: filters → header → summary → each area group,
+          revealed one after another via MotionList/MotionListItem (reduced-motion
+          aware; all tempo from the motion tokens — nothing hardcoded). Each AREA
+          animates as a single unit — its sub-table rows are NOT nested-staggered
+          (that would compound with the DataTable render). Only this tab's first
+          mount plays (playEntrance guard in GapPage); return renders instantly. */}
+      <MotionList {...entranceProps}>
+        {/* 1 — Filters (same page-level filters as Summary/Register). */}
+        <MotionListItem>
       <section aria-label="Evidence filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-xl border"
         style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
         <Filter className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         {renderFilters()}
       </section>
+        </MotionListItem>
 
+        {/* 2 — Header (title + export). */}
+        <MotionListItem>
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-        <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>Evidence index</h2>
+        <h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>Documents index</h2>
         {allEvidenceRows.length > 0 && (
           <div className="flex items-center gap-2">
             {selectedKeys.size > 0 && (
               <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{selectedKeys.size} selected</span>
             )}
             <ExportMenu
-              filename={`evidence-index-${dayjs().format("YYYY-MM-DD")}`}
-              title="Evidence index"
+              filename={`documents-index-${dayjs().format("YYYY-MM-DD")}`}
+              title="Documents index"
               subtitle={`Generated ${dayjs().format("DD MMM YYYY HH:mm")}`}
               headers={EXPORT_HEADERS}
               rows={buildExportRows}
@@ -134,8 +154,10 @@ export function GapEvidenceTab({
           </div>
         )}
       </div>
+        </MotionListItem>
 
-      {allEvidenceRows.length === 0 ? (
+        {allEvidenceRows.length === 0 ? (
+        <MotionListItem>
         <div className="card p-10 text-center">
           <FolderOpen className="w-12 h-12 mx-auto mb-3" style={{ color: "#334155" }} aria-hidden="true" />
           {isAnyFilterActive ? (
@@ -151,21 +173,25 @@ export function GapEvidenceTab({
             </>
           )}
         </div>
-      ) : (
+        </MotionListItem>
+        ) : (
         <>
+          {/* 3 — Complete / Partial / Missing rollup. */}
+          <MotionListItem>
           <div className="flex items-center gap-3 mb-6 flex-wrap">
             <Badge variant="green">{completeCount} complete</Badge>
             <Badge variant="amber">{partialCount} partial</Badge>
             <Badge variant="red">{missingCount} missing</Badge>
             <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>across {allEvidenceRows.length} findings in {evidenceAreas.length} areas</span>
           </div>
+          </MotionListItem>
 
-          <div className="space-y-3">
+          {/* 4… — one MotionListItem per AREA group (unit reveal; no row stagger). */}
             {evidenceAreas.map(({ area, rows, status }) => {
               const isExp = expandedAreas.has(area);
               const areaKey = area.replace(/\s+/g, "-");
               return (
-                <div key={area}>
+                <MotionListItem key={area} className="mb-3">
                   <button type="button" onClick={() => onToggleArea(area)} aria-expanded={isExp} aria-controls={`evidence-area-${areaKey}`}
                     className="w-full flex items-center justify-between p-4 rounded-xl border cursor-pointer text-left transition-all duration-150 bg-(--bg-elevated) border-(--bg-border) hover:bg-(--bg-hover)">
                     <span className="flex items-center gap-2">
@@ -280,12 +306,12 @@ export function GapEvidenceTab({
                       </div>
                     </div>
                   )}
-                </div>
+                </MotionListItem>
               );
             })}
-          </div>
         </>
       )}
+      </MotionList>
     </div>
   );
 }

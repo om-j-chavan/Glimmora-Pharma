@@ -100,7 +100,7 @@ export interface CAPAOriginDoc {
   id: string;
   fileName: string;
   uploadedBy: string;
-  source: "deviation" | "task";
+  source: "deviation" | "task" | "finding";
 }
 
 /** Deviation→CAPA carryover (req 4) — fetch the originating deviation's docs and
@@ -140,6 +140,34 @@ export const getCAPADeviationDocs = cache(async (deviationId: string, tenantId: 
       fileName: d.originalFileName ?? d.fileName,
       uploadedBy: d.uploadedBy,
       source: d.linkedModule === "Deviation Task" ? "task" : "deviation",
+    }));
+});
+
+/** Item 1 — Gap→CAPA carryover. Fetch the originating finding's uploaded docs
+ *  (generic Document rows, linkedModule "Gap Assessment") for the read-only
+ *  "raised from finding X" reference block in the CAPA Overview. Mirrors
+ *  getCAPADeviationDocs: one tenant-scoped query, and the SAME dedupe — a
+ *  categorized+stored gap doc was converted into a real CAPA EvidenceFile on
+ *  raise (convertCategorizedDocsToEvidence("Gap Assessment")) and already shows
+ *  under its evidence category, so it's excluded here to avoid double-listing.
+ *  Uncategorized / null-storage finding docs stay as read-only reference links. */
+export const getCAPAFindingDocs = cache(async (findingId: string, tenantId: string): Promise<CAPAOriginDoc[]> => {
+  const docs = await prisma.document.findMany({
+    where: { tenantId, deletedAt: null, linkedModule: "Gap Assessment", linkedRecordId: findingId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, fileName: true, originalFileName: true, uploadedBy: true, category: true, storageKey: true },
+  });
+  const wasConvertedToEvidence = (d: { category: string | null; storageKey: string | null }) =>
+    d.category != null &&
+    (EVIDENCE_CATEGORIES as readonly string[]).includes(d.category) &&
+    d.storageKey != null;
+  return docs
+    .filter((d) => !wasConvertedToEvidence(d))
+    .map((d) => ({
+      id: d.id,
+      fileName: d.originalFileName ?? d.fileName,
+      uploadedBy: d.uploadedBy,
+      source: "finding" as const,
     }));
 });
 

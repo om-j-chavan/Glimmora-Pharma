@@ -34,6 +34,7 @@ import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
 import { StatusGuide, TabBar, type Tab } from "@/components/shared";
 import { PageLayout } from "@/components/layout/PageLayout";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
 import { FDA483_EVENT_STATUSES } from "@/constants/statusTaxonomy";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -692,18 +693,16 @@ export function FDA483Page({
       className="w-full space-y-5"
     >
       {!liveEvent && (
-        /* Header — module title, list-level counts and the status-guide legend
-           belong ONLY on the list view; they're meaningless once a single event is
-           open (the detail view renders its own EventHeader). So PageLayout stays
-           INSIDE this conditional. StatusGuide, previously a sibling, is now the
-           child that renders under the header divider — same position on screen. */
+        /* Header — list view only (the detail view renders its own EventHeader).
+           Change 1 — the dynamic stats subtitle was replaced with a static
+           one-liner (counts live in the Overview KPIs + the events table).
+           Change 2 — StatusGuide moved from a content child into `headerRight`,
+           so the header reads [Status Guide] [+ Register Event]. The list-level
+           deadline alert is now the header's content child (below the divider). */
         <PageLayout
           title="Inspections & Regulatory"
-          description={`Manage regulatory inspections, observations, and 483 responses. · ${
-            events.length === 0
-              ? "No regulatory events logged yet"
-              : `${events.length} events · ${openCount} open · ${dueCount} response due`
-          }`}
+          description="Track FDA 483 inspection events, observations, commitments, and formal responses across the trailing 12 months."
+          headerRight={<StatusGuide module="FDA 483 Events" statuses={FDA483_EVENT_STATUSES} />}
           actions={
             fda.canCreate
               ? [{
@@ -715,52 +714,49 @@ export function FDA483Page({
               : []
           }
         >
-          <StatusGuide module="FDA 483 Events" statuses={FDA483_EVENT_STATUSES} />
-        </PageLayout>
-      )}
-
-      {/* Deadline alert — LIST view only. On the detail view (liveEvent set)
-          a cross-event deadline banner is interruptive noise; the per-event
-          days-remaining chip in the header already conveys urgency. (Bug 4) */}
-      {!liveEvent && urgentEvents.length > 0 && (
-        <div
-          className={clsx(
-            "flex items-start gap-3 p-4 rounded-xl border",
-            isDark
-              ? "bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.25)]"
-              : "bg-[#fef2f2] border-[#fca5a5]",
-          )}
-          role="alert"
-        >
-          <AlertCircle
-            className="w-5 h-5 text-[#ef4444] flex-shrink-0 mt-0.5"
-            aria-hidden="true"
-          />
-          <div className="flex-1">
-            <p className="text-[13px] font-semibold text-[#ef4444]">
-              {urgentEvents.length} response deadline
-              {urgentEvents.length > 1 ? "s" : ""} within 5 days
-            </p>
-            <p
-              className="text-[11px] mt-0.5"
-              style={{ color: "var(--text-secondary)" }}
+          {/* Deadline alert — LIST view only. Urgency for events with a response
+              due within 5 days; the detail view uses a per-event days chip instead. */}
+          {urgentEvents.length > 0 ? (
+            <div
+              className={clsx(
+                "flex items-start gap-3 p-4 rounded-xl border",
+                isDark
+                  ? "bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.25)]"
+                  : "bg-[#fef2f2] border-[#fca5a5]",
+              )}
+              role="alert"
             >
-              {urgentEvents
-                .map(
-                  (e) =>
-                    `${e.referenceNumber}: ${daysLeft(e.responseDeadline)} day(s) remaining`,
-                )
-                .join(" · ")}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setStatusFilter("Response Due"); urlState.setEvent(null); }}
-          >
-            View
-          </Button>
-        </div>
+              <AlertCircle
+                className="w-5 h-5 text-[#ef4444] flex-shrink-0 mt-0.5"
+                aria-hidden="true"
+              />
+              <div className="flex-1">
+                <p className="text-[13px] font-semibold text-[#ef4444]">
+                  {urgentEvents.length} response deadline
+                  {urgentEvents.length > 1 ? "s" : ""} within 5 days
+                </p>
+                <p
+                  className="text-[11px] mt-0.5"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {urgentEvents
+                    .map(
+                      (e) =>
+                        `${e.referenceNumber}: ${daysLeft(e.responseDeadline)} day(s) remaining`,
+                    )
+                    .join(" · ")}
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setStatusFilter("Response Due"); urlState.setEvent(null); }}
+              >
+                View
+              </Button>
+            </div>
+          ) : null}
+        </PageLayout>
       )}
 
 
@@ -781,45 +777,55 @@ export function FDA483Page({
 
       {/* ═══════════ CONTENT ═══════════ */}
       <div>
-        {/* MAIN LIST VIEW — shown when no event is selected */}
+        {/* MAIN LIST VIEW — shown when no event is selected. Change 4 — Phase-3
+            entrance: the events table (and the submitted banner) reveal via
+            MotionList/MotionListItem on first mount (reduced-motion aware; tempo
+            from the motion tokens). This is a single-page list view (no list-level
+            tabs), so framer's mount-only entrance suffices — filter/pagination
+            re-renders never replay it and NO per-tab guard ref is needed. The
+            detail view (liveEvent branch) is untouched; modals stay outside. */}
         {!liveEvent && (
-          <>
-            <EventsTab
-              events={events}
-              filteredEvents={filteredEvents}
-              openCount={openCount}
-              dueCount={dueCount}
-              closedCount={closedCount}
-              typeFilter={typeFilter}
-              agencyFilter={agencyFilter}
-              statusFilter={statusFilter}
-              siteFilter={siteFilter}
-              anyFilter={anyFilter}
-              sites={sites}
-              timezone={timezone}
-              dateFormat={dateFormat} role={role}
-              onTypeFilterChange={setTypeFilter}
-              onAgencyFilterChange={setAgencyFilter}
-              onStatusFilterChange={setStatusFilter}
-              onSiteFilterChange={setSiteFilter}
-              onClearFilters={clearFilters}
-              onOpenEvent={(e) => { selectEvent(e); }}
-              onAddEvent={() => setAddEventOpen(true)}
-              computeReadiness={computeReadiness}
-            />
+          <MotionList className="space-y-4">
+            <MotionListItem>
+              <EventsTab
+                events={events}
+                filteredEvents={filteredEvents}
+                openCount={openCount}
+                dueCount={dueCount}
+                closedCount={closedCount}
+                typeFilter={typeFilter}
+                agencyFilter={agencyFilter}
+                statusFilter={statusFilter}
+                siteFilter={siteFilter}
+                anyFilter={anyFilter}
+                sites={sites}
+                timezone={timezone}
+                dateFormat={dateFormat} role={role}
+                onTypeFilterChange={setTypeFilter}
+                onAgencyFilterChange={setAgencyFilter}
+                onStatusFilterChange={setStatusFilter}
+                onSiteFilterChange={setSiteFilter}
+                onClearFilters={clearFilters}
+                onOpenEvent={(e) => { selectEvent(e); }}
+                onAddEvent={() => setAddEventOpen(true)}
+                computeReadiness={computeReadiness}
+              />
+            </MotionListItem>
             {hasSubmitted && (
-              <div className="flex justify-end pt-4">
-                <div
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium"
-                  style={{ background: "var(--success-bg)", color: "var(--success)" }}
-                  role="status"
-                >
-                  <span aria-hidden="true">&#10003;</span>
-                  Response submitted &mdash; no further action required
+              <MotionListItem>
+                <div className="flex justify-end pt-4">
+                  <div
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium"
+                    style={{ background: "var(--success-bg)", color: "var(--success)" }}
+                    role="status"
+                  >
+                    <span aria-hidden="true">&#10003;</span>
+                    Response submitted &mdash; no further action required
+                  </div>
                 </div>
-              </div>
+              </MotionListItem>
             )}
-          </>
+          </MotionList>
         )}
 
         {/* EVENT DETAIL — tabbed view */}

@@ -59,7 +59,6 @@ export {
   addActionItem,
   updateActionItem,
   deleteActionItem,
-  reorderActionItems,
   loadActionItemsForCAPA,
 } from "./capas/action-items";
 

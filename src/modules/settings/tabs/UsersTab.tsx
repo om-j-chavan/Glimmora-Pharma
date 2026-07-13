@@ -15,6 +15,7 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
+  Power,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -51,9 +52,11 @@ import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
 import { getMyRoleMatrix } from "@/actions/roleLimits";
 import { roleCapStatus, type RoleMatrixSummary } from "@/lib/roleLimits";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
 import { PasswordConfirmModal } from "@/components/ui/PasswordConfirmModal";
+import { useToast } from "@/components/ui/Toast";
 
 // Role ordering for the dropdowns. Display text comes from roleLabel() — the
 // shared label layer — so labels never drift between screens.
@@ -270,7 +273,9 @@ function UserForm({
       title={title}
       footer={
         <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={requestClose}>
+          {/* type="button" so this footer button never acts as a submit for the
+              form it's associated with — it only ever requests close. */}
+          <Button type="button" variant="secondary" onClick={requestClose}>
             Cancel
           </Button>
           <Button
@@ -285,7 +290,11 @@ function UserForm({
         </div>
       }
     >
-    <form id={formId} onSubmit={handleSubmit(submit)} noValidate className="space-y-4">
+    {/* autoComplete="off" on the form + fields below stops the browser's
+        credential manager from auto-filling the signed-in admin's OWN email and
+        password into a fresh "Add user" form (the reported pre-fill bug — the
+        React form state is already empty; the values came from browser autofill). */}
+    <form id={formId} onSubmit={handleSubmit(submit)} noValidate autoComplete="off" className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <Input
           id="user-name"
@@ -301,6 +310,7 @@ function UserForm({
           type="email"
           required
           placeholder="priya@company.com"
+          autoComplete="off"
           error={errors.email?.message}
           {...register("email")}
         />
@@ -345,6 +355,7 @@ function UserForm({
           type={showPassword ? "text" : "password"}
           required={mode === "add"}
           placeholder="Enter password"
+          autoComplete="new-password"
           error={errors.password?.message}
           rightAdornment={
             <PasswordToggle
@@ -361,6 +372,7 @@ function UserForm({
           type={showConfirmPassword ? "text" : "password"}
           required={mode === "add"}
           placeholder="Re-enter password"
+          autoComplete="new-password"
           error={errors.confirmPassword?.message}
           rightAdornment={
             <PasswordToggle
@@ -456,6 +468,8 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
     usedAccounts,
     isAtAccountLimit,
   } = useTenantConfig();
+  const toast = useToast();
+  const { allSites } = useTenantConfig();
   const { isSuperAdmin, isCustomerAdmin } = useRole();
   const visibleUsers = users.filter((u) => u.role !== "super_admin" && u.role !== "customer_admin");
   const { isAtLimit, getCount, getLimit, tenantPlan } =
@@ -486,6 +500,14 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const [gxpTarget, setGxpTarget] = useState<{ user: TenantUserConfig; value: boolean } | null>(null);
   // The user pending a password-gated delete (U7). Non-null = dialog open.
   const [userToDelete, setUserToDelete] = useState<TenantUserConfig | null>(null);
+  // The user being VIEWED (read-only detail modal). Stored by id and derived
+  // from the live `users` list so a status change made from inside the modal is
+  // reflected immediately without re-opening it.
+  const [viewUserId, setViewUserId] = useState<string | null>(null);
+  const viewUser = viewUserId ? users.find((u) => u.id === viewUserId) ?? null : null;
+  // The user pending a status-change confirmation (from the View modal).
+  const [statusConfirmUser, setStatusConfirmUser] = useState<TenantUserConfig | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
 
   // GxP signatory authority is a Part 11 change — it requires the Customer Admin
   // to re-enter their password, verified server-side (U3). Only on success is the
@@ -511,11 +533,35 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   // Persist active/inactive status server-side (with audit), then mirror to Redux.
-  const persistStatus = async (userId: string, isActive: boolean) => {
+  // Returns whether the write succeeded so callers (e.g. the View modal confirm)
+  // can toast/gate on it.
+  const persistStatus = async (userId: string, isActive: boolean): Promise<boolean> => {
     const res = await setUserStatus(userId, isActive);
-    if (!res.success) { setActionError(res.error || "Failed to update user status."); return; }
+    if (!res.success) { setActionError(res.error || "Failed to update user status."); return false; }
     dispatch(updateTenantUser({ tenantId, userId, patch: { status: isActive ? "Active" : "Inactive" } }));
+    return true;
   };
+
+  // Confirm the status change requested from the View modal. Reuses the existing
+  // audited status action; on success shows a toast. The View modal stays open
+  // and re-renders with the new status (derived from the live `users` list).
+  const confirmUserStatusChange = async () => {
+    if (!statusConfirmUser) return;
+    const nextActive = statusConfirmUser.status !== "Active";
+    setStatusBusy(true);
+    const ok = await persistStatus(statusConfirmUser.id, nextActive);
+    setStatusBusy(false);
+    setStatusConfirmUser(null);
+    if (ok) toast.success(nextActive ? "User reactivated." : "User suspended.");
+  };
+
+  // Site names for a user's assignment (single-site model → 0 or 1 id).
+  const siteNamesFor = (u: TenantUserConfig): string =>
+    u.assignedSites.length === 0
+      ? "No site assigned"
+      : u.assignedSites
+          .map((id) => allSites.find((s) => s.id === id)?.name ?? id)
+          .join(", ");
   const [subPopupOpen, setSubPopupOpen] = useState(false);
 
   const roleOptions = isSuperAdmin
@@ -778,12 +824,14 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           </Button>
         )}
       </div>
-        <p className="mt-1 text-[12px] text-(--text-secondary) max-w-2xl">
-          Users are the people in your organisation who log in to the platform.
-          Manage their roles, site access, GxP signatory authority and account
-          status here — they become the owners you assign to findings, CAPAs,
-          deviations and 483 events. Inactive users keep their records and still
-          count toward your plan&apos;s user limit.
+        {/* Single-line description: truncates with an ellipsis and exposes the
+            full text via the native tooltip so the header never wraps. */}
+        <p
+          className="mt-1 text-[12px] text-(--text-secondary) truncate"
+          title="Users are the people in your organisation who log in — manage their roles, site access, GxP signatory authority and account status here."
+        >
+          Users are the people in your organisation who log in — manage their
+          roles, site access, GxP signatory authority and account status here.
         </p>
       </div>
 
@@ -1027,35 +1075,42 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                 </span>
               ),
             },
-            ...(!readOnly
-              ? [
-                  {
-                    key: "actions",
-                    header: "Actions",
-                    srOnly: true,
-                    width: "w-[10%]",
-                    align: "right" as const,
-                    render: (u: TenantUserConfig) => (
-                      <div className="inline-flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={Pencil}
-                          aria-label={`Edit ${u.name}`}
-                          onClick={() => openEdit(u)}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={Trash2}
-                          aria-label={`Delete ${u.name}`}
-                          onClick={() => setUserToDelete(u)}
-                        />
-                      </div>
-                    ),
-                  },
-                ]
-              : []),
+            {
+              key: "actions",
+              header: "Actions",
+              srOnly: true,
+              width: "w-[12%]",
+              align: "right" as const,
+              render: (u: TenantUserConfig) => (
+                <div className="inline-flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Eye}
+                    aria-label={`View ${u.name}`}
+                    onClick={() => setViewUserId(u.id)}
+                  />
+                  {!readOnly && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Pencil}
+                        aria-label={`Edit ${u.name}`}
+                        onClick={() => openEdit(u)}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Trash2}
+                        aria-label={`Delete ${u.name}`}
+                        onClick={() => setUserToDelete(u)}
+                      />
+                    </>
+                  )}
+                </div>
+              ),
+            },
           ]}
         />
       </div>
@@ -1209,11 +1264,17 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         }
       />
 
-      {/* Delete user — recommend inactive over delete + password gate (U7) */}
+      {/* Delete user — recommend inactive over delete + password gate (U7).
+          onSuccess also closes the View modal (when the delete was triggered
+          from inside it) and toasts. */}
       <PasswordConfirmModal
         open={!!userToDelete}
         onClose={() => setUserToDelete(null)}
         onConfirm={confirmDeleteUser}
+        onSuccess={() => {
+          setViewUserId(null);
+          toast.success("User deleted.");
+        }}
         title="Delete this user?"
         confirmLabel="Delete user"
         variant="danger"
@@ -1226,6 +1287,95 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             signatures and audit trail stay intact and reassignable. Enter your
             Customer Admin password to delete.
           </>
+        }
+      />
+
+      {/* View user modal — read-only details + Change Status / Delete actions,
+          each gated behind its own confirmation. */}
+      <Modal
+        open={!!viewUser}
+        onClose={() => setViewUserId(null)}
+        title="User details"
+        footer={
+          !readOnly && viewUser ? (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                icon={Power}
+                onClick={() => setStatusConfirmUser(viewUser)}
+              >
+                {viewUser.status === "Active" ? "Suspend user" : "Reactivate user"}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                icon={Trash2}
+                onClick={() => setUserToDelete(viewUser)}
+              >
+                Delete user
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {viewUser && (
+          <div className="space-y-0">
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Full name</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{viewUser.name}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Email</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{viewUser.email}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Role</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{roleLabel(viewUser.role)}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Site assignment</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{siteNamesFor(viewUser)}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">GxP signatory</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">
+                {viewUser.gxpSignatory ? "Yes" : "No"}
+              </span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Status</span>
+              <span className="text-right min-w-0">
+                <Badge variant={viewUser.status === "Active" ? "green" : "gray"}>{viewUser.status}</Badge>
+              </span>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Change-status confirmation (from the View modal) */}
+      <ConfirmModal
+        open={!!statusConfirmUser}
+        onClose={() => setStatusConfirmUser(null)}
+        onConfirm={() => void confirmUserStatusChange()}
+        loading={statusBusy}
+        icon={Power}
+        variant={statusConfirmUser?.status === "Active" ? "warning" : "primary"}
+        title={statusConfirmUser?.status === "Active" ? "Suspend this user?" : "Reactivate this user?"}
+        confirmLabel={statusConfirmUser?.status === "Active" ? "Suspend" : "Reactivate"}
+        message={
+          statusConfirmUser?.status === "Active" ? (
+            <>
+              Suspending <strong>{statusConfirmUser?.name}</strong> stops them
+              logging in and removes them from all owner dropdowns. Their records,
+              signatures and audit trail are preserved and reassignable.
+            </>
+          ) : (
+            <>
+              Reactivating <strong>{statusConfirmUser?.name}</strong> restores
+              login access and returns them to the owner dropdowns.
+            </>
+          )
         }
       />
     </section>

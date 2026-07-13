@@ -148,7 +148,6 @@ model Site {
   code      String?
   location  String?
   gmpScope  String?
-  risk      String   @default("MEDIUM")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -590,7 +589,7 @@ model CAPAActionItem {
   tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   capaId          String
   capa            CAPA     @relation("CAPAActionItems", fields: [capaId], references: [id], onDelete: Cascade)
-  // Stable ordering — reorderActionItems mutates this field.
+  // Stable ordering — set at create time (append after the current max).
   sequence        Int
   description     String
   // Display-name cache + nullable userId FK. Matches the dual-write

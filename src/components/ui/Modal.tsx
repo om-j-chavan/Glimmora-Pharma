@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import clsx from "clsx";
+import { MotionDiv } from "@/components/motion/Motion";
 
 export interface ModalProps {
   open: boolean;
@@ -65,8 +66,9 @@ export function Modal({ open, onClose, title, header, children, footer, classNam
   // and the modal centers inside that element instead of the screen.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={persistent ? undefined : onClose}>
-      <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
-      <div
+      <MotionDiv variant="fade" aria-hidden className="absolute inset-0 bg-black/50" />
+      <MotionDiv
+        variant="scaleFade"
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
@@ -76,7 +78,6 @@ export function Modal({ open, onClose, title, header, children, footer, classNam
         className={clsx(
           "relative w-full max-w-[680px] max-h-[85vh] flex flex-col rounded-xl overflow-hidden border shadow-2xl",
           "bg-(--bg-surface) border-(--bg-border)",
-          "animate-[popupIn_0.15s_ease-out]",
           "focus:outline-none",
           className,
         )}
@@ -105,7 +106,7 @@ export function Modal({ open, onClose, title, header, children, footer, classNam
             {footer}
           </div>
         )}
-      </div>
+      </MotionDiv>
     </div>,
     document.body,
   );

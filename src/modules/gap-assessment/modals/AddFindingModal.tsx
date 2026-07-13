@@ -18,14 +18,18 @@ import { DocumentCard } from "@/components/shared/DocumentCard";
 import { rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
 import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
 import { frameworkLabel } from "@/constants/frameworks";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 
 const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
 
 /** Today (YYYY-MM-DD) for the target-date min. */
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+// siteId is OPTIONAL on the base schema: only super_admin / customer_admin see
+// and pick the Site field (crossSiteFindingSchema makes it required for them);
+// every other role has it hidden and the server auto-sets it from their site.
 const findingSchema = z.object({
-  siteId: z.string().min(1, "Site required"),
+  siteId: z.string().optional(),
   area: z.string().min(1, "Area required"),
   requirement: z.string().min(10, "Add the requirement (at least 10 characters)"),
   purpose: z.string().optional(),
@@ -43,6 +47,8 @@ const findingSchema = z.object({
   raiseCapaImmediately: z.boolean().optional(),
 });
 type FindingForm = z.infer<typeof findingSchema>;
+/** Cross-site authors (super_admin / customer_admin) must pick a Site. */
+const crossSiteFindingSchema = findingSchema.extend({ siteId: z.string().min(1, "Site required") });
 
 /** A single evidence file STAGED in the create modal (before the finding
  *  exists). Holds the real `File` so GapPage can upload it via
@@ -76,14 +82,23 @@ interface AddFindingModalProps {
    *  Retained for API stability; the create form no longer renders an Owner field. */
   currentUserName?: string;
   currentUserRole?: string;
+  /** The caller's own assigned site. Used to auto-scope the finding for non-QA
+   *  users (who don't see the Site field). Null when the caller has no assigned
+   *  site — the server then rejects on the missing siteId (edge case). */
+  currentUserSiteId?: string | null;
   /** Gates the AI "Suggest classification" action (AGI mode + CAPA agent on). */
   aiEnabled?: boolean;
 }
 
-export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, lockedSiteId, aiEnabled = true }: AddFindingModalProps) {
+export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activeFrameworks, currentUserRole, aiEnabled = true }: AddFindingModalProps) {
+  // Site-field rule (shared canCreateAcrossSites): only super_admin /
+  // customer_admin see and MUST pick a Site. Every other role has the field
+  // hidden — the server auto-scopes the finding to their own assigned site — so
+  // the form carries no siteId for them.
+  const crossSite = canCreateAcrossSites(currentUserRole ?? "");
   const { register: reg, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting } } = useForm<FindingForm>({
-    resolver: zodResolver(findingSchema),
-    defaultValues: { severity: "High", siteId: lockedSiteId ?? "", raiseCapaImmediately: false },
+    resolver: zodResolver(crossSite ? crossSiteFindingSchema : findingSchema),
+    defaultValues: { severity: "High", siteId: "", raiseCapaImmediately: false },
   });
   // Multi-file staged evidence — uploaded to the finding post-create. Each
   // carries the real File + a local object URL (for the View button).
@@ -229,8 +244,10 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     >
       <form onSubmit={handleSubmit(onSubmit)} aria-label="Add new finding" className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          {/* Site + Area on one row (Site hidden for non-admin — auto from login). */}
-          {!lockedSiteId && (
+          {/* Site + Area on one row. The Site field shows ONLY for cross-site
+              authors (super_admin / customer_admin); every other role has it
+              hidden — the server auto-scopes the finding to their assigned site. */}
+          {crossSite && (
             <div>
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Site <span className="text-(--danger)">*</span></p>
               <Dropdown placeholder="Select site..." value={watch("siteId") ?? ""} onChange={(v) => setValue("siteId", v, { shouldValidate: true })} width="w-full"
@@ -238,7 +255,7 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               {errors.siteId && <p role="alert" className="text-[11px] text-(--danger) mt-1">{errors.siteId.message}</p>}
             </div>
           )}
-          <div className={lockedSiteId ? "col-span-2" : ""}>
+          <div className={!crossSite ? "col-span-2" : ""}>
             <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Area <span className="text-(--danger)">*</span></p>
             <Dropdown placeholder="Select area..." value={watch("area") ?? ""} onChange={(v) => setValue("area", v, { shouldValidate: true })} width="w-full"
               options={AREAS.map((a) => ({ value: a, label: a }))} />

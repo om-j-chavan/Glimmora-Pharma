@@ -153,7 +153,7 @@ async function main() {
       await prisma.site.upsert({
         where: { tenantId_name: { tenantId: tenant.id, name: s.name } },
         update: { code: s.code, isActive: true },
-        create: { tenantId: tenant.id, name: s.name, code: s.code, risk: "MEDIUM" },
+        create: { tenantId: tenant.id, name: s.name, code: s.code },
       });
     }
     for (const u of t.users) {
@@ -186,17 +186,17 @@ async function main() {
     // 3-letter `code` field drives the new reference scheme (e.g.
     // "DEV-CHN-2026-001"). Codes are stable once records reference
     // them — SitesTab enforces immutability after first use.
-    { name: "Chennai QC Laboratory", code: "CHN", location: "Chennai, Tamil Nadu", gmpScope: "QC Testing", risk: "HIGH" },
-    { name: "Mumbai API Plant", code: "MUM", location: "Mumbai, Maharashtra", gmpScope: "API Manufacturing", risk: "MEDIUM" },
-    { name: "Bangalore R&D Centre", code: "BLR", location: "Bangalore, Karnataka", gmpScope: "R&D", risk: "MEDIUM" },
-    { name: "Hyderabad Formulation", code: "HYD", location: "Hyderabad, Telangana", gmpScope: "Formulation", risk: "HIGH" },
+    { name: "Chennai QC Laboratory", code: "CHN", location: "Chennai, Tamil Nadu", gmpScope: "QC Testing" },
+    { name: "Mumbai API Plant", code: "MUM", location: "Mumbai, Maharashtra", gmpScope: "API Manufacturing" },
+    { name: "Bangalore R&D Centre", code: "BLR", location: "Bangalore, Karnataka", gmpScope: "R&D" },
+    { name: "Hyderabad Formulation", code: "HYD", location: "Hyderabad, Telangana", gmpScope: "Formulation" },
   ] as const;
   const upsertedSites = await Promise.all(
     sitesData.map((s) =>
       prisma.site.upsert({
         where: { tenantId_name: { tenantId: demo.id, name: s.name } },
-        update: { code: s.code, location: s.location, gmpScope: s.gmpScope, risk: s.risk, isActive: true },
-        create: { tenantId: demo.id, name: s.name, code: s.code, location: s.location, gmpScope: s.gmpScope, risk: s.risk },
+        update: { code: s.code, location: s.location, gmpScope: s.gmpScope, isActive: true },
+        create: { tenantId: demo.id, name: s.name, code: s.code, location: s.location, gmpScope: s.gmpScope },
       }),
     ),
   );

@@ -5,7 +5,7 @@ import { Home } from "lucide-react";
 // Brand mark — single source so swapping in a dark-mode variant or an SVG later
 // is a one-line change. Rendered on a subtle surface plate (below) so the flat
 // PNG stays legible on both the light (cream) and dark (charcoal) backgrounds.
-const LOGO_SRC = "/logo.png";
+const LOGO_SRC = "/app-logo.png";
 
 export const metadata = {
   title: "Page not found",

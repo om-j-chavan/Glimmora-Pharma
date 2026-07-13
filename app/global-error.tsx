@@ -10,7 +10,7 @@ import { useEffect } from "react";
 // preference via prefers-color-scheme. Palette hexes mirror src/index.css.
 
 // Single source so swapping in a dark-mode variant or an SVG later is one line.
-const LOGO_SRC = "/logo.png";
+const LOGO_SRC = "/app-logo.png";
 
 export default function GlobalError({
   error,
@@ -31,7 +31,7 @@ export default function GlobalError({
             /* Light tokens — mirror :root in src/index.css */
             --bg:#f5f3ef; --surface:#ffffff; --elevated:#faf9f7; --border:#e8e4dd;
             --text:#302d29; --secondary:#6b655c; --muted:#6b6258;
-            --brand:#c9a84c; --brand-hover:#b8902c;
+            --brand:#10b981; --brand-hover:#0e9d6e;
             --danger:#b91c1c; --danger-bg:#fef2f2;
             min-height:100vh; display:flex; align-items:center; justify-content:center;
             padding:16px; background:var(--bg); color:var(--text);
@@ -44,7 +44,7 @@ export default function GlobalError({
               /* Dark tokens — mirror [data-theme="dark"] in src/index.css */
               --bg:#0e0e11; --surface:#17171a; --elevated:#1f1f23; --border:#2a2a30;
               --text:#f4ede6; --secondary:#d5bfb2; --muted:#ab9d8d;
-              --brand:#c9a84c; --brand-hover:#dbb85a;
+              --brand:#10b981; --brand-hover:#0e9d6e;
               --danger:#ef4444; --danger-bg:rgba(239,68,68,0.15);
             }
           }

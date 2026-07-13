@@ -2,9 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
   Lock,
   Pencil,
   Plus,
@@ -23,9 +20,9 @@ import {
   addActionItem,
   updateActionItem,
   deleteActionItem,
-  reorderActionItems,
   loadActionItemsForCAPA,
 } from "@/actions/capas";
+import { canExecuteCAPA } from "@/lib/permissions/roleSets";
 import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
 import { displayUserName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
@@ -36,7 +33,7 @@ import type { CAPA, CAPAActionItem } from "@/store/capa.slice";
  *
  * Lifecycle:
  *   open / in_progress           → full editor
- *     (add / inline-edit / delete / reorder / status)
+ *     (add / inline-edit / delete / status)
  *   pending_qa_review            → status-only updates allowed
  *   pending_verification         → status-only updates allowed
  *   closed / rejected            → read-only
@@ -46,8 +43,7 @@ import type { CAPA, CAPAActionItem } from "@/store/capa.slice";
  * pointless round-trip. Status changes to "complete" or "skipped" open
  * a modal collecting the required completionNotes (≥ 5 chars).
  *
- * Reorder is via up/down buttons (the simplest stable approach without
- * pulling in a drag-and-drop library; can swap to dnd later).
+ * Items render in create (sequence) order; there is no user-facing reordering.
  */
 
 // Phase B — display-only mapping (underlying enum values unchanged):
@@ -70,7 +66,7 @@ const STATUS_VARIANT: Record<CAPAActionItem["status"], "gray" | "amber" | "green
 
 export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFilter?: string | null }) {
   // FIX 3 â€” the action-item mutation server actions (addActionItem /
-  // updateActionItem / deleteActionItem / reorderActionItems) all gate on
+  // updateActionItem / deleteActionItem) all gate on
   // COMPLIANCE_AUTHOR_ROLES. capaCan.canEdit mirrors that exact set, so the
   // UI stops advertising controls (status updates + structural edits) to
   // roles the server rejects (e.g. qc_lab_director, operations_head). NOTE:
@@ -167,6 +163,9 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
   const [editDesc, setEditDesc] = useState("");
   const [editOwner, setEditOwner] = useState("");
   const [editDueDate, setEditDueDate] = useState("");
+  // Item 5 — the due date as loaded, so an UNCHANGED (possibly already-past)
+  // legacy date can be saved while a CHANGE to a past date is still rejected.
+  const [editDueDateOrig, setEditDueDateOrig] = useState("");
   const [editStatus, setEditStatus] = useState<CAPAActionItem["status"]>("pending");
   const [editNotes, setEditNotes] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
@@ -176,13 +175,15 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Batch 4 Part 2 — assignable owners = active tenant users in fixer-eligible
-  // roles (exclude super_admin, who is walled to /admin and can't author GxP,
-  // and viewer). Each option shows NAME — ROLE (friendly label).
+  // Item 4 — assignable owners = active tenant users who may EXECUTE CAPA
+  // actions (CAPA_EXECUTE_ROLES). This drops QA Head + Customer Admin (assign ≠
+  // execute) and every non-executor role (super_admin/viewer are excluded by
+  // omission from the set); the addActionItem/updateActionItem server actions
+  // enforce the same set so this filter can't be bypassed. NAME — ROLE label.
   const ownerOptions = useMemo(
     () =>
       users
-        .filter((u) => u.status === "Active" && u.role !== "super_admin" && u.role !== "viewer")
+        .filter((u) => u.status === "Active" && canExecuteCAPA(u.role))
         .map((u) => ({ value: u.id, label: `${u.name} — ${roleLabel(u.role)}` })),
     [users],
   );
@@ -205,6 +206,12 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
     }
     if (!addDueDate) {
       setAddError("Pick a due date.");
+      return;
+    }
+    // Item 5 — no past due dates (the DatePicker `min` also blocks this; kept as
+    // a friendly pre-submit guard mirroring the server refinement).
+    if (dayjs(addDueDate).isBefore(dayjs().startOf("day"))) {
+      setAddError("Due date can't be in the past.");
       return;
     }
     setBusy(true);
@@ -235,7 +242,9 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
     setEditId(item.id);
     setEditDesc(item.description);
     setEditOwner(item.ownerId ?? "");
-    setEditDueDate(dayjs.utc(item.dueDate).format("YYYY-MM-DD"));
+    const due = dayjs.utc(item.dueDate).format("YYYY-MM-DD");
+    setEditDueDate(due);
+    setEditDueDateOrig(due);
     setEditStatus(item.status);
     setEditNotes(item.completionNotes ?? "");
     setEditError(null);
@@ -247,6 +256,12 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
     if (editDesc.trim().length < 3) { setEditError("Add an action description (at least 3 characters)."); return; }
     if (!editOwner) { setEditError("Select who this is assigned to."); return; }
     if (!editDueDate) { setEditError("Pick a due date."); return; }
+    // Item 5 — reject only a CHANGE to a past date; an unchanged already-past
+    // legacy date saves fine (mirrors the server rule).
+    if (editDueDate !== editDueDateOrig && dayjs(editDueDate).isBefore(dayjs().startOf("day"))) {
+      setEditError("Due date can't be in the past.");
+      return;
+    }
     const needsNotes = editStatus === "complete" || editStatus === "skipped";
     if (needsNotes && editNotes.trim().length < 5) { setEditError("Add completion notes (at least 5 characters)."); return; }
     setBusy(true);
@@ -289,24 +304,6 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
     setDeleteId(null);
     setDeleteReason("");
     toast.success("Action item deleted.");
-    await refresh();
-  };
-
-  const handleReorder = async (idx: number, direction: -1 | 1) => {
-    const target = idx + direction;
-    if (target < 0 || target >= items.length) return;
-    const newOrder = [...items];
-    const [moved] = newOrder.splice(idx, 1);
-    newOrder.splice(target, 0, moved);
-    setBusy(true);
-    const result = await reorderActionItems(capa.id, {
-      orderedIds: newOrder.map((i) => i.id),
-    });
-    setBusy(false);
-    if (!result.success) {
-      setLoadError(result.error);
-      return;
-    }
     await refresh();
   };
 
@@ -380,10 +377,9 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
         </p>
       ) : (
         // NOTE: intentionally NOT migrated to the shared <DataTable>. This is a
-        // stateful editing grid (inline edit + up/down reorder + delete), and
-        // its reorder math depends on each item's index in the FULL list while
-        // it renders a FILTERED subset — DataTable's render(row, index) passes
-        // the rendered-array index, which would silently corrupt reorder order.
+        // stateful editing grid (modal edit + delete) that renders a FILTERED
+        // subset (by the active person filter) — keeping the hand-rolled table
+        // avoids threading that filter through DataTable's render contract.
         <table className="w-full text-[11px] mb-3" role="table">
           <thead>
             <tr style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--bg-border)" }}>
@@ -396,9 +392,9 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
             </tr>
           </thead>
           <tbody>
-            {items.map((item, idx) => {
-              // Keep idx tied to the full list so reorder stays correct; skip
-              // rendering rows filtered out by the active person filter.
+            {items.map((item) => {
+              // Skip rows filtered out by the active person filter; the rest
+              // render in create (sequence) order — no user reordering.
               if (ownerFilter && item.ownerId !== ownerFilter) return null;
               const overdue = overdueDays(item);
               return (
@@ -436,12 +432,11 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
                     )}
                   </td>
                   {/* Structural actions only — status changes moved to the Edit
-                      modal (QA) and the fixer's Worklist task (owner). */}
+                      modal (QA) and the fixer's Worklist task (owner). Reorder
+                      was removed; items stay in create order. */}
                   {canStructuralEdit && (
                     <td className="py-2 align-top text-right">
                       <div className="flex justify-end gap-1 flex-wrap">
-                        <Button variant="ghost" size="xs" icon={ArrowUp} onClick={() => void handleReorder(idx, -1)} disabled={busy || idx === 0} title="Move up" />
-                        <Button variant="ghost" size="xs" icon={ArrowDown} onClick={() => void handleReorder(idx, +1)} disabled={busy || idx === items.length - 1} title="Move down" />
                         <Button variant="ghost" size="xs" icon={Pencil} onClick={() => openEdit(item)} disabled={busy} title="Edit" />
                         <Button variant="ghost" size="xs" icon={Trash2} onClick={() => setDeleteId(item.id)} disabled={busy} title="Delete" />
                       </div>
@@ -483,7 +478,7 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
                 <Dropdown value={addOwner} onChange={setAddOwner} options={ownerOptions} placeholder="Select assignee" width="w-full" />
               </div>
               <div>
-                <DatePicker id="ai-due" label="Due date" required value={addDueDate} onChange={setAddDueDate} />
+                <DatePicker id="ai-due" label="Due date" required min={dayjs().format("YYYY-MM-DD")} value={addDueDate} onChange={setAddDueDate} />
               </div>
             </div>
             {addError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{addError}</p>}
@@ -517,7 +512,7 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
                 <Dropdown value={editOwner} onChange={setEditOwner} options={ownerOptions} placeholder="Select assignee" width="w-full" />
               </div>
               <div>
-                <DatePicker id="ai-edit-due" label="Due date" required value={editDueDate} onChange={setEditDueDate} />
+                <DatePicker id="ai-edit-due" label="Due date" required min={dayjs().format("YYYY-MM-DD")} value={editDueDate} onChange={setEditDueDate} />
               </div>
             </div>
             <div>
@@ -602,7 +597,3 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
     </section>
   );
 }
-
-// Silence "unused" warning on lucide-react ChevronDown import — kept
-// available for a future "expand row" affordance.
-void ChevronDown;

@@ -2,7 +2,7 @@ import { useState, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import {
-  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, Paperclip, Send, Wrench, CheckCircle2, Clock, X,
+  ClipboardList, Plus, Search, ChevronRight, Link2, Bot, Pencil, Save, Paperclip, Send, Wrench, CheckCircle2, Clock, X, AlertTriangle, CalendarClock,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { frameworkLabel } from "@/constants/frameworks";
@@ -33,7 +33,10 @@ import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { StatCard } from "@/components/shared/StatCard";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
 import { DataTable, type Column } from "@/components/shared";
+import { tableCard } from "@/components/table/tableTokens";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -142,6 +145,10 @@ interface GapRegisterTabProps {
   onNavigateCapa: (capaId: string) => void;
   /** Opens the shared evidence modal (link + file upload + current doc). */
   onManageEvidence: (findingId: string, currentLink: string) => void;
+  /** Phase-3 entrance — play the KPI → toolbar → table reveal only on the FIRST
+   *  mount. GapPage passes false on tab-return remounts so it doesn't replay.
+   *  Defaults to true (animate) so standalone use still reveals. */
+  playEntrance?: boolean;
 }
 
 export function GapRegisterTab({
@@ -149,6 +156,7 @@ export function GapRegisterTab({
   isViewOnly, users, timezone, dateFormat, capas,
   agiMode, agiCapa, isAnyFilterActive, renderFilters, onClearFilters,
   onAddOpen, onRaiseCapa, onNavigateCapa, onManageEvidence,
+  playEntrance = true,
 }: GapRegisterTabProps) {
   const isDark = useAppSelector((s) => s.theme.mode === "dark");
   const router = useRouter();
@@ -427,8 +435,43 @@ export function GapRegisterTab({
 
   const isOverdue = selectedFinding ? selectedFinding.status !== "Closed" && dayjs.utc(selectedFinding.targetDate).isBefore(dayjs()) : false;
 
+  // ── KPI strip (Support-pattern) — 4 stat cards summarising the CURRENT view.
+  //    Derived from the page-level filtered set (filteredFindings = baseFindings)
+  //    so they agree with the Summary charts / Evidence Index and the table
+  //    below; the in-table search only narrows visible rows, not these counts. ──
+  const kpiTotal = filteredFindings.length;
+  const kpiCritical = filteredFindings.filter((f) => f.severity === "Critical").length;
+  const kpiOverdue = filteredFindings.filter((f) => f.status !== "Closed" && dayjs.utc(f.targetDate).isBefore(dayjs())).length;
+  const kpiClosed = filteredFindings.filter((f) => f.status === "Closed").length;
+
+  // Phase-3 entrance — spread onto each MotionList. When the reveal shouldn't
+  // play (tab-return remount), pin the list to its resting state via initial=false
+  // so no entrance runs; otherwise the primitive's own initial="hidden" stands.
+  // Durations/stagger come entirely from the motion tokens (nothing hardcoded).
+  const entranceProps: { initial?: false } = playEntrance ? {} : { initial: false };
+
   return (
     <div role="tabpanel" id="panel-register" aria-labelledby="tab-register" tabIndex={0}>
+      {/* Phase-3 entrance sequence: reveal KPI row → toolbar → table one after
+          another via MotionList/MotionListItem (reduced-motion aware; all tempo
+          from the motion tokens — nothing hardcoded). The KPI row nests its OWN
+          MotionList so the 4 cards cascade individually inside the outer
+          sequence. Modals live OUTSIDE this list (they're not part of the
+          reveal). Only the Findings Register tab is animated — Summary/Evidence
+          are untouched. */}
+      <MotionList {...entranceProps}>
+        {/* 1 — KPI cards (Support-pattern), with their own inner card cascade. */}
+        <MotionListItem>
+          <MotionList {...entranceProps} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={ClipboardList} color="var(--brand)" label="Total findings" value={String(kpiTotal)} sub={isAnyFilterActive ? "Matching current filters" : "In the register"} /></MotionListItem>
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={AlertTriangle} color="var(--danger)" label="Critical" value={String(kpiCritical)} sub="Highest-risk gaps" /></MotionListItem>
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={CalendarClock} color="var(--warning)" label="Overdue" value={String(kpiOverdue)} sub="Past target date, still open" /></MotionListItem>
+            <MotionListItem className="h-full [&>*]:h-full"><StatCard icon={CheckCircle2} color="var(--success)" label="Closed" value={String(kpiClosed)} sub="Verified and closed" /></MotionListItem>
+          </MotionList>
+        </MotionListItem>
+
+        {/* 2 — Toolbar */}
+        <MotionListItem>
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="relative flex-1 max-w-[260px]">
@@ -452,9 +495,17 @@ export function GapRegisterTab({
           </div>
         )}
       </div>
+        </MotionListItem>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
+        {/* 3 — Table card (its Phase-2 row-stagger runs inside once it reveals). */}
+        <MotionListItem>
+      {/* Table — wrapped in the shared table card (tableTokens.tableCard: the
+          same border + --card-bg + rounded-xl the Support Center queue gets from
+          the DataTable widget). The toolbar above stays OUTSIDE the card. The
+          card's overflow-hidden rounds the corners; the inner overflow-x-auto
+          keeps horizontal scrolling, and the empty state renders inside too. */}
+      <div className={tableCard}>
+        <div className="overflow-x-auto">
         {displayed.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 gap-3">
             <ClipboardList className="w-12 h-12 text-[#334155]" aria-hidden="true" />
@@ -598,7 +649,10 @@ export function GapRegisterTab({
             ] satisfies Column<Finding>[]}
           />
         )}
+        </div>
       </div>
+        </MotionListItem>
+      </MotionList>
 
       {/* ── Finding detail popup ── */}
       <Modal
@@ -799,7 +853,7 @@ export function GapRegisterTab({
                   Upload / manage evidence document
                 </Button>
               </div>
-            ) : selectedFinding.evidenceLink ? (
+            ) : selectedFinding.evidenceLink?.trim() ? (
               <div>
                 <h3 className={LABEL}>Evidence</h3>
                 <span className="text-[12px] text-[#0ea5e9]">{selectedFinding.evidenceLink}</span>

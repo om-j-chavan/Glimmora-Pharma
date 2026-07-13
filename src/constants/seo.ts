@@ -15,7 +15,7 @@ export const SEO = {
     "pharma quality management",
   ].join(", "),
   twitterHandle: "@glimmora",
-  logoUrl: "/logo.png",
+  logoUrl: "/app-logo.png",
 };
 
 export const PAGE_TITLES: Record<string, string> = {

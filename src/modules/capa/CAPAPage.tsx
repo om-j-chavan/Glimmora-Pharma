@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
-  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, Target,
+  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, Target, Sparkles,
 } from "lucide-react";
 import type { CAPA as PrismaCAPA } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/Button";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
+import { Drawer } from "@/components/ui/Drawer";
 import { StatusGuide } from "@/components/shared";
 import { CAPA_STATUSES } from "@/constants/statusTaxonomy";
 
@@ -146,6 +147,9 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
   const setSelectedCAPA = (c: CAPA | null) => setSelectedCAPAId(c?.id ?? null);
   const [addOpen, setAddOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  // "Ask AI" slide-out — the plain-language CAPA Search (was a card atop the
+  // CAPA Tracker tab) now lives in a Drawer opened from the header.
+  const [askAiOpen, setAskAiOpen] = useState(false);
   const [aiSavedPopup, setAiSavedPopup] = useState<string | null>(null);
   const [addedPopup, setAddedPopup] = useState(false);
   // Failure surface for the create/AI/reopen flows that remain on this list
@@ -305,7 +309,10 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
         contentPadding={true}
         className="capa-shell"
         description={`Track corrective and preventive actions from initiation through effectiveness. \u00b7 ${capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}`}
-        actions={canCreateCAPAs ? [{ label: "New CAPA", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) }] : []}
+        actions={[
+          { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+          ...(canCreateCAPAs ? [{ label: "New CAPA", variant: "primary" as const, icon: Plus, onClick: () => setAddOpen(true) }] : []),
+        ]}
         headerRight={
           <div className="flex items-center gap-3">
             <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
@@ -342,12 +349,8 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
 
       {activeTab === "tracker" && (
         <div className="space-y-4">
-          {/* Feature 2 — Plain-English Record Search */}
-          <CapaSmartSearch
-            capas={capas}
-            sites={allSites}
-            onOpenCapa={(id) => setSelectedCAPAId(id)}
-          />
+          {/* Feature 2 — Plain-English Record Search moved to the "Ask AI"
+              header drawer (see below); the CAPA table + filters live here. */}
           <CAPATrackerTab
             capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
             isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
@@ -373,7 +376,7 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
 
       {/* Modals — edit/sign moved to the detail page (/capa/[id]); this list
           page keeps create / AI / reopen only. */}
-      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} lockedSiteId={selectedSiteId} gapFindings={gapFindings} deviations={deviations} />
+      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} currentUserRole={user?.role ?? ""} currentUserSiteId={users.find((u) => u.id === user?.id)?.assignedSites?.[0] ?? null} gapFindings={gapFindings} deviations={deviations} />
 
       {/* RUNG 3D-CAPA — reopen a closed/rejected CAPA (reason required) */}
       <Modal
@@ -517,6 +520,18 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
           // detail handler).
         }}
       />
+
+      {/* Ask AI — the plain-language CAPA Search, moved out of the tracker body
+          into a slide-out Drawer (mirrors Gap Assessment / Deviation). Selecting
+          a result switches to the CAPA Tracker tab, opens that CAPA's detail, and
+          closes the drawer. */}
+      <Drawer open={askAiOpen} onClose={() => setAskAiOpen(false)} title="Ask AI · CAPA Search" width="lg">
+        <CapaSmartSearch
+          capas={capas}
+          sites={allSites}
+          onOpenCapa={(id) => { setActiveTab("tracker"); setSelectedCAPAId(id); setAskAiOpen(false); }}
+        />
+      </Drawer>
 
       {/* Popups */}
       <Popup isOpen={addedPopup} variant="success" title="CAPA created" description="Added to the tracker. Open the CAPA to document RCA and corrective actions." onDismiss={() => setAddedPopup(false)} />

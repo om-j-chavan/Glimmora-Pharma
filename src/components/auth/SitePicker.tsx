@@ -16,27 +16,6 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 import { setActiveSite, setSelectedSite as setSelectedSiteAction } from "@/store/auth.slice";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 
-const riskStyles = {
-  HIGH: {
-    iconBg: "bg-(--danger-bg)",
-    iconColor: "text-[#ef4444]",
-    badgeBg: "bg-(--danger-bg)",
-    badgeColor: "text-[#ef4444]",
-  },
-  MEDIUM: {
-    iconBg: "bg-(--warning-bg)",
-    iconColor: "text-[#f59e0b]",
-    badgeBg: "bg-(--warning-bg)",
-    badgeColor: "text-[#f59e0b]",
-  },
-  LOW: {
-    iconBg: "bg-(--success-bg)",
-    iconColor: "text-[#10b981]",
-    badgeBg: "bg-(--success-bg)",
-    badgeColor: "text-[#10b981]",
-  },
-};
-
 export function SitePicker() {
   const dispatch = useAppDispatch();
   const router = useRouter();
@@ -153,7 +132,6 @@ export function SitePicker() {
                 </div>
               ) : (
                 filtered.map((site) => {
-                  const risk = riskStyles[site.risk];
                   const isSelected = selectedSite?.id === site.id;
                   return (
                     <div key={site.id} role="listitem" className="mb-1.5">
@@ -161,7 +139,7 @@ export function SitePicker() {
                         type="button"
                         onClick={() => setSelectedSite(site)}
                         aria-pressed={isSelected}
-                        aria-label={`${site.name} — ${site.risk} risk`}
+                        aria-label={site.name}
                         className="w-full flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-150 outline-none text-left"
                         style={{
                           background: isSelected ? "var(--brand-muted)" : "transparent",
@@ -170,10 +148,10 @@ export function SitePicker() {
                       >
                         {/* site icon */}
                         <div
-                          className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${risk.iconBg}`}
+                          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-(--brand-muted)"
                         >
                           <Building2
-                            className={`w-4 h-4 ${risk.iconColor}`}
+                            className="w-4 h-4 text-(--brand)"
                             aria-hidden="true"
                           />
                         </div>
@@ -190,11 +168,6 @@ export function SitePicker() {
 
                         {/* right side */}
                         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                          <span
-                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${risk.badgeBg} ${risk.badgeColor}`}
-                          >
-                            {site.risk}
-                          </span>
                           <div
                             className="w-4 h-4 rounded-full flex items-center justify-center transition-all"
                             style={{ border: isSelected ? "2px solid var(--brand)" : "2px solid var(--bg-border)" }}
