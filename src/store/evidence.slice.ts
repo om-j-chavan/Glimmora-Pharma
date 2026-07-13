@@ -22,11 +22,22 @@ export interface EvidenceDocument {
   reviewedBy?: string;
   effectiveDate: string;
   expiryDate?: string;
+  // GxP periodic-review date (e.g. biennial SOP review). Drives the
+  // "Review due / Overdue" lifecycle. ISO string; only native documents carry it.
+  nextReviewDate?: string;
   tags: string[];
   url?: string;
   sizeKb?: number;
   complianceTags: string[];
   createdAt: string;
+  // True only for standalone `Document` rows (the approve / reject / delete
+  // lifecycle applies). Evidence aggregated from CAPA / Deviation / FDA-483 /
+  // findings is a read-only mirror here — managed in its source module.
+  isNative?: boolean;
+  // Raw Prisma `Document.status` (draft | under_review | approved | rejected)
+  // for native docs, so the detail drawer can gate lifecycle actions precisely
+  // rather than inferring from the display-only DocStatus.
+  rawStatus?: string;
 }
 
 export interface EvidencePack {
@@ -43,31 +54,14 @@ export interface EvidencePack {
 interface EvidenceState {
   documents: EvidenceDocument[];
   packs: EvidencePack[];
-  loading: boolean;
-  error: string | null;
 }
 
-const initialState: EvidenceState = { documents: [], packs: [], loading: false, error: null };
+const initialState: EvidenceState = { documents: [], packs: [] };
 
 const evidenceSlice = createSlice({
   name: "evidence",
   initialState,
   reducers: {
-    setDocuments(state, { payload }: PayloadAction<EvidenceDocument[]>) {
-      state.documents = payload;
-      state.loading = false;
-      state.error = null;
-    },
-    setPacks(state, { payload }: PayloadAction<EvidencePack[]>) {
-      state.packs = payload;
-    },
-    setEvidenceLoading(state, { payload }: PayloadAction<boolean>) {
-      state.loading = payload;
-    },
-    setEvidenceError(state, { payload }: PayloadAction<string | null>) {
-      state.error = payload;
-      state.loading = false;
-    },
     addDocument(state, { payload }: PayloadAction<EvidenceDocument>) {
       state.documents.push(payload);
     },
@@ -91,5 +85,5 @@ const evidenceSlice = createSlice({
   },
 });
 
-export const { setDocuments, setPacks, setEvidenceLoading, setEvidenceError, addDocument, updateDocument, removeDocument, addPack, updatePack, removePack } = evidenceSlice.actions;
+export const { addDocument, updateDocument, removeDocument, addPack, updatePack, removePack } = evidenceSlice.actions;
 export default evidenceSlice.reducer;

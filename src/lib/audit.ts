@@ -1,46 +1,41 @@
-import { api } from "./axios";
-import { store } from "@/store";
-import { logAction, type AuditEntry as FullAuditEntry } from "@/store/auditTrail.slice";
+import { logAuditAction } from "@/actions/auditLogs";
+
+/**
+ * Client-side audit helper.
+ *
+ * Forwards to the `logAuditAction` Server Action, which uses NextAuth
+ * `requireAuth()` to identify the user and writes to the Prisma `AuditLog`
+ * table. The legacy in-app Redux audit log has been removed — Prisma is
+ * the single source of truth. The Audit Trail page reads back from the
+ * same table.
+ *
+ * Fire-and-forget: failures are logged to the console but never thrown,
+ * so a missed audit row never blocks user-facing operations.
+ */
 
 export interface AuditEntry {
   action: string;
   module: string;
-  recordId: string;
+  recordId?: string;
   recordTitle?: string;
   oldValue?: unknown;
   newValue?: unknown;
 }
 
 export async function auditLog(entry: AuditEntry): Promise<void> {
-  const { user } = store.getState().auth;
-  if (!user) return;
-
-  // Dispatch to Redux audit trail for in-app log
-  const full: FullAuditEntry = {
-    id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    timestamp: new Date().toISOString(),
-    userId: user.id,
-    userName: user.name,
-    userRole: user.role,
-    module: entry.module,
-    action: entry.action,
-    recordId: entry.recordId,
-    recordTitle: entry.recordTitle ?? entry.recordId,
-    oldValue: entry.oldValue != null ? String(entry.oldValue) : undefined,
-    newValue: entry.newValue != null ? String(entry.newValue) : undefined,
-    ipAddress: "192.168.1.1",
-    sessionId: `sess-${user.id}`,
-  };
-  store.dispatch(logAction(full));
-
-  // Also POST to server (no-op in mock mode)
   try {
-    await api.post("/audit", {
-      ...entry,
-      userId: user.id,
-      userEmail: user.email,
+    const result = await logAuditAction({
+      module: entry.module,
+      action: entry.action,
+      recordId: entry.recordId,
+      recordTitle: entry.recordTitle ?? entry.recordId,
+      oldValue: entry.oldValue != null ? String(entry.oldValue) : undefined,
+      newValue: entry.newValue != null ? String(entry.newValue) : undefined,
     });
-  } catch {
-    // API may not be connected — local audit trail is the fallback
+    if (!result.success) {
+      console.warn("[audit] server action failed:", result.error);
+    }
+  } catch (err) {
+    console.warn("[audit] dispatch failed:", err);
   }
 }

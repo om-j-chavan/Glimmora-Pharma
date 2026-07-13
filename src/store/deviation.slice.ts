@@ -1,21 +1,71 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { LinkedDocument } from "@/components/shared/DocumentUpload";
+import type { WorklistDoc } from "@/lib/queries/worklist";
+import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
 
 export type DeviationType = "planned" | "unplanned";
 export type DeviationCategory = "process" | "equipment" | "material" | "environmental" | "personnel" | "documentation" | "system" | "other";
-export type DeviationSeverity = "critical" | "major" | "minor";
-export type DeviationStatus = "draft" | "open" | "under_investigation" | "pending_qa_review" | "closed" | "rejected";
+// Accepts both casings. Legacy DB rows are lowercase
+// (critical/major/minor); rows written via createDeviation after the
+// Cat 1 severity-unification rung are TitleCase (Critical/Major/Minor,
+// matching the FDA-regulatory canonical form). Display code normalises
+// via src/lib/severity.ts; comparisons must do the same.
+export type DeviationSeverity = "critical" | "major" | "minor" | "Critical" | "Major" | "Minor";
+// "capa_pending" (Stage 1, deviation redesign): a CAPA was raised for a high/med
+// deviation; it stays OPEN + linked until the CAPA closes, then QA sign-closes.
+export type DeviationStatus = "open" | "under_investigation" | "pending_qa_review" | "capa_pending" | "closed" | "rejected";
 export type ImpactLevel = "high" | "medium" | "low" | "none";
-export type DeviationRCAMethod = "5Why" | "Fishbone" | "FaultTree";
+// Phase 1.5 — unified to canonical spaced values via the shared constant.
+export type DeviationRCAMethod = InvestigationRCAMethod;
+
+/** Stage 4 (deviation redesign) — the current active low-priority task on a
+ *  deviation (serialised; Dates → ISO). Null when none is open. */
+export interface DeviationTaskMessageView {
+  id: string;
+  authorId: string | null;
+  authorName: string;
+  authorRole: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface DeviationActiveTask {
+  id: string;
+  assignee: string;
+  assigneeId: string | null;
+  message: string;
+  dueDate: string | null;
+  status: string;
+  completionNotes: string | null;
+  submittedAt: string | null;
+  reworkReason: string | null;
+  /** Stage 5 — flat QA↔worker conversation. */
+  messages: DeviationTaskMessageView[];
+  /** Count of the task's own documents (for the raise-CAPA confirm preview). */
+  docCount: number;
+  /** The task's own uploaded documents (grouped by GxP category in the QA modal). */
+  taskDocs: WorklistDoc[];
+}
 
 export interface Deviation {
   id: string;
+  // Human-readable reference (e.g. "DEV-CHN-2026-001"). Optional in
+  // the Redux shape because legacy/pre-backfill rows may not have one;
+  // every created Deviation populates it server-side. UI fallback when
+  // missing: display the cuid-prefixed slice.
+  reference?: string;
   tenantId: string;
   title: string;
   description: string;
   type: DeviationType;
   category: DeviationCategory;
   severity: DeviationSeverity;
+  /** Stage 2/3 (deviation redesign) — QA triage priority ("Low"|"Medium"|"High");
+   *  drives the priority split (high/med → CAPA, low → task). Optional: legacy
+   *  rows predate it. */
+  priority?: string;
+  /** Stage 4 — the current active low-priority task (assign → submit → review). */
+  activeTask?: DeviationActiveTask | null;
   siteId: string;
   area: string;
   detectedBy: string;
@@ -28,11 +78,28 @@ export interface Deviation {
   immediateAction: string;
   rootCause?: string;
   rcaMethod?: DeviationRCAMethod;
+  /** Authoritative userId FK of the reporter (Deviation.createdById).
+   *  Used by the investigation/CAPA-decision SoD checks in the UI. */
+  createdById?: string;
+  // ── Tier 2, Items 3+4 — investigation + CAPA decision ──
+  /** Raw structured RCA form buffer as JSON text (repopulates the edit
+   *  form without re-parsing rootCause). */
+  rcaData?: string;
+  investigationCompletedAt?: string;
+  investigationCompletedById?: string;
+  capaDecisionMade?: boolean;
+  capaDecisionRequired?: boolean;
+  capaDecisionReason?: string;
+  capaDecisionAt?: string;
+  capaDecisionById?: string;
   patientSafetyImpact: ImpactLevel;
   productQualityImpact: ImpactLevel;
   regulatoryImpact: ImpactLevel;
   batchesAffected?: string[];
   linkedCAPAId?: string;
+  /** Human-readable reference of the linked CAPA (resolved from the
+   *  sourcedCAPA relation); used for display while linkedCAPAId routes. */
+  linkedCAPARef?: string;
   linkedFindingId?: string;
   documents?: LinkedDocument[];
   closedBy?: string;
@@ -47,11 +114,9 @@ export interface Deviation {
 
 interface DeviationState {
   items: Deviation[];
-  loading: boolean;
-  error: string | null;
 }
 
-const initialState: DeviationState = { items: [], loading: false, error: null };
+const initialState: DeviationState = { items: [] };
 
 const deviationSlice = createSlice({
   name: "deviation",
@@ -59,15 +124,6 @@ const deviationSlice = createSlice({
   reducers: {
     setDeviations(state, { payload }: PayloadAction<Deviation[]>) {
       state.items = payload;
-      state.loading = false;
-      state.error = null;
-    },
-    setDeviationsLoading(state, { payload }: PayloadAction<boolean>) {
-      state.loading = payload;
-    },
-    setDeviationsError(state, { payload }: PayloadAction<string | null>) {
-      state.error = payload;
-      state.loading = false;
     },
     addDeviation(state, { payload }: PayloadAction<Deviation>) {
       state.items.push(payload);
@@ -112,8 +168,7 @@ const deviationSlice = createSlice({
 });
 
 export const {
-  setDeviations, setDeviationsLoading, setDeviationsError,
-  addDeviation, updateDeviation, closeDeviation, rejectDeviation,
+  setDeviations, addDeviation, updateDeviation, closeDeviation, rejectDeviation,
   linkCAPAToDeviation, addDeviationDocument, removeDeviationDocument,
 } = deviationSlice.actions;
 export default deviationSlice.reducer;

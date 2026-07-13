@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import clsx from "clsx";
 import {
@@ -8,12 +10,32 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { chartDefaults } from "@/lib/chartColors";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import type { SiteKPI } from "@/mock/governance.mock";
+import { DataTable, type Column } from "@/components/shared";
+
+export interface SiteKPI {
+  siteId: string;
+  siteName: string;
+  riskLevel: "HIGH" | "MEDIUM" | "LOW";
+  readinessScore: number;
+  openFindings: number;
+  criticalFindings: number;
+  openCAPAs: number;
+  overdueCAPAs: number;
+  activeFDA483: number;
+  systemsValidated: number;
+  systemsTotal: number;
+  diExceptions: number;
+  openDeviations: number;
+  inspectionReadiness: number;
+  nextInspection?: string;
+  nextInspectionDate?: string;
+  capaTimeliness: number;
+  auditTrailCoverage: number;
+}
 
 interface Site {
   id: string;
   name: string;
-  risk: string;
 }
 
 interface SiteReadiness {
@@ -86,7 +108,7 @@ export function KPIScorecardTab({
         </div></div>
         <div className="card"><div className="card-header"><div className="flex items-center gap-2"><Activity className="w-4 h-4 text-[#f59e0b]" aria-hidden="true" /><span className="card-title">Validation &amp; CSV drift</span></div></div><div className="card-body">
           {systemsCount === 0 ? <div className="flex flex-col items-center py-10"><Database className="w-8 h-8 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No systems registered</p></div> : valBreakdown.length === 0 ? <p className="text-center py-10 text-[12px]" style={{ color: "var(--text-muted)" }}>No data</p> : (
-            <div className="flex items-center gap-6"><PieChart width={160} height={160}><Pie data={valBreakdown} cx={75} cy={75} innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={2}>{valBreakdown.map((d, i) => <Cell key={i} fill={d.color} />)}</Pie><Tooltip formatter={(v: any, n: any) => [v, n]} /></PieChart><div className="flex-1 space-y-2">{valBreakdown.map((d) => (<div key={d.name} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{d.name}</span></div><span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{d.value}</span></div>))}</div></div>
+            <div className="flex items-center gap-6"><PieChart width={160} height={160}><Pie data={valBreakdown} cx={75} cy={75} innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={2}>{valBreakdown.map((d, i) => <Cell key={i} fill={d.color} />)}</Pie><Tooltip formatter={(v, n) => [v as string | number, n as string]} /></PieChart><div className="flex-1 space-y-2">{valBreakdown.map((d) => (<div key={d.name} className="flex items-center justify-between"><div className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full" style={{ background: d.color }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{d.name}</span></div><span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{d.value}</span></div>))}</div></div>
           )}
         </div></div>
       </div>
@@ -101,7 +123,7 @@ export function KPIScorecardTab({
       {/* Site heatmap */}
       <div className="card"><div className="card-header"><div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" /><span className="card-title">Site readiness heatmap</span></div></div><div className="card-body">
         {sites.length === 0 ? <div className="flex flex-col items-center py-10"><MapPin className="w-8 h-8 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px] mb-2" style={{ color: "var(--text-muted)" }}>No sites configured</p><Button variant="ghost" size="sm" onClick={onNavigateSettings}>Go to Settings</Button></div> : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{siteReadiness.map((sr) => { const col = sr.score >= 80 ? "#10b981" : sr.score >= 60 ? "#f59e0b" : "#ef4444"; return (<div key={sr.site.id} className="rounded-xl p-4 border" style={{ background: col + (isDark ? "12" : "0A"), borderColor: col + "40" }}><div className="flex items-center justify-between mb-2"><div><p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{sr.site.name}</p><p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{sr.site.risk} risk</p></div><p className="text-[22px] font-bold" style={{ color: col }}>{sr.score}%</p></div><div className={clsx("h-1.5 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}><div className="h-full rounded-full" style={{ width: `${sr.score}%`, background: col }} /></div><div className="flex items-center gap-3 mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}><span>{sr.findingsCount} findings</span><span>{sr.capasCount} CAPAs</span></div></div>); })}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{siteReadiness.map((sr) => { const col = sr.score >= 80 ? "#10b981" : sr.score >= 60 ? "#f59e0b" : "#ef4444"; return (<div key={sr.site.id} className="rounded-xl p-4 border" style={{ background: col + (isDark ? "12" : "0A"), borderColor: col + "40" }}><div className="flex items-center justify-between mb-2"><div><p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{sr.site.name}</p></div><p className="text-[22px] font-bold" style={{ color: col }}>{sr.score}%</p></div><div className={clsx("h-1.5 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}><div className="h-full rounded-full" style={{ width: `${sr.score}%`, background: col }} /></div><div className="flex items-center gap-3 mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}><span>{sr.findingsCount} findings</span><span>{sr.capasCount} CAPAs</span></div></div>); })}</div>
         )}
       </div></div>
 
@@ -112,43 +134,60 @@ export function KPIScorecardTab({
             <div className="card-header">
               <div className="flex items-center gap-2"><BarChart3 className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">Multi-site comparison</span></div>
             </div>
-            <div className="card-body overflow-x-auto">
-              <table className="data-table" style={{ minWidth: 700 }} aria-label="Site comparison matrix">
-                <thead>
-                  <tr>
-                    <th scope="col">Metric</th>
-                    {siteKPIs.map((s) => <th key={s.siteId} scope="col" className="text-center">{s.siteName.split(" ")[0]}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {([
-                    { label: "Readiness %", key: "readinessScore", thresh: [80, 60] },
-                    { label: "Open findings", key: "openFindings", thresh: [0, 1], invert: true },
-                    { label: "Overdue CAPAs", key: "overdueCAPAs", thresh: [0, 1], invert: true },
-                    { label: "Active FDA 483", key: "activeFDA483", thresh: [0, 1], invert: true },
-                    { label: "DI exceptions", key: "diExceptions", thresh: [0, 1], invert: true },
-                    { label: "CAPA timeliness", key: "capaTimeliness", thresh: [80, 60] },
-                    { label: "Audit trail %", key: "auditTrailCoverage", thresh: [80, 60] },
-                  ] as { label: string; key: keyof SiteKPI; thresh: number[]; invert?: boolean }[]).map((row) => (
-                    <tr key={row.label}>
-                      <th scope="row" className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{row.label}</th>
-                      {siteKPIs.map((s) => {
-                        const v = s[row.key] as number;
-                        const isGood = row.invert ? v <= row.thresh[0] : v >= row.thresh[0];
-                        const isMid = row.invert ? v <= row.thresh[1] : v >= row.thresh[1];
-                        const bg = isGood ? "#E8F5F1" : isMid ? "#FEF9EC" : "#FEF2F2";
-                        const col = isGood ? "#0F6E56" : isMid ? "#7A6200" : "#A32D2D";
-                        const bgDark = isGood ? "rgba(16,185,129,0.08)" : isMid ? "rgba(245,158,11,0.08)" : "rgba(239,68,68,0.08)";
-                        return (
-                          <td key={s.siteId} className="text-center text-[12px] font-semibold" style={{ background: isDark ? bgDark : bg, color: col }}>
-                            {row.key === "readinessScore" || row.key === "capaTimeliness" || row.key === "auditTrailCoverage" ? `${v}%` : String(v)}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="card-body">
+              {(() => {
+                type MetricRow = { label: string; key: keyof SiteKPI; thresh: number[]; invert?: boolean };
+                const metricRows: MetricRow[] = [
+                  { label: "Readiness %", key: "readinessScore", thresh: [80, 60] },
+                  { label: "Open findings", key: "openFindings", thresh: [0, 1], invert: true },
+                  { label: "Overdue CAPAs", key: "overdueCAPAs", thresh: [0, 1], invert: true },
+                  { label: "Active FDA 483", key: "activeFDA483", thresh: [0, 1], invert: true },
+                  { label: "DI exceptions", key: "diExceptions", thresh: [0, 1], invert: true },
+                  { label: "CAPA timeliness", key: "capaTimeliness", thresh: [80, 60] },
+                  { label: "Audit trail %", key: "auditTrailCoverage", thresh: [80, 60] },
+                ];
+                // Per-cell heat-map colours (background + text), computed per
+                // metric row + site — identical to the original inline logic.
+                const cellColors = (row: MetricRow, v: number) => {
+                  const isGood = row.invert ? v <= row.thresh[0] : v >= row.thresh[0];
+                  const isMid = row.invert ? v <= row.thresh[1] : v >= row.thresh[1];
+                  const bg = isGood ? "#E8F5F1" : isMid ? "#FEF9EC" : "#FEF2F2";
+                  const col = isGood ? "#0F6E56" : isMid ? "#7A6200" : "#A32D2D";
+                  const bgDark = isGood ? "rgba(16,185,129,0.08)" : isMid ? "rgba(245,158,11,0.08)" : "rgba(239,68,68,0.08)";
+                  return { background: isDark ? bgDark : bg, color: col };
+                };
+                const isPct = (key: keyof SiteKPI) =>
+                  key === "readinessScore" || key === "capaTimeliness" || key === "auditTrailCoverage";
+                return (
+                  <DataTable
+                    ariaLabel="Site comparison matrix"
+                    data={metricRows}
+                    rowKey={(row) => row.label}
+                    minWidth={700}
+                    columns={[
+                      {
+                        key: "metric",
+                        header: "Metric",
+                        cellClassName: "text-[12px] font-medium",
+                        render: (row) => <span style={{ color: "var(--text-primary)" }}>{row.label}</span>,
+                      },
+                      // One column per site — mirrors the original siteKPIs map.
+                      ...siteKPIs.map((s): Column<MetricRow> => ({
+                        key: s.siteId,
+                        header: s.siteName.split(" ")[0],
+                        align: "center",
+                        headerClassName: "text-center",
+                        cellClassName: "text-center text-[12px] font-semibold",
+                        cellStyle: (row) => cellColors(row, s[row.key] as number),
+                        render: (row) => {
+                          const v = s[row.key] as number;
+                          return isPct(row.key) ? `${v}%` : String(v);
+                        },
+                      })),
+                    ]}
+                  />
+                );
+              })()}
             </div>
           </div>
 

@@ -1,82 +1,86 @@
-import { useState, useRef, useEffect } from "react";
+"use client";
+
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
-  Bell, X, AlertTriangle, Clock, Search,
-  ClipboardCheck, ShieldAlert, CheckCircle2,
-  Database, FileWarning, FolderOpen,
-  Download, BarChart3, Activity,
-  CreditCard, Users, MapPin,
+  Bell, X, ShieldAlert, FileWarning, RefreshCw,
+  ClipboardCheck, CheckCircle2, Clock,
 } from "lucide-react";
-import dayjs from "@/lib/dayjs";
+import type { LucideIcon } from "lucide-react";
+import { RelativeTime } from "@/components/ui/RelativeTime";
+import { Button } from "@/components/ui/Button";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import {
-  markRead, markAllRead, clearAll,
-  type AppNotification, type NotificationType,
-} from "@/store/notifications.slice";
+  getNotifications, markRead, markAllRead, unreadCount,
+  type NotificationView,
+} from "@/actions/notifications";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-const NOTIF_CONFIG: Record<NotificationType, { icon: any; color: string; category: string }> = {
-  finding_critical:         { icon: AlertTriangle,  color: "#ef4444", category: "Gap Assessment" },
-  finding_overdue:          { icon: Clock,          color: "#ef4444", category: "Gap Assessment" },
-  finding_assigned:         { icon: Search,         color: "#0ea5e9", category: "Gap Assessment" },
-  capa_overdue:             { icon: Clock,          color: "#ef4444", category: "CAPA" },
-  capa_pending_review:      { icon: ClipboardCheck, color: "#6366f1", category: "CAPA" },
-  capa_assigned:            { icon: ClipboardCheck, color: "#0ea5e9", category: "CAPA" },
-  capa_closed:              { icon: CheckCircle2,   color: "#10b981", category: "CAPA" },
-  capa_di_gate:             { icon: ShieldAlert,    color: "#ef4444", category: "CAPA" },
-  validation_overdue:       { icon: Database,       color: "#f59e0b", category: "CSV/CSA" },
-  system_non_compliant:     { icon: Database,       color: "#ef4444", category: "CSV/CSA" },
-  system_added:             { icon: Database,       color: "#10b981", category: "CSV/CSA" },
-  fda483_deadline:          { icon: FileWarning,    color: "#f59e0b", category: "FDA 483" },
-  fda483_deadline_critical: { icon: FileWarning,    color: "#ef4444", category: "FDA 483" },
-  commitment_overdue:       { icon: FileWarning,    color: "#ef4444", category: "FDA 483" },
-  observation_added:        { icon: FileWarning,    color: "#0ea5e9", category: "FDA 483" },
-  evidence_missing:         { icon: FolderOpen,     color: "#f59e0b", category: "Evidence" },
-  pack_exported:            { icon: Download,       color: "#10b981", category: "Evidence" },
-  raid_critical:            { icon: AlertTriangle,  color: "#ef4444", category: "Governance" },
-  raid_overdue:             { icon: Clock,          color: "#f59e0b", category: "Governance" },
-  kpi_below_threshold:      { icon: BarChart3,      color: "#f59e0b", category: "Governance" },
-  drift_critical:           { icon: Activity,       color: "#ef4444", category: "AGI" },
-  drift_new:                { icon: Activity,       color: "#a78bfa", category: "AGI" },
-  plan_limit_near:          { icon: CreditCard,     color: "#f59e0b", category: "Subscription" },
-  plan_limit_reached:       { icon: CreditCard,     color: "#ef4444", category: "Subscription" },
-  user_added:               { icon: Users,          color: "#10b981", category: "Settings" },
-  site_added:               { icon: MapPin,         color: "#10b981", category: "Settings" },
+// Visual config per notification type (Phase 2 DB types). Falls back to a
+// neutral bell for any unknown/future type (e.g. DUE_SOON/OVERDUE once a
+// scheduler emits them).
+const TYPE_CONFIG: Record<string, { icon: LucideIcon; color: string }> = {
+  CAPA_REJECTED:    { icon: ShieldAlert,    color: "#ef4444" },
+  EVIDENCE_REJECTED:{ icon: FileWarning,    color: "#ef4444" },
+  REWORK_ASSIGNED:  { icon: RefreshCw,      color: "#f59e0b" },
+  CAPA_ASSIGNED:    { icon: ClipboardCheck, color: "#0ea5e9" },
+  ACTION_ASSIGNED:  { icon: ClipboardCheck, color: "#0ea5e9" },
+  CAPA_APPROVED:    { icon: CheckCircle2,   color: "#10b981" },
+  CAPA_VERIFIED:    { icon: CheckCircle2,   color: "#10b981" },
+  CAPA_CLOSED:      { icon: CheckCircle2,   color: "#10b981" },
+  DUE_SOON:         { icon: Clock,          color: "#f59e0b" },
+  OVERDUE:          { icon: Clock,          color: "#ef4444" },
 };
 
-const PRIORITY: Record<NotificationType, number> = {
-  fda483_deadline_critical: 0, capa_di_gate: 1, finding_critical: 2, system_non_compliant: 3,
-  capa_overdue: 4, raid_critical: 5, drift_critical: 6, fda483_deadline: 7, finding_overdue: 8,
-  commitment_overdue: 9, validation_overdue: 10, capa_pending_review: 11, plan_limit_reached: 12,
-  raid_overdue: 13, kpi_below_threshold: 14, plan_limit_near: 15, evidence_missing: 16,
-  drift_new: 17, finding_assigned: 18, capa_assigned: 19, observation_added: 20,
-  system_added: 21, user_added: 22, site_added: 23, pack_exported: 24, capa_closed: 25,
-};
-
-function sortNotifications(items: AppNotification[]) {
-  return [...items].sort((a, b) => {
-    if (a.read !== b.read) return a.read ? 1 : -1;
-    const pa = PRIORITY[a.type] ?? 99;
-    const pb = PRIORITY[b.type] ?? 99;
-    if (pa !== pb) return pa - pb;
-    return dayjs(b.createdAt).diff(dayjs(a.createdAt));
-  });
-}
-
-const CATEGORIES = ["All", "Gap Assessment", "CAPA", "CSV/CSA", "FDA 483", "Evidence", "Governance", "AGI", "Subscription", "Settings"];
+const POLL_MS = 60_000;
 
 export function NotificationBell() {
-  const notifications = useAppSelector((s) => s.notifications.items);
-  const unreadCount = notifications.filter((n) => !n.read).length;
-  const dispatch = useAppDispatch();
   const router = useRouter();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
+  const user = useAppSelector((s) => s.auth.user);
 
   const [open, setOpen] = useState(false);
-  const [activeCategory, setCategory] = useState("All");
+  const [items, setItems] = useState<NotificationView[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [loading, setLoading] = useState(false);
   const bellRef = useRef<HTMLDivElement>(null);
+
+  // Badge count — lightweight, polled while signed in. Guarded on `user` so it
+  // never fires for a logged-out shell (the server action requires auth).
+  const refreshCount = useCallback(async () => {
+    if (!user) return;
+    try {
+      setUnread(await unreadCount());
+    } catch {
+      /* badge is best-effort — ignore transient failures */
+    }
+  }, [user]);
+
+  // Full list — fetched when the dropdown opens.
+  const refreshList = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const rows = await getNotifications(30);
+      setItems(rows);
+      setUnread(rows.filter((n) => !n.isRead).length);
+    } catch {
+      /* ignore — keep whatever we last had */
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) { setItems([]); setUnread(0); return; }
+    refreshCount();
+    const t = setInterval(refreshCount, POLL_MS);
+    return () => clearInterval(t);
+  }, [user, refreshCount]);
+
+  useEffect(() => {
+    if (open) refreshList();
+  }, [open, refreshList]);
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -86,12 +90,24 @@ export function NotificationBell() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const displayed = sortNotifications(
-    notifications.filter((n) => {
-      if (activeCategory === "All") return true;
-      return NOTIF_CONFIG[n.type]?.category === activeCategory;
-    }),
-  );
+  const handleOpenItem = async (n: NotificationView) => {
+    setOpen(false);
+    if (!n.isRead) {
+      // Optimistic — flip locally first, then persist (fault-tolerant).
+      setItems((prev) => prev.map((i) => (i.id === n.id ? { ...i, isRead: true } : i)));
+      setUnread((c) => Math.max(0, c - 1));
+      try { await markRead(n.id); } catch { /* will reconcile on next open */ }
+    }
+    if (n.linkPath) router.push(n.linkPath);
+  };
+
+  const handleMarkAll = async () => {
+    setItems((prev) => prev.map((i) => ({ ...i, isRead: true })));
+    setUnread(0);
+    try { await markAllRead(); } catch { /* reconcile on next open */ }
+  };
+
+  if (!user) return null;
 
   return (
     <div ref={bellRef} className="relative">
@@ -99,7 +115,7 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={`Notifications${unreadCount > 0 ? ` \u2014 ${unreadCount} unread` : ""}`}
+        aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ""}`}
         aria-expanded={open}
         aria-haspopup="true"
         style={{
@@ -109,9 +125,9 @@ export function NotificationBell() {
         }}
       >
         <Bell size={15} aria-hidden="true" />
-        {unreadCount > 0 && (
+        {unread > 0 && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#ef4444] text-white text-[9px] font-bold flex items-center justify-center" aria-hidden="true">
-            {unreadCount > 9 ? "9+" : unreadCount}
+            {unread > 9 ? "9+" : unread}
           </span>
         )}
       </button>
@@ -127,58 +143,38 @@ export function NotificationBell() {
           <div className={clsx("flex items-center justify-between px-4 py-3 border-b", "border-(--bg-border)")}>
             <span className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>Notifications</span>
             <div className="flex items-center gap-2">
-              {unreadCount > 0 && (
-                <button type="button" onClick={() => dispatch(markAllRead())} className="text-[10px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer">Mark all read</button>
+              {unread > 0 && (
+                <Button type="button" variant="ghost" size="xs" onClick={handleMarkAll} className="!h-auto !p-0 text-[10px] text-[#0ea5e9] hover:underline">Mark all read</Button>
               )}
-              {notifications.length > 0 && (
-                <button type="button" onClick={() => dispatch(clearAll())} className="text-[10px] hover:text-[#0ea5e9] border-none bg-transparent cursor-pointer" style={{ color: "var(--text-muted)" }}>Clear all</button>
-              )}
-              <button type="button" onClick={() => setOpen(false)} className="opacity-40 hover:opacity-100 border-none bg-transparent cursor-pointer">
-                <X className="w-3.5 h-3.5" style={{ color: "var(--text-primary)" }} />
-              </button>
+              <Button type="button" variant="ghost" size="xs" icon={X} onClick={() => setOpen(false)} className="opacity-40 hover:opacity-100" style={{ color: "var(--text-primary)" }} aria-label="Close" />
             </div>
-          </div>
-
-          {/* Category tabs */}
-          <div className={clsx("flex gap-1 px-3 py-2 overflow-x-auto border-b", "border-(--bg-border)")} style={{ scrollbarWidth: "none" }}>
-            {CATEGORIES.map((cat) => {
-              const catUnread = cat === "All" ? unreadCount : notifications.filter((n) => !n.read && NOTIF_CONFIG[n.type]?.category === cat).length;
-              return (
-                <button
-                  key={cat} type="button" onClick={() => setCategory(cat)}
-                  className={clsx(
-                    "flex-shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium border-none cursor-pointer transition-colors",
-                    activeCategory === cat ? "bg-[#0ea5e9] text-white" : isDark ? "bg-(--bg-surface) text-[#8899b8]" : "bg-[#f1f5f9] text-[#64748b]",
-                  )}
-                >
-                  {cat}
-                  {catUnread > 0 && <span className={clsx("ml-1 text-[9px] font-bold", activeCategory === cat ? "text-white opacity-80" : "text-[#0ea5e9]")}>{catUnread}</span>}
-                </button>
-              );
-            })}
           </div>
 
           {/* List */}
           <div className="max-h-[360px] overflow-y-auto">
-            {displayed.length === 0 && (
+            {loading && items.length === 0 && (
+              <div className="p-6 text-center">
+                <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Loading…</p>
+              </div>
+            )}
+            {!loading && items.length === 0 && (
               <div className="p-6 text-center">
                 <Bell className="w-8 h-8 mx-auto mb-2" style={{ color: "#334155" }} aria-hidden="true" />
                 <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No notifications</p>
               </div>
             )}
-            {displayed.map((notif) => {
-              const cfg = NOTIF_CONFIG[notif.type];
-              if (!cfg) return null;
+            {items.map((notif) => {
+              const cfg = TYPE_CONFIG[notif.type] ?? { icon: Bell, color: "#64748b" };
               const NotifIcon = cfg.icon;
               return (
                 <div
                   key={notif.id}
                   className={clsx(
                     "flex items-start gap-3 px-4 py-3 border-b last:border-0 cursor-pointer transition-colors duration-150",
-                    !notif.read && (isDark ? "bg-(--brand-muted)" : "bg-[#fafbff]"),
+                    !notif.isRead && (isDark ? "bg-(--brand-muted)" : "bg-[#fafbff]"),
                     isDark ? "border-(--bg-border) hover:bg-(--bg-surface)" : "border-[#f1f5f9] hover:bg-[#f8fafc]",
                   )}
-                  onClick={() => { dispatch(markRead(notif.id)); if (notif.link) router.push(notif.link, { state: notif.linkState }); setOpen(false); }}
+                  onClick={() => handleOpenItem(notif)}
                   role="button"
                   aria-label={notif.title}
                 >
@@ -188,10 +184,12 @@ export function NotificationBell() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>{notif.title}</p>
-                      {!notif.read && <div className="w-2 h-2 rounded-full bg-[#0ea5e9] flex-shrink-0 mt-1" aria-label="Unread" />}
+                      {!notif.isRead && <div className="w-2 h-2 rounded-full bg-[#0ea5e9] flex-shrink-0 mt-1" aria-label="Unread" />}
                     </div>
-                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{notif.message}</p>
-                    <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>{dayjs(notif.createdAt).fromNow()}</p>
+                    {notif.body && (
+                      <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{notif.body}</p>
+                    )}
+                    <RelativeTime value={notif.createdAt} className="block text-[10px] mt-1" style={{ color: "var(--text-muted)" }} />
                   </div>
                 </div>
               );

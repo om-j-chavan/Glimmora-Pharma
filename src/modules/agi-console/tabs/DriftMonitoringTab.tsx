@@ -2,11 +2,13 @@ import { Activity, AlertCircle, Plus } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import dayjs from "@/lib/dayjs";
 import { chartDefaults } from "@/lib/chartColors";
-import type { DriftAlert, DriftSeverity, DriftStatus } from "@/store/agiDrift.slice";
+import type { DriftAlert, DriftSeverity, DriftStatus } from "@/types/agi";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
+import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
 
-function driftSevBadge(s: DriftSeverity) { return <Badge variant={s === "Critical" ? "red" : s === "Major" ? "amber" : "gray"}>{s}</Badge>; }
+function driftSevBadge(s: DriftSeverity) { return <Badge variant={getSeverityVariant(s, "fda")}>{normalizeSeverityForDisplay(s, "fda") ?? s}</Badge>; }
 function driftStatBadge(s: DriftStatus) { const m: Record<DriftStatus, "blue" | "amber" | "green"> = { Open: "blue", Investigating: "amber", Resolved: "green" }; return <Badge variant={m[s]}>{s}</Badge>; }
 
 export interface DriftMonitoringTabProps {
@@ -54,23 +56,27 @@ export function DriftMonitoringTab({
         {driftAlerts.length === 0 ? (
           <p className="text-[11px] italic text-center py-6" style={{ color: "var(--text-muted)" }}>No drift alerts logged. Log alerts manually or enable Drift Detection agent for automated monitoring.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="data-table" aria-label="Drift alerts">
-              <thead><tr><th scope="col">Type</th><th scope="col">Severity</th><th scope="col">Description</th><th scope="col">Agent</th><th scope="col">Owner</th><th scope="col">Detected</th><th scope="col">Status</th>{role !== "viewer" && <th scope="col"><span className="sr-only">Actions</span></th>}</tr></thead>
-              <tbody>{driftAlerts.map((a) => (
-                <tr key={a.id}>
-                  <td><Badge variant="gray">{a.type}</Badge></td>
-                  <td>{driftSevBadge(a.severity)}</td>
-                  <td><p className="text-[12px] line-clamp-2" style={{ maxWidth: 220, color: "var(--text-primary)" }}>{a.description}</p></td>
-                  <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{a.agent}</td>
-                  <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{ownerName(a.owner)}</td>
-                  <td className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{a.detectedAt ? dayjs.utc(a.detectedAt).tz(timezone).format(dateFormat) : "\u2014"}</td>
-                  <td>{driftStatBadge(a.status)}</td>
-                  {role !== "viewer" && <td>{a.status !== "Resolved" && <Button variant="ghost" size="xs" onClick={() => onResolveAlert(a)}>Resolve</Button>}</td>}
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
+          <DataTable
+            ariaLabel="Drift alerts"
+            data={driftAlerts}
+            rowKey={(a) => a.id}
+            columns={[
+              { key: "type", header: "Type", render: (a) => <Badge variant="gray">{a.type}</Badge> },
+              { key: "severity", header: "Severity", render: (a) => driftSevBadge(a.severity) },
+              { key: "description", header: "Description", render: (a) => <p className="text-[12px] line-clamp-2" style={{ maxWidth: 220, color: "var(--text-primary)" }}>{a.description}</p> },
+              { key: "agent", header: "Agent", cellClassName: "text-[11px]", render: (a) => <span style={{ color: "var(--text-secondary)" }}>{a.agent}</span> },
+              { key: "owner", header: "Owner", cellClassName: "text-[11px]", render: (a) => <span style={{ color: "var(--text-secondary)" }}>{ownerName(a.owner)}</span> },
+              { key: "detected", header: "Detected", cellClassName: "text-[11px]", render: (a) => <span style={{ color: "var(--text-secondary)" }}>{a.detectedAt ? dayjs.utc(a.detectedAt).tz(timezone).format(dateFormat) : "\u2014"}</span> },
+              { key: "status", header: "Status", render: (a) => driftStatBadge(a.status) },
+              {
+                key: "actions",
+                header: "Actions",
+                srOnly: true,
+                hidden: role === "viewer",
+                render: (a) => a.status !== "Resolved" && <Button variant="ghost" size="xs" onClick={() => onResolveAlert(a)}>Resolve</Button>,
+              },
+            ] satisfies Column<DriftAlert>[]}
+          />
         )}
       </div></div>
     </>

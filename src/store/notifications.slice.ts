@@ -6,7 +6,7 @@ export type NotificationType =
   | "validation_overdue" | "system_non_compliant" | "system_added"
   | "fda483_deadline" | "fda483_deadline_critical" | "commitment_overdue" | "observation_added"
   | "evidence_missing" | "pack_exported"
-  | "raid_critical" | "raid_overdue" | "kpi_below_threshold"
+  | "kpi_below_threshold"
   | "drift_critical" | "drift_new"
   | "plan_limit_near" | "plan_limit_reached"
   | "user_added" | "site_added";

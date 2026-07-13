@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
+import Image from "next/image";
 import { Mail } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
@@ -9,18 +10,46 @@ import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useNotificationEngine } from "@/hooks/useNotificationEngine";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
-import { logout } from "@/store/auth.slice";
+import { logout, setCredentials, setTenants, type AuthUser, type Tenant } from "@/store/auth.slice";
+import { setEffectiveFrameworks, resetFrameworks, type FrameworkItem } from "@/store/frameworks.slice";
+import { setRegions, type RegionOption } from "@/store/regions.slice";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { SiteFilterBanner } from "./SiteFilterBanner";
+import { AIChatbot } from "@/components/chatbot/AIChatbot";
 
-export function AppShell({ children }: { children?: React.ReactNode }) {
+interface AppShellProps {
+  children?: React.ReactNode;
+  initialTenant?: Tenant | null;
+  /** NextAuth session user resolved server-side by app/(app)/layout.tsx.
+   *  We dispatch setCredentials with this on mount whenever Redux's
+   *  auth.user is missing — the persistMiddleware's 500ms debounce can
+   *  miss the post-login dispatch before window.location.assign navigates,
+   *  leaving auth.currentTenant null. Without that id, useTenantConfig()
+   *  can't find the freshly-dispatched tenant in `tenants[]`, treats the
+   *  missing subscription as expired, and the gate fires "No active
+   *  subscription" against a perfectly healthy DB row. */
+  initialUser?: AuthUser | null;
+  /** Server-resolved effective frameworks for this tenant — seeds the
+   *  non-persisted frameworks slice synchronously on mount (see the (app)
+   *  layout). Guarantees framework-dependent UI is populated on first render. */
+  initialFrameworks?: FrameworkItem[];
+  /** Server-resolved regions (active options + value→label map incl. archived)
+   *  — seeds the non-persisted regions slice on mount (Item #3, Stage 2). */
+  initialRegions?: { active: RegionOption[]; labelMap: Record<string, string> };
+}
+
+export function AppShell({ children, initialTenant, initialUser, initialFrameworks, initialRegions }: AppShellProps) {
   // 🔒 Prevent hydration mismatch
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // SSR-safe mount flag — intentionally syncs on mount only.
+
     setMounted(true);
   }, []);
 
@@ -28,15 +57,81 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const dispatch = useAppDispatch();
-  const { activePlan, tenantName, tenantId, isExpired, isNearExpiry, daysRemaining } =
+  const toast = useToast();
+  const reduxUser = useAppSelector((s) => s.auth.user);
+  const reduxCurrentTenant = useAppSelector((s) => s.auth.currentTenant);
+
+  // Hydrate Redux with the current user's own tenant so useTenantConfig()
+  // can resolve subscription/site/user state. Without this, customer_admin
+  // and site users would have an empty tenants array (only /admin's
+  // CustomerAccountsPage dispatches setTenants), the subscription gate
+  // would fire as "expired", and the entire app would be blocked.
+  const initialSeeded = useRef(false);
+  useEffect(() => {
+    if (initialTenant && !initialSeeded.current) {
+      dispatch(setTenants([initialTenant]));
+      initialSeeded.current = true;
+    }
+  }, [dispatch, initialTenant]);
+
+  // Self-heal Redux's auth.user / currentTenant from the server-rendered
+  // session. The post-login dispatch in LoginPage.finishLogin() lands in
+  // Redux but the persistMiddleware debounces writes by 500ms, so a
+  // window.location.assign("/") that fires immediately after can leave
+  // localStorage holding a stale (or missing) currentTenant. The next
+  // page load's loadPersistedState() then rebuilds the store with that
+  // stale state, useTenantConfig() finds no tenant for currentTenant,
+  // activePlan is null, isExpired collapses to true, and the gate fires.
+  // Mirroring AdminShell's self-heal closes that race for /(app) too.
+  const credentialsSeeded = useRef(false);
+  useEffect(() => {
+    if (credentialsSeeded.current) return;
+    if (!initialUser) return;
+    if (reduxUser && reduxCurrentTenant === initialUser.tenantId) {
+      credentialsSeeded.current = true;
+      return;
+    }
+    dispatch(setCredentials({ token: "nextauth-session", user: initialUser }));
+    credentialsSeeded.current = true;
+  }, [dispatch, initialUser, reduxUser, reduxCurrentTenant]);
+
+  // Per-tenant framework hydration (Phase 1, Item 4). Seeds the NON-persisted
+  // `frameworks` slice from the SERVER-resolved list passed by the (app) layout
+  // — populated on the first client render (no async round-trip), so the Gap
+  // dropdown / CSV columns never read an empty slice. The layout re-runs per
+  // request (per login), so a tenant switch always re-seeds from the server and
+  // one tenant's enablement can never leak to another. Resets on logout.
+  const fwUserId = reduxUser?.id ?? initialUser?.id ?? null;
+  useEffect(() => {
+    if (!fwUserId) { dispatch(resetFrameworks()); return; }
+    dispatch(setEffectiveFrameworks(initialFrameworks ?? []));
+  }, [dispatch, fwUserId, initialFrameworks]);
+
+  // DB-backed regions (Item #3, Stage 2) — seed from the server list. If absent
+  // the slice keeps its constant-fallback initial state, so dropdowns/labels
+  // still work (parity by construction).
+  useEffect(() => {
+    if (initialRegions) dispatch(setRegions(initialRegions));
+  }, [dispatch, initialRegions]);
+
+  const { plan, tenantName, isExpired, isNearExpiry, daysRemaining } =
     useTenantConfig();
-  const { isSuperAdmin } = useRole();
+  const { isSuperAdmin, isViewOnly } = useRole();
 
   // ⛔ Wait until client is ready
   if (!mounted) return null;
 
-  // Only block if user is authenticated (has a tenant) but subscription is expired
-  const isBlocked = tenantId && isExpired && !isSuperAdmin;
+  // The plan gate must NOT evaluate during the logout transition. Logout
+  // dispatches `logout()` (nulling auth.user + currentTenant) but defers the
+  // /login navigation ~500ms, so this shell re-renders while still mounted with
+  // no session: useTenantConfig() then sees no tenant → plan=null → isExpired,
+  // and useRole() defaults to "viewer" → !isSuperAdmin — which previously
+  // flashed the "No plan assigned" blocked screen at every non-SA logout.
+  // Requiring a live session user (`reduxUser`) skips the gate whenever the
+  // session is clearing / absent, without touching the SA exemption
+  // (`!isSuperAdmin`) or a real authenticated plan-less/expired tenant (which
+  // always has a user, so it still sees the card in normal use).
+  const isBlocked = isExpired && !isSuperAdmin && !!reduxUser;
 
   // =========================
   // 🚫 BLOCKED SCREEN
@@ -55,12 +150,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             "bg-(--bg-elevated) border-(--bg-border)",
           )}
         >
-          <div
+          <Image
+            src="/app-icon.png"
+            alt=""
+            width={64}
+            height={64}
             aria-hidden="true"
-            className="w-16 h-16 rounded-2xl bg-[#0ea5e9] flex items-center justify-center mx-auto mb-6 text-white text-[20px] font-bold"
-          >
-            PG
-          </div>
+            className="w-16 h-16 object-contain mx-auto mb-6"
+          />
 
           <p className="text-[13px] font-semibold text-[#0ea5e9] mb-2">
             {tenantName}
@@ -70,18 +167,18 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             className="text-[20px] font-bold mb-2"
             style={{ color: "var(--text-primary)" }}
           >
-            {activePlan
-              ? "Your subscription has ended"
-              : "No active subscription"}
+            {plan
+              ? "Your plan has expired"
+              : "No plan assigned"}
           </h1>
 
-          {activePlan && (
+          {plan && (
             <p
               className="text-[13px] mb-4"
               style={{ color: "var(--text-secondary)" }}
             >
               Your plan expired on{" "}
-              {dayjs.utc(activePlan.endDate).format("DD MMM YYYY")}
+              {dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}
             </p>
           )}
 
@@ -130,11 +227,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               variant="ghost"
               fullWidth
               onClick={async () => {
+                toast.info("Signing out…");
                 try {
                   await nextAuthLogout();
-                } catch {}
+                } catch { /* ignore — fall through to local logout */ }
                 dispatch(logout());
-                window.location.href = "/login";
+                // Clear per-tenant framework state on sign-out so nothing can
+                // carry into the next login in the same browser (belt-and-braces
+                // on top of the hard nav + non-persisted slice).
+                dispatch(resetFrameworks());
+                toast.success("Signed out.");
+                // Hard nav (this surface used window.location to defeat any
+                // stale SPA state). Slight delay so the toast renders.
+                setTimeout(() => { window.location.href = "/login"; }, 500);
               }}
             >
               Logout
@@ -176,7 +281,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         Skip to main content
       </a>
 
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-full overflow-hidden">
         {sidebarOpen && (
           <div
             className="fixed inset-0 z-40 bg-black/50 lg:hidden"
@@ -186,19 +291,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         )}
 
         <div
-          className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0 ${
+          className={`fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0 print:hidden ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <Sidebar onNavigate={() => setSidebarOpen(false)} />
         </div>
 
-        <div className="flex-1 flex flex-col min-w-0 h-screen">
-          <div className="shrink-0">
+        <div className="flex-1 flex flex-col min-w-0 h-full">
+          <div className="shrink-0 print:hidden">
             <Topbar onMenuToggle={() => setSidebarOpen((v) => !v)} />
           </div>
 
-          <div className="shrink-0">
+          <div className="shrink-0 print:hidden">
             <SiteFilterBanner />
           </div>
 
@@ -206,7 +311,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             <div
               role="alert"
               className={clsx(
-                "shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 border-b",
+                "shrink-0 print:hidden flex items-center justify-between gap-3 px-4 py-2.5 border-b",
                 isCritical
                   ? "bg-(--danger-bg) border-(--danger)"
                   : "bg-(--warning-bg) border-(--warning)",
@@ -216,7 +321,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
                 <p
                   className="text-[12px] font-medium"
                   style={{
-                    color: isCritical ? "#ef4444" : "#f59e0b",
+                    color: isCritical ? "#b91c1c" : "#b45309",
                   }}
                 >
                   {daysRemaining === 0
@@ -262,6 +367,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           </main>
         </div>
       </div>
+
+      {/* Floating AI assistant — available on every authed page except for
+          read-only viewers. Right-click + drag the bubble to move it. */}
+      {!isViewOnly && <AIChatbot />}
     </>
   );
 }

@@ -12,6 +12,10 @@ export interface InputProps
   hint?: string;
   required?: boolean;
   icon?: React.ComponentType<{ className?: string }>;
+  /** Optional element rendered inside the field on the right edge (e.g. a
+   *  password show/hide toggle). The input gains right padding so its text
+   *  never sits under the adornment. */
+  rightAdornment?: React.ReactNode;
 }
 
 const baseCls =
@@ -25,7 +29,7 @@ const errorBorder =
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   function Input(
-    { label, id, type = "text", error, hint, required, icon: Icon, className, disabled, ...rest },
+    { label, id, type = "text", error, hint, required, icon: Icon, rightAdornment, className, disabled, ...rest },
     ref,
   ) {
     const hintId = `${id}-hint`;
@@ -65,12 +69,23 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             aria-describedby={describedBy}
             className={clsx(
               baseCls,
-              hasIcon ? "pl-9.5 pr-3" : "px-3",
+              hasIcon ? "pl-9.5" : "pl-3",
+              rightAdornment ? "pr-9" : "pr-3",
               error ? errorBorder : normalBorder,
               disabled && "opacity-50 cursor-not-allowed",
+              // When the app supplies its own show/hide control (rightAdornment)
+              // on a password field, hide the browser-native reveal (Edge/IE
+              // ::-ms-reveal) so only ONE eye shows. Password fields WITHOUT a
+              // custom toggle keep the native reveal as their sole control.
+              type === "password" && rightAdornment && "suppress-native-reveal",
             )}
             {...rest}
           />
+          {rightAdornment && (
+            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center">
+              {rightAdornment}
+            </div>
+          )}
         </div>
 
         {hint && !error && (

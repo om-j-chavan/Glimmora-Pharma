@@ -4,11 +4,14 @@ import {
   ChevronRight, Pencil, Trash2,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import type { GxPSystem, ValidationStatus, ComplianceStatus, RiskLevel, GAMP5Category, GxPRelevance, SystemType } from "@/store/systems.slice";
+import type { GxPSystem, ValidationStatus, ComplianceStatus, RiskLevel, GAMP5Category, GxPRelevance, SystemType } from "@/types/csv-csa";
 import type { UserConfig, SiteConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
+import { displayUserName } from "@/lib/identity-display";
+import { MotionList, MotionListItem } from "@/components/motion/Motion";
 
 /* ── Helpers (pure, no Redux) ── */
 
@@ -34,7 +37,7 @@ function getSystemIcon(type: SystemType) {
 }
 
 function validationBadge(s: ValidationStatus) {
-  const m: Record<ValidationStatus, "green" | "amber" | "red" | "gray"> = { Validated: "green", "In Progress": "amber", Overdue: "red", "Not Started": "gray" };
+  const m: Record<ValidationStatus, "green" | "amber" | "red" | "gray"> = { Validated: "green", "In Progress": "amber", Overdue: "red", "Not Started": "gray", "Under Review": "amber", "Validation Failed": "red" };
   return <Badge variant={m[s]}>{s}</Badge>;
 }
 
@@ -52,7 +55,7 @@ function isReviewOverdue(sys: GxPSystem): boolean {
 }
 
 function complianceBadge(s: ComplianceStatus) {
-  const m: Record<ComplianceStatus, "green" | "red" | "amber" | "gray"> = { Compliant: "green", "Non-Compliant": "red", "In Progress": "amber", "N/A": "gray" };
+  const m: Record<ComplianceStatus, "green" | "red" | "amber" | "gray"> = { Compliant: "green", "Non-Compliant": "red", Partial: "amber", "In Progress": "amber", "N/A": "gray" };
   return <Badge variant={m[s]}>{s}</Badge>;
 }
 
@@ -71,7 +74,7 @@ function relevanceBadge(r: GxPRelevance) {
 }
 
 function ownerName(uid: string, users: UserConfig[]) {
-  return users.find((u) => u.id === uid)?.name ?? uid;
+  return displayUserName(uid, users);
 }
 
 /* ── Props ── */
@@ -118,33 +121,38 @@ export function SystemInventoryTab({
   onAddOpen, onSelectSystem, onEditSystem, onRemoveSystem,
 }: SystemInventoryTabProps) {
   return (
-    <>
-      {/* Tiles */}
-      <section aria-label="System statistics" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="stat-card" role="region" aria-label="Total systems">
-          <div className="flex items-center gap-2 mb-2"><Database className="w-5 h-5 text-[#0ea5e9]" aria-hidden="true" /><span className="stat-label mb-0">Total systems</span></div>
-          <div className="stat-value">{systems.length}</div>
-          <div className="stat-sub">{systems.length === 0 ? "Add your first GxP system to get started" : `across ${[...new Set(systems.map((s) => s.siteId))].length} sites`}</div>
-        </div>
-        <div className="stat-card" role="region" aria-label="High risk systems">
-          <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">High risk</span></div>
-          <div className={clsx("stat-value", highRisk > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{highRisk}</div>
-          <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Require immediate attention"}</div>
-        </div>
-        <div className="stat-card" role="region" aria-label="Validation overdue">
-          <div className="flex items-center gap-2 mb-2"><Clock className="w-5 h-5 text-[#f59e0b]" aria-hidden="true" /><span className="stat-label mb-0">Validation overdue</span></div>
-          <div className={clsx("stat-value", valOverdue > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{valOverdue}</div>
-          <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Past revalidation date"}</div>
-        </div>
-        <div className="stat-card" role="region" aria-label="Non-compliant systems">
-          <div className="flex items-center gap-2 mb-2"><ShieldAlert className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">Non-compliant</span></div>
-          <div className={clsx("stat-value", nonCompliant > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{nonCompliant}</div>
-          <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Part 11 or Annex 11 gap"}</div>
-        </div>
-      </section>
+    /* Entrance cascade — KPI row → filters → table. The tab panel stays mounted
+       (parent toggles `hidden`), so this reveal plays once on page mount and
+       never replays on tab-switch; filter/search changes don't remount it. */
+    <MotionList>
+      {/* Tiles — nested list so the four cards cascade within the row. */}
+      <MotionListItem>
+        <MotionList aria-label="System statistics" className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <MotionListItem className="stat-card" role="region" aria-label="Total systems">
+            <div className="flex items-center gap-2 mb-2"><Database className="w-5 h-5 text-[#0ea5e9]" aria-hidden="true" /><span className="stat-label mb-0">Total systems</span></div>
+            <div className="stat-value">{systems.length}</div>
+            <div className="stat-sub">{systems.length === 0 ? "Add your first GxP system to get started" : `across ${[...new Set(systems.map((s) => s.siteId))].length} sites`}</div>
+          </MotionListItem>
+          <MotionListItem className="stat-card" role="region" aria-label="High risk systems">
+            <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">High risk</span></div>
+            <div className={clsx("stat-value", highRisk > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{highRisk}</div>
+            <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Require immediate attention"}</div>
+          </MotionListItem>
+          <MotionListItem className="stat-card" role="region" aria-label="Validation overdue">
+            <div className="flex items-center gap-2 mb-2"><Clock className="w-5 h-5 text-[#f59e0b]" aria-hidden="true" /><span className="stat-label mb-0">Validation overdue</span></div>
+            <div className={clsx("stat-value", valOverdue > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{valOverdue}</div>
+            <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Past revalidation date"}</div>
+          </MotionListItem>
+          <MotionListItem className="stat-card" role="region" aria-label="Non-compliant systems">
+            <div className="flex items-center gap-2 mb-2"><ShieldAlert className="w-5 h-5 text-[#ef4444]" aria-hidden="true" /><span className="stat-label mb-0">Non-compliant</span></div>
+            <div className={clsx("stat-value", nonCompliant > 0 ? "text-[#ef4444]" : "text-[#10b981]")}>{nonCompliant}</div>
+            <div className="stat-sub">{systems.length === 0 ? "No systems registered" : "Part 11 or Annex 11 gap"}</div>
+          </MotionListItem>
+        </MotionList>
+      </MotionListItem>
 
       {/* Filters */}
-      <section aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
+      <MotionListItem aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
         <Filter className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         <Dropdown placeholder="All sites" value={siteFilter} onChange={onSiteFilterChange} width="w-36" options={[{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]} />
@@ -153,12 +161,13 @@ export function SystemInventoryTab({
         <Dropdown placeholder="All statuses" value={valFilter} onChange={onValFilterChange} width="w-36" options={[{ value: "", label: "All statuses" }, { value: "Validated", label: "Validated" }, { value: "In Progress", label: "In Progress" }, { value: "Overdue", label: "Overdue" }, { value: "Not Started", label: "Not Started" }]} />
         <div className="relative flex-1 max-w-[200px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-          <input type="search" className="input pl-8 text-[12px]" placeholder="Search systems..." value={searchQ} onChange={(e) => onSearchChange(e.target.value)} aria-label="Search systems" />
+          <input type="search" className="input pl-8 text-[12px]" placeholder="Search systems…" value={searchQ} onChange={(e) => onSearchChange(e.target.value)} aria-label="Search systems" />
         </div>
-        {anyFilter && <Button variant="ghost" size="sm" onClick={onClearFilters}>Clear</Button>}
-      </section>
+        {anyFilter && <Button variant="ghost" size="sm" onClick={onClearFilters}>Clear filters</Button>}
+      </MotionListItem>
 
       {/* Table */}
+      <MotionListItem>
       {systems.length === 0 ? (
         <div className="card p-10 text-center">
           <Database className="w-12 h-12 mx-auto mb-3" style={{ color: "#334155" }} aria-hidden="true" />
@@ -173,92 +182,130 @@ export function SystemInventoryTab({
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="data-table" aria-label="GxP system inventory and risk register">
-              <caption className="sr-only">GxP computerised systems with validation and compliance status</caption>
-              <thead>
-                <tr>
-                  <th scope="col">System</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">GxP relevance</th>
-                  <th scope="col">Risk</th>
-                  <th scope="col">Validation</th>
-                  <th scope="col">Progress</th>
-                  {showPart11 && <th scope="col">Part 11</th>}
-                  {showAnnex11 && <th scope="col">Annex 11</th>}
-                  {showGAMP5 && <th scope="col">GAMP 5</th>}
-                  <th scope="col">Owner</th>
-                  <th scope="col">Next review</th>
-                  {role !== "viewer" && <th scope="col"><span className="sr-only">Edit/Remove</span></th>}
-                  <th scope="col"><span className="sr-only">Open detail</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSystems.map((sys) => {
+          <DataTable
+            ariaLabel="GxP system inventory and risk register"
+            caption="GxP computerised systems with validation and compliance status"
+            data={filteredSystems}
+            rowKey={(sys) => sys.id}
+            onRowClick={(sys) => onSelectSystem(sys)}
+            columns={[
+              {
+                key: "system",
+                header: "System",
+                render: (sys) => {
                   const si = getSystemIcon(sys.type);
                   return (
-                  <tr key={sys.id} onClick={() => onSelectSystem(sys)} className="cursor-pointer">
-                    <th scope="row">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: si.color + "18" }}>
-                          <si.icon className="w-3.5 h-3.5" style={{ color: si.color }} aria-hidden="true" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-medium text-[12px]" style={{ color: "var(--text-primary)" }}>{sys.name}</span>
-                            {isReviewOverdue(sys) && <Badge variant="red">Review overdue</Badge>}
-                          </div>
-                          <div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sys.vendor} v{sys.version}</div>
-                        </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-md flex-shrink-0 flex items-center justify-center" style={{ background: si.color + "18" }}>
+                        <si.icon className="w-3.5 h-3.5" style={{ color: si.color }} aria-hidden="true" />
                       </div>
-                    </th>
-                    <td><Badge variant="gray">{sys.type}</Badge></td>
-                    <td>{relevanceBadge(sys.gxpRelevance)}</td>
-                    <td>{riskBadge(sys.riskLevel)}</td>
-                    <td>{validationBadge(sys.validationStatus)}</td>
-                    <td>
-                      {(() => {
-                        const pct = getValidationProgress(sys);
-                        const col = pct >= 100 ? "#10b981" : pct >= 50 ? "#f59e0b" : pct > 0 ? "#ef4444" : "#64748b";
-                        return (
-                          <div className="flex items-center gap-2">
-                            <div className="h-1.5 w-20 rounded-full" style={{ background: "var(--bg-elevated)" }}>
-                              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: col }} />
-                            </div>
-                            <span className="text-[11px] font-semibold tabular-nums" style={{ color: col }}>{pct}%</span>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    {showPart11 && <td>{complianceBadge(sys.part11Status)}</td>}
-                    {showAnnex11 && <td>{complianceBadge(sys.annex11Status)}</td>}
-                    {showGAMP5 && <td>{gampBadge(sys.gamp5Category)}</td>}
-                    <td className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{ownerName(sys.owner, users)}</td>
-                    <td>
-                      {sys.nextReview ? (
-                        <>
-                          <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(sys.nextReview).tz(timezone).format(dateFormat)}</div>
-                          {dayjs.utc(sys.nextReview).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444] font-medium">Overdue</div>}
-                        </>
-                      ) : <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>&mdash;</span>}
-                    </td>
-                    {role !== "viewer" && (
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="xs" icon={Pencil} aria-label={`Edit ${sys.name}`} onClick={() => onEditSystem(sys)} />
-                          <Button variant="ghost" size="xs" icon={Trash2} aria-label={`Remove ${sys.name}`} onClick={() => onRemoveSystem(sys.id)} />
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          {sys.reference && <span className="font-mono text-[11px] font-semibold" style={{ color: "var(--brand)" }}>{sys.reference}</span>}
+                          <span className="font-medium text-[12px]" style={{ color: "var(--text-primary)" }}>{sys.name}</span>
+                          {isReviewOverdue(sys) && <Badge variant="red">Review overdue</Badge>}
                         </div>
-                      </td>
-                    )}
-                    <td><Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${sys.name} detail`} /></td>
-                  </tr>
+                        <div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{sys.vendor} v{sys.version}</div>
+                      </div>
+                    </div>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
+                },
+              },
+              {
+                key: "type",
+                header: "Type",
+                render: (sys) => <Badge variant="gray">{sys.type}</Badge>,
+              },
+              {
+                key: "relevance",
+                header: "GxP relevance",
+                render: (sys) => relevanceBadge(sys.gxpRelevance),
+              },
+              {
+                key: "risk",
+                header: "Risk",
+                render: (sys) => riskBadge(sys.riskLevel),
+              },
+              {
+                key: "validation",
+                header: "Validation",
+                render: (sys) => validationBadge(sys.validationStatus),
+              },
+              {
+                key: "progress",
+                header: "Progress",
+                render: (sys) => {
+                  const pct = getValidationProgress(sys);
+                  const col = pct >= 100 ? "#10b981" : pct >= 50 ? "#f59e0b" : pct > 0 ? "#ef4444" : "#64748b";
+                  return (
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-20 rounded-full" style={{ background: "var(--bg-elevated)" }}>
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: col }} />
+                      </div>
+                      <span className="text-[11px] font-semibold tabular-nums" style={{ color: col }}>{pct}%</span>
+                    </div>
+                  );
+                },
+              },
+              {
+                key: "part11",
+                header: "Part 11",
+                hidden: !showPart11,
+                render: (sys) => complianceBadge(sys.part11Status),
+              },
+              {
+                key: "annex11",
+                header: "Annex 11",
+                hidden: !showAnnex11,
+                render: (sys) => complianceBadge(sys.annex11Status),
+              },
+              {
+                key: "gamp5",
+                header: "GAMP 5",
+                hidden: !showGAMP5,
+                render: (sys) => gampBadge(sys.gamp5Category),
+              },
+              {
+                key: "owner",
+                header: "Owner",
+                cellClassName: "text-[12px]",
+                render: (sys) => <span style={{ color: "var(--text-secondary)" }}>{ownerName(sys.owner, users)}</span>,
+              },
+              {
+                key: "nextReview",
+                header: "Next review",
+                render: (sys) => (
+                  sys.nextReview ? (
+                    <>
+                      <div className="text-[12px]" style={{ color: "var(--text-primary)" }}>{dayjs.utc(sys.nextReview).tz(timezone).format(dateFormat)}</div>
+                      {dayjs.utc(sys.nextReview).isBefore(dayjs()) && <div className="text-[10px] text-[#ef4444] font-medium">Overdue</div>}
+                    </>
+                  ) : <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>&mdash;</span>
+                ),
+              },
+              {
+                key: "editRemove",
+                header: "Edit/Remove",
+                srOnly: true,
+                hidden: role === "viewer",
+                render: (sys) => (
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="xs" icon={Pencil} aria-label={`Edit ${sys.name}`} onClick={() => onEditSystem(sys)} />
+                    <Button variant="ghost" size="xs" icon={Trash2} aria-label={`Remove ${sys.name}`} onClick={() => onRemoveSystem(sys.id)} />
+                  </div>
+                ),
+              },
+              {
+                key: "openDetail",
+                header: "Open detail",
+                srOnly: true,
+                render: (sys) => <Button variant="ghost" size="xs" icon={ChevronRight} aria-label={`View ${sys.name} detail`} />,
+              },
+            ] satisfies Column<GxPSystem>[]}
+          />
         </div>
       )}
-    </>
+      </MotionListItem>
+    </MotionList>
   );
 }

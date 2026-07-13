@@ -1,3 +1,5 @@
+"use client";
+
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ShieldCheck, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import clsx from "clsx";
@@ -102,7 +104,7 @@ export function AIPolicyPage() {
       </div>
 
       {/* Disclaimer */}
-      <div className={clsx("rounded-lg p-4 text-center text-[11px]", isDark ? "bg-[#071526] border border-[#1e3a5a]" : "bg-[#f8fafc] border border-[#e2e8f0]")} style={{ color: "var(--text-muted)" }}>
+      <div className={clsx("rounded-lg p-4 text-center text-[11px]", "bg-(--bg-elevated) border border-(--bg-border)")} style={{ color: "var(--text-muted)" }}>
         This document is available for download and presentation to regulatory inspectors as part of the computerised system validation documentation package.
       </div>
     </main>

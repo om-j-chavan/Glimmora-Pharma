@@ -1,10 +1,7 @@
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { GitBranch, Plus, Save } from "lucide-react";
-import type {
-  FDA483Event,
-  Observation,
-} from "@/store/fda483.slice";
+import type { FDA483Event, Observation } from "@/types/fda483";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
@@ -404,9 +401,7 @@ export function RCATab({
               </span>
               <button
                 onClick={() =>
-                  router.push("/capa", {
-                    state: { openCapaId: selectedObs.capaId },
-                  })
+                  router.push("/capa")
                 }
                 className="font-mono text-[12px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer"
               >

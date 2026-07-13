@@ -13,20 +13,48 @@
   --bg-border: #e8e4dd;
   --bg-hover: #f5f3ef;
   --text-primary: #302d29;
-  --text-secondary: #7a736a;
-  --text-muted: #a39e96;
-  --brand: #8b6914;
-  --brand-hover: #765911;
-  --brand-muted: rgba(139, 105, 20, 0.08);
-  --brand-border: rgba(139, 105, 20, 0.25);
+  /* Merge resolution (devAI ← feat/plan-model): PRESERVE 936f86e's WCAG-AA
+     contrast tuning on the muted + warning text tokens (they don't collide with
+     the brand identity). */
+  --text-secondary: #6b655c;
+  --text-muted: #6b6258; /* 936f86e AA tuning (~5.4:1 on bg-base); kept over feat's lighter #857e74 */
+  /* Brand = emerald green — the app-wide DEFAULT, SAME as dark mode. Values match
+     the [data-color-theme="emerald"] accent block below, so selecting Emerald in
+     the picker is identical to the base; other palettes still override the brand
+     family via their own data-color-theme block. */
+  --brand: #10b981;
+  --brand-hover: #0e9d6e;
+  --brand-muted: rgba(16, 185, 129, 0.10);
+  --brand-border: rgba(16, 185, 129, 0.25);
   --success: #059669;
   --success-bg: #f0fdf4;
-  --warning: #d97706;
+  --warning: #b45309; /* 936f86e AA tuning (~4.8:1 on warning-bg); kept over feat's #b8860b */
   --warning-bg: #fffbeb;
-  --danger: #dc2626;
+  --danger: #b91c1c; /* was #dc2626 (4.41:1 — just under AA); now ~5.9:1 on danger-bg */
   --danger-bg: #fef2f2;
   --info: #4a8fa8;
   --info-bg: #eef6fa;
+  /* Phase C — semantic STATUS tokens (never brand gold). fg values are AA on
+     their -bg tint; -bg values are AA-separated from the white card surface. */
+  --status-pending: #4b5563;       /* slate — ~8:1 on white */
+  --status-pending-bg: #eceae6;
+  --status-active: #1d4ed8;        /* blue — ~6.3:1 on white */
+  --status-active-bg: #eaf1ff;
+  --status-waiting: #92600a;       /* amber/brown — ~5.6:1 on white */
+  --status-waiting-bg: #fdf3e2;
+  --status-done: #047857;          /* green — ~4.9:1 on white */
+  --status-done-bg: #e9fbf1;
+  --status-blocked: #b91c1c;       /* red — ~5.9:1 on white */
+  --status-blocked-bg: #fdecec;
+  /* Phase D — premium depth/hierarchy tokens (additive). Scoped to the CAPA
+     module via .capa-shell; the global app background is left untouched. */
+  --canvas: #f7f8fa;
+  --card: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(16,24,40,.06);
+  --shadow-md: 0 4px 12px rgba(16,24,40,.08);
+  --radius-card: 12px;
+  --radius-ctl: 8px;
+  --text-secondary-muted: #667085;  /* Phase D body-secondary */
   --card-bg: #ffffff;
   --card-border: #e8e4dd;
   --card-text: #302d29;
@@ -38,16 +66,18 @@
   --shadow-card-hover: 0 4px 6px -1px rgba(0,0,0,0.06), 0 2px 4px -2px rgba(0,0,0,0.04);
   --shadow-elevated: 0 10px 15px -3px rgba(0,0,0,0.06), 0 4px 6px -4px rgba(0,0,0,0.04);
   --shadow-modal: 0 25px 50px -12px rgba(0,0,0,0.15);
-  /* Sidebar — white with warm brown accents */
-  --sidebar-bg: #ffffff;
-  --sidebar-surface: #faf9f7;
-  --sidebar-border: #e8e4dd;
-  --sidebar-text: #302d29;
-  --sidebar-text-muted: #7a736a;
-  --sidebar-accent: #faf9f7;
-  --sidebar-active-bg: rgba(139, 105, 20, 0.08);
-  --sidebar-active-text: #8b6914;
-  --sidebar-active-border: #8b6914;
+  /* Sidebar — inherits the shared surface system in BOTH modes; amber brand
+     accent only on the active nav item. Defined once here (the dark block no
+     longer overrides these) so the sidebar always tracks the surface tokens. */
+  --sidebar-bg: var(--bg-surface);
+  --sidebar-surface: var(--bg-elevated);
+  --sidebar-border: var(--bg-border);
+  --sidebar-text: var(--text-primary);
+  --sidebar-text-muted: var(--text-muted);
+  --sidebar-accent: var(--bg-hover);
+  --sidebar-active-bg: var(--brand-muted);
+  --sidebar-active-text: var(--brand);
+  --sidebar-active-border: var(--brand);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -55,47 +85,123 @@
    Dark brown/charcoal backgrounds, golden accents, layered depth
    ══════════════════════════════════════════════════════════════════ */
 [data-theme="dark"] {
-  --bg-base: #1a1510;
-  --bg-surface: #242019;
-  --bg-elevated: #2e2820;
-  --bg-border: #3d362c;
-  --bg-hover: #352f26;
+  /* Near-neutral charcoal surfaces — barely-cool undertone, no warm/amber tint.
+     Keep the generous layer separation: page < card < elevated < border. */
+  --bg-base: #0e0e11;
+  --bg-surface: #17171a;
+  --bg-elevated: #1f1f23;
+  --bg-border: #2a2a30;
+  --bg-hover: #202024;
   --text-primary: #f4ede6;
   --text-secondary: #d5bfb2;
-  --text-muted: #9c8e80;
-  --brand: #c9a84c;
-  --brand-hover: #dbb85a;
-  --brand-muted: rgba(201, 168, 76, 0.15);
-  --brand-border: rgba(201, 168, 76, 0.3);
-  --success: #7a9e6e;
-  --success-bg: rgba(122, 158, 110, 0.15);
+  --text-muted: #ab9d8d; /* was #9c8e80 (~4.0:1 — under AA); now ~6.1:1 on dark surfaces */
+  --brand: #10b981;
+  --brand-hover: #0e9d6e;
+  --brand-muted: rgba(16, 185, 129, 0.15);
+  --brand-border: rgba(16, 185, 129, 0.3);
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.15);
   --warning: #c9a84c;
   --warning-bg: rgba(201, 168, 76, 0.15);
-  --danger: #e05a4a;
-  --danger-bg: rgba(224, 90, 74, 0.15);
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.15);
   --info: #4a8fa8;
   --info-bg: rgba(74, 143, 168, 0.15);
-  --card-bg: #242019;
-  --card-border: #3d362c;
+  /* Phase C — STATUS tokens (dark). fg are light-300 tints (AA on the dark
+     surface + on their translucent -bg); -bg are low-alpha fills. */
+  --status-pending: #b4bccb;       /* slate-300ish — AA on charcoal */
+  --status-pending-bg: rgba(148, 163, 184, 0.16);
+  --status-active: #93c5fd;        /* blue-300 */
+  --status-active-bg: rgba(59, 130, 246, 0.20);
+  --status-waiting: #fcd34d;       /* amber-300 */
+  --status-waiting-bg: rgba(217, 164, 38, 0.20);
+  --status-done: #6ee7b7;          /* green-300 */
+  --status-done-bg: rgba(16, 185, 129, 0.18);
+  --status-blocked: #fca5a5;       /* red-300 */
+  --status-blocked-bg: rgba(239, 68, 68, 0.20);
+  /* Phase D — dark: canvas is the darkest layer; cards one step lighter so
+     they lift off the page. Shadows deepen for separation on dark. */
+  --canvas: #0d0d10;
+  --card: #1c1c21;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.45);
+  --shadow-md: 0 6px 16px rgba(0,0,0,.55);
+  --radius-card: 12px;
+  --radius-ctl: 8px;
+  --text-secondary-muted: #9aa3b2;  /* Phase D body-secondary (dark, AA) */
+  --card-bg: #17171a;
+  --card-border: #2a2a30;
   --card-text: #f4ede6;
   --card-muted: #9c8e80;
-  --chart-grid: #3d362c;
+  --chart-grid: #2a2a30;
   --chart-tick: #9c8e80;
-  --scrollbar-thumb: #4a4238;
+  --scrollbar-thumb: #2f2f36;
   --shadow-card: 0 1px 4px 0 rgba(0,0,0,0.3), 0 1px 2px -1px rgba(0,0,0,0.25);
   --shadow-card-hover: 0 4px 8px -1px rgba(0,0,0,0.35), 0 2px 4px -2px rgba(0,0,0,0.3);
   --shadow-elevated: 0 10px 20px -3px rgba(0,0,0,0.35), 0 4px 6px -4px rgba(0,0,0,0.3);
   --shadow-modal: 0 25px 50px -12px rgba(0,0,0,0.6);
-  --sidebar-bg: #1a1510;
-  --sidebar-surface: #242019;
-  --sidebar-border: #3d362c;
-  --sidebar-text: #f4ede6;
-  --sidebar-text-muted: #9c8e80;
-  --sidebar-accent: rgba(201, 168, 76, 0.08);
-  --sidebar-active-bg: rgba(201, 168, 76, 0.12);
-  --sidebar-active-text: #c9a84c;
-  --sidebar-active-border: #c9a84c;
+  /* Sidebar tokens intentionally NOT redefined here — they inherit the
+     var()-referenced definitions from the base block, which resolve to the
+     dark surface + brand tokens above. */
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   Phase C — CAPA visual system (presentation only)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Status pill — the single token-driven status chip. Modifier sets the
+   fg/bg pair; never uses brand gold (reserved for primary/active/links). */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.0625rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.status-pill--pending { color: var(--status-pending); background: var(--status-pending-bg); }
+.status-pill--active  { color: var(--status-active);  background: var(--status-active-bg); }
+.status-pill--waiting { color: var(--status-waiting); background: var(--status-waiting-bg); }
+.status-pill--done    { color: var(--status-done);    background: var(--status-done-bg); }
+.status-pill--blocked { color: var(--status-blocked); background: var(--status-blocked-bg); }
+
+/* Phase J — CAPA module shell. Background is intentionally NOT set: the shell
+   inherits the app work-area background (--bg-base) so there is ONE continuous
+   surface behind the cards (no grey "panel-in-panel" seam). It only scopes the
+   premium cool card border to the CAPA subtree; cards lift via --card + shadow. */
+.capa-shell {
+  --card-border: #e8eaed;
+}
+[data-theme="dark"] .capa-shell {
+  --card-border: #2a2a30;
+}
+
+/* Unified CAPA card — 1px border, subtle shadow, 12px radius, 20px padding.
+   Promotes every section to a consistent, lifted surface. */
+.capa-card {
+  background: var(--card);
+  border: 1px solid var(--card-border, var(--bg-border));
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+}
+/* Consistent 16px rhythm between stacked cards. */
+.capa-stack > * + * { margin-top: 1rem; }
+
+/* Section heading — small-caps, muted (DESCRIPTION, APPROVALS, …). */
+.capa-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Tracker table — denser rows + clear hover. */
+.capa-table tbody tr { transition: background-color 120ms ease; }
+.capa-table tbody tr:hover { background: var(--bg-hover); }
 
 /* ══════════════════════════════════════════════════════════════════
    Color theme overrides — brand color only, no background tinting
@@ -257,8 +363,37 @@
   --brand-border: rgba(107, 123, 141, 0.3);
 }
 
+/* Tell the UA to render native controls (scrollbars, date pickers, autofill,
+   form widgets) in the matching scheme — without this, dark mode keeps light
+   native chrome. */
+[data-theme="light"] {
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Row density — comfortable (default) vs compact, driven by the topbar toggle
+   via [data-density] on <html>. QA reviewers scanning hundreds of rows can
+   switch to compact for more on screen. */
+:root {
+  --row-py: 0.75rem;
+}
+[data-density="compact"] {
+  --row-py: 0.375rem;
+}
+
 * {
   box-sizing: border-box;
+}
+/* Viewport lock — <html>/<body> are a definite 100% of the ACTUAL viewport and
+   never scroll. The app shell bounds itself off this (h-full), so it can never
+   be scrolled as a unit when 100vh exceeds the visible area (Windows 125% zoom,
+   mobile dynamic browser chrome, embedded webviews). Only <main> scrolls. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
 }
 body {
   background: var(--bg-base);
@@ -269,6 +404,38 @@ body {
     background-color 0.2s ease,
     color 0.2s ease;
   margin: 0;
+}
+
+/* Tabular figures wherever numbers line up in columns — stat values, table
+   cells, and monospace data — so digits align and are easier to scan/compare
+   (batch IDs, deviation counts, dates). Inter and IBM Plex Mono both ship the
+   tnum feature. */
+.stat-value,
+.data-table td,
+.mono,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Readable identifier face — used for every region / framework display id
+   (REG-…, FMK-…) and other reference codes via the shared <DisplayId> atom.
+   A curated, legible monospace stack (distinct from the generic Tailwind
+   font-mono default) with tabular figures + a touch of tracking so uppercased
+   codes stay scannable. Cosmetic only. */
+.display-id {
+  font-family: "Cascadia Code", "JetBrains Mono", "IBM Plex Mono", "Roboto Mono",
+    ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+/* Status badge background derives from its own text color (set inline by
+   StatusBadge) so the pill tints correctly on BOTH light and dark surfaces —
+   no more fixed light-hex pills glowing on a dark theme. The text color
+   already passes AA against this faint same-hue tint. */
+.status-badge {
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }
 ::-webkit-scrollbar {
   width: 4px;
@@ -284,13 +451,13 @@ body {
   .data-table th,
   .data-table td {
     padding: 8px 8px;
-    font-size: 11px;
+    font-size: 0.6875rem; /* 11px — rem so it scales with browser font size */
   }
   .stat-card {
     padding: 12px;
   }
   .stat-value {
-    font-size: 22px;
+    font-size: 1.375rem; /* 22px */
   }
   .card-header {
     padding: 12px 14px;
@@ -299,10 +466,21 @@ body {
     padding: 12px 14px;
   }
   .page-title {
-    font-size: 16px;
+    font-size: 1rem; /* 16px */
   }
   .page-subtitle {
-    font-size: 12px;
+    font-size: 0.75rem; /* 12px */
+  }
+}
+
+/* Container query — compact a .data-table when its OWN container is narrow
+   (e.g. embedded in a side panel), independent of the viewport width. The
+   DataTable wrapper carries the `@container` class. */
+@container (max-width: 30rem) {
+  .data-table th,
+  .data-table td {
+    padding: 0.5rem 0.5rem;
+    font-size: 0.6875rem;
   }
 }
 
@@ -336,6 +514,18 @@ body {
   .input:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  /* Suppress the browser-native password reveal/clear controls (Edge/IE render
+     a second "eye" via ::-ms-reveal). The app's own show/hide toggle
+     (AccountPasswordFields) is the single canonical control. The
+     `.suppress-native-reveal` variant covers the reusable <Input> component
+     (which uses Tailwind classes, not `.input`) when it carries a custom
+     rightAdornment toggle — keeping exactly one eye there too. */
+  .input::-ms-reveal,
+  .input::-ms-clear,
+  .suppress-native-reveal::-ms-reveal,
+  .suppress-native-reveal::-ms-clear {
+    display: none;
   }
 
   .select {
@@ -402,6 +592,15 @@ body {
     background: var(--danger);
     color: white;
   }
+  /* Keyboard focus for the CSS-class buttons. These @apply outline-none, so
+     without this rule a Tab to any secondary/ghost/danger button shows nothing.
+     Two-ring (surface gap + brand) so it reads on any background. */
+  .btn-secondary:focus-visible,
+  .btn-ghost:focus-visible,
+  .btn-danger:focus-visible,
+  .btn-primary:focus-visible {
+    box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--brand);
+  }
 
   .card {
     @apply rounded-xl overflow-hidden;
@@ -459,7 +658,10 @@ body {
     border-color: var(--brand);
   }
   .toggle-track.off {
-    background: var(--bg-elevated);
+    /* --bg-border contrasts against the card surface in BOTH modes (the old
+       --bg-elevated was ~identical to the dark surface → invisible). The white
+       thumb supplies the light cue; the ON state stays amber (--brand). */
+    background: var(--bg-border);
   }
   .toggle-thumb {
     @apply absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200;
@@ -480,20 +682,45 @@ body {
   .data-table th {
     @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider;
     color: var(--text-muted);
+    /* Sticky header for long regulated record lists. Needs an opaque bg or
+       scrolling rows bleed through; z-index keeps it above tinted/zebra rows.
+       Degrades to a normal header where no scroll ancestor exists. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--card-bg);
+    padding-block: var(--row-py); /* density-driven; overrides py-3 */
   }
   .data-table td {
     @apply px-4 py-3;
     color: var(--card-text);
+    padding-block: var(--row-py); /* density-driven; overrides py-3 */
   }
   .data-table tbody tr {
     border-bottom: 1px solid var(--card-border);
     transition: background 0.1s;
   }
-  .data-table tbody tr:hover {
+  /* Zebra striping (token-based) for read accuracy when scanning. Faint, so
+     the hover state below still reads on top of it. */
+  .data-table tbody tr:nth-child(even) {
     background: var(--bg-elevated);
+  }
+  .data-table tbody tr:hover {
+    background: var(--bg-hover);
   }
   .data-table tbody tr:last-child {
     border-bottom: none;
+  }
+
+  /* ap-row — bespoke dashboard ActionPlanTable rows (Rung: action-plan
+     redesign). Scoped to .ap-row ONLY so it cannot affect .data-table or any
+     other table. Hover lifts the row to the elevated bg (the inline severity
+     tint yields; the priority accent left-border stays). */
+  .ap-row td {
+    transition: background-color 0.12s ease;
+  }
+  .ap-row:hover td {
+    background-color: var(--bg-elevated) !important;
   }
 
   /* nav-item — sidebar nav link styling */
@@ -509,6 +736,11 @@ body {
     background: var(--sidebar-active-bg);
     color: var(--sidebar-active-text);
     font-weight: 600;
+  }
+  /* Sidebar is the primary keyboard navigation path — give it a visible ring. */
+  .nav-item:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: -2px;
   }
 
   .page-title {
@@ -528,6 +760,51 @@ body {
     @apply rounded-xl p-4;
     background: var(--info-bg);
     border: 1px solid rgba(74, 143, 168, 0.3);
+  }
+
+  /* Unified AI-action button — brand amber → purple gradient + Sparkles
+   * icon. The single visual signature for every AI entry point. */
+  .btn-ai {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    border-radius: 0.5rem;
+    color: white;
+    background: linear-gradient(135deg, #a36500 0%, #8b4a8b 100%);
+    border: 1px solid rgba(163, 101, 0, 0.4);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.05),
+      0 2px 8px rgba(163, 101, 0, 0.18);
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.15s ease,
+      filter 0.15s ease;
+    cursor: pointer;
+  }
+  .btn-ai:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.05),
+      0 4px 12px rgba(163, 101, 0, 0.28);
+    filter: brightness(1.05);
+  }
+  .btn-ai:active {
+    transform: translateY(0);
+    filter: brightness(0.95);
+  }
+  .btn-ai:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-ai .lucide {
+    width: 1rem;
+    height: 1rem;
+    stroke-width: 2;
   }
 
   .alert {
@@ -592,5 +869,228 @@ body {
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
+  }
+}
+
+/* Login card entrance. Compositor-only (opacity + transform), runs once, no
+   layout thrash. The prefers-reduced-motion block further down collapses it to
+   ~0ms for users who ask for reduced motion. */
+@keyframes loginCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.login-card-in {
+  animation: loginCardIn 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Login split-screen brand panel ────────────────────────────────
+   Built entirely from var(--brand), NOT a hardcoded green: --brand is
+   swapped by [data-color-theme] across 14 palettes (emerald is only the
+   default), so a literal green would be wrong in 13 of them. Each stop
+   mixes brand toward near-black, which (a) keeps the panel on-brand in
+   every palette and (b) guarantees white text clears AA contrast — a
+   full-strength brand fill would not. */
+.login-brand-panel {
+  position: relative;
+  overflow: hidden;
+  background-image:
+    radial-gradient(
+      75% 55% at 15% 12%,
+      color-mix(in oklab, var(--brand) 42%, transparent) 0%,
+      transparent 70%
+    ),
+    linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--brand) 58%, #04120c) 0%,
+      color-mix(in oklab, var(--brand) 32%, #04120c) 55%,
+      color-mix(in oklab, var(--brand) 16%, #04120c) 100%
+    );
+}
+
+/* Hairline separating the panel from the card column. */
+.login-brand-panel::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  width: 1px;
+  background: rgb(255 255 255 / 0.08);
+}
+
+/* ── Login brand-panel flourish: bubbles rising from a faint tilted pill ──
+   Decorative only (the <PillWithBubbles> layer is aria-hidden + pointer-events
+   none). Pure CSS keyframes; the pill itself is static. GPU-composited
+   (transform/opacity only) so idle CPU stays ~0. Bubbles are removed entirely
+   under reduced-motion (below); the pill remains for visual character. */
+@keyframes pill-bubble-rise {
+  /* Emit at the pill at half size, invisible. */
+  0%   { transform: translateY(0) scale(0.5); opacity: 0; }
+  /* Fade in to full presence over the first 10%. */
+  10%  { opacity: 0.35; }
+  /* Hold near-peak until 70%, then fade out over the last 30%. */
+  70%  { opacity: 0.35; }
+  /* Risen up the panel, grown to full size, faded to nothing. */
+  100% { transform: translateY(-46vh) scale(1); opacity: 0; }
+}
+.pill-bubble {
+  position: absolute;
+  bottom: 44%;
+  z-index: 1;
+  width: var(--pb-size, 14px);
+  height: var(--pb-size, 14px);
+  border-radius: 9999px;
+  background: radial-gradient(circle at 35% 30%, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0.4) 60%, rgb(255 255 255 / 0) 100%);
+  filter: drop-shadow(0 0 4px rgb(255 255 255 / 0.55));
+  pointer-events: none;
+  will-change: transform, opacity;
+  animation: pill-bubble-rise var(--pb-dur, 7s) linear var(--pb-delay, 0s) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill-bubble { display: none; }
+}
+
+/* ── Login primary button: depth + hover lift ──────────────────────
+   Scoped to the login submit so the shared <Button> keeps its flat
+   variant everywhere else in the app. Layers a gradient over the
+   variant's bg-(--brand) background-color. */
+.login-submit {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--brand) 88%, white) 0%,
+    var(--brand) 52%,
+    var(--brand-hover) 100%
+  );
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.12),
+    0 6px 16px -6px color-mix(in oklab, var(--brand) 60%, transparent);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease;
+}
+
+.login-submit:hover:not(:disabled) {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.14),
+    0 12px 24px -8px color-mix(in oklab, var(--brand) 70%, transparent);
+}
+
+.login-submit:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.97);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PRINT — audit/PDF output for CAPA records, FDA-483 responses, etc.
+   Strips app chrome, forces ink-on-paper, and spells out status text
+   (color is meaningless in grayscale). Chrome wrappers also carry the
+   Tailwind `print:hidden` utility in AppShell.tsx as belt-and-braces.
+   ══════════════════════════════════════════════════════════════════ */
+@media print {
+  aside,
+  button,
+  [role="toolbar"],
+  .btn-ai {
+    display: none !important;
+  }
+
+  /* Force the light, ink-on-paper rendering regardless of stored theme */
+  [data-theme] {
+    color-scheme: light;
+  }
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Flat, full-bleed cards and tables — no shadows or theme tints */
+  .card,
+  .stat-card {
+    box-shadow: none !important;
+    border-color: #999 !important;
+    break-inside: avoid;
+  }
+  .data-table {
+    font-size: 11pt;
+  }
+  .data-table th,
+  .data-table td {
+    color: #000 !important;
+  }
+
+  /* Spell out the status so a grayscale pill still carries meaning */
+  .status-badge::after {
+    content: " (" attr(data-status) ")";
+    font-weight: 600;
+  }
+
+  /* Audit traceability: reveal external link targets (skip in-app
+     anchors and #fragments, which would just add noise) */
+  a[href^="http"]::after {
+    content: " [" attr(href) "]";
+    font-size: 9pt;
+    color: #555;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FORCED COLORS — Windows High Contrast and similar. Background colors
+   are stripped, so status pills/badges/cards lose their boundary. Add a
+   currentColor border so shape survives; the icon + text label (status
+   taxonomy) carry the meaning without relying on color at all.
+   ══════════════════════════════════════════════════════════════════ */
+@media (forced-colors: active) {
+  .status-badge,
+  .badge {
+    border: 1px solid currentColor;
+  }
+  .card,
+  .stat-card,
+  .input,
+  .select {
+    border: 1px solid CanvasText;
+  }
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost,
+  .btn-danger,
+  .btn-ai {
+    border: 1px solid currentColor;
+  }
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   REDUCED MOTION — vestibular safety; some clinical environments mandate
+   it. Neutralizes the AI-button lift, toggles, and transitions. Loading
+   spinners are deliberately kept spinning (they communicate live state).
+   ══════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Keep functional spinners turning — they signal in-flight work. */
+  .animate-spin {
+    animation-duration: 0.8s !important;
+    animation-iteration-count: infinite !important;
   }
 }

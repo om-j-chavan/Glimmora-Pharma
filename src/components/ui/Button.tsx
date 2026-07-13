@@ -35,11 +35,13 @@ const VARIANTS: Record<ButtonVariant, string> = {
     "bg-transparent text-(--danger) border border-(--danger-bg) hover:bg-(--danger-bg) focus-visible:ring-(--danger) disabled:opacity-40",
 };
 
+// Font sizes in rem so they honor the user's browser font-size / zoom setting
+// (px would stay fixed). Heights stay in Tailwind's spacing scale.
 const SIZES: Record<ButtonSize, string> = {
-  xs: "h-7 px-2.5 text-[11px] gap-1.5 rounded-md",
-  sm: "h-8 px-3 text-[12px] gap-2 rounded-lg",
-  md: "h-9 px-4 text-[13px] gap-2 rounded-lg",
-  lg: "h-11 px-5 text-[14px] gap-2.5 rounded-xl",
+  xs: "h-7 px-2.5 text-[0.6875rem] gap-1.5 rounded-md",
+  sm: "h-8 px-3 text-xs gap-2 rounded-lg",
+  md: "h-9 px-4 text-[0.8125rem] gap-2 rounded-lg",
+  lg: "h-11 px-5 text-sm gap-2.5 rounded-xl",
 };
 
 const ICON_SIZES: Record<ButtonSize, string> = {
@@ -75,6 +77,7 @@ export function Button({
     <button
       {...props}
       disabled={isDisabled}
+      suppressHydrationWarning
       className={clsx(
         "inline-flex items-center justify-center",
         "font-semibold whitespace-nowrap",

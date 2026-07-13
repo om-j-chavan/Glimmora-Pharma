@@ -1,0 +1,710 @@
+import { useEffect, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, XCircle, UploadCloud, FileText, X, BellOff } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { updateTenantUser } from "@/store/auth.slice";
+import { capaCreate, AiBackendError } from "@/lib/aiBackend";
+import { friendlyAiError } from "@/lib/friendlyError";
+
+const aiCapaSchema = z.object({
+  customer_id: z.string().min(1, "Customer ID is required"),
+  problem_statement: z.string().min(10, "Add a problem statement (at least 10 characters)"),
+  source: z.string().min(1, "Source is required"),
+  area_affected: z.string().min(1, "Area affected is required"),
+  equipment_product: z.string().min(1, "Equipment / product is required"),
+  initial_severity: z.enum(["Low", "Medium", "High", "Critical"]),
+});
+export type AICapaForm = z.infer<typeof aiCapaSchema>;
+
+export interface SimilarCAPA {
+  capa_id: string;
+  similarity_score: number;
+  description: string;
+  was_effective: boolean;
+}
+
+export interface AICapaResponse {
+  capa_id: string;
+  customer_id: string;
+  status: string;
+  created_at: string;
+  is_recurring: boolean;
+  similar_capas: SimilarCAPA[];
+  recurrence_alert?: string;
+  pattern_detected?: string;
+  ai_recommendation?: string;
+  risk_score: number;
+  message: string;
+}
+
+interface AIGenerateCAPAModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  defaultCustomerId?: string;
+  onAccepted?: (response: AICapaResponse, form: AICapaForm) => void;
+}
+
+const TOKEN_KEY = "glimmora-ai-token";
+
+function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredToken(t: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (t) sessionStorage.setItem(TOKEN_KEY, t);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function AIGenerateCAPAModal({
+  isOpen,
+  onClose,
+  defaultCustomerId,
+  onAccepted,
+}: AIGenerateCAPAModalProps) {
+  const dispatch = useAppDispatch();
+  // Pull the AI backend access token straight off the logged-in user's
+  // tenant-user record (set by the login flow). Avoids prompting for
+  // a second username/password — re-login refreshes the token.
+  // AI backend permissive since 2026-05-15 — fall back to a placeholder so
+  // the "Generate CAPA" button isn't stuck on "Connecting to AI..." for
+  // users who never received a real aiAccessToken at login.
+  const { authUserId, tenantId, storedAiToken } = useAppSelector((s) => {
+    const u = s.auth.user;
+    if (!u) return { authUserId: null, tenantId: null, storedAiToken: "anonymous" };
+    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
+    const tu = tenant?.config?.users?.find((x) => x.id === u.id);
+    return {
+      authUserId: u.id,
+      tenantId: u.tenantId,
+      storedAiToken: tu?.aiAccessToken ?? u.aiAccessToken ?? "anonymous",
+    };
+  });
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<AICapaForm>({
+    resolver: zodResolver(aiCapaSchema),
+    defaultValues: {
+      customer_id: defaultCustomerId ?? "",
+      problem_statement: "",
+      source: "",
+      area_affected: "",
+      equipment_product: "",
+      initial_severity: "High",
+    },
+  });
+
+  const [file, setFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [result, setResult] = useState<AICapaResponse | null>(null);
+  const [lastForm, setLastForm] = useState<AICapaForm | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      reset({
+        customer_id: defaultCustomerId ?? "",
+        problem_statement: "",
+        source: "",
+        area_affected: "",
+        equipment_product: "",
+        initial_severity: "High",
+      });
+      setFile(null);
+      setResult(null);
+      setLastForm(null);
+      setError(null);
+    }
+  }, [isOpen, defaultCustomerId, reset]);
+
+  async function onSubmit(data: AICapaForm) {
+    setError(null);
+    setResult(null);
+    // Prefer the token attached to the logged-in user record (refreshed on
+    // every login). Fall back to a session-scoped token from the legacy
+    // login prompt if it's set. If neither exists, surface a clear error
+    // and ask the user to log out and log back in — that path automatically
+    // calls /api/v1/auth/login and stores the token.
+    const token = storedAiToken ?? getStoredToken();
+    if (!token) {
+      setError("AI is still connecting. This usually takes 5-10 seconds on first sign-in. Please try again in a moment.");
+      return;
+    }
+    try {
+      const json = await capaCreate(
+        {
+          customer_id: data.customer_id,
+          problem_statement: data.problem_statement,
+          source: data.source,
+          area_affected: data.area_affected,
+          equipment_product: data.equipment_product,
+          initial_severity: data.initial_severity,
+          document: file,
+        },
+        token,
+      );
+      setResult(json);
+      setLastForm(data);
+    } catch (err) {
+      if (err instanceof AiBackendError && err.status === 401) {
+        // Token expired/invalid — clear from both stores and tell the user
+        // to re-login (which refreshes via /api/v1/auth/login).
+        setStoredToken(null);
+        if (authUserId && tenantId) {
+          dispatch(updateTenantUser({ tenantId, userId: authUserId, patch: { aiAccessToken: undefined } }));
+        }
+        setError("AI backend rejected the cached token (401). Please sign out and sign in again to refresh it.");
+        return;
+      }
+      console.error("[capa] generate CAPA failed", err);
+      setError(friendlyAiError(err, "Couldn't generate CAPA. Please try again."));
+    }
+  }
+
+  function handleAccept() {
+    if (result && lastForm) onAccepted?.(result, lastForm);
+    onClose();
+  }
+
+  function handleClose() {
+    onClose();
+  }
+
+  return (
+    <Modal open={isOpen} onClose={handleClose} title="AI-Generated CAPA">
+      {!result && (
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          aria-label="Generate AI CAPA"
+          className="space-y-4"
+        >
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            Describe the issue. The AI will analyse historical CAPAs, detect
+            recurrence patterns, and propose a recommendation.
+          </p>
+
+          {/* customer_id is auto-populated from the logged-in user's tenant
+              (the customer admin's aiUserId). Kept as a hidden field so it
+              still flows through react-hook-form into the request payload. */}
+          <input type="hidden" {...register("customer_id")} />
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label
+                htmlFor="ai-severity"
+                className="text-[11px] font-medium block mb-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Initial severity <span style={{ color: "var(--danger)" }}>*</span>
+              </label>
+              <select
+                id="ai-severity"
+                className="select text-[12px]"
+                {...register("initial_severity")}
+              >
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Critical">Critical</option>
+              </select>
+            </div>
+
+            <div className="col-span-2">
+              <label
+                htmlFor="ai-problem"
+                className="text-[11px] font-medium block mb-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Problem statement <span style={{ color: "var(--danger)" }}>*</span>
+              </label>
+              <textarea
+                id="ai-problem"
+                rows={3}
+                className="input text-[12px] resize-none"
+                placeholder="Describe what went wrong..."
+                {...register("problem_statement")}
+              />
+              {errors.problem_statement && (
+                <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>
+                  {errors.problem_statement.message}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="ai-source"
+                className="text-[11px] font-medium block mb-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Source <span style={{ color: "var(--danger)" }}>*</span>
+              </label>
+              <input
+                id="ai-source"
+                type="text"
+                className="input text-[12px]"
+                placeholder="e.g. Deviation, Complaint, Audit"
+                {...register("source")}
+              />
+              {errors.source && (
+                <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>
+                  {errors.source.message}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="ai-area"
+                className="text-[11px] font-medium block mb-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Area affected <span style={{ color: "var(--danger)" }}>*</span>
+              </label>
+              <input
+                id="ai-area"
+                type="text"
+                className="input text-[12px]"
+                placeholder="e.g. Manufacturing, QC Lab"
+                {...register("area_affected")}
+              />
+              {errors.area_affected && (
+                <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>
+                  {errors.area_affected.message}
+                </p>
+              )}
+            </div>
+
+            <div className="col-span-2">
+              <label
+                htmlFor="ai-equipment"
+                className="text-[11px] font-medium block mb-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Equipment / Product <span style={{ color: "var(--danger)" }}>*</span>
+              </label>
+              <input
+                id="ai-equipment"
+                type="text"
+                className="input text-[12px]"
+                placeholder="e.g. Coater, Tablet Batch #..."
+                {...register("equipment_product")}
+              />
+              {errors.equipment_product && (
+                <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>
+                  {errors.equipment_product.message}
+                </p>
+              )}
+            </div>
+
+            <div className="col-span-2">
+              <label
+                htmlFor="ai-doc"
+                className="text-[11px] font-medium block mb-1.5"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Supporting document (optional)
+              </label>
+              {!file ? (
+                <label
+                  htmlFor="ai-doc"
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    const dropped = e.dataTransfer.files?.[0];
+                    if (dropped) setFile(dropped);
+                  }}
+                  className="flex flex-col items-center justify-center gap-2 px-4 py-6 rounded-lg cursor-pointer text-center transition-colors"
+                  style={{
+                    border: `1.5px dashed ${dragOver ? "var(--brand)" : "var(--bg-border)"}`,
+                    background: dragOver ? "var(--brand-muted)" : "var(--bg-elevated)",
+                  }}
+                >
+                  <UploadCloud
+                    className="w-6 h-6"
+                    aria-hidden="true"
+                    style={{ color: dragOver ? "var(--brand)" : "var(--text-muted)" }}
+                  />
+                  <div>
+                    <p className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+                      <span style={{ color: "var(--brand)" }}>Click to upload</span> or drag and drop
+                    </p>
+                    <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+                      PDF, DOCX, images — up to ~10 MB
+                    </p>
+                  </div>
+                  <input
+                    id="ai-doc"
+                    type="file"
+                    className="sr-only"
+                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              ) : (
+                <div
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg"
+                  style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
+                >
+                  <FileText
+                    className="w-4 h-4 shrink-0"
+                    aria-hidden="true"
+                    style={{ color: "var(--brand)" }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className="text-[12px] font-medium truncate"
+                      style={{ color: "var(--text-primary)" }}
+                      title={file.name}
+                    >
+                      {file.name}
+                    </p>
+                    <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                      {(file.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFile(null)}
+                    aria-label="Remove file"
+                    className="p-1 rounded transition-colors bg-transparent border-0 cursor-pointer"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    <X className="w-4 h-4" aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div
+              role="alert"
+              className="rounded-lg px-3 py-2 text-[12px]"
+              style={{
+                background: "var(--danger-bg)",
+                color: "var(--danger)",
+                border: "1px solid var(--danger)",
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" type="button" onClick={handleClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              icon={Sparkles}
+              loading={isSubmitting}
+              disabled={!storedAiToken}
+            >
+              {!storedAiToken ? "Connecting to AI..." : isSubmitting ? "Analyzing..." : "Generate CAPA"}
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {result && (
+        <AIResultPanel
+          result={result}
+          onBack={() => setResult(null)}
+          onSave={handleAccept}
+          onClose={handleClose}
+        />
+      )}
+    </Modal>
+  );
+}
+
+function AIResultPanel({
+  result,
+  onBack,
+  onSave,
+  onClose,
+}: {
+  result: AICapaResponse;
+  onBack: () => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const riskPct = Math.round(result.risk_score * 100);
+  const riskColor =
+    result.risk_score >= 0.75
+      ? "var(--danger)"
+      : result.risk_score >= 0.4
+        ? "var(--warning)"
+        : "var(--success)";
+
+  return (
+    <div className="space-y-4" aria-live="polite">
+      <div
+        className="rounded-lg px-3 py-2.5 flex items-start gap-2 text-[12px]"
+        style={{
+          background: result.is_recurring ? "var(--warning-bg)" : "var(--brand-muted)",
+          color: result.is_recurring ? "var(--warning)" : "var(--brand)",
+          border: `1px solid ${result.is_recurring ? "var(--warning)" : "var(--brand-border)"}`,
+        }}
+      >
+        {result.is_recurring ? (
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <Sparkles className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
+        )}
+        <div className="min-w-0">
+          <p className="font-semibold">{result.message}</p>
+          <p className="text-[11px] mt-0.5 opacity-80">
+            {result.capa_id} · {result.status} · created {new Date(result.created_at).toLocaleString()}
+          </p>
+        </div>
+      </div>
+
+      <div
+        className="rounded-lg p-3"
+        style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
+            AI risk score
+          </span>
+          <span className="text-[13px] font-bold" style={{ color: riskColor }}>
+            {riskPct}%
+          </span>
+        </div>
+        <div
+          className="w-full rounded-full overflow-hidden"
+          style={{ height: 6, background: "var(--bg-border)" }}
+        >
+          <div
+            style={{
+              width: `${riskPct}%`,
+              background: riskColor,
+              height: "100%",
+              transition: "width .3s",
+            }}
+          />
+        </div>
+      </div>
+
+      {result.pattern_detected && (
+        <Section icon={<TrendingUp className="w-3.5 h-3.5" />} label="Pattern detected">
+          {result.pattern_detected}
+        </Section>
+      )}
+      {result.recurrence_alert && (
+        <div>
+          <Section icon={<AlertTriangle className="w-3.5 h-3.5" />} label="Recurrence alert">
+            {result.recurrence_alert}
+          </Section>
+          <DismissAlertControl capaId={result.capa_id} alertType="recurrence_alert" />
+        </div>
+      )}
+      {result.ai_recommendation && (
+        <Section icon={<Sparkles className="w-3.5 h-3.5" />} label="AI recommendation">
+          {result.ai_recommendation}
+        </Section>
+      )}
+
+      {result.similar_capas?.length > 0 && (
+        <div>
+          <p
+            className="text-[11px] font-semibold uppercase tracking-wider mb-2"
+            style={{ color: "var(--text-muted)" }}
+          >
+            Similar past CAPAs
+          </p>
+          <ul className="space-y-2" role="list">
+            {result.similar_capas.map((s) => (
+              <li
+                key={s.capa_id}
+                className="rounded-lg p-3 text-[12px]"
+                style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono font-semibold" style={{ color: "var(--text-primary)" }}>
+                    {s.capa_id}
+                  </span>
+                  <span className="flex items-center gap-3 text-[11px]">
+                    <span style={{ color: "var(--text-secondary)" }}>
+                      {Math.round(s.similarity_score * 100)}% match
+                    </span>
+                    {s.was_effective ? (
+                      <span className="inline-flex items-center gap-1" style={{ color: "var(--success)" }}>
+                        <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> effective
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1" style={{ color: "var(--danger)" }}>
+                        <XCircle className="w-3 h-3" aria-hidden="true" /> ineffective
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <p className="mt-1" style={{ color: "var(--text-secondary)" }}>{s.description}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex justify-between pt-2">
+        <Button variant="ghost" type="button" onClick={onBack}>
+          New analysis
+        </Button>
+        <div className="flex gap-2">
+          {/* Close — discard the AI suggestion. The CAPA exists on the AI
+              backend already (the capa/create POST fired before this panel
+              rendered) so the lifecycle viewer at /ai-capa/<id> can still
+              reach it, but nothing is written to the local Prisma CAPA
+              library and nothing appears in the CAPA Tracker. */}
+          <Button variant="secondary" type="button" onClick={onClose}>
+            Close
+          </Button>
+          {/* Save to library — persists the AI CAPA into this customer's
+              local CAPA library (Prisma) via createCAPA server action, then
+              opens the AI lifecycle dashboard for RCA → Action plan → … */}
+          <Button variant="primary" type="button" icon={CheckCircle2} onClick={onSave}>
+            Save to library
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  icon,
+  label,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p
+        className="text-[11px] font-semibold uppercase tracking-wider mb-1.5 inline-flex items-center gap-1.5"
+        style={{ color: "var(--text-muted)" }}
+      >
+        <span aria-hidden="true">{icon}</span> {label}
+      </p>
+      <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>
+        {children}
+      </p>
+    </div>
+  );
+}
+
+/* ── Dismiss-alert control ───────────────────────────────────── */
+
+import { capaDismissAlert, selectAiToken } from "@/lib/aiBackend";
+
+function DismissAlertControl({ capaId, alertType }: { capaId: string; alertType: string }) {
+  const token = useAppSelector(selectAiToken);
+  const userName = useAppSelector((s) => s.auth.user?.name ?? "Operator");
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [signature, setSignature] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (done) {
+    return (
+      <p className="text-[11px] mt-1 inline-flex items-center gap-1" style={{ color: "var(--success)" }}>
+        <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Alert dismissed.
+      </p>
+    );
+  }
+
+  async function submit() {
+    if (reason.trim().length < 5 || signature.trim().length < 1) {
+      setError("Reason ≥ 5 chars and signature are required.");
+      return;
+    }
+    if (!token) {
+      setError("AI session is missing. Sign out and sign in again.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await capaDismissAlert({
+        capa_id: capaId,
+        alert_type: alertType,
+        dismissal_reason: reason,
+        electronic_signature: signature,
+        dismissed_by: userName,
+      }, token);
+      setDone(true);
+    } catch (e) {
+      console.error("[capa] dismiss alert failed", e); setError(friendlyAiError(e, "Couldn't dismiss the alert. Please try again."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-[11px] mt-1 inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer underline"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        <BellOff className="w-3 h-3" aria-hidden="true" /> Dismiss alert
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-lg p-3 space-y-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
+      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+        Logged in your audit trail with your identity and a timestamp.
+      </p>
+      <textarea
+        rows={2}
+        className="input text-[12px] resize-none"
+        placeholder="Why is this alert being dismissed? (e.g. investigated and confirmed different root cause)"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <input
+        type="text"
+        className="input text-[12px]"
+        placeholder="Electronic signature (e.g. QM-2026-001)"
+        value={signature}
+        onChange={(e) => setSignature(e.target.value)}
+      />
+      {error && (
+        <div role="alert" className="rounded-lg px-2 py-1 text-[11px]" style={{ background: "var(--danger-bg)", color: "var(--danger)" }}>{error}</div>
+      )}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" type="button" onClick={() => setOpen(false)}>Cancel</Button>
+        <Button variant="primary" type="button" loading={busy} onClick={submit}>Dismiss</Button>
+      </div>
+    </div>
+  );
+}

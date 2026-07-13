@@ -1,3 +1,5 @@
+"use client";
+
 import {
   useState,
   useRef,
@@ -9,6 +11,9 @@ import {
 import { createPortal } from "react-dom";
 import { ChevronDown, Check, Search } from "lucide-react";
 import clsx from "clsx";
+import { motion } from "framer-motion";
+import { usePrefersReducedMotion } from "@/lib/motion/useReducedMotion";
+import { DURATION, EASE } from "@/lib/motion/tokens";
 
 export interface DropdownOption {
   value: string;
@@ -42,6 +47,12 @@ export interface DropdownProps {
   width?: string;
   menuWidth?: string;
   actionMode?: boolean;
+  /** Hide the trailing chevron caret — for icon-only triggers (e.g. a ⋮ menu). */
+  hideCaret?: boolean;
+  /** Trigger size. 'md' (default) keeps the current chrome; 'sm' matches the
+   *  ui/Input + DatePicker form-field height (py-2.5) so it aligns pixel-for-
+   *  pixel when placed inline with those fields. */
+  size?: "sm" | "md";
   disabled?: boolean;
   className?: string;
 }
@@ -68,6 +79,8 @@ export function Dropdown({
   width = "w-48",
   menuWidth,
   actionMode = false,
+  hideCaret = false,
+  size = "md",
   disabled = false,
   className,
 }: DropdownProps) {
@@ -76,6 +89,7 @@ export function Dropdown({
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0, width: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const reduced = usePrefersReducedMotion();
 
   const allSections: DropdownSection[] =
     sections ?? (options ? [{ options }] : []);
@@ -102,7 +116,19 @@ export function Dropdown({
       ? Math.max(viewportPad, rect.top - neededHeight - gap)
       : rect.bottom + gap;
 
-    setMenuPos({ top, left: rect.left, width: rect.width });
+    // Horizontal clamp: keep the menu inside the viewport. Default-aligns the
+    // menu's left edge to the trigger, but if that pushes its right edge off
+    // screen (e.g. a right-aligned ⋮ actions menu), shift it left so it ends
+    // within the viewport — effectively right-aligning it to the trigger.
+    // Uses the menu's real width once rendered (the raf re-measure below picks
+    // it up); falls back to the trigger width on first paint.
+    const actualMenuWidth = menuRef.current?.offsetWidth ?? 0;
+    const menuW = actualMenuWidth > 0 ? actualMenuWidth : rect.width;
+    let left = rect.left;
+    const maxLeft = window.innerWidth - viewportPad - menuW;
+    if (left > maxLeft) left = Math.max(viewportPad, maxLeft);
+
+    setMenuPos({ top, left, width: rect.width });
   }, []);
 
   // Open handler
@@ -200,7 +226,7 @@ export function Dropdown({
   }
 
   const menu = open && (
-    <div
+    <motion.div
       ref={menuRef}
       role="listbox"
       aria-multiselectable={multi || undefined}
@@ -211,7 +237,14 @@ export function Dropdown({
         left: menuPos.left,
         minWidth: menuPos.width,
         maxHeight: Math.min(256, window.innerHeight - menuPos.top - 8),
+        transformOrigin: "top",
       }}
+      // Fast fade + subtle scale on open. Transform (scale) doesn't affect the
+      // offsetWidth/offsetHeight the positioner reads, so imperative placement is
+      // unaffected. Reduced motion → opacity only.
+      initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+      animate={reduced ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+      transition={{ duration: DURATION.fast, ease: EASE.out }}
       className={clsx(
         "z-9999 rounded-[10px] border p-1 shadow-lg",
         "overflow-y-auto",
@@ -276,7 +309,7 @@ export function Dropdown({
                   "text-[12px] font-medium",
                   "border-none outline-none",
                   "transition-colors duration-100",
-                  "disabled:opacity-40 disabled:cursor-not-allowed",
+                  "cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed",
                   opt.danger && "text-(--danger) hover:bg-(--danger-bg)",
                   !opt.danger && isSelected && "bg-(--brand-muted) text-(--brand)",
                   !opt.danger && !isSelected && "text-(--text-primary) hover:bg-(--bg-hover)",
@@ -327,7 +360,7 @@ export function Dropdown({
           })}
         </div>
       ))}
-    </div>
+    </motion.div>
   );
 
   return (
@@ -342,9 +375,13 @@ export function Dropdown({
         aria-expanded={open}
         className={clsx(
           "w-full flex items-center justify-between gap-2",
-          "px-3 py-2 rounded-lg text-[13px] font-medium",
+          "px-3 rounded-lg text-[13px] font-medium",
+          // 'sm' matches ui/Input / DatePicker (py-2.5); 'md' is the original py-2.
+          size === "sm" ? "py-2.5" : "py-2",
           "border outline-none transition-all duration-150",
-          "disabled:opacity-50 disabled:cursor-not-allowed",
+          // Interactive → pointer; disabled → not-allowed (the disabled: variant's
+          // :disabled specificity beats the plain cursor-pointer when disabled).
+          "cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
           "bg-(--bg-elevated) border-(--bg-border) text-(--text-primary)",
           "hover:border-(--brand)",
           open && "border-(--brand) ring-[3px] ring-(--brand-muted)",
@@ -359,13 +396,15 @@ export function Dropdown({
             )
           )}
         </span>
-        <ChevronDown
-          className={clsx(
-            "w-3.5 h-3.5 shrink-0 transition-transform duration-150 text-(--text-muted)",
-            open && "rotate-180",
-          )}
-          strokeWidth={2}
-        />
+        {!hideCaret && (
+          <ChevronDown
+            className={clsx(
+              "w-3.5 h-3.5 shrink-0 transition-transform duration-150 text-(--text-muted)",
+              open && "rotate-180",
+            )}
+            strokeWidth={2}
+          />
+        )}
       </button>
 
       {/* Menu rendered via portal to escape overflow clipping */}

@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
@@ -23,7 +25,7 @@ interface AgentEntry {
 
 const AGENTS: AgentEntry[] = [
   { key: "capa", name: "CAPA Effectiveness Monitor", desc: "Detects weak RCA, flags overdue effectiveness checks",
-    canDo: ["Detect incomplete RCA (empty Whys)", "Flag effectiveness checks overdue", "Suggest similar past CAPAs", "Highlight weak root cause patterns"],
+    canDo: ["Detect incomplete RCA (empty Whys)", "Flag effectiveness checks overdue", "Suggest similar past CAPAs", "Highlight weak root cause patterns", "Summarise a CAPA for approvers (read-only brief)", "Coach the author on unmet submission-readiness items"],
     cannotDo: ["Close or approve CAPAs", "Make compliance decisions", "Override QA Head", "Change CAPA status automatically"],
     triggers: "When CAPA is created or updated", showsIn: "CAPA Tracker detail panel" },
   { key: "deviation", name: "Deviation Intelligence", desc: "Clusters and surfaces recurring deviation patterns",
@@ -34,10 +36,6 @@ const AGENTS: AgentEntry[] = [
     canDo: ["Generate draft response text", "Pull linked CAPAs and RCA data", "Suggest commitment dates", "Structure formal response format"],
     cannotDo: ["Sign or submit response to FDA", "Commit to regulatory timelines", "Make compliance statements", "Replace QA Head sign-off"],
     triggers: "When draft requested", showsIn: "FDA 483 Response tab" },
-  { key: "batch", name: "Batch Readiness Agent", desc: "Analyses batch record completeness before release",
-    canDo: ["Analyse batch record completeness", "Flag missing entries", "Highlight review items", "Suggest pre-release checklist"],
-    cannotDo: ["Release or approve batches", "Make batch disposition decisions", "Override QP release authority"],
-    triggers: "Before batch release", showsIn: "Batch records" },
   { key: "drift", name: "Drift Detection", desc: "Monitors configuration changes and access creep",
     canDo: ["Monitor configuration changes", "Detect access control changes", "Flag audit trail coverage drops", "Alert on system changes"],
     cannotDo: ["Change system configurations", "Restore access controls", "Make IT security decisions"],
@@ -75,12 +73,13 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
   const computedMode = computeMode(agi.agents);
   const [saved, setSaved] = useState(false);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
   return (
-    <section aria-labelledby="agi-heading" className="space-y-6">
+    <section aria-labelledby="agi-heading" className="flex flex-col h-full min-h-0">
       <h2 id="agi-heading" className="sr-only">AGI Policy</h2>
 
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
       {/* AI Usage Policy banner */}
       <div className={clsx("rounded-xl border p-5", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.2)]" : "bg-[#eef2ff] border-[#c7d2fe]")}>
         <div className="flex items-start gap-3">
@@ -232,7 +231,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
                     <Toggle id={`agent-${agent.key}`} checked={agi.agents[agent.key]} onChange={() => !readOnly && dispatch(toggleAgent(agent.key))} label={agent.name} description={agent.desc} disabled={readOnly} hideLabel />
                   </div>
                   {isExpanded && (
-                    <div className={clsx("mt-3 rounded-lg p-3 text-[11px] space-y-2", isDark ? "bg-[#071526] border border-[#1e3a5a]" : "bg-[#f8fafc] border border-[#e2e8f0]")}>
+                    <div className={clsx("mt-3 rounded-lg p-3 text-[11px] space-y-2", "bg-(--bg-elevated) border border-(--bg-border)")}>
                       <div>
                         <p className="font-semibold mb-1" style={{ color: "#10b981" }}>CAN DO (AI-assisted)</p>
                         <ul className="list-none p-0 m-0 space-y-0.5">{agent.canDo.map((t) => <li key={t} className="flex items-start gap-1.5"><span className="text-[#10b981] shrink-0">✅</span><span style={{ color: "var(--text-secondary)" }}>{t}</span></li>)}</ul>
@@ -265,6 +264,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
           </Button>
         </div>
       )}
+      </div>
 
       {/* Popups */}
       <Popup

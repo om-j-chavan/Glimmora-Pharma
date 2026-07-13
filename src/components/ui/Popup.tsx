@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useRef, useCallback } from "react";
 import {
   CheckCircle2,
@@ -8,6 +10,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { MotionDiv } from "@/components/motion/Motion";
 
 export type PopupVariant =
   | "success"
@@ -223,16 +226,18 @@ export function Popup({
       onClick={canDismissBackdrop ? () => onDismiss?.() : undefined}
     >
       {/* Backdrop */}
-      <div
+      <MotionDiv
+        variant="fade"
+        aria-hidden
         className={clsx(
           "absolute inset-0",
           isDark ? "bg-[rgba(0,0,0,0.6)]" : "bg-[rgba(0,0,0,0.3)]",
         )}
-        aria-hidden="true"
       />
 
       {/* Panel */}
-      <div
+      <MotionDiv
+        variant="scaleFade"
         ref={panelRef}
         tabIndex={-1}
         role={
@@ -250,7 +255,6 @@ export function Popup({
         onClick={(e) => e.stopPropagation()}
         className={clsx(
           "relative rounded-xl overflow-hidden w-full max-w-[380px] border shadow-2xl",
-          "animate-[popupIn_0.15s_ease-out]",
           "bg-(--bg-surface)",
           cfg.border[m],
           className,
@@ -391,7 +395,7 @@ export function Popup({
             ))}
           </div>
         )}
-      </div>
+      </MotionDiv>
     </div>
   );
 }

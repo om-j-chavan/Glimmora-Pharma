@@ -1,6 +1,5 @@
-import { useMemo } from "react";
 import { useAppSelector } from "./useAppSelector";
-import type { TenantOrgConfig, TenantSiteConfig, TenantUserConfig, SubscriptionPlan } from "@/store/auth.slice";
+import type { TenantOrgConfig, TenantSiteConfig, TenantUserConfig, PlanConfig } from "@/store/auth.slice";
 import dayjs from "@/lib/dayjs";
 
 const DEFAULT_ORG: TenantOrgConfig = {
@@ -14,93 +13,96 @@ export function useTenantConfig() {
   const currentTenantId = useAppSelector((s) => s.auth.currentTenant);
   const currentUser = useAppSelector((s) => s.auth.user);
   const tenants = useAppSelector((s) => s.auth.tenants);
-
-  const tenant = useMemo(
-    () => tenants.find((t) => t.id === currentTenantId),
-    [tenants, currentTenantId],
-  );
+  const tenant = tenants.find((t) => t.id === currentTenantId);
   const config = tenant?.config;
 
-  const rawSites = useMemo(() => (config?.sites ?? []) as TenantSiteConfig[], [config?.sites]);
-  const users = useMemo(() => (config?.users ?? []) as TenantUserConfig[], [config?.users]);
+  const rawSites = (config?.sites ?? []) as TenantSiteConfig[];
+  const users = (config?.users ?? []) as TenantUserConfig[];
 
   // Inactive sites are hidden from every consumer EXCEPT Settings → Sites
   // (which uses allSitesIncludingInactive to still show and re-enable them).
-  const allSites = useMemo(() => rawSites.filter((s) => s.status === "Active"), [rawSites]);
+  const allSites = rawSites.filter((s) => s.status === "Active");
   const allSitesIncludingInactive = rawSites;
 
-  const userConfig = useMemo(
-    () => users.find((u) => u.id === currentUser?.id),
-    [users, currentUser?.id],
-  );
+  const userConfig = users.find((u) => u.id === currentUser?.id);
 
-  const accessibleSites = useMemo(() => {
+  const accessibleSites = (() => {
     if (!userConfig) return allSites;
     if (userConfig.allSites) return allSites;
     if (currentUser?.role === "super_admin") return allSites;
     if (currentUser?.role === "customer_admin") return allSites;
     if (currentUser?.role === "qa_head") return allSites;
     return allSites.filter((s) => userConfig.assignedSites.includes(s.id));
-  }, [userConfig, allSites, currentUser?.role]);
+  })();
 
-  // ── Subscription helpers ──
-  const subscriptionPlans = useMemo<SubscriptionPlan[]>(
-    () => tenant?.subscriptionPlans ?? [],
-    [tenant?.subscriptionPlans],
-  );
+  // ── Plan helpers (Subscription Phase A) ──
+  // Exactly one optional plan per tenant. Caps are frozen on the plan row.
+  const plan: PlanConfig | null = tenant?.plan ?? null;
 
-  const activePlan = useMemo(
-    () => subscriptionPlans.find((p) => (p.status ?? "").toLowerCase() === "active") ?? null,
-    [subscriptionPlans],
-  );
+  const planExpiry = plan?.expiryDate ?? null;
 
-  // Plans created via admin UI use `expiryDate`; the TS type says `endDate`.
-  // Check both to avoid field-name mismatch causing false "expired" state.
-  const subscriptionInfo = useMemo(() => {
-    const planExpiry = activePlan
-      ? (activePlan as SubscriptionPlan & { expiryDate?: string }).expiryDate ?? activePlan.endDate
-      : null;
+  const daysRemaining = planExpiry
+    ? Math.max(0, dayjs.utc(planExpiry).diff(dayjs(), "day"))
+    : null;
 
-    const daysRemaining = planExpiry
-      ? Math.max(0, dayjs.utc(planExpiry).diff(dayjs(), "day"))
-      : null;
+  // "Expired" is an expiry/no-plan concept — distinct from lifecycle
+  // (Active/Suspended = tenant.active). A missing plan reads as expired for
+  // the gate, exactly as before.
+  const isExpired = planExpiry
+    ? dayjs().isAfter(dayjs.utc(planExpiry))
+    : !plan;
 
-    const isExpired = planExpiry
-      ? dayjs().isAfter(dayjs.utc(planExpiry))
-      : !activePlan;
+  const isNearExpiry = daysRemaining !== null && daysRemaining <= 14 && daysRemaining > 0;
 
-    const isNearExpiry = daysRemaining !== null && daysRemaining <= 14 && daysRemaining > 0;
+  const maxUsers = plan?.maxUsers ?? 0;
+  const maxSites = plan?.maxSites ?? 0;
+  // Seats consumed = ALL site users (active + inactive). Mirrors the
+  // authoritative server cap (assertCanAddUser → prisma.user.count where
+  // tenantId, no isActive filter). One exclusion, deliberate:
+  //   • super_admin / customer_admin are Tenant rows, not User seats — the
+  //     synthetic customer_admin entry in config.users must NOT count (this is
+  //     why a fresh tenant showed "1 of N accounts used" with zero users made).
+  // Inactive users STILL count — they retain data / occupy storage. Keeping this
+  // in lockstep with planCaps.ts makes the meter hit 100% exactly when the
+  // server starts blocking — no off-by-one early block.
+  const usedAccounts = users.filter(
+    (u) => u.role !== "super_admin" && u.role !== "customer_admin",
+  ).length;
+  const usedSites = allSitesIncludingInactive.length;
 
-    const maxAccounts = activePlan?.maxAccounts ?? 0;
-    const usedAccounts = users.length;
-
-    const accountsRemaining = maxAccounts === -1 ? -1 : Math.max(0, maxAccounts - usedAccounts);
-    const isAtAccountLimit = maxAccounts !== -1 && usedAccounts >= maxAccounts;
-
-    return {
-      daysRemaining,
-      isExpired,
-      isNearExpiry,
-      maxAccounts,
-      usedAccounts,
-      accountsRemaining,
-      isAtAccountLimit,
-    };
-  }, [activePlan, users.length]);
+  const accountsRemaining = Math.max(0, maxUsers - usedAccounts);
+  const sitesRemaining = Math.max(0, maxSites - usedSites);
+  const isAtAccountLimit = !!plan && usedAccounts >= maxUsers;
+  const isAtSiteLimit = !!plan && usedSites >= maxSites;
 
   return {
     tenantId: currentTenantId ?? "",
     tenantName: tenant?.name ?? "Pharma Glimmora",
-    tenantPlan: tenant?.plan ?? ("enterprise" as const),
+    // Server-authoritative Tenant.createdAt (ISO). Undefined until a getTenants()
+    // reload supplies it (optimistic inserts don't carry it).
+    orgCreatedAt: tenant?.createdAt ?? null,
     org: config?.org ?? DEFAULT_ORG,
     sites: accessibleSites,
     allSites,
     allSitesIncludingInactive,
     users,
     userConfig,
-    // subscription
-    subscriptionPlans,
-    activePlan,
-    ...subscriptionInfo,
+    // plan (Subscription Phase A)
+    plan,
+    planTier: plan?.tier ?? null,
+    daysRemaining,
+    isExpired,
+    isNearExpiry,
+    // `maxAccounts` kept as an alias for maxUsers so existing consumers
+    // (UsersTab usage bars) read the user cap without renaming.
+    maxAccounts: maxUsers,
+    maxUsers,
+    maxSites,
+    usedAccounts,
+    usedSites,
+    accountsRemaining,
+    sitesRemaining,
+    isAtAccountLimit,
+    isAtSiteLimit,
   };
 }

@@ -1,0 +1,38 @@
+# Render Blueprint — Glimmora Pharma frontend (Next.js 16 + Prisma/SQLite)
+#
+# Deploy: Render Dashboard → New → Blueprint → connect this repo.
+# Keeps file-based SQLite on a persistent disk (no Postgres needed).
+services:
+  - type: web
+    name: glimmora-pharma-web
+    runtime: node
+    plan: starter            # persistent disks require a paid instance (free tier has none)
+    branch: devAI
+    buildCommand: npm install && npx prisma generate && npm run build
+    # `prisma db push` runs every boot (idempotent) so the schema on the
+    # mounted disk is always in sync. Seed once manually via the Shell.
+    startCommand: npx prisma db push && npm start
+    disk:
+      name: glimmora-data
+      mountPath: /data       # SQLite file + uploaded files live here, survive redeploys
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATABASE_URL
+        value: file:/data/glimmora.db
+      - key: FILE_STORAGE_BACKEND
+        value: local           # ./uploads works because the disk is persistent
+      - key: NEXT_PUBLIC_API_URL
+        value: https://pharma-glimmora-ai-backend.onrender.com/api
+      # Secrets — set these in the dashboard, not in git:
+      - key: NEXTAUTH_SECRET
+        sync: false
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: BACKEND_URL
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false

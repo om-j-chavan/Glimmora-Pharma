@@ -1,17 +1,24 @@
+"use client";
+
 import { useState } from "react";
-import { Building2, MapPin, Users, BookOpen, Bot, Shield, Info } from "lucide-react";
+import { Building2, MapPin, Users, BookOpen, Bot, Shield, CreditCard, Info, Settings } from "lucide-react";
 import { OrgTab } from "./tabs/OrgTab";
 import { SitesTab } from "./tabs/SitesTab";
 import { UsersTab } from "./tabs/UsersTab";
 import { FrameworksTab } from "./tabs/FrameworksTab";
 import { AGIPolicyTab } from "./tabs/AGIPolicyTab";
 import { PermissionsTab } from "./tabs/PermissionsTab";
+import { SubscriptionTab } from "./tabs/SubscriptionTab";
 import { usePermissions } from "@/hooks/usePermissions";
+import { PageLayout } from "@/components/layout/PageLayout";
 
 const ALL_TABS = [
   { id: "org", label: "Organization", icon: Building2 },
   { id: "sites", label: "Sites", icon: MapPin },
   { id: "users", label: "Users & Roles", icon: Users },
+  // Read-only plan view — customer_admin sees their own plan/caps/usage but
+  // cannot change anything (tier/caps/dates/MFA are super_admin-only).
+  { id: "subscription", label: "Subscription", icon: CreditCard },
   { id: "frameworks", label: "Frameworks", icon: BookOpen },
   { id: "agi", label: "AGI Policy", icon: Bot },
   { id: "permissions", label: "Permissions", icon: Shield },
@@ -23,10 +30,26 @@ export function SettingsPage() {
   const [active, setActive] = useState<TabId>("org");
   const { canManageSettings, isQAHead, role } = usePermissions();
   const readOnly = !canManageSettings;
-  const visibleTabs = isQAHead ? ALL_TABS.filter((t) => t.id !== "permissions") : ALL_TABS;
+  // Tab-level view gating. Both the tab bar and the panels below map over
+  // visibleTabs, so excluding a tab here removes the tab button AND its rendered
+  // panel (the data never reaches a denied role's DOM).
+  //  - Permissions: qa_head excluded (existing behaviour).
+  //  - Subscription: plan / user-site limits / billing term / retention is
+  //    admin-tier info → customer_admin / super_admin only.
+  const visibleTabs = ALL_TABS.filter((t) => {
+    if (t.id === "permissions" && isQAHead) return false;
+    if (t.id === "subscription" && !canManageSettings) return false;
+    return true;
+  });
 
   return (
-    <div className="flex flex-col -m-3 sm:-m-4 lg:-m-5 h-full min-h-0">
+    <PageLayout
+      title="Settings"
+      titleIcon={Settings}
+      description="Manage organization, users, sites, frameworks, and subscription."
+      contentPadding={true}
+      fillHeight
+    >
       {/* Read-only banner for non-admin roles */}
       {readOnly && (
         <div className="flex items-start gap-2 px-5 py-3 border-b" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
@@ -41,7 +64,7 @@ export function SettingsPage() {
       <div
         role="tablist"
         aria-label="Settings sections"
-        className="flex shrink-0 border-b border-(--bg-border) bg-(--bg-base) px-3 sm:px-4 lg:px-5 overflow-x-auto"
+        className="flex shrink-0 border-b border-(--bg-border) bg-(--bg-base) overflow-x-auto"
       >
         {visibleTabs.map((tab) => (
           <button
@@ -65,7 +88,7 @@ export function SettingsPage() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto min-h-0 p-3 sm:p-4 lg:p-5">
+      <div className="flex-1 overflow-y-auto min-h-0 py-3 sm:py-4 lg:py-5">
         {visibleTabs.map((tab) => (
           <section
             key={tab.id}
@@ -74,17 +97,26 @@ export function SettingsPage() {
             aria-labelledby={`tab-btn-${tab.id}`}
             tabIndex={0}
             hidden={active !== tab.id}
-            className="focus:outline-none"
+            className="focus:outline-none h-full"
           >
-            {tab.id === "org" && <OrgTab readOnly={readOnly} />}
+            {/* Company Details (Organisation) is Super-Admin-managed, so it is
+                view-only on the tenant side — including for customer_admin, who
+                can edit the other tabs. Regulatory Region moved to Super Admin.
+                Server-side, the only writer of these fields is the super_admin
+                updateTenant action, so this is enforcement, not just hiding. */}
+            {tab.id === "org" && <OrgTab readOnly={readOnly || role === "customer_admin"} />}
             {tab.id === "sites" && <SitesTab readOnly={readOnly} />}
             {tab.id === "users" && <UsersTab readOnly={readOnly} />}
+            {/* Subscription is inherently read-only — no readOnly prop / no controls.
+                Customer-Admin-only view (defense-in-depth; visibleTabs already
+                excludes it for other roles). */}
+            {tab.id === "subscription" && canManageSettings && <SubscriptionTab />}
             {tab.id === "frameworks" && <FrameworksTab readOnly={readOnly} />}
             {tab.id === "agi" && <AGIPolicyTab readOnly={readOnly && role !== "it_cdo"} />}
             {tab.id === "permissions" && <PermissionsTab />}
           </section>
         ))}
       </div>
-    </div>
+    </PageLayout>
   );
 }

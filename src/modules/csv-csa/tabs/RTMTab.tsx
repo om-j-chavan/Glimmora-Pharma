@@ -2,22 +2,22 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
-  CheckCircle2, AlertTriangle, X, ChevronRight, Search, Download,
+  CheckCircle2, AlertTriangle, X, ChevronRight, Search,
   Plus, FileText, SkipForward, Clock,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addRTMEntry, type RTMEntry, type TraceabilityStatus, type TestResult } from "@/store/rtm.slice";
-import { auditLog } from "@/lib/audit";
+import { createRTMEntry, updateRTMEntry } from "@/actions/rtm";
+import type { RTMEntry, TraceabilityStatus, TestResult } from "@/types/csv-csa";
 import dayjs from "@/lib/dayjs";
 import { Button } from "@/components/ui/Button";
+import { ExportMenu } from "@/components/ui/ExportMenu";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
-import { StatCard } from "@/components/shared";
+import { StatCard, DataTable, type Column } from "@/components/shared";
 
 /* ── Helpers ── */
 const TR_VARIANT: Record<TraceabilityStatus, "green" | "amber" | "red"> = { complete: "green", partial: "amber", broken: "red" };
@@ -50,15 +50,28 @@ function borderColor(s: TraceabilityStatus): string {
 
 /* ── Component ── */
 
-export function RTMTab() {
+/**
+ * `entries` and `systemsOverride` come from CSVPage (server-fetched +
+ * adapted). When omitted, fall back to Redux selectors so the component
+ * still works in any future standalone usage. Both fallbacks are now
+ * empty arrays (slices delivered but data lives in props).
+ */
+export interface RTMTabProps {
+  entries?: RTMEntry[];
+  systemsOverride?: { id: string; name: string; tenantId: string }[];
+}
+
+export function RTMTab({ entries: entriesProp, systemsOverride }: RTMTabProps = {}) {
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const dispatch = useAppDispatch();
   const router = useRouter();
-  const entries = useAppSelector((s) => s.rtm.items);
-  const { isQAHead } = usePermissions();
+  // rtm slice was deleted — entries come from CSVPage props (server-fetched).
+  const entries = entriesProp ?? [];
+  const permissions = usePermissions();
+  const { isQAHead } = permissions;
   const { tenantId } = useTenantConfig();
-  const systems = useAppSelector((s) => s.systems.items).filter((s) => s.tenantId === tenantId);
-  const canEdit = isQAHead || usePermissions().role === "csv_val_lead";
+  // systems slice was deleted — systems come from CSVPage props.
+  const systems = systemsOverride ?? [];
+  const canEdit = isQAHead || permissions.role === "csv_val_lead";
 
   const tenantEntries = entries.filter((e) => e.tenantId === tenantId);
 
@@ -69,6 +82,20 @@ export function RTMTab() {
   const [addOpen, setAddOpen] = useState(false);
   const [successPopup, setSuccessPopup] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+
+  // RUNG 1 (Finding #6) — per-requirement notes, the first wired updateRTMEntry
+  // field. Saved on blur (so we don't fire a write per keystroke).
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesRowId, setNotesRowId] = useState<string | null>(null);
+  if (selected && selected.id !== notesRowId) {
+    setNotesRowId(selected.id);
+    setNotesDraft(selected.notes ?? "");
+  }
+  async function saveNotes() {
+    if (!selected || (selected.notes ?? "") === notesDraft) return;
+    const result = await updateRTMEntry(selected.id, { notes: notesDraft });
+    if (result.success) { setSuccessMsg("Note saved."); setSuccessPopup(true); router.refresh(); }
+  }
 
   const sysEntries = useMemo(() => {
     let r = tenantEntries.filter((e) => !selectedSystem || e.systemId === selectedSystem);
@@ -88,36 +115,33 @@ export function RTMTab() {
   const [formReg, setFormReg] = useState("");
   const [formPriority, setFormPriority] = useState<"critical" | "high" | "medium">("high");
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!formUrsId.trim() || !formReq.trim() || !formReg.trim()) return;
-    const id = `RTM-${String(tenantEntries.length + 1).padStart(3, "0")}`;
-    const sys = systems.find((s) => s.id === selectedSystem);
-    const entry: RTMEntry = {
-      id, tenantId: tenantId ?? "", systemId: selectedSystem,
-      systemName: sys?.name ?? selectedSystem,
-      ursId: formUrsId, ursRequirement: formReq, ursRegulation: formReg, ursPriority: formPriority,
-      fsStatus: "missing", dsStatus: "missing",
-      evidenceStatus: "missing", traceabilityStatus: "broken",
-    };
-    dispatch(addRTMEntry(entry));
-    auditLog({ action: "RTM_ENTRY_ADDED", module: "CSV/CSA", recordId: id, recordTitle: formReq.slice(0, 50) });
+    const result = await createRTMEntry({
+      systemId: selectedSystem,
+      ursId: formUrsId,
+      ursRequirement: formReq,
+      ursRegulation: formReg,
+      ursPriority: formPriority,
+    });
+    if (!result.success) {
+      console.error("[csv-csa] createRTMEntry failed:", result.error);
+      return;
+    }
     setAddOpen(false);
     setFormUrsId(""); setFormReq(""); setFormReg("");
-    setSuccessMsg(`${id} added to RTM`);
+    setSuccessMsg(`Requirement ${formUrsId} added to RTM`);
     setSuccessPopup(true);
+    router.refresh();
   }
 
-  function exportCSV() {
-    const header = "ID,URS,Requirement,Regulation,Priority,FS,DS,IQ,OQ,PQ,Evidence,Status";
-    const rows = sysEntries.map((e) =>
-      [e.id, e.ursId, `"${e.ursRequirement}"`, e.ursRegulation, e.ursPriority,
-        e.fsStatus, e.dsStatus, e.iqResult ?? "—", e.oqResult ?? "—", e.pqResult ?? "—",
-        e.evidenceStatus, e.traceabilityStatus].join(",")
-    );
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `RTM-${dayjs().format("YYYY-MM-DD")}.csv`; a.click();
-    URL.revokeObjectURL(url);
+  const RTM_HEADERS = ["ID", "URS", "Requirement", "Regulation", "Priority", "FS", "DS", "IQ", "OQ", "PQ", "Evidence", "Status"];
+  function buildRtmRows() {
+    return sysEntries.map((e) => [
+      e.id, e.ursId, e.ursRequirement, e.ursRegulation, e.ursPriority,
+      e.fsStatus, e.dsStatus, e.iqResult ?? "—", e.oqResult ?? "—", e.pqResult ?? "—",
+      e.evidenceStatus, e.traceabilityStatus,
+    ]);
   }
 
   return (
@@ -128,7 +152,15 @@ export function RTMTab() {
           <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>Full validation lifecycle traceability for all GxP-critical systems</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" icon={Download} onClick={exportCSV}>Export RTM</Button>
+          <ExportMenu
+            filename={`RTM-${dayjs().format("YYYY-MM-DD")}`}
+            title="Requirement Traceability Matrix"
+            subtitle={`${sysEntries.length} requirements · ${dayjs().format("DD MMM YYYY HH:mm")}`}
+            headers={RTM_HEADERS}
+            rows={buildRtmRows}
+            label="Export RTM"
+            disabled={sysEntries.length === 0}
+          />
           {canEdit && <Button variant="primary" size="sm" icon={Plus} onClick={() => setAddOpen(true)}>Add Requirement</Button>}
         </div>
       </div>
@@ -149,56 +181,56 @@ export function RTMTab() {
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-[300px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-          <input type="text" className="input pl-9 w-full text-[12px]" placeholder="Search requirements..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+          <input type="text" className="input pl-9 w-full text-[12px]" placeholder="Search requirements…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
         <Dropdown placeholder="All statuses" value={statusFilter} onChange={setStatusFilter} width="w-40" options={[{ value: "", label: "All statuses" }, { value: "complete", label: "Complete" }, { value: "partial", label: "Partial" }, { value: "broken", label: "Broken" }]} />
-        {(searchQuery || statusFilter) && <Button variant="ghost" size="sm" icon={X} onClick={() => { setSearchQuery(""); setStatusFilter(""); }}>Clear</Button>}
+        {(searchQuery || statusFilter) && <Button variant="ghost" size="sm" icon={X} onClick={() => { setSearchQuery(""); setStatusFilter(""); }}>Clear filters</Button>}
       </div>
 
       {/* Main grid */}
       <div className={clsx("grid gap-4", selected ? "grid-cols-1 lg:grid-cols-[1fr_380px]" : "grid-cols-1")}>
         {/* Table */}
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="data-table" style={{ minWidth: 900 }} aria-label="RTM entries">
-              <caption className="sr-only">Requirement traceability matrix showing validation lifecycle</caption>
-              <thead>
-                <tr>
-                  <th scope="col" style={{ width: 200 }}>URS Requirement</th>
-                  <th scope="col">Regulation</th>
-                  <th scope="col">FS</th>
-                  <th scope="col">DS</th>
-                  <th scope="col">IQ</th>
-                  <th scope="col">OQ</th>
-                  <th scope="col">PQ</th>
-                  <th scope="col">Evidence</th>
-                  <th scope="col">Status</th>
-                  <th scope="col"><span className="sr-only">Open</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sysEntries.length === 0 ? (
-                  <tr><td colSpan={10} className="text-center py-8"><FileText className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{systems.length === 0 ? "Add a system first" : "No RTM entries for this system"}</p></td></tr>
-                ) : sysEntries.map((e) => (
-                  <tr key={e.id} className={clsx("cursor-pointer", selected?.id === e.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))} onClick={() => setSelected(e)} style={{ borderLeft: `3px solid ${borderColor(e.traceabilityStatus)}` }}>
-                    <td>
-                      <p className="text-[11px] font-mono" style={{ color: "var(--brand)" }}>{e.ursId}</p>
-                      <p className="text-[11px] line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{e.ursRequirement}</p>
-                    </td>
-                    <td className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{e.ursRegulation}</td>
-                    <td>{linkBadge(e.fsStatus, e.fsReference)}</td>
-                    <td>{linkBadge(e.dsStatus, e.dsReference)}</td>
-                    <td>{e.iqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.iqTestId}</span> : null} {testBadge(e.iqResult)}</td>
-                    <td>{e.oqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.oqTestId}</span> : null} {testBadge(e.oqResult)}</td>
-                    <td>{e.pqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.pqTestId}</span> : null} {testBadge(e.pqResult)}</td>
-                    <td><Badge variant={e.evidenceStatus === "complete" ? "green" : e.evidenceStatus === "partial" ? "amber" : "red"}>{e.evidenceStatus.charAt(0).toUpperCase() + e.evidenceStatus.slice(1)}</Badge></td>
-                    <td><Badge variant={TR_VARIANT[e.traceabilityStatus]}>{TR_LABEL[e.traceabilityStatus]}</Badge></td>
-                    <td><ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            ariaLabel="RTM entries"
+            caption="Requirement traceability matrix showing validation lifecycle"
+            minWidth={900}
+            data={sysEntries}
+            rowKey={(e) => e.id}
+            onRowClick={(e) => setSelected(e)}
+            rowClassName={(e) => clsx(selected?.id === e.id && (isDark ? "bg-[#0d2a4a]" : "bg-[#f0f7ff]"))}
+            rowStyle={(e) => ({ borderLeft: `3px solid ${borderColor(e.traceabilityStatus)}` })}
+            emptyState={
+              <div className="text-center py-8"><FileText className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{systems.length === 0 ? "Add a system first" : "No RTM entries for this system"}</p></div>
+            }
+            columns={[
+              {
+                key: "ursRequirement",
+                header: "URS Requirement",
+                headerClassName: "w-[200px]",
+                render: (e) => (
+                  <>
+                    <p className="text-[11px] font-mono" style={{ color: "var(--brand)" }}>{e.ursId}</p>
+                    <p className="text-[11px] line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 200 }}>{e.ursRequirement}</p>
+                  </>
+                ),
+              },
+              {
+                key: "regulation",
+                header: "Regulation",
+                cellClassName: "text-[10px] font-mono",
+                render: (e) => <span style={{ color: "var(--text-secondary)" }}>{e.ursRegulation}</span>,
+              },
+              { key: "fs", header: "FS", render: (e) => linkBadge(e.fsStatus, e.fsReference) },
+              { key: "ds", header: "DS", render: (e) => linkBadge(e.dsStatus, e.dsReference) },
+              { key: "iq", header: "IQ", render: (e) => <>{e.iqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.iqTestId}</span> : null} {testBadge(e.iqResult)}</> },
+              { key: "oq", header: "OQ", render: (e) => <>{e.oqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.oqTestId}</span> : null} {testBadge(e.oqResult)}</> },
+              { key: "pq", header: "PQ", render: (e) => <>{e.pqTestId ? <span className="text-[10px] font-mono text-[#10b981]">{e.pqTestId}</span> : null} {testBadge(e.pqResult)}</> },
+              { key: "evidence", header: "Evidence", render: (e) => <Badge variant={e.evidenceStatus === "complete" ? "green" : e.evidenceStatus === "partial" ? "amber" : "red"}>{e.evidenceStatus.charAt(0).toUpperCase() + e.evidenceStatus.slice(1)}</Badge> },
+              { key: "status", header: "Status", render: (e) => <Badge variant={TR_VARIANT[e.traceabilityStatus]}>{TR_LABEL[e.traceabilityStatus]}</Badge> },
+              { key: "open", header: "Open", srOnly: true, render: () => <ChevronRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" /> },
+            ] satisfies Column<RTMEntry>[]}
+          />
         </div>
 
         {/* Detail panel */}
@@ -234,7 +266,7 @@ export function RTMTab() {
                   { label: selected.pqTestId ?? "PQ", desc: `PQ Test${selected.pqResult ? ` — ${selected.pqResult.toUpperCase()}` : ""}`, ok: selected.pqResult === "pass", detail: selected.pqTestDescription, doc: selected.pqDocument, pending: selected.pqResult === "pending", missing: !selected.pqTestId && selected.pqResult !== "na" },
                   { label: "Evidence", desc: selected.evidenceStatus.charAt(0).toUpperCase() + selected.evidenceStatus.slice(1), ok: selected.evidenceStatus === "complete", pending: selected.evidenceStatus === "partial", missing: selected.evidenceStatus === "missing" },
                 ].map((step, i, arr) => (
-                  <div key={i} className="flex gap-3">
+                  <div key={step.desc} className="flex gap-3">
                     <div className="flex flex-col items-center shrink-0">
                       <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: step.skip ? "#94a3b818" : step.ok ? "#10b98118" : step.pending ? "#f59e0b18" : step.missing ? "#ef444418" : "#64748b18", color: step.skip ? "#94a3b8" : step.ok ? "#10b981" : step.pending ? "#f59e0b" : step.missing ? "#ef4444" : "#64748b" }}>
                         {step.skip
@@ -278,12 +310,31 @@ export function RTMTab() {
             <div className="grid grid-cols-2 gap-3 text-[11px]">
               <div>
                 <p style={{ color: "var(--text-muted)" }}>Finding</p>
-                {selected.linkedFindingId ? <button type="button" onClick={() => router.push("/gap-assessment", { state: { openFindingId: selected.linkedFindingId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedFindingId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
+                {selected.linkedFindingId ? <button type="button" onClick={() => router.push("/gap-assessment")} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedFindingId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
               </div>
               <div>
                 <p style={{ color: "var(--text-muted)" }}>CAPA</p>
-                {selected.linkedCAPAId ? <button type="button" onClick={() => router.push("/capa", { state: { openCapaId: selected.linkedCAPAId } })} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
+                {selected.linkedCAPAId ? <button type="button" onClick={() => router.push("/capa")} className="font-mono text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">{selected.linkedCAPAId}</button> : <p style={{ color: "var(--text-muted)" }}>\u2014</p>}
               </div>
+            </div>
+
+            {/* Notes (RUNG 1 \u2014 first editable RTM field; saved on blur) */}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Notes</p>
+              {canEdit ? (
+                <textarea
+                  rows={3}
+                  value={notesDraft}
+                  onChange={(e) => setNotesDraft(e.target.value)}
+                  onBlur={saveNotes}
+                  className="input text-[11px] resize-none w-full"
+                  placeholder="Add context for this requirement (saved when you leave the field)"
+                />
+              ) : selected.notes ? (
+                <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{selected.notes}</p>
+              ) : (
+                <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No notes.</p>
+              )}
             </div>
           </aside>
         )}

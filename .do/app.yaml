@@ -1,0 +1,124 @@
+name: glimmora-pharma
+region: blr
+
+# ── Pre-deploy migration (Prisma) ─────────────────────────────────────────────
+jobs:
+  - name: migrate
+    kind: PRE_DEPLOY
+    github:
+      branch: devAI
+      deploy_on_push: true
+    source_dir: /
+    build_command: npm ci && npx prisma generate
+    run_command: npx prisma migrate deploy
+    instance_size_slug: basic-xxs
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+services:
+  # ── FastAPI AI backend ────────────────────────────────────────────────────
+  - name: api
+    github:
+      branch: devAI
+      deploy_on_push: true
+    source_dir: /backend
+    environment_slug: python
+    build_command: pip install -r requirements.txt
+    run_command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+    http_port: 8080
+    instance_size_slug: basic-xs
+    instance_count: 1
+    routes:
+      - path: /v1
+      - path: /api/ai
+      - path: /api/v1
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 30
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: OPENAI_API_KEY
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: PINECONE_API_KEY
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: JWT_SECRET
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: ALLOWED_ORIGINS
+        scope: RUN_AND_BUILD_TIME
+        value: ${APP_URL}
+
+  # ── Next.js frontend ──────────────────────────────────────────────────────
+  - name: web
+    github:
+      branch: devAI
+      deploy_on_push: true
+    source_dir: /
+    build_command: npm ci && npx prisma generate && npm run build
+    run_command: npm start
+    http_port: 3000
+    instance_size_slug: basic-xs
+    instance_count: 1
+    routes:
+      - path: /
+    health_check:
+      http_path: /api/auth/session
+      initial_delay_seconds: 10
+      period_seconds: 30
+      timeout_seconds: 5
+      failure_threshold: 3
+    envs:
+      # ── Prisma / PostgreSQL ────────────────────────────────────────────
+      - key: DATABASE_URL
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+      # ── NextAuth ───────────────────────────────────────────────────────
+      - key: NEXTAUTH_SECRET
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: NEXTAUTH_URL
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+      # ── Email / SMTP ───────────────────────────────────────────────────
+      - key: GMAIL_USER
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: GMAIL_APP_PASSWORD
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+
+      # ── AI backend (internal DO private URL) ──────────────────────────
+      # ${api.PRIVATE_URL} resolves to the api service's internal hostname.
+      # Next.js server → FastAPI never leaves DO's private network.
+      - key: BACKEND_URL
+        scope: RUN_AND_BUILD_TIME
+        value: ${api.PRIVATE_URL}
+
+      # ── File storage (DO Spaces) ───────────────────────────────────────
+      - key: FILE_STORAGE_BACKEND
+        scope: RUN_AND_BUILD_TIME
+        value: do-spaces
+      - key: DO_SPACES_ENDPOINT
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: DO_SPACES_KEY
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: DO_SPACES_BUCKET
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
+      - key: DO_SPACES_REGION
+        scope: RUN_AND_BUILD_TIME
+        value: blr1

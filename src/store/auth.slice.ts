@@ -1,6 +1,9 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
-export type UserRole = "super_admin" | "customer_admin" | "qa_head" | "qc_lab_director" | "regulatory_affairs" | "csv_val_lead" | "it_cdo" | "operations_head" | "viewer";
+// "qa" = execution-level Quality Assurance user. NOT qa_head: no approval,
+// sign-off, closure, or delete authority (see roleSets.ts — qa is in none of
+// the privileged sets). Keep in sync with RoleKey in permissions.slice.ts.
+export type UserRole = "super_admin" | "customer_admin" | "qa_head" | "qa" | "qc_lab_director" | "regulatory_affairs" | "csv_val_lead" | "it_cdo" | "operations_head" | "viewer";
 
 export interface AuthUser {
   id: string;
@@ -10,6 +13,14 @@ export interface AuthUser {
   gxpSignatory: boolean;
   orgId: string;
   tenantId: string;
+  /** AI backend access token, refreshed on each app login. Stored on the
+   *  user record so it's available even for users that don't live in a
+   *  tenant's config.users list (e.g. the platform super admin). */
+  aiAccessToken?: string;
+  /** customer_id used by the AI backend for this user. Defaults to the
+   *  customer admin's aiUserId; set to the user's own AI user_id for the
+   *  platform super admin / customer admin. */
+  aiCustomerId?: string;
 }
 
 export interface TenantOrgConfig {
@@ -24,7 +35,6 @@ export interface TenantSiteConfig {
   name: string;
   location: string;
   gmpScope: string;
-  risk: "HIGH" | "MEDIUM" | "LOW";
   status: "Active" | "Inactive";
 }
 
@@ -39,6 +49,13 @@ export interface TenantUserConfig {
   allSites: boolean;
   password?: string;
   username?: string;
+  /** user_id sent to the AI backend's signup. Set once after successful
+   *  signup and never re-sent on subsequent edits. Use as the "already
+   *  signed up" sentinel — if present, skip /auth/signup. */
+  aiUserId?: string;
+  /** Latest access_token from /api/v1/auth/login (or signup). Updated on
+   *  every login. Sent as the `auth` header for all protected endpoints. */
+  aiAccessToken?: string;
 }
 
 export interface TenantConfig {
@@ -47,24 +64,56 @@ export interface TenantConfig {
   users: TenantUserConfig[];
 }
 
-export interface SubscriptionPlan {
+export type PlanTier = "ESSENTIALS" | "PROFESSIONAL" | "ENTERPRISE" | "TAILORED";
+
+/**
+ * Subscription Phase A — the single plan assigned to a tenant. Caps are the
+ * values FROZEN onto the Plan row at assignment (see src/lib/plans.ts), not
+ * live tier defaults. Replaces the old SubscriptionPlan (maxAccounts + status).
+ */
+export interface PlanConfig {
   id: string;
-  startDate: string;
-  endDate: string;
-  maxAccounts: number;
-  status: "Active" | "Inactive";
-  createdAt: string;
+  tier: PlanTier;
+  displayName: string | null; // TAILORED only; null => UI shows "TAILORED"
+  maxUsers: number;
+  maxSites: number;
+  minRetentionYears: number;
+  durationMonths: number; // subscription term; expiryDate = startDate + durationMonths
+  startDate: string; // ISO
+  expiryDate: string; // ISO (derived from startDate + durationMonths)
+  // Server-authoritative (Plan.createdAt @default(now())). Optional because
+  // optimistic client-side inserts don't carry it — the next getTenants()
+  // reload supplies the real value.
+  createdAt?: string;
 }
 
 export interface Tenant {
   id: string;
   name: string;
-  plan: "trial" | "professional" | "enterprise";
+  // Human-readable per-tenant code (Tenant.customerCode, e.g. "PGI_001").
+  // Display-only here. Optional because optimistic client-side inserts don't
+  // carry it — the next getTenants() reload supplies the real value.
+  customerCode?: string;
   adminEmail: string;
-  createdAt: string;
+  // Tenant logo, stored as a data URL (Tenant.logoUrl). Null/undefined => the
+  // detail view falls back to the building icon. Set via the logo crop modal.
+  logoUrl?: string | null;
+  // Server-authoritative (Tenant.createdAt @default(now())). Optional
+  // because optimistic client-side inserts don't carry it — the next
+  // getTenants() reload supplies the real value.
+  createdAt?: string;
   active: boolean;
+  // Soft-delete timestamp (ISO). Present => tenant is in the DELETED state
+  // (recoverable via Restore). null/undefined => not soft-deleted. Combined
+  // with `active`: ACTIVE (active=true, deletedAt null), SUSPENDED (active=false,
+  // deletedAt null), DELETED (deletedAt set). See src/actions/tenants.ts.
+  deletedAt?: string | null;
+  mfaEnabled?: boolean;
   config: TenantConfig;
-  subscriptionPlans: SubscriptionPlan[];
+  // Subscription Phase A — exactly one optional plan per tenant (null until a
+  // super_admin assigns one). Replaces the old subscriptionPlans[] array and
+  // the vestigial `plan` tier-label string.
+  plan: PlanConfig | null;
 }
 
 interface AuthState {
@@ -80,81 +129,27 @@ const authSlice = createSlice({
   name: "auth",
   initialState: {
     token: null, user: null, activeSiteId: null, selectedSiteId: null, currentTenant: null,
-    tenants: [
-      {
-        id: "tenant-glimmora", name: "Pharma Glimmora International", plan: "enterprise",
-        adminEmail: "admin@pharmaglimmora.com", createdAt: "2026-01-01T00:00:00Z", active: true,
-        config: {
-          org: { companyName: "Pharma Glimmora International", timezone: "Asia/Kolkata", dateFormat: "DD/MM/YYYY", regulatoryRegion: "India" },
-          sites: [
-            { id: "site-gl-1", name: "Mumbai API Plant", location: "India", gmpScope: "API Manufacturing", risk: "HIGH", status: "Active" },
-            { id: "site-gl-2", name: "Bangalore R&D Centre", location: "India", gmpScope: "R&D", risk: "MEDIUM", status: "Active" },
-            { id: "site-gl-3", name: "Chennai QC Laboratory", location: "India", gmpScope: "QC Testing", risk: "MEDIUM", status: "Active" },
-            { id: "site-gl-4", name: "Hyderabad Formulation", location: "India", gmpScope: "Formulation", risk: "HIGH", status: "Active" },
-          ],
-          users: [
-            { id: "u-001", name: "System Administrator", email: "admin@pharmaglimmora.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-009", name: "Customer Administrator", email: "custadmin@pharmaglimmora.com", role: "customer_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", role: "regulatory_affairs", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-1", "site-gl-2"], allSites: false },
-            { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", role: "csv_val_lead", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-1", "site-gl-3"], allSites: false },
-            { id: "u-005", name: "Dr. Nisha Rao", email: "qc@pharmaglimmora.com", role: "qc_lab_director", gxpSignatory: true, status: "Active", assignedSites: ["site-gl-3"], allSites: false },
-            { id: "u-006", name: "Vikram Singh", email: "it@pharmaglimmora.com", role: "it_cdo", gxpSignatory: false, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-007", name: "Suresh Kumar", email: "ops@pharmaglimmora.com", role: "operations_head", gxpSignatory: false, status: "Active", assignedSites: ["site-gl-1", "site-gl-4"], allSites: false },
-            { id: "u-008", name: "View Only User", email: "viewer@pharmaglimmora.com", role: "viewer", gxpSignatory: false, status: "Active", assignedSites: ["site-gl-1"], allSites: false },
-          ],
-        },
-        subscriptionPlans: [
-          { id: "sub-gl-001", startDate: "2026-01-01T00:00:00Z", endDate: "2026-12-31T00:00:00Z", maxAccounts: 15, status: "Active", createdAt: "2026-01-01T00:00:00Z" },
-        ],
-      },
-      {
-        id: "tenant-abc", name: "ABC Pharma Ltd", plan: "professional",
-        adminEmail: "admin@abcpharma.com", createdAt: "2026-01-01T00:00:00Z", active: true,
-        config: {
-          org: { companyName: "ABC Pharma Ltd", timezone: "Asia/Kolkata", dateFormat: "DD/MM/YYYY", regulatoryRegion: "India" },
-          sites: [
-            { id: "site-abc-1", name: "Hyderabad Manufacturing", location: "India", gmpScope: "API Manufacturing", risk: "HIGH", status: "Active" },
-            { id: "site-abc-2", name: "Pune QC Facility", location: "India", gmpScope: "QC Testing", risk: "MEDIUM", status: "Active" },
-            { id: "site-abc-3", name: "Ahmedabad Packaging", location: "India", gmpScope: "Packaging", risk: "LOW", status: "Active" },
-          ],
-          users: [
-            { id: "u-abc-001", name: "ABC Admin", email: "admin@abcpharma.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-cust-abc", name: "ABC Customer Admin", email: "custadmin@abcpharma.com", role: "customer_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-abc-002", name: "Dr. Sunita Rao", email: "qa@abcpharma.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-abc-003", name: "Kiran Mehta", email: "csv@abcpharma.com", role: "csv_val_lead", gxpSignatory: false, status: "Active", assignedSites: ["site-abc-1"], allSites: false },
-          ],
-        },
-        subscriptionPlans: [
-          { id: "sub-abc-001", startDate: "2026-02-01T00:00:00Z", endDate: "2026-04-30T00:00:00Z", maxAccounts: 10, status: "Active", createdAt: "2026-02-01T00:00:00Z" },
-        ],
-      },
-      {
-        id: "tenant-xyz", name: "XYZ Biotech", plan: "trial",
-        adminEmail: "admin@xyzbiotech.com", createdAt: "2026-02-01T00:00:00Z", active: true,
-        config: {
-          org: { companyName: "XYZ Biotech", timezone: "Asia/Kolkata", dateFormat: "DD/MM/YYYY", regulatoryRegion: "India" },
-          sites: [
-            { id: "site-xyz-1", name: "Delhi Research Center", location: "India", gmpScope: "R&D / Biotech", risk: "LOW", status: "Active" },
-            { id: "site-xyz-2", name: "Noida Biotech Lab", location: "India", gmpScope: "Biotech", risk: "MEDIUM", status: "Active" },
-          ],
-          users: [
-            { id: "u-xyz-001", name: "XYZ Admin", email: "admin@xyzbiotech.com", role: "super_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-cust-xyz", name: "XYZ Customer Admin", email: "custadmin@xyzbiotech.com", role: "customer_admin", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-            { id: "u-xyz-002", name: "Dr. Arjun Das", email: "qa@xyzbiotech.com", role: "qa_head", gxpSignatory: true, status: "Active", assignedSites: [], allSites: true },
-          ],
-        },
-        subscriptionPlans: [
-          { id: "sub-xyz-001", startDate: "2026-03-01T00:00:00Z", endDate: "2026-03-15T00:00:00Z", maxAccounts: 3, status: "Active", createdAt: "2026-03-01T00:00:00Z" },
-        ],
-      },
-    ],
+    // Tenants are loaded from the database on every visit to /admin via
+    // getTenants() and dispatched through setTenants(). The previous hardcoded
+    // demo array bled fake "ABC Pharma" / "XYZ Biotech" rows into the UI even
+    // when no real DB tenant existed and could mask drift between Redux and
+    // the database.
+    tenants: [],
   } as AuthState,
   reducers: {
     setCredentials(state, { payload }: PayloadAction<{ token: string; user: AuthUser }>) {
       state.token = payload.token;
       state.user = payload.user;
       state.currentTenant = payload.user.tenantId;
+    },
+    /** Updates the AI backend token + customer_id on the currently logged-in
+     *  user record. Used by LoginPage's refreshAiToken so even users that
+     *  don't live in any tenant.config.users list (platform super admin)
+     *  still have a token to send with chat / capa-create / etc. */
+    setAiCredentials(state, { payload }: PayloadAction<{ accessToken: string; customerId?: string }>) {
+      if (!state.user) return;
+      state.user.aiAccessToken = payload.accessToken;
+      if (payload.customerId) state.user.aiCustomerId = payload.customerId;
     },
     setActiveSite(state, { payload }: PayloadAction<string>) { state.activeSiteId = payload; },
     setSelectedSite(state, { payload }: PayloadAction<string | null>) { state.selectedSiteId = payload; },
@@ -199,28 +194,15 @@ const authSlice = createSlice({
       const t = state.tenants.find((t) => t.id === payload.tenantId);
       if (t) { const u = t.config.users.find((u) => u.id === payload.userId); if (u) Object.assign(u, payload.patch); }
     },
-
-    // Subscription plans
-    addSubscriptionPlan(state, { payload }: PayloadAction<{ tenantId: string; plan: SubscriptionPlan }>) {
+    removeTenantUser(state, { payload }: PayloadAction<{ tenantId: string; userId: string }>) {
       const t = state.tenants.find((t) => t.id === payload.tenantId);
-      if (!t) return;
-      if (!t.subscriptionPlans) t.subscriptionPlans = [];
-      // If new plan is Active, deactivate previous active plans
-      if (payload.plan.status === "Active") {
-        t.subscriptionPlans.forEach((p) => { if (p.status === "Active") p.status = "Inactive"; });
-      }
-      t.subscriptionPlans.push(payload.plan);
+      if (t) t.config.users = t.config.users.filter((u) => u.id !== payload.userId);
     },
-    updateSubscriptionPlan(state, { payload }: PayloadAction<{ tenantId: string; planId: string; patch: Partial<SubscriptionPlan> }>) {
+
+    // Subscription Phase A — set (or clear with null) the tenant's single plan.
+    setTenantPlan(state, { payload }: PayloadAction<{ tenantId: string; plan: PlanConfig | null }>) {
       const t = state.tenants.find((t) => t.id === payload.tenantId);
-      if (!t || !t.subscriptionPlans) return;
-      const plan = t.subscriptionPlans.find((p) => p.id === payload.planId);
-      if (!plan) return;
-      Object.assign(plan, payload.patch);
-      // If we just activated this plan, deactivate the others
-      if (payload.patch.status === "Active") {
-        t.subscriptionPlans.forEach((p) => { if (p.id !== plan.id && p.status === "Active") p.status = "Inactive"; });
-      }
+      if (t) t.plan = payload.plan;
     },
 
     logout(state) {
@@ -231,11 +213,11 @@ const authSlice = createSlice({
 });
 
 export const {
-  setCredentials, setActiveSite, setSelectedSite, setCurrentTenant,
+  setCredentials, setAiCredentials, setActiveSite, setSelectedSite, setCurrentTenant,
   addTenant, updateTenant, removeTenant, setTenants,
   updateTenantOrg, addTenantSite, updateTenantSite, removeTenantSite,
-  addTenantUser, updateTenantUser,
-  addSubscriptionPlan, updateSubscriptionPlan,
+  addTenantUser, updateTenantUser, removeTenantUser,
+  setTenantPlan,
   logout,
 } = authSlice.actions;
 export default authSlice.reducer;

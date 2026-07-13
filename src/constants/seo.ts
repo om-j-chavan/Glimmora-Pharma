@@ -15,7 +15,7 @@ export const SEO = {
     "pharma quality management",
   ].join(", "),
   twitterHandle: "@glimmora",
-  logoUrl: "/logo.png",
+  logoUrl: "/app-logo.png",
 };
 
 export const PAGE_TITLES: Record<string, string> = {
@@ -24,7 +24,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "/deviation": "Deviation Management",
   "/capa": "QMS & CAPA Tracker",
   "/csv-csa": "CSV/CSA Validation",
-  "/fda-483": "FDA 483 & Regulatory Events",
+  "/fda-483": "Inspections & Regulatory",
   "/evidence": "Evidence & Documents",
   "/governance": "Governance & KPIs",
   "/readiness": "Training & Awareness",

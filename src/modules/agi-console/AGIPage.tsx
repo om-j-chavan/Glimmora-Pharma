@@ -1,24 +1,26 @@
+"use client";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
+import type { AuditLog } from "@prisma/client";
 import {
   Bot, BookOpen, Shield, Activity, Settings, AlertTriangle,
   ClipboardCheck, Search, Database, FileWarning, FolderOpen, TrendingUp,
 } from "lucide-react";
-import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { addAlert, resolveAlert, type DriftAlert, type DriftSeverity, type DriftType } from "@/store/agiDrift.slice";
+import type { DriftAlert, DriftSeverity, DriftType } from "@/types/agi";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
+import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 
@@ -26,6 +28,8 @@ import { AGIOverviewTab } from "./tabs/AGIOverviewTab";
 import { IntendedUseTab } from "./tabs/IntendedUseTab";
 import { OversightTab } from "./tabs/OversightTab";
 import { DriftMonitoringTab } from "./tabs/DriftMonitoringTab";
+import { displayUserName } from "@/lib/identity-display";
+import { roleLabel } from "@/lib/labels/roles";
 
 /* ── Types & constants ── */
 
@@ -50,18 +54,25 @@ const alertSchema = z.object({
 });
 type AlertForm = z.infer<typeof alertSchema>;
 
+export interface AGIPageProps {
+  /** Server-fetched AGI activity entries from the AuditLog table. */
+  activityLogs?: AuditLog[];
+}
+
 /* ══════════════════════════════════════ */
 
-export function AGIPage() {
+export function AGIPage({ activityLogs: _activityLogs = [] }: AGIPageProps = {}) {
+  // Server-fetched activity log accepted; the existing UI still derives
+  // its activity feed from useTenantData() (now empty Redux). Wiring the
+  // prop into the existing AGI Activity tab is the next focused step.
   const router = useRouter();
-  const dispatch = useAppDispatch();
   const agiSettings = useAppSelector((s) => s.settings.agi);
-  const { driftAlerts, driftMetrics, capas, findings, systems, fda483Events, tenantId } = useTenantData();
+  const { driftAlerts, driftMetrics, capas, findings, systems, fda483Events } = useTenantData();
   const { org, users } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;  const { role } = useRole();
 
-  function ownerName(id: string) { return users.find((u) => u.id === id)?.name ?? id; }
+  function ownerName(id: string) { return displayUserName(id, users); }
 
   const activeAgents = Object.entries(agiSettings.agents).filter(([, v]) => v).map(([k]) => k);
   const isManualMode = agiSettings.mode === "manual";
@@ -69,10 +80,10 @@ export function AGIPage() {
   const openAlerts = driftAlerts.filter((a) => a.status !== "Resolved");
   const insightsGenerated = findings.length + capas.length + fda483Events.length;
   const actionsTriggered = isAutoMode ? capas.filter((c) => c.source === "Gap Assessment").length : 0;
-  const hitlApprovals = capas.filter((c) => c.status === "Pending QA Review" || c.status === "Closed").length;
+  const hitlApprovals = capas.filter((c) => c.status === "pending_qa_review" || c.status === "closed").length;
 
   const capabilities = [
-    { key: "monitoring", title: "Compliance Monitoring", icon: Activity, color: "#0ea5e9", agent: "capa" as const, desc: "CAPA aging, overdue actions, training delinquency, audit commitments, DI exception patterns.", live: capas.filter((c) => c.status !== "Closed").length, liveLabel: "open CAPAs monitored" },
+    { key: "monitoring", title: "Compliance Monitoring", icon: Activity, color: "#0ea5e9", agent: "capa" as const, desc: "CAPA aging, overdue actions, training delinquency, audit commitments, DI exception patterns.", live: capas.filter((c) => c.status !== "closed").length, liveLabel: "open CAPAs monitored" },
     { key: "riskPriority", title: "Risk Prioritization", icon: TrendingUp, color: "#6366f1", agent: "riskScore" as const, desc: "ICH Q9-aligned scoring. Patient safety, product quality, DI impact, inspection proximity.", live: findings.filter((f) => f.severity === "Critical" && f.status !== "Closed").length, liveLabel: "critical findings in queue" },
     { key: "readiness", title: "Readiness Orchestration", icon: Activity, color: "#10b981", agent: "evidence" as const, desc: "Evidence kit completeness checks, DIL drill simulation, SME readiness mapping.", live: systems.filter((s) => s.validationStatus === "Overdue").length, liveLabel: "overdue validations flagged" },
     { key: "drift", title: "Drift Detection", icon: Activity, color: "#ef4444", agent: "driftDetect" as const, desc: "Configuration changes, access creep, audit trail anomalies, validation drift signals.", live: openAlerts.length, liveLabel: "drift signals detected" },
@@ -90,20 +101,22 @@ export function AGIPage() {
   const alertForm = useForm<AlertForm>({ resolver: zodResolver(alertSchema), defaultValues: { severity: "Major", type: "Configuration Change" } });
 
   function onAlertSave(data: AlertForm) {
+    // Drift alert persistence removed — no Prisma `DriftAlert` model.
+    // The audit log captures the event so it remains in the trail.
     const id = crypto.randomUUID();
-    dispatch(addAlert({ ...data, id, tenantId: tenantId ?? "", detectedAt: dayjs().toISOString(), status: "Open" }));
     auditLog({ action: "AGI_DRIFT_ALERT_ADDED", module: "agi-console", recordId: id, newValue: data });
     setAddAlertOpen(false); setAlertAddedPopup(true); alertForm.reset();
   }
 
   function handleResolve() {
     if (!selectedAlert || !resolveAction.trim()) return;
-    dispatch(resolveAlert({ id: selectedAlert.id, action: resolveAction.trim(), resolvedAt: dayjs().toISOString() }));
+    // Resolution persistence removed — no Prisma `DriftAlert` model.
+    // The audit log preserves the resolution event for the trail.
     auditLog({ action: "AGI_DRIFT_ALERT_RESOLVED", module: "agi-console", recordId: selectedAlert.id, newValue: { action: resolveAction } });
     setResolveOpen(false); setSelectedAlert(null); setResolveAction(""); setResolvedPopup(true);
   }
 
-  function driftSevBadge(s: DriftSeverity) { return <Badge variant={s === "Critical" ? "red" : s === "Major" ? "amber" : "gray"}>{s}</Badge>; }
+  function driftSevBadge(s: DriftSeverity) { return <Badge variant={getSeverityVariant(s, "fda")}>{normalizeSeverityForDisplay(s, "fda") ?? s}</Badge>; }
 
   /* ══════════════════════════════════════ */
 
@@ -150,7 +163,7 @@ export function AGIPage() {
       </div>
 
       <div role="tabpanel" id="panel-oversight" aria-labelledby="tab-oversight" tabIndex={0} hidden={activeTab !== "oversight"}>
-        <OversightTab pendingReviewCount={capas.filter((c) => c.status === "Pending QA Review").length} approvedCount={capas.filter((c) => c.status === "Closed").length} agiAssistedCount={capas.filter((c) => c.source === "Gap Assessment").length} closedCAPAs={capas.filter((c) => c.status === "Closed")} ownerName={ownerName} />
+        <OversightTab pendingReviewCount={capas.filter((c) => c.status === "pending_qa_review").length} approvedCount={capas.filter((c) => c.status === "closed").length} agiAssistedCount={capas.filter((c) => c.source === "Gap Assessment").length} closedCAPAs={capas.filter((c) => c.status === "closed")} />
       </div>
 
       <div role="tabpanel" id="panel-drift" aria-labelledby="tab-drift" tabIndex={0} hidden={activeTab !== "drift"}>
@@ -165,7 +178,7 @@ export function AGIPage() {
             <div><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Severity *</label><Controller name="severity" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={[{ value: "Critical", label: "Critical" }, { value: "Major", label: "Major" }, { value: "Minor", label: "Minor" }]} />} /></div>
             <div><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Agent *</label><Controller name="agent" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select agent" width="w-full" options={Object.entries(AGENT_ICONS).map(([k]) => ({ value: k, label: k }))} />} /></div>
             <div className="col-span-2"><label htmlFor="alert-desc" className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Description *</label><textarea id="alert-desc" rows={3} className="input text-[12px] resize-none" placeholder="Describe the drift event..." {...alertForm.register("description")} />{alertForm.formState.errors.description && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{alertForm.formState.errors.description.message}</p>}</div>
-            <div className="col-span-2"><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />} /></div>
+            <div className="col-span-2"><label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={alertForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />} /></div>
           </div>
           <div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => setAddAlertOpen(false)}>Cancel</Button><Button variant="primary" type="submit" loading={alertForm.formState.isSubmitting}>Log alert</Button></div>
         </form>
@@ -187,8 +200,8 @@ export function AGIPage() {
       </Modal>
 
       {/* Popups */}
-      <Popup isOpen={alertAddedPopup} variant="success" title="Drift alert logged" description="Alert added to the monitoring board." onDismiss={() => setAlertAddedPopup(false)} />
-      <Popup isOpen={resolvedPopup} variant="success" title="Alert resolved" description="Drift alert marked as resolved with action documented." onDismiss={() => setResolvedPopup(false)} />
+      <Popup isOpen={alertAddedPopup} variant="success" title="Drift alert logged to audit trail" description="Recorded in the audit trail. Drift alerts aren't persisted as a monitoring record yet, so this won't remain on the board after a refresh." onDismiss={() => setAlertAddedPopup(false)} />
+      <Popup isOpen={resolvedPopup} variant="success" title="Resolution logged to audit trail" description="The corrective action was recorded in the audit trail. Resolutions aren't persisted yet, so the alert won't stay resolved after a refresh." onDismiss={() => setResolvedPopup(false)} />
     </main>
   );
 }

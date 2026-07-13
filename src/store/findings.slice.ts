@@ -1,7 +1,7 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
-export type FindingSeverity = "Critical" | "High" | "Low";
-export type FindingStatus = "Open" | "In Progress" | "Closed";
+export type FindingSeverity = "Critical" | "High" | "Medium" | "Low";
+export type FindingStatus = "Open" | "In Progress" | "Submitted" | "Rework" | "Closed";
 
 export interface EditHistoryEntry {
   editedBy: string;
@@ -12,10 +12,15 @@ export interface EditHistoryEntry {
 
 export interface Finding {
   id: string;
+  // Human-readable reference (e.g. "FND-CHN-2026-001"). Optional —
+  // populated server-side at create + backfill; UI falls back to the
+  // cuid slice when missing.
+  reference?: string;
   tenantId: string;
   siteId: string;
   area: string;
   requirement: string;
+  purpose?: string;
   framework: string;
   severity: FindingSeverity;
   status: FindingStatus;
@@ -23,6 +28,9 @@ export interface Finding {
   targetDate: string;
   evidenceLink: string;
   rootCause?: string;
+  // Gap RCA (Batch B) — structured method + JSON detail; rootCause is the mirror.
+  rcaMethod?: string;
+  rcaDetail?: string;
   agiSummary?: string;
   capaId?: string;
   linkedSystemId?: string;
@@ -33,11 +41,9 @@ export interface Finding {
 
 interface FindingsState {
   items: Finding[];
-  loading: boolean;
-  error: string | null;
 }
 
-const initialState: FindingsState = { items: [], loading: false, error: null };
+const initialState: FindingsState = { items: [] };
 
 const findingsSlice = createSlice({
   name: "findings",
@@ -45,15 +51,6 @@ const findingsSlice = createSlice({
   reducers: {
     setFindings(state, { payload }: PayloadAction<Finding[]>) {
       state.items = payload;
-      state.loading = false;
-      state.error = null;
-    },
-    setFindingsLoading(state, { payload }: PayloadAction<boolean>) {
-      state.loading = payload;
-    },
-    setFindingsError(state, { payload }: PayloadAction<string | null>) {
-      state.error = payload;
-      state.loading = false;
     },
     addFinding(state, { payload }: PayloadAction<Finding>) {
       state.items.push(payload);
@@ -102,5 +99,5 @@ const findingsSlice = createSlice({
   },
 });
 
-export const { setFindings, setFindingsLoading, setFindingsError, addFinding, updateFinding, closeFinding, linkCapa, editFinding } = findingsSlice.actions;
+export const { setFindings, addFinding, updateFinding, closeFinding, linkCapa, editFinding } = findingsSlice.actions;
 export default findingsSlice.reducer;

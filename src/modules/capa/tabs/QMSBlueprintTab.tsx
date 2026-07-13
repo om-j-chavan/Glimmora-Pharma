@@ -21,6 +21,9 @@ interface QMSProcess {
   sourceKey: string;
   targetState: string;
   currentGap: string;
+  // Phase G — honest build status. "planned" modules are not live in Phase 1
+  // and must be visibly flagged so demos don't read them as current.
+  status: "live" | "planned";
 }
 
 interface QMSBlueprintTabProps {
@@ -54,9 +57,10 @@ export function QMSBlueprintTab({
           <div key={step.step} className="flex items-stretch">
             <button type="button" role="button" aria-expanded={selectedStep === step.step}
               onClick={() => onSelectStep(selectedStep === step.step ? null : step.step)}
-              className={clsx("flex-shrink-0 w-[148px] rounded-xl overflow-hidden border-t-2 p-3 text-left bg-transparent outline-none cursor-pointer transition-all duration-150 border border-(--bg-border)",
+              className={clsx("flex-shrink-0 w-[148px] overflow-hidden border-t-2 p-3 text-left outline-none cursor-pointer transition-all duration-150 border border-(--card-border)",
                 selectedStep === step.step && "ring-2 ring-offset-1")}
-              style={{ borderTopColor: step.color, background: "var(--bg-elevated)", ...(selectedStep === step.step ? { boxShadow: `0 0 0 2px ${step.color}` } : {}) }}>
+              // Phase G — lift the step cards off the canvas with the shared card treatment.
+              style={{ borderTopColor: step.color, background: "var(--card)", borderRadius: "var(--radius-card)", boxShadow: "var(--shadow-sm)", ...(selectedStep === step.step ? { boxShadow: `0 0 0 2px ${step.color}` } : {}) }}>
               <div className="flex items-center justify-between mb-2">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: step.color + "18" }}>
                   <step.Icon className="w-4 h-4" style={{ color: step.color }} aria-hidden="true" />
@@ -96,12 +100,20 @@ export function QMSBlueprintTab({
         {qmsProcesses.map((proc) => {
           const metrics = getProcessMetrics(proc.sourceKey);
           const hasData = metrics.open > 0 || metrics.thisMonth > 0 || metrics.overdue > 0;
+          const planned = proc.status === "planned";
           return (
-            <article key={proc.title} className="card overflow-hidden">
+            <article key={proc.title} className="card overflow-hidden" style={planned ? { borderStyle: "dashed", opacity: 0.92 } : undefined}>
               <div className="card-header">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: proc.color + "18" }}><proc.Icon className="w-4 h-4" style={{ color: proc.color }} aria-hidden="true" /></div>
-                  <span className="card-title">{proc.title}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: proc.color + "18" }}><proc.Icon className="w-4 h-4" style={{ color: proc.color }} aria-hidden="true" /></div>
+                    <span className="card-title">{proc.title}</span>
+                  </div>
+                  {/* Batch 1 — neutral, non-time-bound status (no phase label):
+                      not-yet-live modules read "Roadmap"; built ones "Active". */}
+                  {planned
+                    ? <Badge variant="gray">Roadmap</Badge>
+                    : <Badge variant="green">Active</Badge>}
                 </div>
               </div>
               <div className="card-body space-y-3">

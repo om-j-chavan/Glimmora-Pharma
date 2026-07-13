@@ -1,4 +1,4 @@
-import type { Tenant, TenantSiteConfig, TenantUserConfig, SubscriptionPlan } from "@/store/auth.slice";
+import type { Tenant, TenantSiteConfig, TenantUserConfig, PlanConfig, PlanTier } from "@/store/auth.slice";
 
 type PrismaTenantRow = {
   id: string;
@@ -9,14 +9,22 @@ type PrismaTenantRow = {
   role: string;
   language: string;
   timezone: string;
+  logoUrl: string | null;
+  regulatoryRegion: string | null;
   isActive: boolean;
+  deletedAt: Date | null;
+  mfaEnabled: boolean;
   createdAt: Date;
-  subscription?: {
+  plan?: {
     id: string;
-    maxAccounts: number;
+    tier: string;
+    displayName: string | null;
+    maxUsers: number;
+    maxSites: number;
+    minRetentionYears: number;
+    durationMonths: number;
     startDate: Date;
     expiryDate: Date;
-    status: string;
     createdAt: Date;
   } | null;
   sites?: Array<{
@@ -24,7 +32,6 @@ type PrismaTenantRow = {
     name: string;
     location: string | null;
     gmpScope: string | null;
-    risk: string;
     isActive: boolean;
   }>;
   users?: Array<{
@@ -45,7 +52,6 @@ function mapSite(site: NonNullable<PrismaTenantRow["sites"]>[number]): TenantSit
     name: site.name,
     location: site.location ?? "",
     gmpScope: site.gmpScope ?? "",
-    risk: (site.risk === "HIGH" || site.risk === "MEDIUM" || site.risk === "LOW") ? site.risk : "MEDIUM",
     status: site.isActive ? "Active" : "Inactive",
   };
 }
@@ -64,14 +70,18 @@ function mapUser(user: NonNullable<PrismaTenantRow["users"]>[number]): TenantUse
   };
 }
 
-function mapSubscription(sub: NonNullable<PrismaTenantRow["subscription"]>): SubscriptionPlan {
+function mapPlan(plan: NonNullable<PrismaTenantRow["plan"]>): PlanConfig {
   return {
-    id: sub.id,
-    startDate: sub.startDate.toISOString(),
-    endDate: sub.expiryDate.toISOString(),
-    maxAccounts: sub.maxAccounts,
-    status: sub.status === "Active" ? "Active" : "Inactive",
-    createdAt: sub.createdAt.toISOString(),
+    id: plan.id,
+    tier: plan.tier as PlanTier,
+    displayName: plan.displayName,
+    maxUsers: plan.maxUsers,
+    maxSites: plan.maxSites,
+    minRetentionYears: plan.minRetentionYears,
+    durationMonths: plan.durationMonths,
+    startDate: plan.startDate.toISOString(),
+    expiryDate: plan.expiryDate.toISOString(),
+    createdAt: plan.createdAt.toISOString(),
   };
 }
 
@@ -96,20 +106,23 @@ export function mapTenantFromPrisma(row: PrismaTenantRow): Tenant {
   return {
     id: row.id,
     name: row.name,
-    plan: "professional",
+    customerCode: row.customerCode,
     adminEmail: row.email,
+    logoUrl: row.logoUrl,
     createdAt: row.createdAt.toISOString(),
     active: row.isActive,
+    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+    mfaEnabled: row.mfaEnabled,
     config: {
       org: {
         companyName: row.name,
         timezone: row.timezone,
         dateFormat: "DD/MM/YYYY",
-        regulatoryRegion: "",
+        regulatoryRegion: row.regulatoryRegion ?? "",
       },
       sites: (row.sites ?? []).map(mapSite),
       users: allUsers,
     },
-    subscriptionPlans: row.subscription ? [mapSubscription(row.subscription)] : [],
+    plan: row.plan ? mapPlan(row.plan) : null,
   };
 }

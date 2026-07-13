@@ -3,6 +3,7 @@ import { useAppDispatch } from "./useAppDispatch";
 import { useAppSelector } from "./useAppSelector";
 import { useTenantData } from "./useTenantData";
 import { addNotification, type AppNotification, type NotificationType } from "@/store/notifications.slice";
+import { isOverdue } from "@/types/capa";
 import dayjs from "@/lib/dayjs";
 
 function make(id: string, type: NotificationType, title: string, message: string, link?: string, linkState?: Record<string, unknown>, read = false): AppNotification {
@@ -11,7 +12,7 @@ function make(id: string, type: NotificationType, title: string, message: string
 
 export function useNotificationEngine() {
   const dispatch = useAppDispatch();
-  const { findings, capas, systems, fda483Events, raidItems } = useTenantData();
+  const { findings, capas, systems, fda483Events } = useTenantData();
   const currentUser = useAppSelector((s) => s.auth.user);
   const existing = useAppSelector((s) => s.notifications.items);
 
@@ -35,16 +36,16 @@ export function useNotificationEngine() {
 
   // CAPA
   useEffect(() => {
-    capas.filter((c) => c.status !== "Closed" && dayjs.utc(c.dueDate).isBefore(dayjs())).forEach((c) =>
+    capas.filter(isOverdue).forEach((c) =>
       push(make(`capa-overdue-${c.id}`, "capa_overdue", "CAPA overdue", `${c.id} is past due date.`, "/capa", { openCapaId: c.id })),
     );
-    capas.filter((c) => c.status === "Pending QA Review").forEach((c) =>
+    capas.filter((c) => c.status === "pending_qa_review").forEach((c) =>
       push(make(`capa-review-${c.id}`, "capa_pending_review", "CAPA awaiting QA sign-off", `${c.id} ready for review and closure.`, "/capa", { openCapaId: c.id })),
     );
-    capas.filter((c) => c.owner === currentUser?.id && c.status !== "Closed").forEach((c) =>
+    capas.filter((c) => c.owner === currentUser?.id && c.status !== "closed").forEach((c) =>
       push(make(`capa-assigned-${c.id}-${currentUser?.id}`, "capa_assigned", "CAPA assigned to you", `${c.id}: ${c.description.slice(0, 60)}`, "/capa", { openCapaId: c.id })),
     );
-    capas.filter((c) => c.diGate && c.status !== "Closed").forEach((c) =>
+    capas.filter((c) => c.diGate && c.status !== "closed").forEach((c) =>
       push(make(`capa-digate-${c.id}`, "capa_di_gate", "DI gate CAPA open", `${c.id} \u2014 data integrity review required.`, "/capa", { openCapaId: c.id })),
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,15 +88,13 @@ export function useNotificationEngine() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findings.length]);
 
-  // RAID
-  useEffect(() => {
-    raidItems.filter((r) => r.priority === "Critical" && r.status !== "Closed").forEach((r) =>
-      push(make(`raid-critical-${r.id}`, "raid_critical", "Critical RAID item open", `${r.type}: ${r.title.slice(0, 60)}`, "/governance")),
-    );
-    raidItems.filter((r) => r.status !== "Closed" && dayjs.utc(r.dueDate).isBefore(dayjs())).forEach((r) =>
-      push(make(`raid-overdue-${r.id}`, "raid_overdue", "RAID item overdue", `${r.type}: ${r.title.slice(0, 60)}`, "/governance")),
-    );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raidItems.length]);
+  // Governance / Risk Register — no notifications in Phase 1.
+  //
+  // The old RAID block read `raidItems` from Redux. The Risk Register is
+  // SERVER-FIRST (no Redux slice) precisely because its reads must be scoped by
+  // `riskVisibilityWhere` — a client-side store cannot enforce that, and
+  // fanning every tenant's risks into Redux to drive a toast would re-open the
+  // leak the visibility work closes. Risk notifications therefore need a
+  // server-side feed and are deliberately out of Phase-1 scope.
 
 }

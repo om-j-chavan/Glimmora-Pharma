@@ -1,5 +1,6 @@
 import { useRouter } from "next/navigation";
 import dayjs from "@/lib/dayjs";
+import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   ClipboardList,
   ClipboardCheck,
@@ -9,72 +10,40 @@ import {
 } from "lucide-react";
 import type {
   FDA483Event,
-  EventType,
   EventStatus,
   Observation,
   ObservationSeverity,
-} from "@/store/fda483.slice";
+} from "@/types/fda483";
 import type { CAPA } from "@/store/capa.slice";
+import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/shared";
+import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
+import {
+  eventStatusBadge,
+  eventTypeBadge,
+  getEffectiveEventStatus,
+  observationSeverityBadge,
+  observationStatusBadge,
+} from "../_shared";
 
-/* ── Helpers ── */
-
-function eventTypeBadge(t: EventType) {
-  const m: Record<EventType, "red" | "amber" | "blue"> = {
-    "FDA 483": "red",
-    "Warning Letter": "red",
-    "EMA Inspection": "amber",
-    "MHRA Inspection": "amber",
-    "WHO Inspection": "blue",
-  };
-  return <Badge variant={m[t]}>{t}</Badge>;
-}
-
-function eventStatusBadge(s: EventStatus) {
-  const m: Record<EventStatus, "blue" | "red" | "amber" | "green" | "purple" | "gray"> = {
-    Open: "blue",
-    "Under Investigation": "amber",
-    "Response Due": "red",
-    "Response Drafted": "purple",
-    "Pending QA Sign-off": "amber",
-    "Response Submitted": "green",
-    "FDA Acknowledged": "green",
-    Closed: "gray",
-    "Warning Letter": "red",
-  };
-  return <Badge variant={m[s] ?? "gray"}>{s}</Badge>;
-}
+/* ── Helpers ──
+ * Inline badge / status helpers extracted to ../_shared.ts. Thin
+ * wrappers below preserve the pre-refactor call shape for the JSX. */
 
 function obsSevBadge(s: ObservationSeverity) {
-  return (
-    <Badge
-      variant={s === "Critical" ? "red" : s === "High" ? "amber" : "green"}
-    >
-      {s}
-    </Badge>
-  );
+  const b = observationSeverityBadge(s);
+  return <Badge variant={b.variant}>{b.label}</Badge>;
 }
 
 function obsStatBadge(s: Observation["status"]) {
-  const m: Record<string, "blue" | "amber" | "purple" | "green"> = {
-    Open: "blue",
-    "RCA In Progress": "amber",
-    "Response Drafted": "purple",
-    Closed: "green",
-  };
-  return <Badge variant={m[s] ?? "gray"}>{s}</Badge>;
-}
-
-function daysLeft(d: string) {
-  return dayjs.utc(d).diff(dayjs(), "day");
+  const b = observationStatusBadge(s);
+  return <Badge variant={b.variant}>{b.label}</Badge>;
 }
 
 function getEffectiveStatus(e: FDA483Event): EventStatus {
-  if (e.status === "Closed") return "Closed";
-  if (e.status === "Response Submitted") return "Response Submitted";
-  if (daysLeft(e.responseDeadline) <= 15) return "Response Due";
-  return e.status;
+  return getEffectiveEventStatus(e.status, e.responseDeadline);
 }
 
 interface Site {
@@ -109,7 +78,7 @@ export function ObservationsTab({
   onEditObservation,
   onAddCommitment,
 }: ObservationsTabProps) {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
   // Lock levels:
   //  fullyLocked = Response Submitted or Closed → everything read-only
   //  hasLinkedCapa = any observation has a CAPA → show soft warning
@@ -156,8 +125,14 @@ export function ObservationsTab({
           <div className="flex items-start justify-between flex-wrap gap-3">
             <div>
               <div className="flex items-center gap-2 flex-wrap mb-2">
-                {eventTypeBadge(liveEvent.type)}
-                {eventStatusBadge(getEffectiveStatus(liveEvent))}
+                {(() => {
+                  const t = eventTypeBadge(liveEvent.type);
+                  return <Badge variant={t.variant}>{t.label}</Badge>;
+                })()}
+                {(() => {
+                  const s = eventStatusBadge(getEffectiveStatus(liveEvent));
+                  return <Badge variant={s.variant}>{s.label}</Badge>;
+                })()}
                 <span className="font-mono text-[12px] font-semibold text-[#0ea5e9]">
                   {liveEvent.referenceNumber}
                 </span>
@@ -259,147 +234,140 @@ export function ObservationsTab({
 
       {/* Observations table */}
       <div className="card overflow-hidden mb-4">
-        <div className="overflow-x-auto">
-          <table
-            className="data-table"
-            aria-label="Regulatory event observations"
-          >
-            <caption className="sr-only">
-              Observations from {liveEvent.referenceNumber}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">No.</th>
-                <th scope="col">Observation</th>
-                <th scope="col">Area</th>
-                <th scope="col">Regulation</th>
-                <th scope="col">Severity</th>
-                <th scope="col">RCA</th>
-                <th scope="col">CAPA</th>
-                <th scope="col">Status</th>
-                {role !== "viewer" && (
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {liveEvent.observations.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="text-center py-6">
-                    <p
-                      className="text-[12px] italic"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      No observations logged. Click &ldquo;Add
-                      observation&rdquo; above.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                liveEvent.observations.map((obs) => (
-                  <tr key={obs.id}>
-                    <th scope="row">
-                      <span
-                        className="font-mono text-[12px] font-semibold"
-                        style={{ color: "var(--text-primary)" }}
+        <DataTable
+          ariaLabel="Regulatory event observations"
+          caption={`Observations from ${liveEvent.referenceNumber}`}
+          data={liveEvent.observations}
+          rowKey={(obs) => obs.id}
+          emptyState={
+            <p
+              className="text-[12px] italic"
+              style={{ color: "var(--text-muted)" }}
+            >
+              No observations logged. Click &ldquo;Add
+              observation&rdquo; above.
+            </p>
+          }
+          columns={[
+            {
+              key: "number",
+              header: "No.",
+              render: (obs) => (
+                <span
+                  className="font-mono text-[12px] font-semibold"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  #{obs.number}
+                </span>
+              ),
+            },
+            {
+              key: "observation",
+              header: "Observation",
+              render: (obs) => (
+                <p
+                  className="text-[12px] line-clamp-2"
+                  style={{
+                    maxWidth: 240,
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  {obs.text}
+                </p>
+              ),
+            },
+            {
+              key: "area",
+              header: "Area",
+              cellClassName: "text-[12px] text-(--text-secondary)",
+              render: (obs) => obs.area || "\u2014",
+            },
+            {
+              key: "regulation",
+              header: "Regulation",
+              cellClassName: "text-[11px] text-(--text-secondary)",
+              render: (obs) => obs.regulation || "\u2014",
+            },
+            {
+              key: "severity",
+              header: "Severity",
+              render: (obs) => obsSevBadge(obs.severity),
+            },
+            {
+              key: "rca",
+              header: "RCA",
+              render: (obs) =>
+                obs.rcaMethod ? (
+                  <Badge variant="purple">{obs.rcaMethod}</Badge>
+                ) : (
+                  <span
+                    className="text-[11px] italic"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Pending
+                  </span>
+                ),
+            },
+            {
+              key: "capa",
+              header: "CAPA",
+              render: (obs) =>
+                obs.capaId ? (() => {
+                  // Live lookup from the capa.items Redux slice (via capas prop)
+                  const linkedCapa = capas.find((c) => c.id === obs.capaId);
+                  const isClosed = linkedCapa?.status === "closed";
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() =>
+                          router.push("/capa")
+                        }
+                        className="font-mono text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer shrink-0"
+                        aria-label={`Open ${obs.capaId}`}
                       >
-                        #{obs.number}
-                      </span>
-                    </th>
-                    <td>
-                      <p
-                        className="text-[12px] line-clamp-2"
-                        style={{
-                          maxWidth: 240,
-                          color: "var(--text-primary)",
-                        }}
-                      >
-                        {obs.text}
-                      </p>
-                    </td>
-                    <td
-                      className="text-[12px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {obs.area || "\u2014"}
-                    </td>
-                    <td
-                      className="text-[11px]"
-                      style={{ color: "var(--text-secondary)" }}
-                    >
-                      {obs.regulation || "\u2014"}
-                    </td>
-                    <td>{obsSevBadge(obs.severity)}</td>
-                    <td>
-                      {obs.rcaMethod ? (
-                        <Badge variant="purple">{obs.rcaMethod}</Badge>
-                      ) : (
-                        <span
-                          className="text-[11px] italic"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          Pending
-                        </span>
+                        {obs.capaId}
+                      </button>
+                      {linkedCapa && (
+                        <Badge variant={isClosed ? "green" : linkedCapa.status === "pending_qa_review" ? "purple" : linkedCapa.status === "in_progress" ? "amber" : "blue"}>
+                          {isClosed ? "Closed \u2713" : CAPA_STATUS_LABEL[linkedCapa.status]}
+                        </Badge>
                       )}
-                    </td>
-                    <td>
-                      {obs.capaId ? (() => {
-                        // Live lookup from the capa.items Redux slice (via capas prop)
-                        const linkedCapa = capas.find((c) => c.id === obs.capaId);
-                        const isClosed = linkedCapa?.status === "Closed";
-                        return (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() =>
-                                router.push("/capa", {
-                                  state: { openCapaId: obs.capaId },
-                                })
-                              }
-                              className="font-mono text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer shrink-0"
-                              aria-label={`Open ${obs.capaId}`}
-                            >
-                              {obs.capaId}
-                            </button>
-                            {linkedCapa && (
-                              <Badge variant={isClosed ? "green" : linkedCapa.status === "Pending QA Review" ? "purple" : linkedCapa.status === "In Progress" ? "amber" : "blue"}>
-                                {isClosed ? "Closed \u2713" : linkedCapa.status}
-                              </Badge>
-                            )}
-                          </div>
-                        );
-                      })() : (
-                        <span
-                          className="text-[11px] italic"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          &mdash;
-                        </span>
-                      )}
-                    </td>
-                    <td>{obsStatBadge(obs.status)}</td>
-                    {role !== "viewer" && (
-                      <td>
-                        {fullyLocked ? (
-                          <Badge variant="gray">Locked</Badge>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            icon={Pencil}
-                            aria-label={`Edit observation ${obs.number}`}
-                            onClick={() => onEditObservation(obs)}
-                          />
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                  );
+                })() : (
+                  <span
+                    className="text-[11px] italic"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    &mdash;
+                  </span>
+                ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (obs) => obsStatBadge(obs.status),
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              srOnly: true,
+              hidden: role === "viewer",
+              render: (obs) =>
+                fullyLocked ? (
+                  <Badge variant="gray">Locked</Badge>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    icon={Pencil}
+                    aria-label={`Edit observation ${obs.number}`}
+                    onClick={() => onEditObservation(obs)}
+                  />
+                ),
+            },
+          ] satisfies Column<Observation>[]}
+        />
       </div>
 
       {/* Commitments */}
@@ -512,7 +480,7 @@ export function ObservationsTab({
             style={{ color: "var(--text-muted)" }}
           >
             {eventCAPAs.length} CAPA{eventCAPAs.length !== 1 ? "s" : ""}
-            {eventCAPAs.length > 0 && ` \u00b7 ${eventCAPAs.filter((c) => c.status === "Closed").length} closed`}
+            {eventCAPAs.length > 0 && ` \u00b7 ${eventCAPAs.filter((c) => c.status === "closed").length} closed`}
           </span>
         </div>
         <div className="card-body">
@@ -533,7 +501,7 @@ export function ObservationsTab({
                   borderColor: isDark ? "#0f2039" : "#f1f5f9",
                 }}
                 onClick={() =>
-                  router.push("/capa", { state: { openCapaId: c.id } })
+                  router.push("/capa")
                 }
                 role="button"
                 aria-label={`Open ${c.id}`}
@@ -550,29 +518,21 @@ export function ObservationsTab({
                   </span>
                 </div>
                 <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-                  <Badge
-                    variant={
-                      c.risk === "Critical"
-                        ? "red"
-                        : c.risk === "High"
-                          ? "amber"
-                          : "green"
-                    }
-                  >
-                    {c.risk}
+                  <Badge variant={getSeverityVariant(c.risk, "generic")}>
+                    {normalizeSeverityForDisplay(c.risk, "generic") ?? c.risk}
                   </Badge>
                   <Badge
                     variant={
-                      c.status === "Closed"
+                      c.status === "closed"
                         ? "green"
-                        : c.status === "Pending QA Review"
+                        : c.status === "pending_qa_review"
                           ? "purple"
-                          : c.status === "In Progress"
+                          : c.status === "in_progress"
                             ? "amber"
                             : "blue"
                     }
                   >
-                    {c.status}
+                    {CAPA_STATUS_LABEL[c.status]}
                   </Badge>
                 </div>
               </div>

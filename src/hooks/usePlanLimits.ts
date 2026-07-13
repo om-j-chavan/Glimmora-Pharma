@@ -1,17 +1,19 @@
 import { useTenantConfig } from "./useTenantConfig";
 import { useTenantData } from "./useTenantData";
 
-const PLAN_LIMITS: Record<string, { sites: number; users: number; findings: number; systems: number }> = {
-  trial:        { sites: 1,  users: 3,  findings: 50, systems: 3 },
-  professional: { sites: 3,  users: 15, findings: -1, systems: -1 },
-  enterprise:   { sites: -1, users: -1, findings: -1, systems: -1 },
-};
-
 export function usePlanLimits() {
-  const { tenantPlan, allSitesIncludingInactive, users } = useTenantConfig();
+  // Subscription Phase A — caps come from the tenant's assigned plan (frozen
+  // at assignment), not hardcoded tier constants. findings/systems are not
+  // capped in Phase A, so they read as unlimited (-1).
+  const { plan, planTier, allSitesIncludingInactive, users } = useTenantConfig();
   const { findings, systems } = useTenantData();
 
-  const limits = PLAN_LIMITS[tenantPlan] ?? PLAN_LIMITS.trial;
+  const limits = {
+    sites: plan?.maxSites ?? 0,
+    users: plan?.maxUsers ?? 0,
+    findings: -1,
+    systems: -1,
+  };
 
   const counts = {
     sites: allSitesIncludingInactive.length,
@@ -35,5 +37,5 @@ export function usePlanLimits() {
     return l !== -1 && counts[r] / l >= 0.8;
   }
 
-  return { limits, tenantPlan, isAtLimit, isNearLimit, getCount, getLimit };
+  return { limits, tenantPlan: planTier, isAtLimit, isNearLimit, getCount, getLimit };
 }

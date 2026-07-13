@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   FileText,
@@ -12,28 +12,28 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import { addResponseDocument, removeResponseDocument } from "@/store/fda483.slice";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import { addResponseDocument, removeResponseDocument } from "@/actions/fda483";
 import { DocumentUpload } from "@/components/shared";
-import type {
-  FDA483Event,
-  EventStatus,
-} from "@/store/fda483.slice";
+import type { FDA483Event, EventStatus } from "@/types/fda483";
+import { displayName } from "@/lib/identity-display";
 import type { CAPA } from "@/store/capa.slice";
+import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { daysUntil, getEffectiveEventStatus, FDA483_AUDIT_MODULE } from "../_shared";
 
-/* ── Helpers ── */
+/* ── Helpers ──
+ * Inline daysLeft + getEffectiveStatus extracted to ../_shared.ts.
+ * Thin wrappers preserve the pre-refactor call shape. */
 
-function daysLeft(d: string) {
-  return dayjs.utc(d).diff(dayjs(), "day");
+function daysLeft(d: string): number {
+  return daysUntil(d) ?? 0;
 }
 
 function getEffectiveStatus(e: FDA483Event): EventStatus {
-  if (e.status === "Closed") return "Closed";
-  if (e.status === "Response Submitted") return "Response Submitted";
-  if (daysLeft(e.responseDeadline) <= 15) return "Response Due";
-  return e.status;
+  return getEffectiveEventStatus(e.status, e.responseDeadline);
 }
 
 export interface ResponseTabProps {
@@ -48,7 +48,6 @@ export interface ResponseTabProps {
   responseText: string;
   editingResponse: boolean;
   canSubmit: boolean;
-  ownerName: (id: string) => string;
   onGoToEvents: () => void;
   onResponseTextChange: (v: string) => void;
   onEditResponseToggle: () => void;
@@ -70,7 +69,6 @@ export function ResponseTab({
   dateFormat,
   responseText,
   canSubmit,
-  ownerName,
   onGoToEvents,
   onResponseTextChange,
   onCancelEdit,
@@ -79,8 +77,8 @@ export function ResponseTab({
   onGenerateAGIDraft,
   onSignSubmit,
 }: ResponseTabProps) {
-  const dispatch = useAppDispatch();
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const router = useRouter();
+  const isDark = useAppSelector((s) => s.theme.mode === "dark");
   // Local UI state for modals
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [agiModalOpen, setAgiModalOpen] = useState(false);
@@ -122,17 +120,23 @@ export function ResponseTab({
   const totalObs = liveEvent.observations.length;
   const capasRaised = totalObs > 0 && liveEvent.observations.every((o) => !!o.capaId);
   const allCapasClosed = capasRaised && linkedCapas.length > 0
-    && linkedCapas.every((c) => c.status === "Closed");
+    && linkedCapas.every((c) => c.status === "closed");
 
   const obsWithCapa = liveEvent.observations.filter((o) => (o.capaIds?.length ?? 0) > 0 || !!o.capaId).length;
   const hasResponseDocs = (liveEvent.responseDocuments?.length ?? 0) > 0;
 
-  const checks = [
+  // `id` is a stable semantic slug per check row (NOT the label, which can
+  // change content for the CAPA row depending on closure progress). Used as
+  // the React key in the render loop below so each row preserves its
+  // identity across re-renders even when the label text updates.
+  const checks: { id: string; label: string; done: boolean }[] = [
     {
+      id: "rca",
       label: "All observations have RCA",
       done: liveEvent.observations.length > 0 && liveEvent.observations.every((o) => o.rootCause?.trim()),
     },
     {
+      id: "capa",
       label: allCapasClosed
         ? "All CAPAs raised and closed"
         : capasRaised
@@ -141,22 +145,27 @@ export function ResponseTab({
       done: allCapasClosed,
     },
     {
+      id: "docs",
       label: `Response documents attached (${liveEvent.responseDocuments?.length ?? 0})`,
       done: hasResponseDocs,
     },
     {
+      id: "draft",
       label: "Response draft written",
       done: (liveEvent.responseDraft?.trim().length ?? 0) > 0,
     },
     {
+      id: "commitments",
       label: "All commitments have due dates",
       done: liveEvent.commitments.length > 0 && liveEvent.commitments.every((c) => c.dueDate),
     },
     {
+      id: "deadline",
       label: "Response within deadline",
       done: daysLeft(liveEvent.responseDeadline) >= 0,
     },
     {
+      id: "signed",
       label: "Signed and submitted",
       done: isSubmitted,
     },
@@ -196,7 +205,7 @@ export function ResponseTab({
             {liveEvent.submittedBy && (
               <div>
                 <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>Signed by</p>
-                <p className="mt-0.5" style={{ color: "var(--text-primary)" }}>{ownerName(liveEvent.submittedBy)}</p>
+                <p className="mt-0.5" style={{ color: "var(--text-primary)" }}>{displayName({ name: liveEvent.submittedBy })}</p>
               </div>
             )}
             {liveEvent.signatureMeaning && (
@@ -214,11 +223,11 @@ export function ResponseTab({
           {linkedCapas.length > 0 && (
             <div className="mt-4 pt-3" style={{ borderTop: "1px solid rgba(16,185,129,0.25)" }}>
               <p className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: "var(--text-muted)" }}>
-                Linked CAPAs ({linkedCapas.filter((c) => c.status === "Closed").length} of {linkedCapas.length} closed)
+                Linked CAPAs ({linkedCapas.filter((c) => c.status === "closed").length} of {linkedCapas.length} closed)
               </p>
               <ul className="space-y-1.5 list-none p-0">
                 {linkedCapas.map((c) => {
-                  const isClosed = c.status === "Closed";
+                  const isClosed = c.status === "closed";
                   return (
                     <li key={c.id} className="flex items-center justify-between gap-2 text-[11px]">
                       <div className="flex items-center gap-2 min-w-0">
@@ -228,8 +237,8 @@ export function ResponseTab({
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <Badge variant={isClosed ? "green" : c.status === "Pending QA Review" ? "purple" : c.status === "In Progress" ? "amber" : "blue"}>
-                          {c.status}
+                        <Badge variant={isClosed ? "green" : c.status === "pending_qa_review" ? "purple" : c.status === "in_progress" ? "amber" : "blue"}>
+                          {CAPA_STATUS_LABEL[c.status]}
                         </Badge>
                         {isClosed && c.closedAt && (
                           <span style={{ color: "var(--text-muted)" }}>
@@ -271,9 +280,9 @@ export function ResponseTab({
           </span>
         </div>
         <div className="card-body space-y-2">
-          {checks.map((c, i) => (
+          {checks.map((c) => (
             <div
-              key={i}
+              key={c.id}
               className="flex items-center gap-2 text-[12px]"
             >
               {c.done ? (
@@ -352,10 +361,34 @@ export function ResponseTab({
           <DocumentUpload
             recordId={liveEvent.id + "_response"}
             recordTitle="Response Package"
-            module="FDA 483 Response"
+            module={FDA483_AUDIT_MODULE}
             existingDocs={liveEvent.responseDocuments ?? []}
-            onUpload={(doc) => dispatch(addResponseDocument({ eventId: liveEvent.id, doc }))}
-            onDelete={(docId) => dispatch(removeResponseDocument({ eventId: liveEvent.id, docId }))}
+            onUpload={async (doc) => {
+              // <DocumentUpload> hands us a fully-formed LinkedDocument; map
+              // its fields onto the FDA483Document schema. `dataUrl` (base64
+              // for in-app uploads) becomes `fileUrl`.
+              const result = await addResponseDocument({
+                eventId: liveEvent.id,
+                fileName: doc.fileName,
+                fileUrl: doc.dataUrl ?? doc.fileName,
+                fileType: doc.fileType,
+                fileSize: doc.fileSize,
+                type: "response",
+              });
+              if (!result.success) {
+                console.error("[fda-483] addResponseDocument failed:", result.error);
+                return;
+              }
+              router.refresh();
+            }}
+            onDelete={async (docId) => {
+              const result = await removeResponseDocument(docId, liveEvent.id);
+              if (!result.success) {
+                console.error("[fda-483] removeResponseDocument failed:", result.error);
+                return;
+              }
+              router.refresh();
+            }}
             readOnly={isSubmitted}
           />
           <p className="text-[10px] italic mt-2" style={{ color: "var(--text-muted)" }}>

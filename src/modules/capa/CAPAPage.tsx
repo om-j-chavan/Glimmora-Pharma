@@ -4,8 +4,9 @@ import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
-  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare,
+  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, Target, Sparkles,
 } from "lucide-react";
+import type { CAPA as PrismaCAPA } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -15,21 +16,22 @@ import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useComplianceUsers } from "@/hooks/useComplianceUsers";
 import {
-  addCAPA, updateCAPA as updateCAPAAction, closeCAPA,
-  addCAPADocument, removeCAPADocument, approveCAPADocument,
-  type CAPA, type RCAMethod,
+  setCAPAs,
+  addCAPA,
+  type CAPA,
 } from "@/store/capa.slice";
-import { closeFinding } from "@/store/findings.slice";
-import { updateObservation } from "@/store/fda483.slice";
+import { isOverdue } from "@/types/capa";
+import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
 import { auditLog } from "@/lib/audit";
 import {
   createCAPA as createCAPAServer,
-  updateCAPA as updateCAPAServer,
-  submitForReview as submitForReviewServer,
-  signAndCloseCAPA as signAndCloseCAPAServer,
+  reopenCAPA as reopenCAPAServer,
 } from "@/actions/capas";
 import { Button } from "@/components/ui/Button";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Popup } from "@/components/ui/Popup";
+import { Modal } from "@/components/ui/Modal";
+import { Drawer } from "@/components/ui/Drawer";
 import { StatusGuide } from "@/components/shared";
 import { CAPA_STATUSES } from "@/constants/statusTaxonomy";
 
@@ -37,10 +39,30 @@ import { QMSBlueprintTab } from "./tabs/QMSBlueprintTab";
 import { CAPATrackerTab } from "./tabs/CAPATrackerTab";
 import { CAPAMetricsTab } from "./tabs/CAPAMetricsTab";
 import { AddCAPAModal, type CAPAForm } from "./modals/AddCAPAModal";
-import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
-import { SignCloseModal } from "./modals/SignCloseModal";
+import { AIGenerateCAPAModal, type AICapaResponse, type AICapaForm } from "./modals/AIGenerateCAPAModal";
+import { CapaSmartSearch } from "./components/CapaSmartSearch";
+import type { LinkableRecord } from "@/lib/queries/capas";
 
 /* ── Constants ── */
+
+/**
+ * Maps the CAPA modal's source vocabulary onto the server's
+ * CreateCAPASchema enum. Shared by the manual create path (handleAddCAPA)
+ * and the AI create path so the two can never drift. Unmapped values fall
+ * back to "Other" at the call site.
+ */
+const UI_TO_SERVER_CAPA_SOURCE: Record<
+  string,
+  "Gap Assessment" | "Deviation" | "FDA 483" | "Internal Audit" | "External Audit" | "Customer Complaint" | "Other"
+> = {
+  "483": "FDA 483",
+  "Internal Audit": "Internal Audit",
+  Deviation: "Deviation",
+  Complaint: "Customer Complaint",
+  OOS: "Other",
+  "Change Control": "Other",
+  "Gap Assessment": "Gap Assessment",
+};
 
 type TabId = "blueprint" | "tracker" | "metrics";
 const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
@@ -50,26 +72,66 @@ const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
 ];
 
 const QMS_PROCESSES = [
-  { title: "Deviation Management", Icon: AlertTriangle, color: "#f59e0b", sourceKey: "Deviation", targetState: "Risk-based classification within 24h. DI gate check for all deviations. Trend monitoring for recurrence.", currentGap: "Recurrence detection is manual \u2014 AGI deviation intelligence not yet active." },
-  { title: "Change Control", Icon: GitBranch, color: "#6366f1", sourceKey: "Change Control", targetState: "Impact assessment before any GMP change. CSV review for system changes. QA approval mandatory.", currentGap: "Change control SOP last reviewed 2023 \u2014 update required for Annex 11 alignment." },
-  { title: "Complaint Handling", Icon: MessageSquare, color: "#0ea5e9", sourceKey: "Complaint", targetState: "Complaint triage within 24h. Serious complaints trigger CAPA automatically. Monthly trend analysis.", currentGap: "Complaint data not yet integrated. Manual review process in place." },
+  // Phase G \u2014 status: Deviation is a built Phase-1 module; Change Control has no
+  // module yet and Complaint Handling is Phase 2, so both are flagged "planned".
+  { title: "Deviation Management", Icon: AlertTriangle, color: "#f59e0b", sourceKey: "Deviation", status: "live" as const, targetState: "Risk-based classification within 24h. DI gate check for all deviations. Trend monitoring for recurrence.", currentGap: "Recurrence detection is manual \u2014 AGI deviation intelligence not yet active." },
+  { title: "Change Control", Icon: GitBranch, color: "#6366f1", sourceKey: "Change Control", status: "planned" as const, targetState: "Impact assessment before any GMP change. CSV review for system changes. QA approval mandatory.", currentGap: "Change control SOP last reviewed 2023 \u2014 update required for Annex 11 alignment." },
+  { title: "Complaint Handling", Icon: MessageSquare, color: "#0ea5e9", sourceKey: "Complaint", status: "planned" as const, targetState: "Complaint triage within 24h. Serious complaints trigger CAPA automatically. Monthly trend analysis.", currentGap: "Complaint data not yet integrated. Manual review process in place." },
 ];
 
 /* ══════════════════════════════════════ */
 
-interface CAPAPageProps {
-  openCapaId?: string;
+export interface EffectivenessDueItem {
+  id: string;
+  reference: string | null;
+  description: string;
+  risk: string;
+  effectivenessDate: string | null;
 }
 
-export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
+interface CAPAPageProps {
+  openCapaId?: string;
+  /** Server-fetched CAPAs (Prisma rows) — seeded into Redux on mount. */
+  capas?: PrismaCAPA[];
+  /** Phase 6 — closed CAPAs whose 90-day effectiveness check is due. */
+  effectivenessDue?: EffectivenessDueItem[];
+  /** Batch 2b — open linkable records for the New CAPA source picker. */
+  gapFindings?: LinkableRecord[];
+  deviations?: LinkableRecord[];
+}
+
+export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = [], gapFindings = [], deviations = [] }: CAPAPageProps = {}) {
   const router = useRouter();
   const dispatch = useAppDispatch();
-  const [, startTransition] = useTransition();
-  const { canSign, canCloseCapa, isViewOnly } = useRole();
-  const { isCustomerAdmin, canCreateCAPAs } = usePermissions();
 
-  const { capas, fda483Events, tenantId } = useTenantData();
+  // Seed Redux from server-fetched CAPAs on mount / when props change.
+  useEffect(() => {
+    if (serverCAPAs) {
+      dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
+    }
+  }, [serverCAPAs, dispatch]);
+  const [, startTransition] = useTransition();
+  // canSign / canCloseCapa moved into the CAPA detail page (which calls
+  // useRole itself); this page only needs isViewOnly to gate the table's
+  // "New CAPA" button + edit affordances at the row level.
+  const { isViewOnly } = useRole();
+  const { isCustomerAdmin, isSuperAdmin, isQAHead, canCreateCAPAs, isViewer } = usePermissions();
+  // RUNG 3D-CAPA — reopening a closed/rejected CAPA is a senior action.
+  const canReopen = isQAHead || isCustomerAdmin || isSuperAdmin;
+  // AI CAPA is available to anyone except read-only viewers — including
+  // customer admins, so they can trigger AI analysis even though the manual
+  // "New CAPA" creation flow is reserved for QA-side roles.
+  const canUseAiCapa = !isViewer;
+
+  const { capas, tenantId } = useTenantData();
   const { org, users, allSites } = useTenantConfig();
+  // For the AI backend, customer_id is the customer admin's aiUserId (the
+  // CUST_xxx that was registered at signup). Fall back to the local tenantId
+  // only if no admin has been signed up yet — the backend will then 422.
+  const aiCustomerId =
+    users.find((u) => u.role === "customer_admin" && u.aiUserId)?.aiUserId ??
+    tenantId ??
+    "";
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -84,33 +146,39 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
   const selectedCAPA = selectedCAPAId ? capas.find((c) => c.id === selectedCAPAId) ?? null : null;
   const setSelectedCAPA = (c: CAPA | null) => setSelectedCAPAId(c?.id ?? null);
   const [addOpen, setAddOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  // "Ask AI" slide-out — the plain-language CAPA Search (was a card atop the
+  // CAPA Tracker tab) now lives in a Drawer opened from the header.
+  const [askAiOpen, setAskAiOpen] = useState(false);
+  const [aiSavedPopup, setAiSavedPopup] = useState<string | null>(null);
   const [addedPopup, setAddedPopup] = useState(false);
-  const [signOpen, setSignOpen] = useState(false);
-  const [signedPopup, setSignedPopup] = useState(false);
-  const [submittedPopup, setSubmittedPopup] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editSavedPopup, setEditSavedPopup] = useState(false);
+  // Failure surface for the create/AI/reopen flows that remain on this list
+  // page. (Phase 6 cleanup — edit/sign/submit modals moved to /capa/[id].)
+  const [errorMsg, setErrorMsg] = useState("");
+  const [errorPopup, setErrorPopup] = useState(false);
 
   /* ── Open from route ── */
   useEffect(() => {
     if (openCapaId) {
       const found = capas.find((c) => c.id === openCapaId);
+      // Sync route-prop → local state; intentional setState in effect.
+       
       if (found) { setActiveTab("tracker"); setSelectedCAPA(found); }
     }
   }, [openCapaId, capas]);
 
   /* ── Computed ── */
-  const openCAPAs = capas.filter((c) => c.status !== "Closed");
-  const overdueCAPAs = openCAPAs.filter((c) => dayjs.utc(c.dueDate).isBefore(dayjs()));
-  const closedCAPAs = capas.filter((c) => c.status === "Closed");
+  const openCAPAs = capas.filter((c) => c.status !== "closed");
+  const overdueCAPAs = capas.filter(isOverdue);
+  const closedCAPAs = capas.filter((c) => c.status === "closed");
 
-  const noRCACount = capas.filter((c) => c.status !== "Closed" && c.status !== "Pending QA Review" && (!c.rca || c.rca.trim().length === 0)).length;
-  const criticalOpenCount = capas.filter((c) => c.risk === "Critical" && c.status !== "Closed").length;
-  const pendingReviewCount = capas.filter((c) => c.status === "Pending QA Review").length;
+  const noRCACount = capas.filter((c) => c.status !== "closed" && c.status !== "pending_qa_review" && (!c.rca || c.rca.trim().length === 0)).length;
+  const criticalOpenCount = capas.filter((c) => c.risk === "Critical" && c.status !== "closed").length;
+  const pendingReviewCount = capas.filter((c) => c.status === "pending_qa_review").length;
 
   const onTimeRate = closedCAPAs.length === 0 ? 0 : Math.round((closedCAPAs.filter((c) => !dayjs.utc(c.closedAt || c.dueDate).isAfter(dayjs.utc(c.dueDate))).length / closedCAPAs.length) * 100);
   const overdueRate = openCAPAs.length === 0 ? 0 : Math.round((overdueCAPAs.length / openCAPAs.length) * 100);
-  const diExceptions = capas.filter((c) => c.diGate && c.status !== "Closed").length;
+  const diExceptions = capas.filter((c) => c.diGate && c.status !== "closed").length;
   const effectivenessCount = capas.filter((c) => c.effectivenessCheck).length;
 
   const riskSignalData = useMemo(() => {
@@ -127,10 +195,10 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
 
   const statusDonut = useMemo(() =>
     ([
-      { name: "Open", value: capas.filter((c) => c.status === "Open").length, fill: "#3B82F6" },
-      { name: "In Progress", value: capas.filter((c) => c.status === "In Progress").length, fill: "#F59E0B" },
-      { name: "Pending QA", value: capas.filter((c) => c.status === "Pending QA Review").length, fill: "#6366f1" },
-      { name: "Closed", value: capas.filter((c) => c.status === "Closed").length, fill: "#0F6E56" },
+      { name: "Open", value: capas.filter((c) => c.status === "open").length, fill: "#3B82F6" },
+      { name: "In Progress", value: capas.filter((c) => c.status === "in_progress").length, fill: "#F59E0B" },
+      { name: "Pending QA", value: capas.filter((c) => c.status === "pending_qa_review").length, fill: "#6366f1" },
+      { name: "Closed", value: capas.filter((c) => c.status === "closed").length, fill: "#0F6E56" },
     ] as const).filter((d) => d.value > 0),
   [capas]);
 
@@ -143,7 +211,7 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
   /* ── Blueprint helpers ── */
   function getProcessMetrics(sourceKey: string) {
     const src = capas.filter((c) => c.source === sourceKey);
-    return { open: src.filter((c) => c.status !== "Closed").length, thisMonth: src.filter((c) => c.createdAt && dayjs.utc(c.createdAt).format("MMM YYYY") === dayjs().format("MMM YYYY")).length, overdue: src.filter((c) => c.status !== "Closed" && dayjs.utc(c.dueDate).isBefore(dayjs())).length };
+    return { open: src.filter((c) => c.status !== "closed").length, thisMonth: src.filter((c) => c.createdAt && dayjs.utc(c.createdAt).format("MMM YYYY") === dayjs().format("MMM YYYY")).length, overdue: src.filter(isOverdue).length };
   }
 
   function stepHasProblem(step: number): boolean {
@@ -163,126 +231,101 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
     { step: 7, label: "Effectiveness", Icon: TrendingUp, color: "#6366f1", desc: "90-day recurrence check", targetState: "Effectiveness check at 30, 60, 90 days. Recurrence monitoring active.", currentGap: "No formal effectiveness scoring \u2014 AGI monitoring planned for future phase." },
   ];
 
-  /* ── Handlers ── */
+  /* ── Handlers ──
+   *
+   * Server-first throughout. We previously dispatched optimistic Redux
+   * updates and showed green popups BEFORE awaiting the server, which
+   * meant a server reject (FORBIDDEN, validation, Part 11 password fail)
+   * left the UI claiming success against state the DB never accepted —
+   * regulatory exposure on a compliance product. Every handler below now
+   * awaits the server first; only on success do we mutate Redux / surface
+   * a success popup. Failures route through errorPopup with the server's
+   * own error message.
+   */
   function handleAddCAPA(data: CAPAForm) {
-    const newId = `CAPA-${String(Date.now()).slice(-4)}`;
-    // Optimistic Redux update so UI feels instant.
-    dispatch(addCAPA({ ...data, id: newId, tenantId: tenantId ?? "", evidenceLinks: [], status: "Open", createdAt: dayjs().toISOString(), rcaMethod: data.rcaMethod as RCAMethod | undefined, rca: undefined, correctiveActions: undefined, findingId: data.findingId || undefined }));
-    setAddOpen(false);
-    setAddedPopup(true);
     startTransition(async () => {
       const res = await createCAPAServer({
+        title: data.title,
         description: data.description,
-        source: data.source as never,
+        // Map the modal's source vocabulary ("483", "Complaint", "OOS",
+        // "Change Control", …) onto the server CreateCAPASchema enum. Without
+        // this, 4 of 7 sources fail server-side zod validation ("Validation
+        // failed"). Mirrors the mapping the AI path already applies below.
+        source: UI_TO_SERVER_CAPA_SOURCE[data.source] ?? "Other",
         risk: data.risk as never,
         owner: data.owner,
         dueDate: data.dueDate,
         siteId: data.siteId,
         linkedFindingId: data.findingId || undefined,
+        linkedDeviationId: data.deviationId || undefined,
         diGateRequired: data.diGate,
+        rca: data.rca,
+        rcaMethod: data.rcaMethod,
+        rcaDetail: data.rcaDetail,
       });
-      if (!res.success) console.error("[CAPA] create failed:", res.error);
-      router.refresh();
-    });
-  }
-
-  function handleEditSave(data: EditForm) {
-    if (!selectedCAPA) return;
-    const autoAdvance = selectedCAPA.status === "Open" && data.rca?.trim();
-    dispatch(updateCAPAAction({
-      id: selectedCAPA.id,
-      patch: {
-        description: data.description, owner: data.owner,
-        dueDate: dayjs(data.dueDate).utc().toISOString(),
-        risk: data.risk, rcaMethod: (data.rcaMethod as RCAMethod) || undefined,
-        rca: data.rca ?? "", correctiveActions: data.correctiveActions ?? "",
-        effectivenessCheck: data.effectivenessCheck, diGate: data.diGate,
-        diGateStatus: data.diGateStatus ?? "open",
-        diGateNotes: data.diGateNotes ?? "",
-        diGateReviewedBy: data.diGateReviewedBy ?? "",
-        diGateReviewDate: data.diGateReviewDate ?? "",
-        ...(autoAdvance ? { status: "In Progress" as const } : {}),
-      },
-    }));
-    setEditModalOpen(false);
-    setEditSavedPopup(true);
-    const capaId = selectedCAPA.id;
-    startTransition(async () => {
-      const res = await updateCAPAServer(capaId, {
-        description: data.description,
-        owner: data.owner,
-        dueDate: data.dueDate,
-        risk: data.risk as never,
-        rcaMethod: (data.rcaMethod as string) || undefined,
-        rca: data.rca ?? "",
-        correctiveActions: data.correctiveActions ?? "",
-        status: autoAdvance ? "In Progress" : undefined,
-      });
-      if (!res.success) console.error("[CAPA] update failed:", res.error);
-      router.refresh();
-    });
-  }
-
-  function handleSubmitForReview(id: string) {
-    dispatch(updateCAPAAction({ id, patch: { status: "Pending QA Review" } }));
-    setSubmittedPopup(true);
-    setSelectedCAPA(null);
-    startTransition(async () => {
-      const res = await submitForReviewServer(id);
-      if (!res.success) console.error("[CAPA] submit for review failed:", res.error);
-      router.refresh();
-    });
-  }
-
-  const [diGateBlockPopup, setDiGateBlockPopup] = useState(false);
-
-  function handleSignClose(data: { meaning: string }) {
-    if (!selectedCAPA) return;
-    if (selectedCAPA.diGate && selectedCAPA.diGateStatus !== "cleared") {
-      setSignOpen(false);
-      setDiGateBlockPopup(true);
-      return;
-    }
-    const capaId = selectedCAPA.id;
-    const findingId = selectedCAPA.findingId;
-    const source = selectedCAPA.source;
-    const now = dayjs().toISOString();
-    dispatch(closeCAPA({ id: capaId, closedBy: user?.id ?? "", closedAt: now }));
-    if (findingId) { dispatch(closeFinding(findingId)); }
-    if (source === "483") {
-      for (const ev of fda483Events) {
-        const matchingObs = ev.observations.find((o) => o.capaId === capaId);
-        if (matchingObs) {
-          dispatch(updateObservation({ eventId: ev.id, obsId: matchingObs.id, patch: { status: "Closed" } }));
-          break;
-        }
+      if (!res.success) {
+        // Surface which field failed (createCAPA returns fieldErrors) instead of
+        // a bare "Validation failed".
+        const firstField = res.fieldErrors ? Object.entries(res.fieldErrors)[0] : undefined;
+        const hint = firstField?.[1]?.[0] ? ` (${firstField[0]}: ${firstField[1][0]})` : "";
+        setErrorMsg((res.error || "Failed to create CAPA. Please try again.") + hint);
+        setErrorPopup(true);
+        return;
       }
-    }
-    auditLog({ action: "CAPA_CLOSED_MEANING", module: "capa", recordId: capaId, newValue: { meaning: data.meaning } });
-    setSignOpen(false);
-    setSignedPopup(true);
-    setSelectedCAPA(null);
-    startTransition(async () => {
-      const res = await signAndCloseCAPAServer(capaId);
-      if (!res.success) console.error("[CAPA] sign & close failed:", res.error);
+      setAddOpen(false);
+      setAddedPopup(true);
       router.refresh();
     });
+  }
+
+  // Phase 6 cleanup FIX 5 — handleEditSave / handleSubmitForReview /
+  // handleSignClose removed: the detail PAGE (/capa/[id]) now owns edit,
+  // submit, and sign-&-close (it reuses the same EditCAPAModal/SignCloseModal).
+  // This list page keeps create / AI / reopen only.
+
+  // RUNG 3D-CAPA — reopen a closed/rejected CAPA (senior action, reason ≥10).
+  const [reopenTarget, setReopenTarget] = useState<string | null>(null);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenBusy, setReopenBusy] = useState(false);
+  const [reopenError, setReopenError] = useState<string | null>(null);
+  function closeReopenModal() { setReopenTarget(null); setReopenReason(""); setReopenError(null); }
+  async function handleConfirmReopen() {
+    if (!reopenTarget || reopenReason.trim().length < 10) return;
+    setReopenBusy(true); setReopenError(null);
+    const res = await reopenCAPAServer(reopenTarget, { reason: reopenReason.trim() });
+    setReopenBusy(false);
+    if (!res.success) { setReopenError(res.error || "Failed to reopen CAPA."); return; }
+    if (selectedCAPA?.id === reopenTarget) setSelectedCAPA(null);
+    closeReopenModal();
+    router.refresh();
   }
 
   /* ══════════════════════════════════════ */
 
   return (
-    <main id="main-content" aria-label="QMS and CAPA tracker" className="w-full space-y-5">
-      {/* Header */}
-      <header className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="page-title">QMS &amp; CAPA Tracker</h1>
-          <p className="page-subtitle mt-1">{capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}</p>
-          <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
-        </div>
-        {canCreateCAPAs && <Button variant="primary" icon={Plus} onClick={() => setAddOpen(true)}>New CAPA</Button>}
-        {isCustomerAdmin && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>CAPA actions require QA Head authorization</p>}
-      </header>
+      <PageLayout
+        title="CAPA Tracker"
+        titleIcon={Target}
+        contentPadding={true}
+        className="capa-shell"
+        description={`Track corrective and preventive actions from initiation through effectiveness. \u00b7 ${capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}`}
+        actions={[
+          { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+          ...(canCreateCAPAs ? [{ label: "New CAPA", variant: "primary" as const, icon: Plus, onClick: () => setAddOpen(true) }] : []),
+        ]}
+        headerRight={
+          <div className="flex items-center gap-3">
+            <StatusGuide module="CAPA Tracker" statuses={CAPA_STATUSES} />
+            {isCustomerAdmin && <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>CAPA actions require QA Head authorization</p>}
+          </div>
+        }
+      >
+        {/* Content below the header is unchanged; the space-y-5 that used to sit
+            on <main> now wraps the children so their spacing is preserved. */}
+        <div className="space-y-5">
+
+      {/* Batch 1 — the "How a CAPA flows" strip was removed; the QMS Blueprint
+          tab's 7-step lifecycle cards already teach the flow. */}
 
       {/* Tab bar */}
       <div role="tablist" aria-label="CAPA sections" className="flex gap-1 border-b border-(--bg-border)">
@@ -305,18 +348,20 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
       )}
 
       {activeTab === "tracker" && (
-        <CAPATrackerTab
-          capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
-          isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
-          timezone={timezone} dateFormat={dateFormat} canSign={canSign} canCloseCapa={canCloseCapa}
-          onAddOpen={() => setAddOpen(true)} onEditOpen={() => setEditModalOpen(true)}
-          onSignOpen={() => setSignOpen(true)} onSubmitForReview={handleSubmitForReview}
-          onNavigateGap={(fid) => router.push(`/gap-assessment?openFindingId=${encodeURIComponent(fid)}`)}
-          onNavigateCapa={() => router.push("/gap-assessment")}
-          onDocUpload={(capaId, doc) => dispatch(addCAPADocument({ capaId, doc }))}
-          onDocDelete={(capaId, docId) => dispatch(removeCAPADocument({ capaId, docId }))}
-          onDocApprove={(capaId, docId, approvedBy) => dispatch(approveCAPADocument({ capaId, docId, approvedBy }))}
-        />
+        <div className="space-y-4">
+          {/* Feature 2 — Plain-English Record Search moved to the "Ask AI"
+              header drawer (see below); the CAPA table + filters live here. */}
+          <CAPATrackerTab
+            capas={capas} filteredCAPAs={capas} selectedCAPA={selectedCAPA} onSelectCAPA={setSelectedCAPA}
+            isDark={isDark} isViewOnly={isViewOnly} users={users} user={user} sites={allSites}
+            timezone={timezone} dateFormat={dateFormat}
+            onAddOpen={() => setAddOpen(true)}
+            onAiOpen={canUseAiCapa ? () => setAiOpen(true) : undefined}
+            onReopen={canReopen ? (id) => { setReopenTarget(id); setReopenReason(""); setReopenError(null); } : undefined}
+            onNavigateCapa={() => router.push("/gap-assessment")}
+            effectivenessDue={effectivenessDue}
+          />
+        </div>
       )}
 
       {activeTab === "metrics" && (
@@ -329,17 +374,170 @@ export function CAPAPage({ openCapaId }: CAPAPageProps = {}) {
         />
       )}
 
-      {/* Modals */}
-      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} lockedSiteId={selectedSiteId} />
-      <EditCAPAModal isOpen={editModalOpen} onClose={() => setEditModalOpen(false)} onSave={handleEditSave} capa={selectedCAPA} users={complianceUsers} />
-      <SignCloseModal isOpen={signOpen} onClose={() => setSignOpen(false)} onSign={handleSignClose} capa={selectedCAPA} />
+      {/* Modals — edit/sign moved to the detail page (/capa/[id]); this list
+          page keeps create / AI / reopen only. */}
+      <AddCAPAModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSave={handleAddCAPA} users={complianceUsers} sites={allSites} currentUserRole={user?.role ?? ""} currentUserSiteId={users.find((u) => u.id === user?.id)?.assignedSites?.[0] ?? null} gapFindings={gapFindings} deviations={deviations} />
+
+      {/* RUNG 3D-CAPA — reopen a closed/rejected CAPA (reason required) */}
+      <Modal
+        open={!!reopenTarget}
+        onClose={reopenBusy ? () => undefined : closeReopenModal}
+        title="Reopen this CAPA?"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" disabled={reopenBusy} onClick={closeReopenModal}>Cancel</Button>
+            <Button variant="primary" size="sm" icon={RotateCcw} loading={reopenBusy} disabled={reopenBusy || reopenReason.trim().length < 10} onClick={handleConfirmReopen}>Reopen CAPA</Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            Reopening returns the CAPA to the open state and unlocks its evidence and effectiveness criteria for further work. This is recorded in the audit trail.
+          </p>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Reason for reopening *</label>
+            <textarea rows={3} className="input text-[12px] resize-none w-full" value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} placeholder="Why is this CAPA being reopened? (min 10 characters)" maxLength={2000} disabled={reopenBusy} aria-label="Reopen reason" />
+          </div>
+          {reopenError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{reopenError}</p>}
+        </div>
+      </Modal>
+      <AIGenerateCAPAModal
+        isOpen={aiOpen}
+        onClose={() => setAiOpen(false)}
+        defaultCustomerId={aiCustomerId}
+        onAccepted={async (res: AICapaResponse, form: AICapaForm) => {
+          // Map AI form severity → CAPA risk taxonomy ("Medium" → "High" so it
+          // still escalates; backend severity is informational anyway).
+          const risk: "Critical" | "High" | "Low" =
+            form.initial_severity === "Critical" ? "Critical" :
+            form.initial_severity === "Low" ? "Low" : "High";
+
+          // Map AI free-text source → the createCAPA Zod enum the server
+          // expects. Unmatched values land in "Other". Shares the module-level
+          // map with the manual create path so the two cannot drift.
+          const serverSource = UI_TO_SERVER_CAPA_SOURCE[form.source] ?? "Other";
+
+          // Redux's CAPASource type uses the legacy AI-form vocabulary
+          // (different enum from the server's Zod schema). Keep both in sync
+          // for the degraded-mode fallback dispatch.
+          const REDUX_KNOWN_SOURCES = ["483", "Internal Audit", "Deviation", "Complaint", "OOS", "Change Control", "Gap Assessment"] as const;
+          const reduxSource = (REDUX_KNOWN_SOURCES as readonly string[]).includes(form.source)
+            ? (form.source as typeof REDUX_KNOWN_SOURCES[number])
+            : "Deviation";
+
+          // Default due date: 30 days for Critical, 60 for High, 90 for Low.
+          const days = risk === "Critical" ? 30 : risk === "High" ? 60 : 90;
+          const dueDateIso = dayjs(res.created_at).add(days, "day").toISOString();
+
+          const description = [
+            form.problem_statement,
+            form.area_affected ? `Area: ${form.area_affected}` : "",
+            form.equipment_product ? `Equipment/Product: ${form.equipment_product}` : "",
+            res.ai_recommendation ? `\nAI recommendation: ${res.ai_recommendation}` : "",
+            res.pattern_detected ? `Pattern: ${res.pattern_detected}` : "",
+            res.recurrence_alert ? `Recurrence: ${res.recurrence_alert}` : "",
+          ].filter(Boolean).join("\n");
+
+          // Persist locally so the CAPA survives page refresh. Prior to this
+          // the AI CAPA only lived in Redux + the AI backend, so refreshing
+          // /capa wiped it from the tracker (capa.slice doesn't persist).
+          // The AI backend's res.capa_id is kept in the audit log's newValue
+          // so the AI lifecycle viewer at /ai-capa/[capaId] is still findable
+          // post-create; the local Prisma row gets its own cuid + reference.
+          // Phase A — short title for the AI CAPA (problem statement, capped).
+          const aiTitle = (form.problem_statement || description).slice(0, 120);
+          let persistedToDb = false;
+          let serverCapa: PrismaCAPA | null = null;
+          try {
+            const createRes = await createCAPAServer({
+              title: aiTitle,
+              description,
+              source: serverSource,
+              risk,
+              owner: user?.id || user?.name || "ai-system",
+              dueDate: dueDateIso,
+              siteId: selectedSiteId ?? allSites[0]?.id ?? undefined,
+            });
+            if (createRes.success && createRes.data) {
+              serverCapa = createRes.data as PrismaCAPA;
+              persistedToDb = true;
+            } else if (!createRes.success) {
+              console.warn("[ai-capa] local persist rejected:", createRes.error);
+            }
+          } catch (err) {
+            console.error("[ai-capa] local persist threw:", err);
+          }
+
+          if (persistedToDb && serverCapa) {
+            // Mirror the server's authoritative row into Redux so the tracker
+            // shows the canonical Prisma id + reference, not the AI backend id.
+            dispatch(addCAPA(mapCAPAFromPrisma(serverCapa)));
+          } else {
+            // Degraded mode: persist failed but AI backend has the CAPA.
+            // Keep the user moving — add to Redux so the tracker still shows
+            // something this session. On next page refresh this row will
+            // vanish (capa.slice doesn't persist + Prisma row is missing).
+            dispatch(addCAPA({
+              id: res.capa_id,
+              tenantId: tenantId ?? "",
+              siteId: selectedSiteId ?? allSites[0]?.id ?? "",
+              source: reduxSource,
+              risk,
+              owner: user?.id ?? "",
+              dueDate: dueDateIso,
+              status: "open",
+              title: aiTitle,
+              description,
+              effectivenessCheck: true,
+              diGate: false,
+              createdAt: res.created_at,
+            }));
+          }
+
+          auditLog({
+            action: "CAPA_AI_GENERATED",
+            module: "capa",
+            recordId: serverCapa?.id ?? res.capa_id,
+            newValue: {
+              riskScore: res.risk_score,
+              isRecurring: res.is_recurring,
+              aiBackendId: res.capa_id,
+              persistedToDb,
+            },
+          });
+          setAiSavedPopup(
+            persistedToDb
+              ? `AI CAPA ${serverCapa?.reference ?? res.capa_id} created and added to the tracker. Open the row to start RCA in the AI lifecycle.`
+              : `AI CAPA ${res.capa_id} created (warning: local persist failed; refresh will clear from tracker).`,
+          );
+          // We used to auto-redirect to /ai-capa/<id> here. That meant the
+          // user got bounced off the CAPA Tracker the moment they clicked
+          // "Save to library" — before the success popup could display and
+          // before they had a chance to verify the row landed. Now the user
+          // stays on /capa, sees the new row in the tracker, sees the
+          // popup, and opens the AI lifecycle on their own terms by clicking
+          // the row (which routes to /ai-capa/<aiBackendId> via the row's
+          // detail handler).
+        }}
+      />
+
+      {/* Ask AI — the plain-language CAPA Search, moved out of the tracker body
+          into a slide-out Drawer (mirrors Gap Assessment / Deviation). Selecting
+          a result switches to the CAPA Tracker tab, opens that CAPA's detail, and
+          closes the drawer. */}
+      <Drawer open={askAiOpen} onClose={() => setAskAiOpen(false)} title="Ask AI · CAPA Search" width="lg">
+        <CapaSmartSearch
+          capas={capas}
+          sites={allSites}
+          onOpenCapa={(id) => { setActiveTab("tracker"); setSelectedCAPAId(id); setAskAiOpen(false); }}
+        />
+      </Drawer>
 
       {/* Popups */}
-      <Popup isOpen={editSavedPopup} variant="success" title="CAPA updated" description="Changes saved. Submit for QA review when RCA and corrective actions are complete." onDismiss={() => setEditSavedPopup(false)} />
-      <Popup isOpen={addedPopup} variant="success" title="CAPA created" description="Added to the tracker. Document RCA and corrective actions next." onDismiss={() => setAddedPopup(false)} />
-      <Popup isOpen={submittedPopup} variant="success" title="Submitted for QA review" description="QA Head will review and sign to close." onDismiss={() => setSubmittedPopup(false)} />
-      <Popup isOpen={signedPopup} variant="success" title="CAPA closed" description="Signed and closed. Audit trail entry recorded." onDismiss={() => setSignedPopup(false)} />
-      <Popup isOpen={diGateBlockPopup} variant="confirmation" title="DI gate must be cleared" description="Data integrity review has not been completed. Open Edit mode and clear the DI gate before closing this CAPA." onDismiss={() => setDiGateBlockPopup(false)} actions={[{ label: "OK", style: "primary", onClick: () => setDiGateBlockPopup(false) }]} />
-    </main>
+      <Popup isOpen={addedPopup} variant="success" title="CAPA created" description="Added to the tracker. Open the CAPA to document RCA and corrective actions." onDismiss={() => setAddedPopup(false)} />
+      <Popup isOpen={!!aiSavedPopup} variant="success" title="AI CAPA generated" description={aiSavedPopup ?? ""} onDismiss={() => setAiSavedPopup(null)} />
+      <Popup isOpen={errorPopup} variant="error" title="Action failed" description={errorMsg} onDismiss={() => setErrorPopup(false)} />
+        </div>
+      </PageLayout>
   );
 }

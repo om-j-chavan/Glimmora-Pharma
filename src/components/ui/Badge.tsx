@@ -1,8 +1,10 @@
 import clsx from "clsx";
 import type { ReactNode } from "react";
 
+export type BadgeVariant = "red" | "amber" | "green" | "blue" | "gray" | "purple";
+
 interface BadgeProps {
-  variant: "red" | "amber" | "green" | "blue" | "gray" | "purple";
+  variant: BadgeVariant;
   children: ReactNode;
 }
 

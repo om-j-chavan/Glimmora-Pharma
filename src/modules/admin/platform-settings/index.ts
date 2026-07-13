@@ -1,0 +1,1 @@
+export { PlatformSettingsPage } from "./PlatformSettingsPage";

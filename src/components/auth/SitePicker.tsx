@@ -9,7 +9,6 @@ import {
   Info,
   Check,
 } from "lucide-react";
-import clsx from "clsx";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -17,32 +16,10 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 import { setActiveSite, setSelectedSite as setSelectedSiteAction } from "@/store/auth.slice";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 
-const riskStyles = {
-  HIGH: {
-    iconBg: "bg-(--danger-bg)",
-    iconColor: "text-[#ef4444]",
-    badgeBg: "bg-(--danger-bg)",
-    badgeColor: "text-[#ef4444]",
-  },
-  MEDIUM: {
-    iconBg: "bg-(--warning-bg)",
-    iconColor: "text-[#f59e0b]",
-    badgeBg: "bg-(--warning-bg)",
-    badgeColor: "text-[#f59e0b]",
-  },
-  LOW: {
-    iconBg: "bg-(--success-bg)",
-    iconColor: "text-[#10b981]",
-    badgeBg: "bg-(--success-bg)",
-    badgeColor: "text-[#10b981]",
-  },
-};
-
 export function SitePicker() {
   const dispatch = useAppDispatch();
   const router = useRouter();
   const user = useAppSelector((s) => s.auth.user);
-  const isDark = useAppSelector((s) => s.theme.mode) === "dark";
   const { sites } = useTenantConfig();
   const activeSites = sites.filter((s) => s.status === "Active");
 
@@ -98,26 +75,21 @@ export function SitePicker() {
               </p>
             </div>
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
+            icon={X}
             onClick={() => router.push("/login")}
             aria-label="Close"
-            className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent border-none cursor-pointer transition-colors duration-150"
             style={{ color: "var(--text-muted)" }}
-          >
-            <X className="w-[14px] h-[14px]" aria-hidden="true" />
-          </button>
+          />
         </div>
 
         {activeSites.length === 0 ? (
           /* ── No sites fallback ── */
           <div className="px-6 py-8">
-            <div className={clsx(
-              "rounded-xl p-5 text-center border",
-              isDark
-                ? "bg-[#242019] border-[#3d362c]"
-                : "bg-[#faf9f7] border-[#e8e4dd]"
-            )}>
+            <div className="rounded-xl p-5 text-center border bg-(--bg-elevated) border-(--bg-border)">
               <MapPin className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
               <p className="text-[14px] font-semibold mb-1" style={{ color: "var(--text-primary)" }}>No sites configured</p>
               <p className="text-[12px] mb-4" style={{ color: "var(--text-secondary)" }}>
@@ -137,7 +109,7 @@ export function SitePicker() {
                 id="site-search"
                 type="search"
                 icon={Search}
-                placeholder="Search sites..."
+                placeholder="Search sites…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -160,7 +132,6 @@ export function SitePicker() {
                 </div>
               ) : (
                 filtered.map((site) => {
-                  const risk = riskStyles[site.risk];
                   const isSelected = selectedSite?.id === site.id;
                   return (
                     <div key={site.id} role="listitem" className="mb-1.5">
@@ -168,7 +139,7 @@ export function SitePicker() {
                         type="button"
                         onClick={() => setSelectedSite(site)}
                         aria-pressed={isSelected}
-                        aria-label={`${site.name} — ${site.risk} risk`}
+                        aria-label={site.name}
                         className="w-full flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-150 outline-none text-left"
                         style={{
                           background: isSelected ? "var(--brand-muted)" : "transparent",
@@ -177,10 +148,10 @@ export function SitePicker() {
                       >
                         {/* site icon */}
                         <div
-                          className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${risk.iconBg}`}
+                          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-(--brand-muted)"
                         >
                           <Building2
-                            className={`w-4 h-4 ${risk.iconColor}`}
+                            className="w-4 h-4 text-(--brand)"
                             aria-hidden="true"
                           />
                         </div>
@@ -197,11 +168,6 @@ export function SitePicker() {
 
                         {/* right side */}
                         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                          <span
-                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${risk.badgeBg} ${risk.badgeColor}`}
-                          >
-                            {site.risk}
-                          </span>
                           <div
                             className="w-4 h-4 rounded-full flex items-center justify-center transition-all"
                             style={{ border: isSelected ? "2px solid var(--brand)" : "2px solid var(--bg-border)" }}
@@ -227,8 +193,11 @@ export function SitePicker() {
               <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
                 {selectedSite ? `${selectedSite.name} selected` : "No site selected"}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="primary"
+                icon={ArrowRight}
+                iconPosition="right"
                 onClick={handleEnter}
                 disabled={!selectedSite}
                 aria-label={
@@ -236,16 +205,9 @@ export function SitePicker() {
                     ? `Enter platform at ${selectedSite.name}`
                     : "Select a site to continue"
                 }
-                className="flex items-center gap-1.5 rounded-lg px-5 py-2.5 text-[12px] font-semibold transition-colors duration-150 disabled:cursor-not-allowed"
-                style={{
-                  background: selectedSite ? "var(--brand)" : "var(--bg-border)",
-                  color: selectedSite ? "#ffffff" : "var(--text-muted)",
-                  border: "none",
-                }}
               >
                 Enter platform
-                <ArrowRight className="w-[13px] h-[13px]" aria-hidden="true" />
-              </button>
+              </Button>
             </div>
           </>
         )}

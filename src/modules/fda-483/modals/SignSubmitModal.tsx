@@ -1,24 +1,10 @@
-import clsx from "clsx";
 import { ShieldCheck } from "lucide-react";
-import type {
-  FDA483Event,
-  EventType,
-} from "@/store/fda483.slice";
+import type { FDA483Event } from "@/types/fda483";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
-
-function eventTypeBadge(t: EventType) {
-  const m: Record<EventType, "red" | "amber" | "blue"> = {
-    "FDA 483": "red",
-    "Warning Letter": "red",
-    "EMA Inspection": "amber",
-    "MHRA Inspection": "amber",
-    "WHO Inspection": "blue",
-  };
-  return <Badge variant={m[t]}>{t}</Badge>;
-}
+import { eventTypeBadge } from "../_shared";
 
 export interface SignSubmitModalProps {
   open: boolean;
@@ -29,6 +15,16 @@ export interface SignSubmitModalProps {
   onSignMeaningChange: (v: string) => void;
   onSignPasswordChange: (v: string) => void;
   onSubmit: () => void;
+  /** Set by the parent when signSubmitFDA483Response rejects (wrong
+   *  password, role gate, validation). The modal stays open and renders
+   *  this message inline so the user can correct and retry without
+   *  losing the meaning-dropdown selection. Cleared by the parent on
+   *  retry or on modal close. */
+  error?: string | null;
+  /** True while the server signing call is in flight. Disables both
+   *  buttons and shows a spinner on Sign so the user can't double-submit
+   *  during a slow round-trip. */
+  busy?: boolean;
 }
 
 export function SignSubmitModal({
@@ -40,8 +36,9 @@ export function SignSubmitModal({
   onSignMeaningChange,
   onSignPasswordChange,
   onSubmit,
+  error,
+  busy,
 }: SignSubmitModalProps) {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   return (
     <Modal
       open={open}
@@ -55,16 +52,21 @@ export function SignSubmitModal({
       </p>
       {liveEvent && (
         <div
-          className={clsx(
-            "rounded-lg p-3 mb-4",
-            isDark
-              ? "bg-[#071526] border border-[#1e3a5a]"
-              : "bg-[#f8fafc] border border-[#e2e8f0]",
-          )}
+          className="rounded-lg p-3 mb-4 border"
+          style={{
+            background: "var(--bg-surface)",
+            borderColor: "var(--bg-border)",
+          }}
         >
           <div className="flex items-center gap-2 flex-wrap">
-            {eventTypeBadge(liveEvent.type)}
-            <span className="font-mono text-[11px] text-[#0ea5e9]">
+            {(() => {
+              const t = eventTypeBadge(liveEvent.type);
+              return <Badge variant={t.variant}>{t.label}</Badge>;
+            })()}
+            <span
+              className="font-mono text-[11px]"
+              style={{ color: "var(--text-primary)" }}
+            >
               {liveEvent.referenceNumber}
             </span>
           </div>
@@ -129,18 +131,33 @@ export function SignSubmitModal({
           </p>
         </div>
       </div>
+      {error && (
+        <p
+          role="alert"
+          className="text-[11px] rounded-md p-2 mt-4"
+          style={{
+            background: "var(--danger-bg)",
+            color: "var(--danger)",
+            border: "1px solid var(--danger)",
+          }}
+        >
+          {error}
+        </p>
+      )}
       <div className="flex justify-end gap-2 mt-4">
         <Button
           variant="ghost"
           type="button"
           onClick={onClose}
+          disabled={busy}
         >
           Cancel
         </Button>
         <Button
           variant="primary"
           icon={ShieldCheck}
-          disabled={!signMeaning || !signPassword}
+          disabled={busy || !signMeaning || !signPassword}
+          loading={busy}
           onClick={onSubmit}
         >
           Sign &amp; Submit

@@ -3,17 +3,10 @@ import type { RoleKey, ModuleKey } from "@/store/permissions.slice";
 
 export type UserRole = RoleKey;
 
-export const ROLE_LABELS: Record<UserRole, string> = {
-  super_admin: "Super Admin",
-  customer_admin: "Customer Admin",
-  qa_head: "QA Head",
-  qc_lab_director: "QC/Lab Director",
-  regulatory_affairs: "Regulatory Affairs",
-  csv_val_lead: "CSV/Val Lead",
-  it_cdo: "IT/CDO",
-  operations_head: "Operations Head",
-  viewer: "Viewer",
-};
+// Re-exported from the shared label layer so role display text has a single
+// source of truth (was a duplicated map here). Consumers importing ROLE_LABELS
+// from this hook keep working; new code should prefer roleLabel().
+export { ROLE_LABELS } from "@/lib/labels/roles";
 
 /** Maps module keys to route paths for sidebar/nav */
 const MODULE_PATHS: Record<ModuleKey, string> = {

@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pharma Glimmora - Project Status Report</title>
+  <style>
+    :root {
+      --bg-base: #040e1e;
+      --bg-surface: #071526;
+      --bg-elevated: #0a1f38;
+      --bg-border: #1e3a5a;
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #475569;
+      --brand: #0ea5e9;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --info: #6366f1;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      padding: 2rem;
+    }
+
+    .container { max-width: 1400px; margin: 0 auto; }
+
+    header {
+      text-align: center;
+      padding: 2rem 0 3rem;
+      border-bottom: 1px solid var(--bg-border);
+      margin-bottom: 2rem;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--brand);
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+    }
+
+    .report-date {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+
+    .executive-summary {
+      background: var(--bg-surface);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .stat-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--bg-border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--brand);
+    }
+
+    .stat-value.success { color: var(--success); }
+    .stat-value.warning { color: var(--warning); }
+    .stat-value.danger { color: var(--danger); }
+
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-top: 0.5rem;
+    }
+
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 2rem 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--brand);
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin: 1.5rem 0 0.75rem;
+    }
+
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .module-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .module-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--bg-border);
+    }
+
+    .module-name {
+      font-weight: 600;
+      font-size: 1rem;
+    }
+
+    .module-percentage {
+      font-weight: 700;
+      font-size: 1.1rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+    }
+
+    .percentage-high {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+    }
+
+    .percentage-medium {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+    }
+
+    .percentage-low {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+    }
+
+    .module-body {
+      padding: 1.25rem;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: var(--bg-border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .progress-fill.high { background: var(--success); }
+    .progress-fill.medium { background: var(--warning); }
+    .progress-fill.low { background: var(--danger); }
+
+    .feature-section {
+      margin-bottom: 1rem;
+    }
+
+    .feature-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature-label.implemented { color: var(--success); }
+    .feature-label.partial { color: var(--warning); }
+    .feature-label.missing { color: var(--danger); }
+    .feature-label.next { color: var(--info); }
+
+    .feature-list {
+      list-style: none;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    .feature-list li {
+      padding: 0.25rem 0;
+      padding-left: 1.25rem;
+      position: relative;
+    }
+
+    .feature-list li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.6rem;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    .feature-list.implemented li::before { background: var(--success); }
+    .feature-list.partial li::before { background: var(--warning); }
+    .feature-list.missing li::before { background: var(--danger); }
+    .feature-list.next li::before { background: var(--info); }
+
+    .integration-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+
+    .integration-table th,
+    .integration-table td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--bg-border);
+    }
+
+    .integration-table th {
+      background: var(--bg-elevated);
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .integration-table td {
+      color: var(--text-primary);
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .status-complete {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+    }
+
+    .status-partial {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+    }
+
+    .status-missing {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+    }
+
+    .status-stub {
+      background: rgba(239, 68, 68, 0.25);
+      color: var(--danger);
+    }
+
+    .critical-gaps {
+      background: var(--bg-surface);
+      border: 1px solid var(--danger);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 2rem 0;
+    }
+
+    .critical-gaps h3 {
+      color: var(--danger);
+      margin-top: 0;
+    }
+
+    .gap-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--bg-border);
+    }
+
+    .gap-item:last-child { border-bottom: none; }
+
+    .gap-name { font-weight: 500; }
+
+    .gap-impact {
+      font-size: 0.8rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+    }
+
+    .impact-high {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+    }
+
+    .impact-medium {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+    }
+
+    .roadmap {
+      background: var(--bg-surface);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 2rem 0;
+    }
+
+    .roadmap-phase {
+      margin-bottom: 1.5rem;
+    }
+
+    .phase-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .phase-number {
+      width: 28px;
+      height: 28px;
+      background: var(--brand);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+    }
+
+    .phase-title {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .phase-items {
+      margin-left: 2.5rem;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
+
+    .phase-items li {
+      padding: 0.25rem 0;
+    }
+
+    .tech-stack {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin: 1rem 0;
+    }
+
+    .stack-section {
+      background: var(--bg-surface);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .stack-title {
+      font-weight: 600;
+      color: var(--brand);
+      margin-bottom: 0.75rem;
+      font-size: 0.95rem;
+    }
+
+    .stack-items {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    .stack-items code {
+      background: var(--bg-elevated);
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--brand);
+    }
+
+    footer {
+      text-align: center;
+      padding: 2rem 0;
+      margin-top: 3rem;
+      border-top: 1px solid var(--bg-border);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+      h1 { font-size: 1.75rem; }
+      .module-grid { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Pharma Glimmora</h1>
+      <p class="subtitle">GxP/GMP Inspection Readiness Platform - Project Status Report</p>
+      <p class="report-date">Generated: April 29, 2026</p>
+    </header>
+
+    <section class="executive-summary">
+      <h2 style="margin-top: 0; border: none; padding: 0;">Executive Summary</h2>
+      <div class="summary-grid">
+        <div class="stat-card">
+          <div class="stat-value">87%</div>
+          <div class="stat-label">Frontend Completion</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">85%</div>
+          <div class="stat-label">Backend Completion</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value success">10</div>
+          <div class="stat-label">Production-Ready Modules</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value warning">3</div>
+          <div class="stat-label">Partial Modules</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value danger">1</div>
+          <div class="stat-label">Stub Only</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color: var(--info);">30+</div>
+          <div class="stat-label">Backend API Endpoints</div>
+        </div>
+      </div>
+    </section>
+
+    <h2>Frontend Modules (Glimmora-Pharma)</h2>
+
+    <div class="module-grid">
+      <!-- Dashboard -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Dashboard</span>
+          <span class="module-percentage percentage-high">95%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 95%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Executive KPI cards (readiness, findings, CAPA rate)</li>
+              <li>Area readiness heatmap with multi-site support</li>
+              <li>Observation volume trend chart</li>
+              <li>90-day action plan with priority sorting</li>
+              <li>AGI insights panel with conditional alerts</li>
+              <li>Dynamic site & time period filtering</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label next">Next Steps</div>
+            <ul class="feature-list next">
+              <li>Backend API integration testing</li>
+              <li>PDF export functionality</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gap Assessment -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Gap Assessment</span>
+          <span class="module-percentage percentage-high">92%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 92%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Summary, Findings Register, Evidence Index tabs</li>
+              <li>Finding CRUD with severity/framework classification</li>
+              <li>Evidence linking workflow</li>
+              <li>CAPA auto-raise from findings</li>
+              <li>Multi-framework filtering</li>
+              <li>Audit trail for all operations</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label next">Next Steps</div>
+            <ul class="feature-list next">
+              <li>Bulk operations (multi-select)</li>
+              <li>Evidence file upload integration</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- CAPA -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">CAPA Management</span>
+          <span class="module-percentage percentage-high">95%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 95%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>QMS Blueprint, Tracker, Metrics tabs</li>
+              <li>7-step lifecycle visualization</li>
+              <li>RCA with 5-Why, Fishbone, Fault Tree</li>
+              <li>DI gate with clearance tracking</li>
+              <li>E-signature closure with audit trail</li>
+              <li>Risk metrics & overdue tracking</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label partial">Needs Work</div>
+            <ul class="feature-list partial">
+              <li>Backend API integration for persistence</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Deviation -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Deviation Management</span>
+          <span class="module-percentage percentage-high">90%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 90%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Deviation reporting (planned/unplanned)</li>
+              <li>Severity & impact classification</li>
+              <li>Category taxonomy & batch tracking</li>
+              <li>CAPA auto-raise with risk mapping</li>
+              <li>Document upload & linked CAPA tracking</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>Trend analysis & recurrence detection</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- FDA 483 -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">FDA 483 Response</span>
+          <span class="module-percentage percentage-high">94%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 94%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Event registration with inspection details</li>
+              <li>Observations tab with RCA workspace</li>
+              <li>CAPA auto-creation from observations</li>
+              <li>AGI-assisted response drafting</li>
+              <li>E-signature submission workflow</li>
+              <li>Commitment tracking & deadline alerts</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label next">Next Steps</div>
+            <ul class="feature-list next">
+              <li>Backend API integration</li>
+              <li>Historical pattern analysis</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- CSV/CSA -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">CSV/CSA (Computer System Validation)</span>
+          <span class="module-percentage percentage-high">92%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 92%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>System Inventory with risk classification</li>
+              <li>Part 11, Annex 11, GAMP 5 compliance status</li>
+              <li>CSV Roadmap with stage-based planning</li>
+              <li>System detail drawer (Risk, Validation, DI)</li>
+              <li>Bidirectional sync with roadmap activities</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>Full RTM functionality (traceability matrix)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Evidence/Documents -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Evidence & Documents</span>
+          <span class="module-percentage percentage-high">88%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 88%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Document library aggregation</li>
+              <li>Classification & area-based organization</li>
+              <li>Evidence pack creation (multi-select)</li>
+              <li>HTML export with compliance tags</li>
+              <li>Linking to findings, CAPAs, systems</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>File upload integration (backend)</li>
+              <li>PDF export</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Governance -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Governance & KPIs</span>
+          <span class="module-percentage percentage-high">90%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 90%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>KPI Scorecard with 6 key metrics</li>
+              <li>Site readiness scoring & comparison</li>
+              <li>CAPA closure trend charts</li>
+              <li>RAID log management (Risk, Action, Issue, Decision)</li>
+              <li>Monthly KPI & inspection readiness exports</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label next">Next Steps</div>
+            <ul class="feature-list next">
+              <li>Dashboard trend analytics</li>
+              <li>Predictive risk scoring</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- AGI Console -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">AGI Console</span>
+          <span class="module-percentage percentage-high">85%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 85%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Overview, Intended Use, Human Oversight tabs</li>
+              <li>AGI mode configuration (Manual/Assisted/Autonomous)</li>
+              <li>Agent activation status tracking</li>
+              <li>Drift alert management & severity classification</li>
+              <li>Insight & action triggering metrics</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label next">Next Steps</div>
+            <ul class="feature-list next">
+              <li>Advanced drift analytics</li>
+              <li>ML model performance monitoring</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Admin -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Admin (Super Admin)</span>
+          <span class="module-percentage percentage-medium">40%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill medium" style="width: 40%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Super admin shell layout</li>
+              <li>Customer accounts listing</li>
+              <li>Customer detail view</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>Account CRUD operations</li>
+              <li>User role assignment</li>
+              <li>Subscription/plan management</li>
+              <li>Feature flag toggling</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inspection Readiness -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Inspection Readiness</span>
+          <span class="module-percentage percentage-low">5%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill low" style="width: 5%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing (Stub Only)</div>
+            <ul class="feature-list missing">
+              <li>Readiness scoring algorithm</li>
+              <li>Pre-inspection checklist</li>
+              <li>Document readiness verification</li>
+              <li>Inspector preparation workflow</li>
+              <li>Readiness metrics dashboard</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Settings</span>
+          <span class="module-percentage percentage-medium">75%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill medium" style="width: 75%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Organization settings (name, timezone)</li>
+              <li>Site management (add, edit, delete)</li>
+              <li>User management with roles</li>
+              <li>Compliance framework activation</li>
+              <li>AGI Policy configuration</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>SSO configuration</li>
+              <li>API token management</li>
+              <li>Integration webhooks</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Backend Modules (pharma_glimmora_ai_backend)</h2>
+
+    <div class="module-grid">
+      <!-- CAPA AI -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">CAPA AI Analysis</span>
+          <span class="module-percentage percentage-high">95%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 95%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">API Endpoints</div>
+            <ul class="feature-list implemented">
+              <li>POST /api/v1/capa/create - Create with AI recurrence detection</li>
+              <li>GET /api/v1/capa/all - Retrieve all CAPAs</li>
+              <li>GET /api/v1/capa/customer/{id} - Get by customer</li>
+              <li>GET /api/v1/capa/status/{id} - Get status details</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">AI Features</div>
+            <ul class="feature-list implemented">
+              <li>AI Recurrence Detection (GPT-4o)</li>
+              <li>Similarity Scoring (>= 0.70 threshold)</li>
+              <li>Risk Assessment from patterns</li>
+              <li>Document Analysis (PDF, DOCX, TXT)</li>
+              <li>Effectiveness Prediction</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- RCA -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">RCA (5-Why Analysis)</span>
+          <span class="module-percentage percentage-high">90%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 90%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">AI Features</div>
+            <ul class="feature-list implemented">
+              <li>Auto 5-Why Generation from CAPA problem</li>
+              <li>Quality Scoring (0-100: WEAK/MODERATE/STRONG)</li>
+              <li>Depth Analysis & Evidence Validation</li>
+              <li>Systemic Thinking Assessment</li>
+              <li>Recurrence Risk Classification (LOW/MEDIUM/HIGH)</li>
+              <li>Auto Suggestions (3+ improvements)</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>Fishbone Diagram generation</li>
+              <li>Fault Tree Analysis</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Plan -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Action Plan Review</span>
+          <span class="module-percentage percentage-high">88%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 88%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">AI Features</div>
+            <ul class="feature-list implemented">
+              <li>Action-to-Root-Cause Alignment</li>
+              <li>Cosmetic CAPA Detection</li>
+              <li>Completeness Check</li>
+              <li>Mismatch Detection</li>
+              <li>Suggested Actions</li>
+              <li>Effectiveness Prediction</li>
+              <li>Plan Rating (WEAK/MODERATE/STRONG)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monitoring -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Implementation Monitoring</span>
+          <span class="module-percentage percentage-high">92%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 92%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">AI Features</div>
+            <ul class="feature-list implemented">
+              <li>Due Date Tracking & Overdue Detection</li>
+              <li>Owner Accountability</li>
+              <li>Dynamic Escalation (4-level)</li>
+              <li>Status Classification (On Track/At Risk/Critical)</li>
+              <li>Progress Analytics</li>
+              <li>AI Management Recommendations</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>Email notification integration</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Effectiveness -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">Effectiveness Verification</span>
+          <span class="module-percentage percentage-high">90%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 90%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">AI Features</div>
+            <ul class="feature-list implemented">
+              <li>Recurrence Check</li>
+              <li>Evidence Verification</li>
+              <li>Trend Analysis (before/after metrics)</li>
+              <li>Gap Detection</li>
+              <li>Effectiveness Scoring (0-100)</li>
+              <li>Closure Readiness Determination</li>
+              <li>30-day minimum wait enforcement</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Closure -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">CAPA Closure (HITL Gate)</span>
+          <span class="module-percentage percentage-high">85%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill high" style="width: 85%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">AI Features</div>
+            <ul class="feature-list implemented">
+              <li>Pre-Closure Checklist (5 items)</li>
+              <li>AI Closure Recommendation</li>
+              <li>Related CAPA Check</li>
+              <li>Risk Assessment (LOW/MEDIUM/HIGH)</li>
+              <li>Human-in-the-Loop Gate</li>
+              <li>Closure Rationale Storage</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Chat -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">AI Assistant & Chat</span>
+          <span class="module-percentage percentage-medium">75%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill medium" style="width: 75%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">AI Features</div>
+            <ul class="feature-list implemented">
+              <li>Intent Classification (DB_QUERY, RAG_SEARCH, GENERAL)</li>
+              <li>Natural Language DB Queries</li>
+              <li>RAG Search via Pinecone</li>
+              <li>Customer Isolation (JWT filtering)</li>
+              <li>Chat History Support</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>Streaming responses</li>
+              <li>Conversation persistence</li>
+              <li>Multi-language support</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- RAG -->
+      <div class="module-card">
+        <div class="module-header">
+          <span class="module-name">RAG / Knowledge Base</span>
+          <span class="module-percentage percentage-medium">60%</span>
+        </div>
+        <div class="module-body">
+          <div class="progress-bar">
+            <div class="progress-fill medium" style="width: 60%;"></div>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label implemented">Implemented</div>
+            <ul class="feature-list implemented">
+              <li>Pinecone Vector Store integration</li>
+              <li>Document Embedding (text-embedding-3-small)</li>
+              <li>Semantic Search with cosine similarity</li>
+              <li>Grounded Answers via context</li>
+            </ul>
+          </div>
+          <div class="feature-section">
+            <div class="feature-label missing">Missing</div>
+            <ul class="feature-list missing">
+              <li>Knowledge base ingestion UI</li>
+              <li>Document management APIs</li>
+              <li>Document versioning</li>
+              <li>Actual SOP/procedure content (stub only)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="critical-gaps">
+      <h3>Critical Gaps & Blockers</h3>
+      <div class="gap-item">
+        <span class="gap-name">Frontend-Backend API Integration</span>
+        <span class="gap-impact impact-high">HIGH</span>
+      </div>
+      <div class="gap-item">
+        <span class="gap-name">FDA 483 Parsing (Backend)</span>
+        <span class="gap-impact impact-high">HIGH</span>
+      </div>
+      <div class="gap-item">
+        <span class="gap-name">Inspection Readiness Module (Frontend)</span>
+        <span class="gap-impact impact-high">HIGH</span>
+      </div>
+      <div class="gap-item">
+        <span class="gap-name">RAG Knowledge Base Content</span>
+        <span class="gap-impact impact-medium">MEDIUM</span>
+      </div>
+      <div class="gap-item">
+        <span class="gap-name">Email Notifications for Escalations</span>
+        <span class="gap-impact impact-medium">MEDIUM</span>
+      </div>
+      <div class="gap-item">
+        <span class="gap-name">File Upload/Download Infrastructure</span>
+        <span class="gap-impact impact-medium">MEDIUM</span>
+      </div>
+      <div class="gap-item">
+        <span class="gap-name">RTM (Requirements Traceability Matrix)</span>
+        <span class="gap-impact impact-medium">MEDIUM</span>
+      </div>
+      <div class="gap-item">
+        <span class="gap-name">PDF Report Generation</span>
+        <span class="gap-impact impact-medium">MEDIUM</span>
+      </div>
+    </section>
+
+    <h2>Integration Status</h2>
+
+    <table class="integration-table">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>Frontend</th>
+          <th>Backend</th>
+          <th>Integration</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Authentication</td>
+          <td><span class="status-badge status-complete">Complete</span></td>
+          <td><span class="status-badge status-complete">Complete</span></td>
+          <td><span class="status-badge status-complete">Connected</span></td>
+        </tr>
+        <tr>
+          <td>CAPA CRUD</td>
+          <td><span class="status-badge status-complete">UI Ready</span></td>
+          <td><span class="status-badge status-complete">API Ready</span></td>
+          <td><span class="status-badge status-partial">Needs Wiring</span></td>
+        </tr>
+        <tr>
+          <td>CAPA AI Analysis</td>
+          <td><span class="status-badge status-complete">UI Ready</span></td>
+          <td><span class="status-badge status-complete">API Ready</span></td>
+          <td><span class="status-badge status-partial">Needs Wiring</span></td>
+        </tr>
+        <tr>
+          <td>RCA (5-Why)</td>
+          <td><span class="status-badge status-complete">UI Ready</span></td>
+          <td><span class="status-badge status-complete">API Ready</span></td>
+          <td><span class="status-badge status-partial">Needs Wiring</span></td>
+        </tr>
+        <tr>
+          <td>Deviation CRUD</td>
+          <td><span class="status-badge status-complete">UI Ready</span></td>
+          <td><span class="status-badge status-missing">Not Built</span></td>
+          <td><span class="status-badge status-missing">Not Started</span></td>
+        </tr>
+        <tr>
+          <td>FDA 483 Management</td>
+          <td><span class="status-badge status-complete">UI Ready</span></td>
+          <td><span class="status-badge status-missing">Not Built</span></td>
+          <td><span class="status-badge status-missing">Not Started</span></td>
+        </tr>
+        <tr>
+          <td>Document Upload</td>
+          <td><span class="status-badge status-partial">Modal Ready</span></td>
+          <td><span class="status-badge status-missing">Not Built</span></td>
+          <td><span class="status-badge status-missing">Not Started</span></td>
+        </tr>
+        <tr>
+          <td>AI Chat</td>
+          <td><span class="status-badge status-partial">Placeholder</span></td>
+          <td><span class="status-badge status-complete">API Ready</span></td>
+          <td><span class="status-badge status-partial">Needs Wiring</span></td>
+        </tr>
+        <tr>
+          <td>Escalation Emails</td>
+          <td><span class="status-badge status-complete">Display Ready</span></td>
+          <td><span class="status-badge status-missing">Not Built</span></td>
+          <td><span class="status-badge status-missing">Not Started</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Recommended Roadmap</h2>
+
+    <section class="roadmap">
+      <div class="roadmap-phase">
+        <div class="phase-header">
+          <span class="phase-number">1</span>
+          <span class="phase-title">API Integration Sprint (Priority: Critical)</span>
+        </div>
+        <ul class="phase-items">
+          <li>Wire frontend CAPA module to backend CAPA APIs</li>
+          <li>Connect RCA 5-Why UI to backend auto-generation</li>
+          <li>Integrate Action Plan review with AI recommendations</li>
+          <li>Connect Monitoring & Escalation features</li>
+          <li>Wire Effectiveness Check and Closure workflows</li>
+        </ul>
+      </div>
+
+      <div class="roadmap-phase">
+        <div class="phase-header">
+          <span class="phase-number">2</span>
+          <span class="phase-title">FDA 483 & Deviation Backend (Priority: High)</span>
+        </div>
+        <ul class="phase-items">
+          <li>Build FDA 483 parsing module (PDF extraction, observation detection)</li>
+          <li>Create Deviation CRUD APIs</li>
+          <li>Implement deviation-to-CAPA linking</li>
+          <li>Add recurrence detection for deviations</li>
+        </ul>
+      </div>
+
+      <div class="roadmap-phase">
+        <div class="phase-header">
+          <span class="phase-number">3</span>
+          <span class="phase-title">File & Document Infrastructure (Priority: High)</span>
+        </div>
+        <ul class="phase-items">
+          <li>Implement file upload/download backend (S3 or local storage)</li>
+          <li>Add document versioning and metadata tracking</li>
+          <li>Connect frontend Evidence module to file APIs</li>
+          <li>Implement PDF export for reports</li>
+        </ul>
+      </div>
+
+      <div class="roadmap-phase">
+        <div class="phase-header">
+          <span class="phase-number">4</span>
+          <span class="phase-title">Inspection Readiness Module (Priority: High)</span>
+        </div>
+        <ul class="phase-items">
+          <li>Define readiness scoring algorithm (weighted compliance factors)</li>
+          <li>Build pre-inspection checklist template system</li>
+          <li>Create document readiness verification workflow</li>
+          <li>Implement inspector preparation dashboard</li>
+        </ul>
+      </div>
+
+      <div class="roadmap-phase">
+        <div class="phase-header">
+          <span class="phase-number">5</span>
+          <span class="phase-title">Knowledge Base & Notifications (Priority: Medium)</span>
+        </div>
+        <ul class="phase-items">
+          <li>Build knowledge base ingestion pipeline</li>
+          <li>Create document upload UI for SOPs/procedures</li>
+          <li>Implement email notifications (SMTP integration)</li>
+          <li>Add conversation persistence for AI chat</li>
+        </ul>
+      </div>
+
+      <div class="roadmap-phase">
+        <div class="phase-header">
+          <span class="phase-number">6</span>
+          <span class="phase-title">Admin & Enterprise Features (Priority: Medium)</span>
+        </div>
+        <ul class="phase-items">
+          <li>Complete Admin CRUD for customer accounts</li>
+          <li>Implement subscription/plan management</li>
+          <li>Add SSO configuration</li>
+          <li>Build API token management</li>
+          <li>Create webhook configuration UI</li>
+        </ul>
+      </div>
+    </section>
+
+    <h2>Technology Stack</h2>
+
+    <div class="tech-stack">
+      <div class="stack-section">
+        <div class="stack-title">Frontend (Glimmora-Pharma)</div>
+        <div class="stack-items">
+          <p><code>Next.js 16.2.4</code> with App Router & Turbopack</p>
+          <p><code>React 19</code> + <code>TypeScript</code></p>
+          <p><code>Redux Toolkit</code> + <code>React Query</code></p>
+          <p><code>Tailwind CSS v4</code></p>
+          <p><code>NextAuth</code> for authentication</p>
+          <p><code>Prisma</code> + SQLite (local dev)</p>
+          <p><code>Zod</code> for validation</p>
+          <p><code>Recharts</code> for visualizations</p>
+        </div>
+      </div>
+
+      <div class="stack-section">
+        <div class="stack-title">Backend (pharma_glimmora_ai_backend)</div>
+        <div class="stack-items">
+          <p><code>FastAPI 0.115.0</code></p>
+          <p><code>Python 3.12</code></p>
+          <p><code>SQLAlchemy 2.0</code> ORM</p>
+          <p><code>SQLite</code> (dev), PostgreSQL-ready</p>
+          <p><code>OpenAI GPT-4o</code> for AI features</p>
+          <p><code>Pinecone</code> for vector storage (RAG)</p>
+          <p><code>PyJWT</code> for authentication</p>
+          <p><code>Uvicorn</code> server</p>
+        </div>
+      </div>
+
+      <div class="stack-section">
+        <div class="stack-title">Compliance Frameworks</div>
+        <div class="stack-items">
+          <p>21 CFR Part 210/211 (FDA cGMP)</p>
+          <p>21 CFR Part 11 (Electronic Records)</p>
+          <p>EU GMP Annex 11 (Computerized Systems)</p>
+          <p>EU GMP Annex 15 (Qualification & Validation)</p>
+          <p>ICH Q9 (Quality Risk Management)</p>
+          <p>ICH Q10 (Pharmaceutical Quality System)</p>
+          <p>GAMP 5 (Risk-Based Approach)</p>
+          <p>WHO GMP Guidelines</p>
+        </div>
+      </div>
+
+      <div class="stack-section">
+        <div class="stack-title">AI Capabilities</div>
+        <div class="stack-items">
+          <p>CAPA Recurrence Detection</p>
+          <p>Auto 5-Why RCA Generation</p>
+          <p>Action Plan Quality Scoring</p>
+          <p>Dynamic Escalation Rules</p>
+          <p>Effectiveness Prediction</p>
+          <p>HITL (Human-in-the-Loop) Gates</p>
+          <p>RAG-based Knowledge Search</p>
+          <p>Intent-based Chat Routing</p>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <p>Pharma Glimmora - GxP/GMP Inspection Readiness Platform</p>
+      <p>Report generated by Claude Code Analysis</p>
+    </footer>
+  </div>
+</body>
+</html>

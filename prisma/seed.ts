@@ -1,54 +1,49 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { BCRYPT_COST } from "../src/lib/passwords";
+import { PLAN_TIERS } from "../src/lib/plans";
+import { seedPlanRoleLimits } from "./roleLimitsSeed";
+import { RESERVED_FRAMEWORKS } from "../src/constants/frameworks";
+import { REGULATORY_REGIONS, GLOBAL_REGION_VALUE, GLOBAL_REGION_LABEL } from "../src/constants/regulatoryRegions";
 
 const prisma = new PrismaClient();
 
+/** Add N working days (skip Sat/Sun) — used for the fresh event's deadline. */
+function addWorkingDays(from: Date, n: number): Date {
+  const d = new Date(from);
+  let added = 0;
+  while (added < n) {
+    d.setDate(d.getDate() + 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return d;
+}
+
 async function main() {
-  console.log("Seeding database with comprehensive data...\n");
+  console.log("Seeding database...");
+
+  // Refresh passwordHash on every seed run so re-seeding heals hash drift
+  // (manual edits, partial migrations, stale rows from earlier seed values).
+  // Without this the upsert update branch was a no-op and login could
+  // silently break with no way to recover short of `db:reset`.
+  const superAdminHash = await bcrypt.hash("1", BCRYPT_COST);
+  const demoHash = await bcrypt.hash("Admin@123", BCRYPT_COST);
 
   // ══════════════════════════════════════════════════════════════════════════
-  // CLEANUP - Remove existing data to avoid duplicates
+  // SUBSCRIPTION PLANS (Razorpay)
   // ══════════════════════════════════════════════════════════════════════════
 
-  await prisma.auditLog.deleteMany();
-  await prisma.simulation.deleteMany();
-  await prisma.readinessAction.deleteMany();
-  await prisma.inspection.deleteMany();
-  await prisma.roadmapActivity.deleteMany();
-  await prisma.rTMEntry.deleteMany();
-  await prisma.validationStage.deleteMany();
-  await prisma.fDA483Commitment.deleteMany();
-  await prisma.fDA483Observation.deleteMany();
-  await prisma.fDA483Event.deleteMany();
-  await prisma.cAPADocument.deleteMany();
-  await prisma.cAPA.deleteMany();
-  await prisma.deviation.deleteMany();
-  await prisma.finding.deleteMany();
-  await prisma.gxPSystem.deleteMany();
-  await prisma.document.deleteMany();
-  await prisma.rAIDItem.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.site.deleteMany();
-  await prisma.payment.deleteMany();
-  await prisma.subscription.deleteMany();
-  await prisma.pendingSignup.deleteMany();
-  await prisma.subscriptionPlan.deleteMany();
-  await prisma.tenant.deleteMany();
-
-  console.log("✓ Cleaned up existing data\n");
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // SUBSCRIPTION PLANS
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const starterPlan = await prisma.subscriptionPlan.create({
-    data: {
+  const starterPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "starter" },
+    update: {},
+    create: {
       id: "plan-starter",
       name: "starter",
       displayName: "Starter",
       description: "Perfect for small teams getting started with GxP compliance",
-      priceMonthly: 999900, // ₹9,999/month in paise
-      priceYearly: 9999900, // ₹99,999/year in paise (2 months free)
+      priceMonthly: 999900,
+      priceYearly: 9999900,
       currency: "INR",
       maxAccounts: 5,
       maxSites: 1,
@@ -66,14 +61,16 @@ async function main() {
     },
   });
 
-  const professionalPlan = await prisma.subscriptionPlan.create({
-    data: {
+  const professionalPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "professional" },
+    update: {},
+    create: {
       id: "plan-professional",
       name: "professional",
       displayName: "Professional",
       description: "For growing organizations with multiple sites",
-      priceMonthly: 2499900, // ₹24,999/month in paise
-      priceYearly: 24999900, // ₹2,49,999/year in paise (2 months free)
+      priceMonthly: 2499900,
+      priceYearly: 24999900,
       currency: "INR",
       maxAccounts: 15,
       maxSites: 3,
@@ -92,14 +89,16 @@ async function main() {
     },
   });
 
-  const enterprisePlan = await prisma.subscriptionPlan.create({
-    data: {
+  const enterprisePlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "enterprise" },
+    update: {},
+    create: {
       id: "plan-enterprise",
       name: "enterprise",
       displayName: "Enterprise",
       description: "Full platform access for large pharma organizations",
-      priceMonthly: 4999900, // ₹49,999/month in paise
-      priceYearly: 49999900, // ₹4,99,999/year in paise (2 months free)
+      priceMonthly: 4999900,
+      priceYearly: 49999900,
       currency: "INR",
       maxAccounts: 50,
       maxSites: 10,
@@ -118,46 +117,65 @@ async function main() {
     },
   });
 
-  console.log("✓ Subscription Plans: Starter, Professional, Enterprise");
+  console.log("  Subscription Plans: Starter, Professional, Enterprise");
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // TENANTS & AUTH
-  // ══════════════════════════════════════════════════════════════════════════
-
-  // Super Admin tenant
-  const superAdmin = await prisma.tenant.create({
-    data: {
+  // ── Super Admin tenant ──
+  const superAdmin = await prisma.tenant.upsert({
+    where: { email: "superadmin@glimmora.com" },
+    update: { passwordHash: superAdminHash, isActive: true },
+    create: {
       customerCode: "SUPER_001",
       name: "Glimmora Platform",
       username: "superadmin",
       email: "superadmin@glimmora.com",
-      passwordHash: await bcrypt.hash("1", 10),
+      passwordHash: superAdminHash,
       role: "super_admin",
       isActive: true,
     },
   });
-  console.log("✓ Super admin:", superAdmin.id);
+  console.log("  Super admin:", superAdmin.id);
 
-  // Demo customer tenant - Use fixed ID matching frontend
-  const DEMO_TENANT_ID = "tenant-glimmora";
-  const demo = await prisma.tenant.create({
-    data: {
-      id: DEMO_TENANT_ID,
+  // ── Demo customer tenant ──
+  const demo = await prisma.tenant.upsert({
+    where: { email: "admin@pharmaglimmora.com" },
+    update: { passwordHash: demoHash, isActive: true },
+    create: {
       customerCode: "PGI_001",
       name: "Pharma Glimmora International",
       username: "admin",
       email: "admin@pharmaglimmora.com",
-      passwordHash: await bcrypt.hash("Admin@123", 10),
+      passwordHash: demoHash,
       role: "customer_admin",
-      timezone: "Asia/Kolkata",
       isActive: true,
     },
   });
-  console.log("✓ Demo tenant:", demo.id);
+  console.log("  Demo tenant:", demo.id);
 
-  // Subscription with plan
-  await prisma.subscription.create({
-    data: {
+  // ── Plan (Subscription Phase A) ──
+  // Demo tenant is PROFESSIONAL. Caps are FROZEN onto the row from the tier
+  // defaults (30 users / 5 sites / 3yr min retention).
+  await prisma.plan.upsert({
+    where: { tenantId: demo.id },
+    update: {},
+    create: {
+      tenantId: demo.id,
+      tier: "PROFESSIONAL",
+      displayName: null,
+      maxUsers: PLAN_TIERS.PROFESSIONAL.maxUsers,
+      maxSites: PLAN_TIERS.PROFESSIONAL.maxSites,
+      minRetentionYears: PLAN_TIERS.PROFESSIONAL.minRetentionYears,
+      durationMonths: PLAN_TIERS.PROFESSIONAL.durationMonths,
+      startDate: new Date("2026-01-01"),
+      expiryDate: new Date("2026-12-31"),
+    },
+  });
+  console.log("  Plan created (PROFESSIONAL tier)");
+
+  // ── Subscription (Razorpay payment tracking) ──
+  await prisma.subscription.upsert({
+    where: { tenantId: demo.id },
+    update: {},
+    create: {
       tenantId: demo.id,
       planId: professionalPlan.id,
       maxAccounts: 15,
@@ -172,1045 +190,1070 @@ async function main() {
       gracePeriodDays: 7,
     },
   });
-  console.log("✓ Subscription created (Professional Plan)");
+  console.log("  Subscription created (Professional Plan)");
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // SITES - Use hardcoded IDs matching frontend Redux initial state
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const mumbai = await prisma.site.create({
-    data: { id: "site-gl-1", tenantId: demo.id, name: "Mumbai API Plant", location: "Mumbai, Maharashtra", gmpScope: "API Manufacturing", risk: "HIGH" },
-  });
-  const bangalore = await prisma.site.create({
-    data: { id: "site-gl-2", tenantId: demo.id, name: "Bangalore R&D Centre", location: "Bangalore, Karnataka", gmpScope: "R&D", risk: "MEDIUM" },
-  });
-  const chennai = await prisma.site.create({
-    data: { id: "site-gl-3", tenantId: demo.id, name: "Chennai QC Laboratory", location: "Chennai, Tamil Nadu", gmpScope: "QC Testing", risk: "HIGH" },
-  });
-  const hyderabad = await prisma.site.create({
-    data: { id: "site-gl-4", tenantId: demo.id, name: "Hyderabad Formulation", location: "Hyderabad, Telangana", gmpScope: "Formulation", risk: "HIGH" },
-  });
-  console.log("✓ Sites: Mumbai, Bangalore, Chennai, Hyderabad");
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // USERS - Passwords match frontend mock accounts
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const usersList = [
-    { id: "u-002", name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", username: "priya.sharma", role: "qa_head", gxpSignatory: true, siteId: chennai.id, password: "QaHead@123" },
-    { id: "u-003", name: "Rahul Mehta", email: "ra@pharmaglimmora.com", username: "rahul.mehta", role: "regulatory_affairs", gxpSignatory: true, siteId: mumbai.id, password: "RegAff@123" },
-    { id: "u-004", name: "Anita Patel", email: "csv@pharmaglimmora.com", username: "anita.patel", role: "csv_val_lead", gxpSignatory: true, siteId: chennai.id, password: "CsvVal@123" },
-    { id: "u-005", name: "Dr. Nisha Rao", email: "qc@pharmaglimmora.com", username: "nisha.rao", role: "qc_lab_director", gxpSignatory: true, siteId: chennai.id, password: "QcLab@123" },
-    { id: "u-006", name: "Vikram Singh", email: "it@pharmaglimmora.com", username: "vikram.singh", role: "it_cdo", gxpSignatory: false, siteId: bangalore.id, password: "ItCdo@123" },
-    { id: "u-007", name: "Suresh Kumar", email: "ops@pharmaglimmora.com", username: "suresh.kumar", role: "operations_head", gxpSignatory: false, siteId: hyderabad.id, password: "OpsHead@123" },
-    { id: "u-008", name: "Meera Krishnan", email: "viewer@pharmaglimmora.com", username: "meera.krishnan", role: "viewer", gxpSignatory: false, siteId: mumbai.id, password: "Viewer@123" },
-  ];
-
-  const users: Record<string, string> = {};
-  for (const u of usersList) {
-    const { password, id, ...userData } = u;
-    const user = await prisma.user.create({
-      data: { id, tenantId: demo.id, ...userData, passwordHash: await bcrypt.hash(password, 10) },
-    });
-    users[u.role] = user.id;
-    users[u.id] = user.id;
-  }
-  console.log("✓ Users:", usersList.length);
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // FINDINGS (Gap Assessment) - Comprehensive data
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const findings = [
+  // ── Additional tenants: one per remaining tier so smoke tests can exercise
+  // all four plans. Each gets a customer_admin (the tenant row itself), a
+  // frozen plan, and a few users/sites kept comfortably under their caps. ──
+  const tierHash = await bcrypt.hash("Admin@123", BCRYPT_COST);
+  const extraTenants = [
     {
-      id: "FIND-001",
-      requirement: "Audit trail not enabled in LIMS — 21 CFR 11.10(e)",
-      area: "Laboratory",
-      framework: "21 CFR Part 11",
-      severity: "Critical",
-      status: "In Progress",
-      owner: users["u-004"],
-      siteId: chennai.id,
-      targetDate: new Date("2026-05-01"),
-      rootCause: "LIMS configuration not enforcing audit trail for all GxP-critical fields",
-      evidenceLink: "https://docs.pharmaglimmora.com/lims-gap-assessment",
+      code: "ESS_001", name: "Wellspring Generics", username: "wellspring", email: "admin@wellspring.test",
+      tier: "ESSENTIALS" as const, displayName: null as string | null,
+      caps: { maxUsers: PLAN_TIERS.ESSENTIALS.maxUsers, maxSites: PLAN_TIERS.ESSENTIALS.maxSites, minRetentionYears: PLAN_TIERS.ESSENTIALS.minRetentionYears, durationMonths: PLAN_TIERS.ESSENTIALS.durationMonths },
+      sites: [{ name: "Pune Plant", code: "PUN" }],
+      users: [
+        { name: "Ravi Kumar", email: "ravi@wellspring.test", username: "ravi", role: "qa_head", gxpSignatory: true },
+        // Phase 6 cleanup FIX 2 — SoD-viable QA: 2nd qa_head + a regulatory_affairs.
+        { name: "Priya Desai", email: "priya@wellspring.test", username: "priya.desai", role: "qa_head", gxpSignatory: true },
+        { name: "Karan Shah", email: "karan@wellspring.test", username: "karan.shah", role: "regulatory_affairs", gxpSignatory: true },
+      ],
     },
     {
-      id: "FIND-002",
-      requirement: "E-signature not enforced in CDS — 21 CFR 11.50",
-      area: "Laboratory",
-      framework: "21 CFR Part 11",
-      severity: "Critical",
-      status: "Open",
-      owner: users["u-005"],
-      siteId: chennai.id,
-      targetDate: new Date("2026-05-15"),
-      rootCause: "CDS e-signature module not configured for method approvals",
+      code: "ENT_001", name: "Helios Biologics", username: "helios", email: "admin@helios.test",
+      tier: "ENTERPRISE" as const, displayName: null as string | null,
+      caps: { maxUsers: PLAN_TIERS.ENTERPRISE.maxUsers, maxSites: PLAN_TIERS.ENTERPRISE.maxSites, minRetentionYears: PLAN_TIERS.ENTERPRISE.minRetentionYears, durationMonths: PLAN_TIERS.ENTERPRISE.durationMonths },
+      sites: [{ name: "Vizag Biologics", code: "VTZ" }, { name: "Goa Fill-Finish", code: "GOA" }],
+      users: [
+        { name: "Meera Nair", email: "meera@helios.test", username: "meera", role: "qa_head", gxpSignatory: true },
+        { name: "Arjun Rao", email: "arjun@helios.test", username: "arjun", role: "csv_val_lead", gxpSignatory: true },
+        // Phase 6 cleanup FIX 2 — SoD-viable QA: 2nd qa_head + a regulatory_affairs.
+        { name: "Vivek Menon", email: "vivek@helios.test", username: "vivek.menon", role: "qa_head", gxpSignatory: true },
+        { name: "Anjali Iyer", email: "anjali@helios.test", username: "anjali.iyer", role: "regulatory_affairs", gxpSignatory: true },
+      ],
     },
     {
-      id: "FIND-003",
-      requirement: "Temperature monitoring records incomplete for cold storage units",
-      area: "Storage & Distribution",
-      framework: "EU GMP Annex 11",
-      severity: "Critical",
-      status: "Open",
-      owner: users["u-002"],
-      siteId: chennai.id,
-      targetDate: new Date("2026-05-20"),
-      rootCause: "Manual logging process prone to human error",
-    },
-    {
-      id: "FIND-004",
-      requirement: "Batch record review not completed within 30 days",
-      area: "Production",
-      framework: "21 CFR 211.192",
-      severity: "Major",
-      status: "Open",
-      owner: users["u-002"],
-      siteId: mumbai.id,
-      targetDate: new Date("2026-05-25"),
-    },
-    {
-      id: "FIND-005",
-      requirement: "Equipment qualification status not current for HPLC units",
-      area: "Laboratory",
-      framework: "GAMP 5",
-      severity: "Major",
-      status: "Closed",
-      owner: users["u-005"],
-      siteId: chennai.id,
-      targetDate: new Date("2026-04-01"),
-    },
-    {
-      id: "FIND-006",
-      requirement: "Deviation trending analysis not performed quarterly",
-      area: "Quality Systems",
-      framework: "ICH Q10",
-      severity: "Minor",
-      status: "Open",
-      owner: users["u-002"],
-      siteId: hyderabad.id,
-      targetDate: new Date("2026-06-01"),
-    },
-    {
-      id: "FIND-007",
-      requirement: "Electronic signature policy not aligned with Part 11 requirements",
-      area: "Data Integrity",
-      framework: "21 CFR Part 11",
-      severity: "Critical",
-      status: "In Progress",
-      owner: users["u-006"],
-      siteId: bangalore.id,
-      targetDate: new Date("2026-04-30"),
-    },
-    {
-      id: "FIND-008",
-      requirement: "Change control procedure missing risk assessment step",
-      area: "Quality Systems",
-      framework: "ICH Q9",
-      severity: "Major",
-      status: "Open",
-      owner: users["u-002"],
-      siteId: mumbai.id,
-      targetDate: new Date("2026-05-30"),
-    },
-    {
-      id: "FIND-009",
-      requirement: "Supplier qualification records incomplete for critical raw materials",
-      area: "Supply Chain",
-      framework: "EU GMP Chapter 5",
-      severity: "Major",
-      status: "Open",
-      owner: users["u-007"],
-      siteId: hyderabad.id,
-      targetDate: new Date("2026-06-05"),
-    },
-    {
-      id: "FIND-010",
-      requirement: "Computer system access not revoked within 24 hours of termination",
-      area: "Data Integrity",
-      framework: "21 CFR Part 11",
-      severity: "Major",
-      status: "In Progress",
-      owner: users["u-006"],
-      siteId: bangalore.id,
-      targetDate: new Date("2026-05-10"),
-    },
-    {
-      id: "FIND-011",
-      requirement: "Backup and recovery procedure not tested annually",
-      area: "Data Integrity",
-      framework: "EU GMP Annex 11",
-      severity: "Major",
-      status: "Open",
-      owner: users["u-006"],
-      siteId: mumbai.id,
-      targetDate: new Date("2026-06-15"),
-    },
-    {
-      id: "FIND-012",
-      requirement: "Training records not linked to SOP revisions",
-      area: "Training",
-      framework: "21 CFR 211.25",
-      severity: "Minor",
-      status: "Open",
-      owner: users["u-002"],
-      siteId: chennai.id,
-      targetDate: new Date("2026-06-20"),
+      code: "TLR_001", name: "Custom Pilot Pharma", username: "custompilot", email: "admin@custompilot.test",
+      tier: "TAILORED" as const, displayName: "Custom Pilot" as string | null,
+      caps: { maxUsers: 250, maxSites: 20, minRetentionYears: 10, durationMonths: 24 },
+      sites: [{ name: "Ahmedabad Plant", code: "AMD" }],
+      users: [
+        { name: "Sana Shaikh", email: "sana@custompilot.test", username: "sana", role: "qa_head", gxpSignatory: true },
+        // Phase 6 cleanup FIX 2 — SoD-viable QA: 2nd qa_head + a regulatory_affairs.
+        { name: "Farah Khan", email: "farah@custompilot.test", username: "farah.khan", role: "qa_head", gxpSignatory: true },
+        { name: "Imran Sheikh", email: "imran@custompilot.test", username: "imran.sheikh", role: "regulatory_affairs", gxpSignatory: true },
+      ],
     },
   ];
 
-  const createdFindings: string[] = [];
-  for (const f of findings) {
-    const { id, ...data } = f;
-    const finding = await prisma.finding.create({
-      data: { id, tenantId: demo.id, createdBy: users["u-002"], ...data },
+  for (const t of extraTenants) {
+    const tenant = await prisma.tenant.upsert({
+      where: { email: t.email },
+      update: { passwordHash: tierHash, isActive: true },
+      create: {
+        customerCode: t.code, name: t.name, username: t.username, email: t.email,
+        passwordHash: tierHash, role: "customer_admin", isActive: true,
+      },
     });
-    createdFindings.push(finding.id);
-  }
-  console.log("✓ Findings:", findings.length);
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // CAPAs - Comprehensive data with various states
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const capas = [
-    {
-      id: "CAPA-1417",
-      findingId: "FIND-001",
-      source: "Gap Assessment",
-      description: "Configure LIMS audit trail for all GxP-critical fields",
-      risk: "HIGH",
-      owner: users["u-004"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-05-15"),
-      status: "Closed",
-      rca: "Initial LIMS configuration did not include all required audit trail fields per 21 CFR 11.10(e)",
-      rcaMethod: "Fishbone",
-      correctiveActions: "1. Identify all GxP-critical fields\n2. Enable audit trail for each field\n3. Validate configuration\n4. Update SOPs",
-      diGate: true,
-      diGateStatus: "Cleared",
-      diGateReviewedBy: users["u-002"],
-      diGateReviewDate: new Date("2026-04-15"),
-      closedBy: users["u-002"],
-      closedAt: new Date("2026-04-16"),
-    },
-    {
-      id: "CAPA-1418",
-      findingId: "FIND-002",
-      source: "Gap Assessment",
-      description: "E-signature validation for CDS",
-      risk: "HIGH",
-      owner: users["u-005"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-05-30"),
-      status: "In Progress",
-      rca: "CDS e-signature module was not activated during initial deployment",
-      rcaMethod: "5 Why",
-      correctiveActions: "1. Activate e-signature module\n2. Configure signature meanings\n3. Execute OQ\n4. Train users",
-      diGate: true,
-      diGateStatus: "Pending",
-    },
-    {
-      id: "CAPA-1419",
-      findingId: "FIND-003",
-      source: "Gap Assessment",
-      description: "Implement automated temperature monitoring system with electronic alerts",
-      risk: "HIGH",
-      owner: users["u-002"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-06-01"),
-      status: "Open",
-      rca: "Lack of automated monitoring led to incomplete records and potential data gaps",
-      rcaMethod: "5 Why",
-      correctiveActions: "1. Procure IoT temperature sensors\n2. Integrate with SCADA\n3. Configure alert thresholds\n4. Train personnel",
-      diGate: true,
-      diGateStatus: "Pending",
-    },
-    {
-      id: "CAPA-1420",
-      source: "Internal Audit",
-      description: "Establish electronic batch record review workflow with escalation",
-      risk: "MEDIUM",
-      owner: users["u-002"],
-      siteId: mumbai.id,
-      dueDate: new Date("2026-06-15"),
-      status: "Open",
-      correctiveActions: "1. Define review workflow\n2. Configure system alerts\n3. Implement escalation rules",
-    },
-    {
-      id: "CAPA-1421",
-      source: "Customer Complaint",
-      description: "Revise packaging inspection procedure to prevent label mix-ups",
-      risk: "HIGH",
-      owner: users["u-007"],
-      siteId: hyderabad.id,
-      dueDate: new Date("2026-04-25"),
-      status: "Pending QA Review",
-      rca: "Insufficient line clearance verification between product changeovers",
-      rcaMethod: "5 Why",
-      correctiveActions: "1. Implement barcode verification\n2. Add dual verification step\n3. Update line clearance SOP",
-      effectivenessCheck: true,
-      effectivenessDate: new Date("2026-05-25"),
-    },
-    {
-      id: "CAPA-1422",
-      source: "Deviation",
-      description: "Update cleaning validation for multi-product equipment",
-      risk: "MEDIUM",
-      owner: users["u-004"],
-      siteId: mumbai.id,
-      dueDate: new Date("2026-05-25"),
-      status: "Closed",
-      rca: "Cleaning validation protocol did not account for all product residues",
-      rcaMethod: "Fishbone",
-      closedBy: users["u-002"],
-      closedAt: new Date("2026-04-10"),
-    },
-    {
-      id: "CAPA-1423",
-      source: "FDA 483",
-      description: "Implement revised method validation protocol for all impurity methods",
-      risk: "HIGH",
-      owner: users["u-005"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-05-30"),
-      status: "In Progress",
-      rca: "Method validation protocol did not include all ICH Q2 requirements",
-      rcaMethod: "Gap Analysis",
-      correctiveActions: "1. Revise validation protocol\n2. Execute revalidation\n3. Update method SOPs",
-      diGate: false,
-    },
-    {
-      id: "CAPA-1424",
-      source: "OOS Investigation",
-      description: "Improve dissolution method robustness",
-      risk: "HIGH",
-      owner: users["u-005"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-06-10"),
-      status: "Open",
-      rca: "Dissolution method sensitive to media preparation variations",
-      rcaMethod: "5 Why",
-      correctiveActions: "1. Conduct method ruggedness study\n2. Tighten media preparation controls\n3. Retrain analysts",
-    },
-    {
-      id: "CAPA-1425",
-      source: "Self-Inspection",
-      description: "Implement electronic training record system",
-      risk: "MEDIUM",
-      owner: users["u-002"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-07-01"),
-      status: "Open",
-      correctiveActions: "1. Evaluate LMS solutions\n2. Implement selected system\n3. Migrate existing records",
-    },
-    {
-      id: "CAPA-1426",
-      source: "Change Control",
-      description: "Qualify alternate excipient supplier",
-      risk: "MEDIUM",
-      owner: users["u-007"],
-      siteId: hyderabad.id,
-      dueDate: new Date("2026-06-30"),
-      status: "In Progress",
-      correctiveActions: "1. Conduct supplier audit\n2. Complete qualification protocol\n3. Update approved supplier list",
-    },
-  ];
-
-  for (const c of capas) {
-    const { id, ...data } = c;
-    await prisma.cAPA.create({
-      data: { id, tenantId: demo.id, createdBy: users["u-002"], ...data },
+    await prisma.plan.upsert({
+      where: { tenantId: tenant.id },
+      update: {},
+      create: {
+        tenantId: tenant.id,
+        tier: t.tier,
+        displayName: t.displayName,
+        maxUsers: t.caps.maxUsers,
+        maxSites: t.caps.maxSites,
+        minRetentionYears: t.caps.minRetentionYears,
+        durationMonths: t.caps.durationMonths,
+        startDate: new Date("2026-01-01"),
+        expiryDate: new Date("2026-12-31"),
+      },
     });
-  }
-  console.log("✓ CAPAs:", capas.length);
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // DEVIATIONS - Comprehensive data
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const deviations = [
-    {
-      id: "DEV-2026-001",
-      title: "Temperature excursion in cold room #3",
-      description: "Temperature rose to 12°C for 45 minutes due to door left open by cleaning crew",
-      type: "Unplanned",
-      category: "Environmental",
-      severity: "Major",
-      area: "Storage",
-      detectedBy: users["u-005"],
-      detectedDate: new Date("2026-04-10"),
-      owner: users["u-002"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-04-25"),
-      status: "open",
-      immediateAction: "Transferred products to cold room #2, initiated impact assessment on all stored materials",
-      patientSafetyImpact: "Potential impact on stability-sensitive products - requires evaluation",
-      productQualityImpact: "Assessment required for 12 batches stored in affected unit",
-      batchesAffected: "BTH-2026-0412, BTH-2026-0413, BTH-2026-0414",
-    },
-    {
-      id: "DEV-2026-002",
-      title: "Batch yield below specification",
-      description: "API batch yield at 78% vs specification of 85% minimum for intermediate compound",
-      type: "Unplanned",
-      category: "Process",
-      severity: "Major",
-      area: "Production",
-      detectedBy: users["u-007"],
-      detectedDate: new Date("2026-04-08"),
-      owner: users["u-002"],
-      siteId: mumbai.id,
-      dueDate: new Date("2026-04-22"),
-      status: "investigation",
-      immediateAction: "Batch quarantined pending investigation, notified QA and production management",
-      rootCause: "Reaction temperature variance during synthesis due to faulty thermocouple",
-      rcaMethod: "5 Why",
-      productQualityImpact: "Batch rejected, no product released to market",
-      batchesAffected: "API-2026-0088",
-    },
-    {
-      id: "DEV-2026-003",
-      title: "Missing signature on batch record page 5",
-      description: "Operator signature missing for weighing verification step on page 5 of batch record",
-      type: "Documentation",
-      category: "GDocP",
-      severity: "Minor",
-      area: "Production",
-      detectedBy: users["u-002"],
-      detectedDate: new Date("2026-04-12"),
-      owner: users["u-007"],
-      siteId: hyderabad.id,
-      dueDate: new Date("2026-04-19"),
-      status: "closed",
-      closedBy: users["u-002"],
-      closedDate: new Date("2026-04-15"),
-      closureNotes: "Signature obtained retrospectively with documented justification. Operator counseled on documentation requirements.",
-    },
-    {
-      id: "DEV-2026-004",
-      title: "OOS result for dissolution test",
-      description: "Dissolution at 30 min: 72% vs specification of NLT 80% for finished product batch",
-      type: "Laboratory",
-      category: "OOS",
-      severity: "Critical",
-      area: "Laboratory",
-      detectedBy: users["u-005"],
-      detectedDate: new Date("2026-04-14"),
-      owner: users["u-005"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-04-28"),
-      status: "open",
-      immediateAction: "Initiated OOS investigation per SOP-QC-015, batch quarantined",
-      regulatoryImpact: "May require field alert if confirmed OOS after Phase II investigation",
-      batchesAffected: "BTH-2026-0420",
-    },
-    {
-      id: "DEV-2026-005",
-      title: "Equipment malfunction during coating",
-      description: "Coating pan #2 spray gun nozzle clogged during coating operation",
-      type: "Unplanned",
-      category: "Equipment",
-      severity: "Minor",
-      area: "Production",
-      detectedBy: users["u-007"],
-      detectedDate: new Date("2026-04-15"),
-      owner: users["u-007"],
-      siteId: hyderabad.id,
-      dueDate: new Date("2026-04-22"),
-      status: "closed",
-      immediateAction: "Operation paused, nozzle replaced with spare, coating resumed after verification",
-      rootCause: "Coating solution viscosity slightly out of range due to ambient temperature variation",
-      rcaMethod: "Fishbone",
-      closedBy: users["u-002"],
-      closedDate: new Date("2026-04-20"),
-      closureNotes: "Preventive maintenance schedule updated to include daily nozzle inspection during coating campaigns",
-    },
-    {
-      id: "DEV-2026-006",
-      title: "Raw material received without CoA",
-      description: "Excipient lot received from approved supplier without Certificate of Analysis",
-      type: "Planned",
-      category: "Material",
-      severity: "Minor",
-      area: "Warehouse",
-      detectedBy: users["u-007"],
-      detectedDate: new Date("2026-04-16"),
-      owner: users["u-007"],
-      siteId: mumbai.id,
-      dueDate: new Date("2026-04-23"),
-      status: "investigation",
-      immediateAction: "Material quarantined, CoA requested from supplier urgently",
-    },
-    {
-      id: "DEV-2026-007",
-      title: "Power fluctuation in QC laboratory",
-      description: "30-second power fluctuation caused HPLC system to restart mid-sequence",
-      type: "Unplanned",
-      category: "Equipment",
-      severity: "Minor",
-      area: "Laboratory",
-      detectedBy: users["u-005"],
-      detectedDate: new Date("2026-04-17"),
-      owner: users["u-005"],
-      siteId: chennai.id,
-      dueDate: new Date("2026-04-24"),
-      status: "open",
-      immediateAction: "Sequence restarted, samples re-injected, UPS status checked",
-      batchesAffected: "BTH-2026-0422, BTH-2026-0423",
-    },
-  ];
-
-  for (const d of deviations) {
-    const { id, ...data } = d;
-    await prisma.deviation.create({
-      data: { id, tenantId: demo.id, createdBy: users["u-002"], ...data },
-    });
-  }
-  console.log("✓ Deviations:", deviations.length);
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // FDA 483 EVENTS - Comprehensive data
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const fda483Event = await prisma.fDA483Event.create({
-    data: {
-      id: "FEI-3004795103-2026",
-      tenantId: demo.id,
-      referenceNumber: "FDA-483-2026-001",
-      eventType: "FDA 483",
-      agency: "FDA",
-      siteId: chennai.id,
-      inspectionDate: new Date("2026-03-10"),
-      responseDeadline: new Date("2026-04-30"),
-      status: "In Progress",
-      createdBy: users["u-003"],
-    },
-  });
-
-  // Observations
-  const observations = [
-    {
-      number: 1,
-      text: "Failure to establish laboratory controls that include scientifically sound and appropriate specifications, standards, sampling plans, and test procedures designed to assure that components, drug product containers, closures, in-process materials, labeling, and drug products conform to appropriate standards of identity, strength, quality, and purity.",
-      severity: "Critical",
-      area: "Laboratory Controls",
-      regulation: "21 CFR 211.160(b)",
-      status: "In Progress",
-      rcaMethod: "Fishbone",
-      rootCause: "Inadequate method validation for impurity testing - validation protocol did not include all required ICH Q2 elements",
-      responseText: "Pharma Glimmora International acknowledges the observation and has initiated immediate corrective actions...",
-    },
-    {
-      number: 2,
-      text: "Failure to thoroughly review any unexplained discrepancy and the failure of a batch or any of its components to meet any of its specifications whether or not the batch has already been distributed.",
-      severity: "Major",
-      area: "Production and Process Controls",
-      regulation: "21 CFR 211.192",
-      status: "In Progress",
-      rcaMethod: "5 Why",
-      rootCause: "OOS investigation procedure not consistently followed - Phase II investigations initiated prematurely",
-      responseText: "We have revised our OOS investigation procedure to include mandatory checkpoints...",
-    },
-    {
-      number: 3,
-      text: "Failure to have, for each batch of drug product, appropriate laboratory determination of satisfactory conformance to final specifications for the drug product.",
-      severity: "Major",
-      area: "Laboratory Records",
-      regulation: "21 CFR 211.194(a)",
-      status: "Open",
-    },
-  ];
-
-  for (const obs of observations) {
-    await prisma.fDA483Observation.create({
-      data: { eventId: fda483Event.id, ...obs },
-    });
-  }
-
-  // Commitments
-  const commitments = [
-    { text: "Implement revised method validation protocol for all impurity methods", dueDate: new Date("2026-05-30"), owner: users["u-005"], status: "In Progress" },
-    { text: "Conduct OOS investigation refresher training for all QC personnel", dueDate: new Date("2026-05-15"), owner: users["u-002"], status: "In Progress" },
-    { text: "Revise batch release checklist to ensure all specifications verified", dueDate: new Date("2026-05-20"), owner: users["u-002"], status: "Pending" },
-    { text: "Implement electronic lab notebook with enforced workflow", dueDate: new Date("2026-06-30"), owner: users["u-005"], status: "Pending" },
-    { text: "Complete retrospective review of 2025 OOS investigations", dueDate: new Date("2026-05-10"), owner: users["u-005"], status: "In Progress" },
-  ];
-
-  for (const c of commitments) {
-    await prisma.fDA483Commitment.create({
-      data: { eventId: fda483Event.id, ...c },
-    });
-  }
-  console.log("✓ FDA 483 Event with", observations.length, "observations and", commitments.length, "commitments");
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // GxP SYSTEMS (CSV/CSA) - Comprehensive data
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const systems = [
-    {
-      id: "SYS-001",
-      name: "LIMS (LabWare)",
-      type: "LIMS",
-      vendor: "LabWare Inc.",
-      version: "7.4.2",
-      gxpRelevance: "Major",
-      part11Status: "Compliant",
-      annex11Status: "Compliant",
-      gamp5Category: "4",
-      validationStatus: "Validated",
-      riskLevel: "HIGH",
-      siteId: chennai.id,
-      intendedUse: "Management of laboratory samples, test results, and certificates of analysis",
-      owner: users["u-004"],
-    },
-    {
-      id: "SYS-002",
-      name: "SAP ERP",
-      type: "ERP",
-      vendor: "SAP",
-      version: "S/4HANA 2023",
-      gxpRelevance: "Major",
-      part11Status: "Compliant",
-      annex11Status: "Compliant",
-      gamp5Category: "4",
-      validationStatus: "Validated",
-      riskLevel: "HIGH",
-      siteId: mumbai.id,
-      intendedUse: "Batch management, inventory control, production planning",
-      owner: users["u-006"],
-    },
-    {
-      id: "SYS-003",
-      name: "Empower CDS",
-      type: "CDS",
-      vendor: "Waters Corporation",
-      version: "3.7",
-      gxpRelevance: "Major",
-      part11Status: "Non-Compliant",
-      annex11Status: "Partial",
-      gamp5Category: "4",
-      validationStatus: "In Progress",
-      riskLevel: "HIGH",
-      siteId: chennai.id,
-      intendedUse: "HPLC and GC data acquisition and processing",
-      owner: users["u-005"],
-      plannedActions: "Complete Part 11 gap remediation by Q2 2026",
-    },
-    {
-      id: "SYS-004",
-      name: "TrackWise",
-      type: "QMS",
-      vendor: "Honeywell",
-      version: "8.5",
-      gxpRelevance: "Major",
-      part11Status: "Compliant",
-      annex11Status: "Compliant",
-      gamp5Category: "4",
-      validationStatus: "Validated",
-      riskLevel: "MEDIUM",
-      siteId: hyderabad.id,
-      intendedUse: "CAPA, deviation, change control, and complaint management",
-      owner: users["u-002"],
-    },
-    {
-      id: "SYS-005",
-      name: "DeltaV DCS",
-      type: "SCADA",
-      vendor: "Emerson",
-      version: "14.3",
-      gxpRelevance: "Critical",
-      part11Status: "Compliant",
-      annex11Status: "Compliant",
-      gamp5Category: "5",
-      validationStatus: "Validated",
-      riskLevel: "HIGH",
-      siteId: mumbai.id,
-      intendedUse: "Process automation for API manufacturing",
-      owner: users["u-006"],
-    },
-    {
-      id: "SYS-006",
-      name: "Veeva Vault",
-      type: "DMS",
-      vendor: "Veeva Systems",
-      version: "23R2",
-      gxpRelevance: "Major",
-      part11Status: "Compliant",
-      annex11Status: "Compliant",
-      gamp5Category: "4",
-      validationStatus: "In Progress",
-      riskLevel: "MEDIUM",
-      siteId: bangalore.id,
-      intendedUse: "Controlled document management and regulatory submissions",
-      owner: users["u-003"],
-    },
-    {
-      id: "SYS-007",
-      name: "Calibration Manager",
-      type: "CMMS",
-      vendor: "Blue Mountain",
-      version: "9.2",
-      gxpRelevance: "Major",
-      part11Status: "Compliant",
-      annex11Status: "Compliant",
-      gamp5Category: "4",
-      validationStatus: "Validated",
-      riskLevel: "MEDIUM",
-      siteId: chennai.id,
-      intendedUse: "Equipment calibration scheduling and records management",
-      owner: users["u-005"],
-    },
-    {
-      id: "SYS-008",
-      name: "Stability Manager",
-      type: "Custom",
-      vendor: "In-house",
-      version: "2.1",
-      gxpRelevance: "Major",
-      part11Status: "Partial",
-      annex11Status: "Partial",
-      gamp5Category: "5",
-      validationStatus: "Not Started",
-      riskLevel: "HIGH",
-      siteId: chennai.id,
-      intendedUse: "Stability study management and trending",
-      owner: users["u-005"],
-      plannedActions: "Full validation planned for Q3 2026",
-    },
-  ];
-
-  const createdSystems: string[] = [];
-  for (const s of systems) {
-    const { id, ...data } = s;
-    const system = await prisma.gxPSystem.create({
-      data: { id, tenantId: demo.id, createdBy: users["u-004"], ...data },
-    });
-    createdSystems.push(system.id);
-
-    // Add validation stages for each system
-    const stages = ["URS", "Risk Assessment", "Vendor Assessment", "IQ", "OQ", "PQ", "Validation Summary"];
-    for (const stageName of stages) {
-      const isValidated = s.validationStatus === "Validated";
-      const isInProgress = s.validationStatus === "In Progress";
-      await prisma.validationStage.create({
-        data: {
-          systemId: system.id,
-          stageName,
-          status: isValidated ? "approved" : isInProgress && stages.indexOf(stageName) < 4 ? "approved" : "not_started",
-          approvedBy: isValidated || (isInProgress && stages.indexOf(stageName) < 4) ? users["u-002"] : undefined,
-          approvedDate: isValidated ? new Date("2026-01-15") : undefined,
+    for (const s of t.sites) {
+      await prisma.site.upsert({
+        where: { tenantId_name: { tenantId: tenant.id, name: s.name } },
+        update: { code: s.code, isActive: true },
+        create: { tenantId: tenant.id, name: s.name, code: s.code },
+      });
+    }
+    for (const u of t.users) {
+      await prisma.user.upsert({
+        where: { tenantId_email: { tenantId: tenant.id, email: u.email } },
+        update: { isActive: true, role: u.role, gxpSignatory: u.gxpSignatory },
+        create: {
+          tenantId: tenant.id, name: u.name, email: u.email, username: u.username,
+          passwordHash: tierHash, role: u.role, gxpSignatory: u.gxpSignatory,
         },
       });
     }
   }
-  console.log("✓ GxP Systems:", systems.length);
+  console.log("  Extra tier tenants:", extraTenants.map((t) => `${t.code}(${t.tier})`).join(", "));
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // RTM ENTRIES
-  // ══════════════════════════════════════════════════════════════════════════
+  // Assign Helios to the EMA region so the region archive → auto-reassign
+  // scenario (Stage 3) has a real in-use region to demonstrate. Idempotent:
+  // only backfills when unset, so a later admin change is never clobbered.
+  const heliosReassigned = await prisma.tenant.updateMany({
+    where: { email: "admin@helios.test", regulatoryRegion: null },
+    data: { regulatoryRegion: "EMA" },
+  });
+  if (heliosReassigned.count) console.log("  Helios → EMA region assigned");
 
-  const rtmEntries = [
-    { systemId: "SYS-001", ursId: "URS-001", ursRequirement: "System shall maintain audit trail for all data changes", ursPriority: "critical", fsReference: "FS-3.1", fsStatus: "approved", iqTestId: "IQ-015", iqResult: "pass", traceabilityStatus: "complete" },
-    { systemId: "SYS-001", ursId: "URS-002", ursRequirement: "System shall support electronic signatures per 21 CFR Part 11", ursPriority: "critical", fsReference: "FS-3.2", fsStatus: "approved", iqTestId: "IQ-016", iqResult: "pass", oqTestId: "OQ-008", oqResult: "pass", traceabilityStatus: "complete" },
-    { systemId: "SYS-001", ursId: "URS-003", ursRequirement: "System shall generate Certificate of Analysis automatically", ursPriority: "high", fsReference: "FS-4.1", fsStatus: "approved", oqTestId: "OQ-012", oqResult: "pass", traceabilityStatus: "complete" },
-    { systemId: "SYS-001", ursId: "URS-004", ursRequirement: "System shall enforce role-based access control", ursPriority: "critical", fsReference: "FS-2.1", fsStatus: "approved", iqTestId: "IQ-003", iqResult: "pass", traceabilityStatus: "complete" },
-    { systemId: "SYS-003", ursId: "URS-001", ursRequirement: "System shall acquire chromatographic data with timestamp", ursPriority: "critical", fsStatus: "pending", traceabilityStatus: "broken" },
-    { systemId: "SYS-003", ursId: "URS-002", ursRequirement: "System shall prevent deletion of raw data files", ursPriority: "critical", fsStatus: "missing", traceabilityStatus: "broken" },
-    { systemId: "SYS-003", ursId: "URS-003", ursRequirement: "System shall support e-signature for method approval", ursPriority: "critical", fsStatus: "pending", traceabilityStatus: "broken" },
-    { systemId: "SYS-006", ursId: "URS-001", ursRequirement: "System shall maintain document version history", ursPriority: "critical", fsReference: "FS-1.1", fsStatus: "approved", iqTestId: "IQ-001", iqResult: "pass", traceabilityStatus: "partial" },
+  // ── Sites ──
+  // Upsert keyed on (tenantId, name) so re-seeding doesn't duplicate rows.
+  // Previously used `create`, which is why earlier reseeds left 12 site rows
+  // (4 unique × 3) instead of 4.
+  const sitesData = [
+    // 3-letter `code` field drives the new reference scheme (e.g.
+    // "DEV-CHN-2026-001"). Codes are stable once records reference
+    // them — SitesTab enforces immutability after first use.
+    { name: "Chennai QC Laboratory", code: "CHN", location: "Chennai, Tamil Nadu", gmpScope: "QC Testing" },
+    { name: "Mumbai API Plant", code: "MUM", location: "Mumbai, Maharashtra", gmpScope: "API Manufacturing" },
+    { name: "Bangalore R&D Centre", code: "BLR", location: "Bangalore, Karnataka", gmpScope: "R&D" },
+    { name: "Hyderabad Formulation", code: "HYD", location: "Hyderabad, Telangana", gmpScope: "Formulation" },
+  ] as const;
+  const upsertedSites = await Promise.all(
+    sitesData.map((s) =>
+      prisma.site.upsert({
+        where: { tenantId_name: { tenantId: demo.id, name: s.name } },
+        update: { code: s.code, location: s.location, gmpScope: s.gmpScope, isActive: true },
+        create: { tenantId: demo.id, name: s.name, code: s.code, location: s.location, gmpScope: s.gmpScope },
+      }),
+    ),
+  );
+  const [chennai, mumbai, bangalore, hyderabad] = upsertedSites;
+  console.log("  Sites:", [chennai, mumbai, bangalore, hyderabad].map((s) => s.name).join(", "));
+
+  // ── Users ──
+  const users = [
+    { name: "Dr. Priya Sharma", email: "qa@pharmaglimmora.com", username: "priya.sharma", role: "qa_head", gxpSignatory: true, siteId: chennai.id },
+    { name: "Rahul Mehta", email: "ra@pharmaglimmora.com", username: "rahul.mehta", role: "regulatory_affairs", gxpSignatory: true, siteId: mumbai.id },
+    { name: "Anita Patel", email: "csv@pharmaglimmora.com", username: "anita.patel", role: "csv_val_lead", gxpSignatory: true, siteId: chennai.id },
+    { name: "Dr. Nisha Rao", email: "qc@pharmaglimmora.com", username: "nisha.rao", role: "qc_lab_director", gxpSignatory: true, siteId: chennai.id },
+    { name: "Vikram Singh", email: "it@pharmaglimmora.com", username: "vikram.singh", role: "it_cdo", gxpSignatory: false, siteId: bangalore.id },
+    { name: "Suresh Kumar", email: "ops@pharmaglimmora.com", username: "suresh.kumar", role: "operations_head", gxpSignatory: false, siteId: hyderabad.id },
+    // Substage 5.2 — second qa_head + second regulatory_affairs. The
+    // simplified Critical tier needs 1 qa_head + 1 regulatory_affairs;
+    // keeping a second qa_head (Suresh) gives us 2 total so the
+    // distinct-user dedup ("same person can't approve twice on a single
+    // CAPA") is still testable. Sanjay (ra2) is symmetric on the RA side.
+    { name: "Dr. Suresh Iyer", email: "qa2@pharmaglimmora.com", username: "suresh.iyer", role: "qa_head", gxpSignatory: true, siteId: chennai.id },
+    { name: "Sanjay Verma", email: "ra2@pharmaglimmora.com", username: "sanjay.verma", role: "regulatory_affairs", gxpSignatory: true, siteId: bangalore.id },
+    // Execution-level QA test user — non-privileged observer/executor. Distinct
+    // from the qa_head accounts above: role "qa", gxpSignatory false (no
+    // e-signature), so it can never approve/sign/close/delete. Email/username
+    // kept distinct from priya.sharma's qa@... (qa_head) to avoid a collision.
+    { name: "QA Test User", email: "qa.exec@pharmaglimmora.com", username: "qa.exec", role: "qa", gxpSignatory: false, siteId: chennai.id },
   ];
-
-  for (const rtm of rtmEntries) {
-    await prisma.rTMEntry.create({ data: rtm });
-  }
-  console.log("✓ RTM Entries:", rtmEntries.length);
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // ROADMAP ACTIVITIES
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const roadmapActivities = [
-    { systemId: "SYS-003", title: "Part 11 Gap Assessment", type: "Assessment", status: "Completed", startDate: new Date("2026-02-01"), endDate: new Date("2026-02-15"), owner: users["u-004"] },
-    { systemId: "SYS-003", title: "Audit Trail Configuration", type: "Remediation", status: "In Progress", startDate: new Date("2026-04-01"), endDate: new Date("2026-04-30"), owner: users["u-006"] },
-    { systemId: "SYS-003", title: "User Access Review", type: "Remediation", status: "Planned", startDate: new Date("2026-05-01"), endDate: new Date("2026-05-15"), owner: users["u-004"] },
-    { systemId: "SYS-003", title: "E-Signature Configuration", type: "Remediation", status: "Planned", startDate: new Date("2026-05-15"), endDate: new Date("2026-05-30"), owner: users["u-004"] },
-    { systemId: "SYS-003", title: "OQ Execution", type: "Validation", status: "Planned", startDate: new Date("2026-06-01"), endDate: new Date("2026-06-30"), owner: users["u-004"] },
-    { systemId: "SYS-006", title: "Initial Risk Assessment", type: "Assessment", status: "Completed", startDate: new Date("2026-01-15"), endDate: new Date("2026-01-30"), owner: users["u-004"] },
-    { systemId: "SYS-006", title: "IQ Execution", type: "Validation", status: "In Progress", startDate: new Date("2026-03-15"), endDate: new Date("2026-04-15"), owner: users["u-004"] },
-    { systemId: "SYS-006", title: "OQ Execution", type: "Validation", status: "Planned", startDate: new Date("2026-04-20"), endDate: new Date("2026-05-20"), owner: users["u-004"] },
-    { systemId: "SYS-008", title: "URS Development", type: "Documentation", status: "Planned", startDate: new Date("2026-07-01"), endDate: new Date("2026-07-15"), owner: users["u-005"] },
-  ];
-
-  for (const activity of roadmapActivities) {
-    await prisma.roadmapActivity.create({ data: activity });
-  }
-  console.log("✓ Roadmap Activities:", roadmapActivities.length);
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // DOCUMENTS (Evidence) - Comprehensive data
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const documents = [
-    { fileName: "SOP-QA-001_Document_Control.pdf", fileType: "application/pdf", fileSize: "245 KB", version: "v3.0", status: "approved", description: "Document Control Procedure", linkedModule: "Quality Systems", uploadedBy: users["u-002"], approvedBy: users["u-002"], approvedAt: new Date("2026-01-10") },
-    { fileName: "SOP-QC-015_OOS_Investigation.pdf", fileType: "application/pdf", fileSize: "312 KB", version: "v2.1", status: "approved", description: "OOS Investigation Procedure", linkedModule: "Laboratory", uploadedBy: users["u-005"], approvedBy: users["u-002"], approvedAt: new Date("2026-02-05") },
-    { fileName: "LIMS_Validation_Summary_Report.pdf", fileType: "application/pdf", fileSize: "1.2 MB", version: "v1.0", status: "approved", description: "LIMS Validation Summary Report", linkedModule: "CSV", linkedRecordId: "SYS-001", uploadedBy: users["u-004"], approvedBy: users["u-002"], approvedAt: new Date("2026-01-20") },
-    { fileName: "Temperature_Monitoring_Protocol.docx", fileType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", fileSize: "89 KB", version: "v1.0", status: "draft", description: "Temperature Monitoring Remediation Protocol", linkedModule: "CAPA", uploadedBy: users["u-002"] },
-    { fileName: "FDA483_Response_Draft.pdf", fileType: "application/pdf", fileSize: "567 KB", version: "v0.3", status: "in_review", description: "FDA 483 Response - Draft for Review", linkedModule: "FDA 483", linkedRecordId: "FEI-3004795103-2026", uploadedBy: users["u-003"] },
-    { fileName: "Annual_Product_Review_2025.pdf", fileType: "application/pdf", fileSize: "2.4 MB", version: "v1.0", status: "approved", description: "Annual Product Review for 2025", linkedModule: "Quality Systems", uploadedBy: users["u-002"], approvedBy: users["u-002"], approvedAt: new Date("2026-03-15") },
-    { fileName: "SOP-PROD-022_Line_Clearance.pdf", fileType: "application/pdf", fileSize: "156 KB", version: "v4.0", status: "approved", description: "Line Clearance Procedure", linkedModule: "Production", uploadedBy: users["u-007"], approvedBy: users["u-002"], approvedAt: new Date("2026-02-20") },
-    { fileName: "Training_Matrix_QC_2026.xlsx", fileType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileSize: "78 KB", version: "v1.0", status: "approved", description: "QC Department Training Matrix", linkedModule: "Training", uploadedBy: users["u-005"], approvedBy: users["u-002"], approvedAt: new Date("2026-01-05") },
-    { fileName: "Method_Validation_Protocol_Impurity.pdf", fileType: "application/pdf", fileSize: "445 KB", version: "v2.0", status: "in_review", description: "Method Validation Protocol for Impurity Testing", linkedModule: "Laboratory", uploadedBy: users["u-005"] },
-    { fileName: "CDS_Part11_Gap_Assessment.pdf", fileType: "application/pdf", fileSize: "890 KB", version: "v1.0", status: "approved", description: "CDS Part 11 Gap Assessment Report", linkedModule: "CSV", linkedRecordId: "SYS-003", uploadedBy: users["u-004"], approvedBy: users["u-002"], approvedAt: new Date("2026-02-15") },
-    { fileName: "Deviation_Trend_Analysis_Q1_2026.pdf", fileType: "application/pdf", fileSize: "678 KB", version: "v1.0", status: "approved", description: "Quarterly Deviation Trend Analysis", linkedModule: "Quality Systems", uploadedBy: users["u-002"], approvedBy: users["u-002"], approvedAt: new Date("2026-04-10") },
-    { fileName: "CAPA_Effectiveness_Report_CAPA1417.pdf", fileType: "application/pdf", fileSize: "234 KB", version: "v1.0", status: "approved", description: "CAPA Effectiveness Verification Report", linkedModule: "CAPA", linkedRecordId: "CAPA-1417", uploadedBy: users["u-004"], approvedBy: users["u-002"], approvedAt: new Date("2026-04-16") },
-    { fileName: "Supplier_Qualification_Report_XYZ.pdf", fileType: "application/pdf", fileSize: "1.1 MB", version: "v1.0", status: "draft", description: "Supplier Qualification Report - XYZ Chemicals", linkedModule: "Supply Chain", uploadedBy: users["u-007"] },
-    { fileName: "Equipment_IQ_OQ_HPLC_Unit5.pdf", fileType: "application/pdf", fileSize: "2.3 MB", version: "v1.0", status: "approved", description: "HPLC Unit 5 IQ/OQ Protocol and Report", linkedModule: "Laboratory", uploadedBy: users["u-005"], approvedBy: users["u-002"], approvedAt: new Date("2026-03-01") },
-    { fileName: "SOP-IT-005_Access_Control.pdf", fileType: "application/pdf", fileSize: "198 KB", version: "v2.0", status: "approved", description: "IT Access Control Procedure", linkedModule: "IT", uploadedBy: users["u-006"], approvedBy: users["u-002"], approvedAt: new Date("2026-01-25") },
-  ];
-
-  for (const doc of documents) {
-    await prisma.document.create({
-      data: { tenantId: demo.id, ...doc },
+  // Hash once — bcrypt generates a fresh random salt per call, so calling it
+  // inside the loop wasted CPU and made re-runs slower than necessary.
+  const userPasswordHash = await bcrypt.hash("Demo@123", BCRYPT_COST);
+  for (const u of users) {
+    await prisma.user.upsert({
+      where: {
+        tenantId_username: { tenantId: demo.id, username: u.username },
+      },
+      update: {
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        gxpSignatory: u.gxpSignatory,
+        siteId: u.siteId,
+        isActive: true,
+        passwordHash: userPasswordHash,
+      },
+      create: {
+        ...u,
+        tenantId: demo.id,
+        passwordHash: userPasswordHash,
+        isActive: true,
+      },
     });
   }
-  console.log("✓ Documents:", documents.length);
+  console.log("  Users:", users.length);
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // RAID ITEMS (Governance) - Comprehensive data
-  // ══════════════════════════════════════════════════════════════════════════
+  /* ═══════════════════════════════════════════════════════════════
+   * FDA 483 — wipe + reseed demo data (4 lifecycle-stage events)
+   * ═══════════════════════════════════════════════════════════════ */
 
-  const raidItems = [
-    { type: "Risk", title: "FDA inspection pending", description: "Pre-approval inspection expected for new product submission. Site readiness score currently at 40%.", priority: "Critical", owner: users["u-003"], dueDate: new Date("2026-05-30"), status: "Open", impact: "Potential delay in product launch if inspection results in 483", mitigation: "Complete inspection readiness checklist, conduct mock inspection, close all critical CAPAs" },
-    { type: "Risk", title: "Key personnel attrition in QC", description: "Two senior analysts have given notice, effective end of May", priority: "High", owner: users["u-005"], dueDate: new Date("2026-05-15"), status: "Open", impact: "Reduced testing capacity by 30%, potential batch release delays", mitigation: "Accelerate hiring, cross-train existing staff, engage contract lab for overflow" },
-    { type: "Risk", title: "Supply chain disruption for critical excipient", description: "Single source supplier facing capacity issues, lead time extended to 12 weeks", priority: "Critical", owner: users["u-007"], dueDate: new Date("2026-05-01"), status: "Open", impact: "Production delays possible for 3 products", mitigation: "Qualify alternate supplier, build safety stock" },
-    { type: "Action", title: "Complete Part 11 remediation for Empower CDS", description: "Address audit trail and access control gaps identified in gap assessment", priority: "High", owner: users["u-004"], dueDate: new Date("2026-06-30"), status: "In Progress" },
-    { type: "Action", title: "Implement electronic batch record system", description: "Deploy EBR for Hyderabad formulation plant", priority: "Medium", owner: users["u-006"], dueDate: new Date("2026-09-30"), status: "Open" },
-    { type: "Issue", title: "Batch record review backlog", description: "45 batch records pending final QA review, oldest is 28 days", priority: "High", owner: users["u-002"], dueDate: new Date("2026-04-30"), status: "Open", impact: "Delayed product release, potential compliance finding" },
-    { type: "Issue", title: "LIMS performance degradation", description: "System response time increased 40% over last month", priority: "Medium", owner: users["u-006"], dueDate: new Date("2026-05-15"), status: "In Progress", impact: "Reduced lab productivity" },
-    { type: "Decision", title: "Select new ELN vendor", description: "Evaluate and select Electronic Lab Notebook solution for QC", priority: "Medium", owner: users["u-006"], dueDate: new Date("2026-06-15"), status: "Open" },
-    { type: "Decision", title: "Outsource stability studies", description: "Evaluate whether to outsource long-term stability studies to contract lab", priority: "Low", owner: users["u-005"], dueDate: new Date("2026-07-01"), status: "Open" },
-    { type: "Risk", title: "Equipment obsolescence - HPLC fleet", description: "3 HPLC units approaching end of vendor support (Dec 2026)", priority: "Medium", owner: users["u-005"], dueDate: new Date("2026-08-01"), status: "Open", impact: "Potential inability to get spare parts, qualification concerns", mitigation: "Budget for replacement units in 2027" },
-  ];
+  // ── Wipe (scoped to FDA 483 + its derivative CAPAs only) ──
+  // NOTE: the AuditLog module value is "FDA 483" (with a space), not
+  // "FDA_483" — matched to what the app actually writes.
+  const wipe = await prisma.$transaction([
+    prisma.auditLog.deleteMany({ where: { module: "FDA 483" } }),
+    prisma.fDA483Document.deleteMany({}),
+    prisma.fDA483Commitment.deleteMany({}),
+    // No FK on observation.capaId, but unlink first for cleanliness.
+    prisma.fDA483Observation.updateMany({ data: { capaId: null } }),
+    prisma.cAPA.deleteMany({ where: { source: "FDA 483" } }),
+    prisma.fDA483Observation.deleteMany({}),
+    prisma.fDA483Event.deleteMany({}),
+  ]);
+  console.log("  FDA 483 wiped:", {
+    audit: wipe[0].count,
+    documents: wipe[1].count,
+    commitments: wipe[2].count,
+    capasUnlinkedFromObs: wipe[3].count,
+    capas: wipe[4].count,
+    observations: wipe[5].count,
+    events: wipe[6].count,
+  });
 
-  for (const item of raidItems) {
-    await prisma.rAIDItem.create({
-      data: { tenantId: demo.id, createdBy: users["u-002"], ...item },
-    });
-  }
-  console.log("✓ RAID Items:", raidItems.length);
+  // ── Resolve compliance users (created above) ──
+  const allUsers = await prisma.user.findMany({ where: { tenantId: demo.id } });
+  const byUser = (username: string) => {
+    const found = allUsers.find((x) => x.username === username);
+    if (!found) throw new Error(`Seed: expected user ${username} not found`);
+    return found;
+  };
+  const priya = byUser("priya.sharma"); // qa_head — RCA author / internal owner
+  const sureshIyer = byUser("suresh.iyer"); // qa_head #2 — RCA reviewer (SoD)
+  const anita = byUser("anita.patel"); // csv lead — CAPA owner / E4 owner
+  const nisha = byUser("nisha.rao"); // qc director — commitment owner
+  const rahul = byUser("rahul.mehta"); // RA — CAPA owner
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // INSPECTIONS (Training & Awareness / Readiness)
-  // ══════════════════════════════════════════════════════════════════════════
+  const today = new Date("2026-05-31T00:00:00Z");
 
-  // Past completed inspection
-  const pastInspection = await prisma.inspection.create({
-    data: {
-      id: "INSP-2026-000",
+  // Audit rows accumulate here and are inserted once at the end.
+  const auditRows: Prisma.AuditLogCreateManyInput[] = [];
+  const audit = (
+    action: string,
+    recordId: string,
+    createdAt: string,
+    extra: Partial<Prisma.AuditLogCreateManyInput> = {},
+  ) =>
+    auditRows.push({
       tenantId: demo.id,
-      title: "FDA GMP Inspection Q1 2026",
-      siteName: "Chennai QC Laboratory",
+      userId: priya.id,
+      userName: priya.name,
+      userRole: "qa_head",
+      module: "FDA 483",
+      action,
+      recordId,
+      createdAt: new Date(createdAt),
+      ...extra,
+    });
+
+  /* ── EVENT 1 — Fully submitted (terminal, full history) ── */
+  const e1 = await prisma.fDA483Event.create({
+    data: {
+      tenantId: demo.id,
+      referenceNumber: "483-CHN-2026-001",
+      eventType: "FDA 483",
       agency: "FDA",
-      type: "announced",
-      status: "completed",
-      expectedDate: new Date("2026-03-10"),
-      startDate: new Date("2026-03-10"),
-      endDate: new Date("2026-03-12"),
-      inspectionLead: users["u-002"],
-      linkedFDA483Id: "FEI-3004795103-2026",
-      notes: "Resulted in FDA 483 with 3 observations",
-      createdBy: users["u-002"],
+      siteId: bangalore.id,
+      inspectionDate: new Date("2026-04-13"),
+      inspectionEndDate: new Date("2026-04-17"),
+      leadInvestigator: "Dr. James Smith",
+      internalOwnerId: priya.id,
+      responseDeadline: new Date("2026-05-08"),
+      status: "Response Submitted",
+      agiDraft:
+        "Dear FDA District Office,\n\nPharma Glimmora International received Form FDA-483 issued at the conclusion of the inspection of our Bangalore R&D Centre facility on 17 April 2026. We appreciate the opportunity to respond to the observations cited in the form.\n\nWe have completed thorough root cause analysis and initiated corrective and preventive actions (CAPAs) for each observation, as summarized below.\n\nObservation #1: Procedural deviation in batch records — operator judgment on humidity-borderline readings.\nRoot Cause: Procedure inadequately specifies thresholds, leading to operator judgment calls under varying conditions.\nCorrective Action: CAPA-CHN-2026-001 has been raised; SOP-EC-447 revision, targeted training and effectiveness verification within 90 days.\n\nObservation #2: Equipment qualification interval exceeded the 12-month SOP requirement.\nRoot Cause: Qualification scheduling relied on a manual tracking process that did not flag the overdue equipment.\nCorrective Action: CAPA-CHN-2026-002 has been raised; automated qualification scheduling with escalation alerts.\n\nObservation #3: Training records incomplete for a recent SOP revision.\nRoot Cause: Training system did not enforce SOP-version association with completion records.\nCorrective Action: CAPA-CHN-2026-003 has been raised; LMS version-gating control.\n\nWe are committed to continuous improvement of our quality systems and will provide periodic updates on the effectiveness of these corrective actions.\n\nSincerely,\n\nDr. Priya Sharma, QA Head\nPharma Glimmora International",
+      submittedAt: new Date("2026-05-06"),
+      submittedBy: priya.name,
+      signatureMeaning: "Approval",
+      createdBy: priya.name,
+      createdAt: new Date("2026-04-15"),
     },
   });
 
-  // Upcoming inspections
-  const inspection1 = await prisma.inspection.create({
+  const e1capa1 = await prisma.cAPA.create({
     data: {
-      id: "INSP-2026-001",
       tenantId: demo.id,
-      title: "FDA GMP Inspection Q2 2026",
-      siteName: "Chennai QC Laboratory",
+      reference: "CAPA-CHN-2026-001",
+      title: "Revise SOP-EC-447 humidity threshold specification",
+      source: "FDA 483",
+      siteId: bangalore.id,
+      description: "483-CHN-2026-001 Obs #1: Revise SOP-EC-447 to specify numeric humidity thresholds and eliminate operator judgment on borderline readings.",
+      risk: "Critical",
+      owner: anita.id,
+      dueDate: new Date("2026-06-17"),
+      status: "in_progress",
+      rca: "Procedure inadequately specifies thresholds, leading to operator judgment calls under varying conditions.",
+      rcaMethod: "5 Why",
+      rcaApproved: true,
+      rcaReviewedBy: sureshIyer.name,
+      rcaReviewedById: sureshIyer.id,
+      rcaReviewedAt: new Date("2026-04-24"),
+      rcaReviewNotes: "RCA traced to a genuine procedural gap; threshold specification is the correct corrective focus.",
+      createdBy: priya.name,
+      createdAt: new Date("2026-04-22"),
+    },
+  });
+  const e1capa2 = await prisma.cAPA.create({
+    data: {
+      tenantId: demo.id,
+      reference: "CAPA-CHN-2026-002",
+      title: "Automate equipment requalification scheduling + alerts",
+      source: "FDA 483",
+      siteId: bangalore.id,
+      description: "483-CHN-2026-001 Obs #2: Implement automated equipment requalification scheduling with overdue-escalation alerts.",
+      risk: "High",
+      owner: rahul.id,
+      dueDate: new Date("2026-06-03"),
+      status: "in_progress",
+      rca: "Qualification scheduling system did not flag the overdue equipment due to manual tracking process.",
+      rcaMethod: "Fishbone",
+      rcaApproved: true,
+      rcaReviewedBy: sureshIyer.name,
+      rcaReviewedById: sureshIyer.id,
+      rcaReviewedAt: new Date("2026-04-24"),
+      createdBy: priya.name,
+      createdAt: new Date("2026-04-22"),
+    },
+  });
+  const e1capa3 = await prisma.cAPA.create({
+    data: {
+      tenantId: demo.id,
+      reference: "CAPA-CHN-2026-003",
+      title: "Enforce SOP-version link in LMS training records",
+      source: "FDA 483",
+      siteId: bangalore.id,
+      description: "483-CHN-2026-001 Obs #3: Enforce SOP-version association with training completion records in the LMS.",
+      risk: "Medium",
+      owner: nisha.id,
+      dueDate: new Date("2026-07-01"),
+      status: "in_progress",
+      rca: "Training tracking system did not enforce the SOP version association with completion records.",
+      rcaMethod: "Fault Tree",
+      rcaApproved: true,
+      rcaReviewedBy: sureshIyer.name,
+      rcaReviewedById: sureshIyer.id,
+      rcaReviewedAt: new Date("2026-04-25"),
+      createdBy: priya.name,
+      createdAt: new Date("2026-04-23"),
+    },
+  });
+
+  await prisma.fDA483Observation.createMany({
+    data: [
+      {
+        eventId: e1.id, reference: "483-BLR-2026-001", number: 1,
+        text: "Procedural deviation in batch records. Operator made judgment calls on humidity-borderline readings.",
+        severity: "Critical", area: "QC Lab", regulation: "21 CFR 211.68",
+        rcaMethod: "5 Why",
+        rootCause: "Why 1: Operators recorded humidity-borderline readings using personal judgment rather than a defined rule.\nWhy 2: The batch record gave no explicit pass/fail threshold for borderline humidity values.\nWhy 3: SOP-EC-447 referenced an \"acceptable range\" without numeric cut-offs or a borderline-handling step.\nWhy 4: The SOP predated the current humidity-sensitive product and was never revised for it.\nWhy 5: Procedure inadequately specifies thresholds, leading to operator judgment calls under varying conditions.",
+        capaId: e1capa1.id, status: "Response Drafted",
+      },
+      {
+        eventId: e1.id, reference: "483-BLR-2026-002", number: 2,
+        text: "Equipment qualification interval was last performed 18 months ago, exceeding the 12-month SOP requirement.",
+        severity: "High", area: "Manufacturing", regulation: "21 CFR 211.100",
+        rcaMethod: "Fishbone",
+        rootCause: "People: Engineering coordinator tracked qualification dates personally, with no backup during absence.\nProcess: Requalification scheduling relied on a manual spreadsheet with no automated due-date escalation.\nEquipment: The asset carried no qualification tag linking it to a managed schedule.\nMaterials: No material factor identified.\nEnvironment: Competing capacity demands repeatedly pushed planned-maintenance windows.\nManagement: The qualification due-list was not reviewed at the quality management review.\n\nRoot cause: Qualification scheduling system did not flag the overdue equipment due to manual tracking process.",
+        capaId: e1capa2.id, status: "Response Drafted",
+      },
+      {
+        eventId: e1.id, reference: "483-BLR-2026-003", number: 3,
+        text: "Training records for 2 QC analysts incomplete for recent SOP revision.",
+        severity: "Low", area: "Documentation", regulation: "21 CFR 211.22",
+        rcaMethod: "Fault Tree",
+        rootCause: "Training tracking system did not enforce the SOP version association with completion records.",
+        capaId: e1capa3.id, status: "Response Drafted",
+      },
+    ],
+  });
+
+  await prisma.fDA483Commitment.createMany({
+    data: [
+      { eventId: e1.id, text: "Complete revision of SOP-EC-447 and validate", dueDate: new Date("2026-06-30"), owner: anita.id, status: "Pending" },
+      { eventId: e1.id, text: "Quarterly humidity monitoring data review for 90 days", dueDate: new Date("2026-07-31"), owner: nisha.id, status: "Pending" },
+    ],
+  });
+
+  await prisma.fDA483Document.create({
+    data: {
+      eventId: e1.id,
+      fileName: "Response-Package-483-CHN-2026-001.pdf",
+      fileUrl: "/uploads/fda483/Response-Package-483-CHN-2026-001.pdf",
+      fileType: "pdf",
+      fileSize: "2.4 MB",
+      type: "response",
+      uploadedBy: priya.name,
+      createdAt: new Date("2026-05-05"),
+    },
+  });
+
+  // Part 11 signature ledger row + link from the event.
+  const e1sig = await prisma.signedRecord.create({
+    data: {
+      tenantId: demo.id,
+      recordType: "FDA483_RESPONSE",
+      recordId: e1.id,
+      signerId: priya.id,
+      signerName: priya.name,
+      signerRole: "qa_head",
+      signerEmail: priya.email,
+      signatureMeaning: "Approval",
+      contentHash: "9f2c1a7b4e6d8c0f3a5b2e1d7c9048fa6b3e2d1c5a7f9b0e4d6c8a1f2b3c4d5e",
+      contentSummary: "FDA 483 response 483-CHN-2026-001 submitted by Dr. Priya Sharma (qa_head) — meaning: Approval",
+      passwordVerifiedAt: new Date("2026-05-06"),
+      createdAt: new Date("2026-05-06"),
+    },
+  });
+  await prisma.fDA483Event.update({
+    where: { id: e1.id },
+    data: { responseSignatureId: e1sig.id },
+  });
+
+  // E1 audit lifecycle (15 Apr → 6 May).
+  audit("FDA483_EVENT_REGISTERED", e1.id, "2026-04-15", { recordTitle: "483-CHN-2026-001" });
+  audit("OBSERVATION_ADDED", e1.id, "2026-04-16", { recordTitle: "Observation #1" });
+  audit("OBSERVATION_ADDED", e1.id, "2026-04-16", { recordTitle: "Observation #2" });
+  audit("OBSERVATION_ADDED", e1.id, "2026-04-16", { recordTitle: "Observation #3" });
+  audit("OBSERVATION_RCA_COMPLETED", e1.id, "2026-04-20", { recordTitle: "Observation #1 — 5 Why" });
+  audit("OBSERVATION_RCA_COMPLETED", e1.id, "2026-04-20", { recordTitle: "Observation #2 — Fishbone" });
+  audit("OBSERVATION_RCA_COMPLETED", e1.id, "2026-04-21", { recordTitle: "Observation #3 — Fault Tree" });
+  audit("CAPA_RAISED_FROM_OBSERVATION", e1.id, "2026-04-22", { recordTitle: "CAPA-CHN-2026-001", newValue: e1capa1.id });
+  audit("CAPA_RAISED_FROM_OBSERVATION", e1.id, "2026-04-22", { recordTitle: "CAPA-CHN-2026-002", newValue: e1capa2.id });
+  audit("CAPA_RAISED_FROM_OBSERVATION", e1.id, "2026-04-23", { recordTitle: "CAPA-CHN-2026-003", newValue: e1capa3.id });
+  audit("CAPA_RCA_APPROVED", e1capa1.id, "2026-04-24", { userId: sureshIyer.id, userName: sureshIyer.name, recordTitle: "CAPA-CHN-2026-001" });
+  audit("CAPA_RCA_APPROVED", e1capa2.id, "2026-04-24", { userId: sureshIyer.id, userName: sureshIyer.name, recordTitle: "CAPA-CHN-2026-002" });
+  audit("CAPA_RCA_APPROVED", e1capa3.id, "2026-04-25", { userId: sureshIyer.id, userName: sureshIyer.name, recordTitle: "CAPA-CHN-2026-003" });
+  audit("COMMITMENT_ADDED", e1.id, "2026-04-28", { recordTitle: "Revise SOP-EC-447" });
+  audit("COMMITMENT_ADDED", e1.id, "2026-04-28", { recordTitle: "Quarterly humidity review" });
+  audit("AGI_DRAFT_SAVED", e1.id, "2026-05-02", { recordTitle: "483-CHN-2026-001" });
+  audit("RESPONSE_DOCUMENT_ADDED", e1.id, "2026-05-05", { recordTitle: "Response-Package-483-CHN-2026-001.pdf" });
+  audit("RESPONSE_SIGNED", e1.id, "2026-05-06", {
+    recordTitle: "483-CHN-2026-001",
+    newValue: JSON.stringify({ signerId: priya.id, meaning: "Approval", contentHashPrefix: "9f2c1a7b4e6d8c0f" }),
+  });
+
+  /* ── EVENT 2 — Active response in progress ── */
+  const e2 = await prisma.fDA483Event.create({
+    data: {
+      tenantId: demo.id,
+      referenceNumber: "483-MUM-2026-002",
+      eventType: "FDA 483",
       agency: "FDA",
-      type: "announced",
-      status: "preparation",
-      expectedDate: new Date("2026-06-01"),
-      inspectionLead: users["u-002"],
-      notes: "Follow-up inspection after Q1 483 observations",
-      createdBy: users["u-002"],
+      siteId: mumbai.id,
+      inspectionDate: new Date("2026-05-08"),
+      inspectionEndDate: new Date("2026-05-12"),
+      leadInvestigator: "Inspector Maria Gomez",
+      internalOwnerId: priya.id,
+      responseDeadline: new Date("2026-06-02"),
+      status: "Under Investigation",
+      createdBy: priya.name,
+      createdAt: new Date("2026-05-13"),
     },
   });
-
-  const inspection2 = await prisma.inspection.create({
+  const e2capa1 = await prisma.cAPA.create({
     data: {
-      id: "INSP-2026-002",
-      tenantId: demo.id,
-      title: "EMA Annex 11 Review",
-      siteName: "Mumbai API Plant",
-      agency: "EMA",
-      type: "announced",
-      status: "preparation",
-      expectedDate: new Date("2026-07-15"),
-      inspectionLead: users["u-003"],
-      createdBy: users["u-002"],
+      tenantId: demo.id, reference: "CAPA-MUM-2026-001", title: "Re-qualify HVAC pressure cascade + continuous monitoring", source: "FDA 483", siteId: mumbai.id,
+      description: "483-MUM-2026-002 Obs #1: Re-qualify HVAC pressure cascade and add continuous differential-pressure alarming on the fill line.",
+      risk: "Critical", owner: anita.id, dueDate: new Date("2026-06-19"), status: "in_progress",
+      rca: "Pressure-cascade interlock setpoints were not revalidated after the AHU service in March, so the differential drifted below the qualified range during dynamic filling.",
+      rcaMethod: "5 Why",
+      rcaApproved: true, rcaReviewedBy: sureshIyer.name, rcaReviewedById: sureshIyer.id, rcaReviewedAt: new Date("2026-05-18"),
+      createdBy: priya.name, createdAt: new Date("2026-05-16"),
     },
   });
-
-  const inspection3 = await prisma.inspection.create({
+  const e2capa2 = await prisma.cAPA.create({
     data: {
-      id: "INSP-2026-003",
-      tenantId: demo.id,
-      title: "MHRA GMP Routine Inspection",
-      siteName: "Hyderabad Formulation",
-      agency: "MHRA",
-      type: "announced",
-      status: "preparation",
-      expectedDate: new Date("2026-08-30"),
-      inspectionLead: users["u-002"],
-      createdBy: users["u-002"],
+      tenantId: demo.id, reference: "CAPA-MUM-2026-002", title: "Automated stability-pull scheduling with escalation", source: "FDA 483", siteId: mumbai.id,
+      description: "483-MUM-2026-002 Obs #2: Add automated stability-pull scheduling with overdue escalation to prevent interval excursions.",
+      risk: "High", owner: nisha.id, dueDate: new Date("2026-07-03"), status: "in_progress",
+      rca: "Stability pull scheduling was tracked manually on a spreadsheet with no escalation, so a 5-day slip on batch B-2026-018 went unnoticed.",
+      rcaMethod: "Fishbone",
+      rcaApproved: true, rcaReviewedBy: sureshIyer.name, rcaReviewedById: sureshIyer.id, rcaReviewedAt: new Date("2026-05-19"),
+      createdBy: priya.name, createdAt: new Date("2026-05-17"),
     },
   });
+  await prisma.fDA483Observation.createMany({
+    data: [
+      {
+        eventId: e2.id, reference: "483-MUM-2026-001", number: 1,
+        text: "HVAC pressure differential outside qualified range during filling operation on 9 May 2026.",
+        severity: "Critical", area: "Sterile Manufacturing", regulation: "21 CFR 211.42",
+        rcaMethod: "5 Why",
+        rootCause: "Why 1: The room-to-room pressure differential fell below the qualified minimum during the filling run.\nWhy 2: The pressure-cascade interlock was holding a setpoint lower than the qualified value.\nWhy 3: Setpoints were not re-verified when the AHU returned to service after its March maintenance.\nWhy 4: The AHU service work order had no \"revalidate interlock setpoints\" closure step.\nWhy 5: Pressure-cascade interlock setpoints were not revalidated after the AHU service in March, so the differential drifted below the qualified range during dynamic filling.",
+        capaId: e2capa1.id, status: "CAPA Linked",
+      },
+      {
+        eventId: e2.id, reference: "483-MUM-2026-002", number: 2,
+        text: "Stability sample testing exceeded SOP-defined interval by 5 days for batch B-2026-018.",
+        severity: "High", area: "QC", regulation: "21 CFR 211.165",
+        rcaMethod: "Fishbone",
+        rootCause: "People: The stability coordinator carried the pull schedule manually and missed the B-2026-018 window.\nProcess: Pull-due dates had no automated reminder or overdue escalation.\nEquipment: The LIMS stability module was not configured to enforce pull windows.\nMaterials: No material factor identified.\nEnvironment: A high concurrent study load increased the chance of a missed pull.\nManagement: Stability-schedule adherence was not a tracked QC metric.\n\nRoot cause: Stability pull scheduling was tracked manually on a spreadsheet with no escalation, so a 5-day slip on batch B-2026-018 went unnoticed.",
+        capaId: e2capa2.id, status: "CAPA Linked",
+      },
+      {
+        eventId: e2.id, reference: "483-MUM-2026-003", number: 3,
+        text: "Cleaning validation protocol does not address residue limits for product changeovers between API families.",
+        severity: "Low", area: "Cleaning Validation", regulation: "21 CFR 211.67",
+        status: "In Progress",
+      },
+      {
+        eventId: e2.id, reference: "483-MUM-2026-004", number: 4,
+        text: "Batch record review signature dates not consistently formatted across the manufacturing record.",
+        severity: "Low", area: "Documentation", regulation: "21 CFR 211.188",
+        status: "Open",
+      },
+    ],
+  });
+  await prisma.fDA483Commitment.create({
+    data: { eventId: e2.id, text: "Complete RCA on remaining observations (3, 4)", dueDate: new Date("2026-05-22"), owner: priya.id, status: "Pending" },
+  });
+  audit("FDA483_EVENT_REGISTERED", e2.id, "2026-05-13", { recordTitle: "483-MUM-2026-002" });
+  audit("OBSERVATION_ADDED", e2.id, "2026-05-14", { recordTitle: "Observation #1" });
+  audit("OBSERVATION_ADDED", e2.id, "2026-05-14", { recordTitle: "Observation #2" });
+  audit("OBSERVATION_ADDED", e2.id, "2026-05-14", { recordTitle: "Observation #3" });
+  audit("OBSERVATION_ADDED", e2.id, "2026-05-14", { recordTitle: "Observation #4" });
+  audit("OBSERVATION_RCA_COMPLETED", e2.id, "2026-05-16", { recordTitle: "Observation #1 — 5 Why" });
+  audit("OBSERVATION_RCA_COMPLETED", e2.id, "2026-05-17", { recordTitle: "Observation #2 — Fishbone" });
+  audit("CAPA_RAISED_FROM_OBSERVATION", e2.id, "2026-05-16", { recordTitle: "CAPA-MUM-2026-001", newValue: e2capa1.id });
+  audit("CAPA_RAISED_FROM_OBSERVATION", e2.id, "2026-05-17", { recordTitle: "CAPA-MUM-2026-002", newValue: e2capa2.id });
+  audit("CAPA_RCA_APPROVED", e2capa1.id, "2026-05-18", { userId: sureshIyer.id, userName: sureshIyer.name, recordTitle: "CAPA-MUM-2026-001" });
+  audit("CAPA_RCA_APPROVED", e2capa2.id, "2026-05-19", { userId: sureshIyer.id, userName: sureshIyer.name, recordTitle: "CAPA-MUM-2026-002" });
+  audit("COMMITMENT_ADDED", e2.id, "2026-05-20", { recordTitle: "Complete RCA on remaining observations" });
 
-  // Readiness actions for inspection 1
-  const readinessActions1 = [
-    { title: "Brief QA Head and key SMEs on inspection protocol", lane: "People", bucket: "Immediate", priority: "High", status: "Not Started", owner: users["u-002"], dueDate: new Date("2026-05-01") },
-    { title: "Assign front-room and back-room roles", lane: "People", bucket: "Immediate", priority: "High", status: "Not Started", owner: users["u-002"], dueDate: new Date("2026-05-05") },
-    { title: "Run mock inspection simulation — Chennai site", lane: "People", bucket: "31-60 days", priority: "High", status: "Not Started", owner: users["u-002"], dueDate: new Date("2026-05-20") },
-    { title: "Leadership briefing — risk posture and communications", lane: "People", bucket: "61-90 days", priority: "Medium", status: "Not Started", owner: users["u-007"], dueDate: new Date("2026-05-25") },
-    { title: "Review and update CAPA SOP — close FIND-001 gaps", lane: "Process", bucket: "Immediate", priority: "High", status: "Not Started", owner: users["u-002"], dueDate: new Date("2026-05-08") },
-    { title: "Complete ICH Q9 risk assessment updates", lane: "Process", bucket: "31-60 days", priority: "Medium", status: "Not Started", owner: users["u-003"], dueDate: new Date("2026-05-18") },
-    { title: "Effectiveness check — closed CAPAs from Q1", lane: "Process", bucket: "61-90 days", priority: "Medium", status: "Not Started", owner: users["u-004"], dueDate: new Date("2026-05-28") },
-    { title: "Remediate LIMS audit trail — all 12 modules", lane: "Data", bucket: "Immediate", priority: "Critical", status: "Not Started", owner: users["u-004"], dueDate: new Date("2026-05-12") },
-    { title: "Validate audit trail logs across all GxP systems", lane: "Data", bucket: "31-60 days", priority: "High", status: "Not Started", owner: users["u-006"], dueDate: new Date("2026-05-22") },
-    { title: "Complete DI remediation sign-off report", lane: "Data", bucket: "61-90 days", priority: "Medium", status: "Not Started", owner: users["u-004"], dueDate: new Date("2026-05-30") },
-    { title: "Complete LIMS Part 11 gap remediation", lane: "Systems", bucket: "Immediate", priority: "Critical", status: "In Progress", owner: users["u-004"], dueDate: new Date("2026-05-10") },
-    { title: "CDS e-signature validation OQ completion", lane: "Systems", bucket: "31-60 days", priority: "High", status: "Not Started", owner: users["u-004"], dueDate: new Date("2026-05-20") },
-    { title: "MES validation project kickoff", lane: "Systems", bucket: "61-90 days", priority: "Medium", status: "Not Started", owner: users["u-006"], dueDate: new Date("2026-05-28") },
-    { title: "Compile DIL evidence kit — Chennai QC Lab", lane: "Documentation", bucket: "Immediate", priority: "High", status: "In Progress", owner: users["u-003"], dueDate: new Date("2026-05-10") },
-    { title: "Update all SOPs post inspection findings", lane: "Documentation", bucket: "31-60 days", priority: "Medium", status: "Not Started", owner: users["u-002"], dueDate: new Date("2026-05-18") },
-    { title: "Archive all inspection evidence documents", lane: "Documentation", bucket: "61-90 days", priority: "Low", status: "Not Started", owner: users["u-003"], dueDate: new Date("2026-05-28") },
+  /* ── EVENT 3 — Warning Letter ── */
+  const e3 = await prisma.fDA483Event.create({
+    data: {
+      tenantId: demo.id,
+      referenceNumber: "WL-MUM-2026-001",
+      eventType: "Warning Letter",
+      agency: "FDA",
+      siteId: mumbai.id,
+      inspectionDate: new Date("2026-03-01"),
+      inspectionEndDate: null,
+      leadInvestigator: null,
+      internalOwnerId: priya.id,
+      responseDeadline: new Date("2026-04-16"),
+      status: "Under Investigation",
+      createdBy: priya.name,
+      createdAt: new Date("2026-03-02"),
+    },
+  });
+  const e3capa1 = await prisma.cAPA.create({
+    data: {
+      tenantId: demo.id, reference: "CAPA-MUM-2026-003", title: "Restrict LIMS admin access + persistent audit logging", source: "FDA 483", siteId: mumbai.id,
+      description: "WL-MUM-2026-001 Obs #1: Restrict LIMS administrative access and enforce persistent, tamper-evident audit logging of QC result changes.",
+      risk: "Critical", owner: anita.id, dueDate: new Date("2026-05-30"), status: "in_progress",
+      rca: "LIMS administrator role was over-scoped and audit-trail logging could be disabled, so privileged users could modify results without a persistent record.",
+      rcaMethod: "5 Why",
+      rcaApproved: true, rcaReviewedBy: sureshIyer.name, rcaReviewedById: sureshIyer.id, rcaReviewedAt: new Date("2026-03-12"),
+      diGate: true, diGateStatus: "pending",
+      createdBy: priya.name, createdAt: new Date("2026-03-10"),
+    },
+  });
+  const e3capa2 = await prisma.cAPA.create({
+    data: {
+      tenantId: demo.id, reference: "CAPA-MUM-2026-004", title: "LIMS audit-trail CSV risk assessment", source: "FDA 483", siteId: mumbai.id,
+      description: "WL-MUM-2026-001 Obs #2: Complete CSV risk assessment for the LIMS audit-trail function and update validation documentation.",
+      risk: "High", owner: rahul.id, dueDate: new Date("2026-06-15"), status: "in_progress",
+      rca: "The original LIMS CSV package predated current data-integrity expectations and never assessed the audit-trail function as a risk-bearing control.",
+      rcaMethod: "Fishbone",
+      rcaApproved: true, rcaReviewedBy: sureshIyer.name, rcaReviewedById: sureshIyer.id, rcaReviewedAt: new Date("2026-03-13"),
+      createdBy: priya.name, createdAt: new Date("2026-03-11"),
+    },
+  });
+  await prisma.fDA483Observation.createMany({
+    data: [
+      {
+        eventId: e3.id, reference: "WL-MUM-2026-001-OBS1", number: 1,
+        text: "Inadequate access controls on the LIMS audit trail allow administrative users to modify QC test results without persistent audit logging.",
+        severity: "Critical", area: "Data Integrity", regulation: "21 CFR Part 11",
+        rcaMethod: "5 Why",
+        rootCause: "Why 1: Administrative users could change QC results without a tamper-evident record being kept.\nWhy 2: The LIMS audit-trail function could be switched off by holders of the admin role.\nWhy 3: The administrator role bundled data-entry and configuration rights with audit-trail control.\nWhy 4: Roles were configured at go-live for convenience, without least-privilege segregation.\nWhy 5: LIMS administrator role was over-scoped and audit-trail logging could be disabled, so privileged users could modify results without a persistent record.",
+        capaId: e3capa1.id, status: "CAPA Linked",
+      },
+      {
+        eventId: e3.id, reference: "WL-MUM-2026-001-OBS2", number: 2,
+        text: "Computer system validation documentation for the LIMS is missing risk assessment for the audit trail function.",
+        severity: "High", area: "CSV", regulation: "EU GMP Annex 11",
+        rcaMethod: "Fishbone",
+        rootCause: "People: The original validation author treated the audit trail as a passive log, not a GMP control.\nProcess: The CSV risk assessment had no data-integrity-specific evaluation step.\nEquipment: The LIMS audit-trail configuration sat outside the validated-function boundary.\nMaterials: No material factor identified.\nEnvironment: The system was validated before data-integrity guidance matured.\nManagement: No periodic CSV re-assessment was triggered when DI expectations changed.\n\nRoot cause: The original LIMS CSV package predated current data-integrity expectations and never assessed the audit-trail function as a risk-bearing control.",
+        capaId: e3capa2.id, status: "CAPA Linked",
+      },
+    ],
+  });
+  await prisma.fDA483Commitment.create({
+    data: { eventId: e3.id, text: "Engage external CSV consultant for LIMS audit trail assessment", dueDate: new Date("2026-06-30"), owner: rahul.id, status: "Pending" },
+  });
+  audit("FDA483_EVENT_REGISTERED", e3.id, "2026-03-02", { recordTitle: "WL-MUM-2026-001" });
+  audit("OBSERVATION_ADDED", e3.id, "2026-03-04", { recordTitle: "Observation #1" });
+  audit("OBSERVATION_ADDED", e3.id, "2026-03-04", { recordTitle: "Observation #2" });
+  audit("OBSERVATION_RCA_COMPLETED", e3.id, "2026-03-09", { recordTitle: "Observation #1 — 5 Why" });
+  audit("OBSERVATION_RCA_COMPLETED", e3.id, "2026-03-10", { recordTitle: "Observation #2 — Fishbone" });
+  audit("CAPA_RAISED_FROM_OBSERVATION", e3.id, "2026-03-10", { recordTitle: "CAPA-MUM-2026-003", newValue: e3capa1.id });
+  audit("CAPA_RAISED_FROM_OBSERVATION", e3.id, "2026-03-11", { recordTitle: "CAPA-MUM-2026-004", newValue: e3capa2.id });
+  audit("CAPA_RCA_APPROVED", e3capa1.id, "2026-03-12", { userId: sureshIyer.id, userName: sureshIyer.name, recordTitle: "CAPA-MUM-2026-003" });
+  audit("CAPA_RCA_APPROVED", e3capa2.id, "2026-03-13", { userId: sureshIyer.id, userName: sureshIyer.name, recordTitle: "CAPA-MUM-2026-004" });
+  audit("COMMITMENT_ADDED", e3.id, "2026-03-16", { recordTitle: "Engage external CSV consultant" });
+
+  /* ═══════════════════════════════════════════════════════════════
+   * Phase 6 — QA-screen fixtures (so queues / Worklist / detail are seeable).
+   * Existing seed above is untouched; this only enriches three e1 CAPAs.
+   * ═══════════════════════════════════════════════════════════════ */
+  const sureshKumar = byUser("suresh.kumar"); // operations_head — a non-author fixer
+  const EV_CATS = [
+    "BATCH_RECORDS", "TRAINING_RECORDS", "EQUIPMENT_LOGS", "ENVIRONMENTAL_DATA",
+    "DEVIATION_HISTORY", "WITNESS_INTERVIEWS", "SUPPLIER_DATA",
   ];
+  const nowFix = new Date("2026-06-08T00:00:00Z");
+  const dPast = (n: number) => new Date(nowFix.getTime() - n * 86400000);
+  const dFut = (n: number) => new Date(nowFix.getTime() + n * 86400000);
+  const initEvidence = async (capaId: string) => {
+    await prisma.evidenceItem.createMany({
+      data: EV_CATS.map((category) => ({ capaId, category, status: "PENDING", createdBy: priya.name })),
+    });
+    return prisma.evidenceItem.findMany({ where: { capaId }, orderBy: { category: "asc" } });
+  };
 
-  for (const action of readinessActions1) {
-    await prisma.readinessAction.create({
-      data: { inspectionId: inspection1.id, ...action },
+  // Authoritative driver/creator FKs on every demo CAPA (the create calls above
+  // predate ownerId/createdById; set them here so owner/driver paths work after
+  // a fresh reseed exactly as they do after the Phase-3 backfill).
+  const demoCapaOwners: Array<[{ id: string }, { id: string }]> = [
+    [e1capa1, anita], [e1capa2, rahul], [e1capa3, nisha],
+    [e2capa1, anita], [e2capa2, nisha], [e3capa1, anita], [e3capa2, rahul],
+  ];
+  for (const [capa, ownerUser] of demoCapaOwners) {
+    await prisma.cAPA.update({ where: { id: capa.id }, data: { ownerId: ownerUser.id, createdById: priya.id } });
+  }
+
+  // ── Fixture 1: e1capa2 (driver Rahul) — READY, sitting pending_qa_review.
+  await prisma.cAPA.update({
+    where: { id: e1capa2.id },
+    data: {
+      status: "pending_qa_review", diGate: false,
+      alignmentStatus: "aligned", alignmentReviewedBy: sureshIyer.name,
+      alignmentReviewedById: sureshIyer.id, alignmentReviewedAt: dPast(20),
+    },
+  });
+  await prisma.cAPAActionItem.createMany({
+    data: [
+      { capaId: e1capa2.id, tenantId: demo.id, sequence: 1, description: "Configure automated requalification schedule in the CMMS", owner: nisha.name, ownerId: nisha.id, dueDate: dPast(6), status: "complete", completionNotes: "Schedule configured and verified against the equipment master list.", completedBy: nisha.name, completedById: nisha.id, completedAt: dPast(4), createdBy: priya.name, createdById: priya.id },
+      { capaId: e1capa2.id, tenantId: demo.id, sequence: 2, description: "Enable overdue-escalation email alerts to QA", owner: sureshKumar.name, ownerId: sureshKumar.id, dueDate: dPast(3), status: "complete", completionNotes: "Alerts enabled; QA distribution list received the test escalation.", completedBy: sureshKumar.name, completedById: sureshKumar.id, completedAt: dPast(2), createdBy: priya.name, createdById: priya.id },
+    ],
+  });
+  const ev2 = await initEvidence(e1capa2.id);
+  await prisma.evidenceItem.updateMany({ where: { capaId: e1capa2.id }, data: { status: "COMPLETE" } });
+  await prisma.evidenceFile.create({
+    data: { evidenceItemId: ev2[0].id, fileName: "requal-schedule.pdf", originalFileName: "requal-schedule.pdf", fileSize: 24576, fileType: "application/pdf", fileExtension: ".pdf", fileUrl: "seed://requal-schedule.pdf", contentHashSha256: "seedhash-e1capa2-001", retainUntil: dFut(2555), uploadedBy: nisha.name, uploadedById: nisha.id },
+  });
+  await prisma.cAPAEffectivenessCriterion.create({
+    data: { capaId: e1capa2.id, tenantId: demo.id, description: "Zero overdue requalifications for 90 days post-implementation", targetMetric: "Overdue requalification count", measurementMethod: "CMMS overdue report", targetValue: "0", monitoringPeriod: "90 days", createdBy: priya.name },
+  });
+
+  // ── Fixture 2: e1capa3 (driver Nisha) — bounced back, one item in REWORK.
+  await prisma.cAPA.update({
+    where: { id: e1capa3.id },
+    data: { status: "in_progress", rejectionReason: "Training-record linkage evidence is insufficient — attach the LMS export showing SOP-version association.", rejectedById: priya.id, rejectedAt: dPast(2) },
+  });
+  await prisma.cAPAActionItem.createMany({
+    data: [
+      { capaId: e1capa3.id, tenantId: demo.id, sequence: 1, description: "Enforce SOP-version ↔ training-record association in the LMS", owner: nisha.name, ownerId: nisha.id, dueDate: dPast(1), status: "rework", reworkReason: "Training-record linkage evidence is insufficient — attach the LMS export showing SOP-version association.", reworkRequestedById: priya.id, reworkRequestedAt: dPast(2), createdBy: priya.name, createdById: priya.id },
+      { capaId: e1capa3.id, tenantId: demo.id, sequence: 2, description: "Backfill SOP-version tags on the last 12 months of training records", owner: sureshKumar.name, ownerId: sureshKumar.id, dueDate: dPast(4), status: "in_progress", createdBy: priya.name, createdById: priya.id },
+      { capaId: e1capa3.id, tenantId: demo.id, sequence: 3, description: "Add SOP-version field to the quarterly training audit checklist", owner: nisha.name, ownerId: nisha.id, dueDate: dFut(10), status: "pending", createdBy: priya.name, createdById: priya.id },
+    ],
+  });
+  const ev3 = await initEvidence(e1capa3.id);
+  await prisma.evidenceItem.update({ where: { id: ev3[1].id }, data: { status: "COMPLETE" } });
+  // N/A items: write the rationale to BOTH the column AND an EvidenceNoteVersion
+  // row, exactly as updateEvidenceStatus does, so seeded rationales surface in
+  // the note-history UI (audit follow-up FIX 4). Idempotent: the parent FDA-483
+  // CAPAs are wiped + recreated each seed run, cascading these rows away first.
+  const naSeed: Array<[string, string]> = [
+    [ev3[2].id, "No equipment logs relate to a training-record linkage CAPA."],
+    [ev3[4].id, "Deviation history is not relevant to this LMS configuration fix."],
+  ];
+  for (const [evidenceItemId, reason] of naSeed) {
+    await prisma.evidenceItem.update({ where: { id: evidenceItemId }, data: { status: "NOT_APPLICABLE", naReason: reason } });
+    await prisma.evidenceNoteVersion.create({
+      data: { evidenceItemId, notes: reason, statusAtTime: "NOT_APPLICABLE", createdBy: priya.name },
     });
   }
+  await prisma.cAPAEffectivenessCriterion.create({
+    data: { capaId: e1capa3.id, tenantId: demo.id, description: "100% of training records carry the correct SOP version for 90 days", targetMetric: "SOP-version tagged training records", measurementMethod: "LMS audit export", targetValue: "100%", monitoringPeriod: "90 days", createdBy: priya.name },
+  });
 
-  // Simulations for inspection 1
-  const simulations = [
-    { title: "Mock FDA Inspection - Day 1", type: "Full Mock", duration: 480, scheduledAt: new Date("2026-05-15"), participants: "QA Team, QC Team, Production Lead", status: "Scheduled", createdBy: users["u-002"] },
-    { title: "Front Room Q&A Practice", type: "Front Room", duration: 120, scheduledAt: new Date("2026-05-08"), participants: "Dr. Priya Sharma, Rahul Mehta, Dr. Nisha Rao", status: "Scheduled", createdBy: users["u-002"] },
-    { title: "DIL Handling Drill", type: "DIL Drill", duration: 90, scheduledAt: new Date("2026-05-10"), participants: "Back Room Team", status: "Scheduled", createdBy: users["u-002"] },
-    { title: "SME Q&A Practice - QC Lab", type: "SME Q&A", duration: 120, scheduledAt: new Date("2026-04-25"), participants: "QC Analysts, Lab Supervisors", status: "Completed", score: 78, notes: "Good performance, need to improve on Part 11 questions", createdBy: users["u-002"] },
+  // ── Fixture 3: e1capa1 — CLOSED with a 90-day effectiveness check now DUE.
+  await prisma.cAPA.update({
+    where: { id: e1capa1.id },
+    data: { status: "closed", closedBy: priya.name, closedAt: dPast(95), effectivenessCheck: true, effectivenessDate: dPast(5), effectivenessVerdict: null },
+  });
+
+  console.log("  Phase 6 fixtures: e1capa2 ready/pending_qa_review, e1capa3 rework, e1capa1 closed+effectiveness-due");
+
+  /* ── EVENT 4 — Fresh / minimal (empty-state demo) ── */
+  const e4InspStart = new Date(today); e4InspStart.setDate(e4InspStart.getDate() - 2); // 29 May
+  const e4InspEnd = new Date(today); e4InspEnd.setDate(e4InspEnd.getDate() - 1); // 30 May
+  const e4Deadline = addWorkingDays(today, 15);
+  const e4 = await prisma.fDA483Event.create({
+    data: {
+      tenantId: demo.id,
+      referenceNumber: "483-CHN-2026-003",
+      eventType: "FDA 483",
+      agency: "FDA",
+      siteId: bangalore.id,
+      inspectionDate: e4InspStart,
+      inspectionEndDate: e4InspEnd,
+      leadInvestigator: "Dr. Robert Chen",
+      internalOwnerId: anita.id,
+      responseDeadline: e4Deadline,
+      status: "Open",
+      createdBy: priya.name,
+      createdAt: new Date(today),
+    },
+  });
+  audit("FDA483_EVENT_REGISTERED", e4.id, "2026-05-31", { recordTitle: "483-CHN-2026-003" });
+
+  // Insert all FDA 483 audit rows.
+  await prisma.auditLog.createMany({ data: auditRows });
+
+  // ── Verify ──
+  const [evCount, obsCount, capaCount, commitCount, docCount, fdaAudit] =
+    await Promise.all([
+      prisma.fDA483Event.count(),
+      prisma.fDA483Observation.count(),
+      prisma.cAPA.count({ where: { source: "FDA 483" } }),
+      prisma.fDA483Commitment.count(),
+      prisma.fDA483Document.count(),
+      prisma.auditLog.count({ where: { module: "FDA 483" } }),
+    ]);
+  console.log("  FDA 483 seeded:", {
+    events: evCount,
+    observations: obsCount,
+    fda483Capas: capaCount,
+    commitments: commitCount,
+    responseDocuments: docCount,
+    auditEntries: fdaAudit,
+  });
+  console.table(
+    [
+      { Reference: "483-CHN-2026-001", Status: "Response Submitted", Obs: 3, CAPAs: 3, Submitted: "Yes" },
+      { Reference: "483-MUM-2026-002", Status: "Under Investigation", Obs: 4, CAPAs: 2, Submitted: "No" },
+      { Reference: "WL-MUM-2026-001", Status: "Under Investigation", Obs: 2, CAPAs: 2, Submitted: "No" },
+      { Reference: "483-CHN-2026-003", Status: "Open", Obs: 0, CAPAs: 0, Submitted: "No" },
+    ],
+  );
+
+  /* ═══════════════════════════════════════════════════════════════
+   * DEVIATIONS — wipe + reseed 5 lifecycle-stage scenarios (Tier 2:
+   * investigation + CAPA decision + SoD). Reporters are distributed
+   * across users so any single test login can investigate some of them.
+   *
+   * Field mapping vs the task spec (only post-Tier 2 fields exist):
+   *   detectedById → detectedBy (name) + createdById (authoritative
+   *     reporter FK used by SoD); ownerId → owner (userId); detectedAt →
+   *     detectedDate; *Risk → *Impact (lowercase enum); status/type →
+   *     lowercase canonical; rcaMethod "5 Why" → "5Why" etc.
+   *   dataIntegrityImpact → DROPPED (no such column on Deviation).
+   * Site note: the task referenced DEV-CHN-* at "Bangalore R&D Centre",
+   *   but CHN is Chennai QC Laboratory's code (Bangalore = BLR). Kept the
+   *   task's literal DEV-CHN references and seeded them at Chennai so the
+   *   reference codes stay canonical.
+   * ═══════════════════════════════════════════════════════════════ */
+  const vikram = byUser("vikram.singh"); // it_cdo — deviation owner/investigator
+
+  const dAgo = (n: number) => { const d = new Date(today); d.setDate(d.getDate() - n); return d; };
+  const dAhead = (n: number) => { const d = new Date(today); d.setDate(d.getDate() + n); return d; };
+
+  // ── Wipe (scoped to Deviation + its derivative CAPAs only) ──
+  // AuditLog module value matches what the Tier 2 actions write:
+  // "Deviation Management" (not "DEVIATION").
+  const devWipe = await prisma.$transaction([
+    prisma.auditLog.deleteMany({ where: { module: "Deviation Management" } }),
+    prisma.cAPA.deleteMany({ where: { source: "Deviation" } }),
+    prisma.deviation.deleteMany({}),
+  ]);
+  console.log("  Deviations wiped:", { audit: devWipe[0].count, deviationCapas: devWipe[1].count, deviations: devWipe[2].count });
+
+  // RCA serialization — mirrors DeviationInvestigation.tsx buildPayload so
+  // the saved-RCA display renders the structured blocks.
+  const FB_CATS = ["People", "Process", "Equipment", "Materials", "Environment", "Management"] as const;
+  const synth5Why = (whys: string[]) => whys.filter((w) => w.trim()).map((w, i) => `Why ${i + 1}: ${w}`).join("\n");
+  const synthFishbone = (cats: Record<string, string>, root: string) =>
+    FB_CATS.filter((c) => cats[c]?.trim()).map((c) => `${c}: ${cats[c]}`).join("\n") + `\n\nRoot cause: ${root}`;
+
+  // ── DEV 1 — just reported, no investigation (reporter: Anita) ──
+  const dev1 = await prisma.deviation.create({ data: {
+    tenantId: demo.id, reference: "DEV-CHN-2026-001", siteId: chennai.id,
+    title: "Tablet hardness OOS — Batch B-2026-018",
+    description: "Tablet hardness measurements exceeded the upper specification limit (12 kP vs SOP limit of 10 kP). 5 of 20 tested tablets above limit.",
+    type: "unplanned", category: "Out Of Specification", severity: "Major", area: "Manufacturing",
+    detectedBy: anita.name, detectedDate: dAgo(2), createdBy: anita.name, createdById: anita.id,
+    owner: vikram.id, dueDate: dAhead(10), status: "open",
+    immediateAction: "Batch quarantined. QC investigation initiated. No release pending review.",
+    patientSafetyImpact: "medium", productQualityImpact: "high", regulatoryImpact: "medium",
+  } });
+
+  // ── DEV 2 — investigation in progress (5 Why, first 3 filled) ──
+  const dev2whys = [
+    "Settle plate counts in Cleanroom B exceeded the action level during the monitoring session.",
+    "Airborne particulate was not being cleared at the qualified rate.",
+    "The HVAC supplying Cleanroom B was not maintaining the designed air-change rate.",
+    "", "",
   ];
+  const dev2 = await prisma.deviation.create({ data: {
+    tenantId: demo.id, reference: "DEV-CHN-2026-002", siteId: chennai.id,
+    title: "Environmental monitoring exceeded action level — Cleanroom B",
+    description: "Settle plate count 65 CFU/4hr vs action limit 50 CFU/4hr. Personnel monitoring also elevated. Possible HVAC malfunction.",
+    type: "unplanned", category: "EM Excursion", severity: "Major", area: "Manufacturing",
+    detectedBy: rahul.name, detectedDate: dAgo(3), createdBy: rahul.name, createdById: rahul.id,
+    owner: nisha.id, dueDate: dAhead(7), status: "under_investigation",
+    immediateAction: "Cleanroom temporarily restricted. HVAC engineering called for investigation.",
+    patientSafetyImpact: "low", productQualityImpact: "medium", regulatoryImpact: "low",
+    rcaMethod: "5Why", rcaData: JSON.stringify({ whys: dev2whys }), rootCause: null,
+  } });
 
-  for (const sim of simulations) {
-    await prisma.simulation.create({
-      data: { inspectionId: inspection1.id, ...sim },
+  // ── DEV 3 — investigation complete (Fishbone), CAPA decision pending ──
+  const dev3cats: Record<string, string> = {
+    People: "The equipment owner tracked PQ due-dates personally, with no cover during leave.",
+    Process: "PQ scheduling was a manual spreadsheet not integrated with the equipment master.",
+    Equipment: "HPLC #4 carried no system-enforced qualification-due flag.",
+    Materials: "No material factor identified.",
+    Environment: "A heavy stability-testing workload kept the instrument in continuous use.",
+    Management: "The qualification due-list was not reviewed at the periodic quality review.",
+  };
+  const dev3root = "Calibration scheduling system did not flag the overdue PQ due to manual tracking process not integrated with equipment master data.";
+  const dev3 = await prisma.deviation.create({ data: {
+    tenantId: demo.id, reference: "DEV-CHN-2026-003", siteId: chennai.id,
+    title: "Equipment qualification overdue — HPLC #4",
+    description: "PQ requalification scheduled 2026-04-15 was not completed. System has been used for stability testing in the interim period.",
+    type: "unplanned", category: "Qualification Overdue", severity: "Major", area: "QC Lab",
+    detectedBy: anita.name, detectedDate: dAgo(5), createdBy: anita.name, createdById: anita.id,
+    owner: vikram.id, dueDate: dAhead(5), status: "under_investigation",
+    immediateAction: "HPLC #4 taken out of routine use. Pending data integrity review.",
+    patientSafetyImpact: "medium", productQualityImpact: "high", regulatoryImpact: "high",
+    rcaMethod: "Fishbone", rcaData: JSON.stringify({ categories: dev3cats, root: dev3root }),
+    rootCause: synthFishbone(dev3cats, dev3root),
+    investigationCompletedAt: dAgo(1), investigationCompletedById: vikram.id,
+  } });
+
+  // ── DEV 4 — CAPA required + raised (Critical, Mumbai) ──
+  const dev4whys = [
+    "The pre-filter seal on the line-3 filter housing failed during a humidity spike.",
+    "The seal had degraded faster than its qualified service interval assumed.",
+    "The qualification interval did not account for humidity-driven elastomer ageing.",
+    "The qualification procedure used a single fixed interval regardless of environmental zone.",
+    "Filter housing seal qualification interval was set too long for the humidity-exposed environment; procedure did not specify humidity-dependent intervals.",
+  ];
+  const dev4 = await prisma.deviation.create({ data: {
+    tenantId: demo.id, reference: "DEV-MUM-2026-001", siteId: mumbai.id,
+    title: "Critical: Filter housing seal failure during fill operation",
+    description: "Filter housing pre-filter seal failed during humidity spike on line 3. Production halted immediately.",
+    type: "unplanned", category: "Process", severity: "Critical", area: "Sterile Manufacturing",
+    detectedBy: nisha.name, detectedDate: dAgo(14), createdBy: nisha.name, createdById: nisha.id,
+    owner: anita.id, dueDate: dAhead(2), status: "under_investigation",
+    immediateAction: "Line 3 stopped immediately. Affected batches quarantined. Engineering and Production heads notified.",
+    patientSafetyImpact: "high", productQualityImpact: "high", regulatoryImpact: "medium",
+    rcaMethod: "5Why", rcaData: JSON.stringify({ whys: dev4whys }), rootCause: synth5Why(dev4whys),
+    investigationCompletedAt: dAgo(7), investigationCompletedById: anita.id,
+    capaDecisionMade: true, capaDecisionRequired: true,
+    capaDecisionReason: "Root cause indicates systemic qualification scheduling gap. CAPA required to revise SOP and retrain QC staff on humidity-zone equipment.",
+    capaDecisionAt: dAgo(5), capaDecisionById: priya.id,
+  } });
+  // Linked CAPA. NOTE: CAPA-MUM-2026-001..004 are already taken by the FDA 483
+  // seed and CAPA.reference is @unique — so the deviation CAPA uses the next
+  // free MUM number (005) rather than the spec's 001.
+  const dev4capa = await prisma.cAPA.create({ data: {
+    tenantId: demo.id, reference: "CAPA-MUM-2026-005", title: "Filter housing seal qualification interval revision", source: "Deviation", siteId: mumbai.id,
+    description: "Address: Filter housing seal qualification interval revision (from DEV-MUM-2026-001).",
+    risk: "High", owner: anita.id, dueDate: dAhead(30), status: "in_progress",
+    rca: dev4whys[4], rcaMethod: "5 Why", deviationId: dev4.id,
+    createdBy: priya.name, createdAt: dAgo(5),
+  } });
+  await prisma.deviation.update({ where: { id: dev4.id }, data: { linkedCAPAId: dev4capa.id } });
+
+  // ── DEV 5 — closed without CAPA (one-off, Barrier Analysis) ──
+  const dev5root = "Reviewer training did not emphasize standardized formatting. Isolated to one reviewer. Not a systemic issue.";
+  const dev5 = await prisma.deviation.create({ data: {
+    tenantId: demo.id, reference: "DEV-CHN-2026-004", siteId: chennai.id,
+    title: "Documentation: Batch record review signature formatting",
+    description: "Batch record review signature dates not consistently formatted across the manufacturing record. Minor formatting variations only.",
+    type: "unplanned", category: "Documentation", severity: "Minor", area: "QC Lab",
+    detectedBy: vikram.name, detectedDate: dAgo(20), createdBy: vikram.name, createdById: vikram.id,
+    owner: rahul.id, dueDate: dAgo(15), status: "closed",
+    immediateAction: "Reviewer asked to use consistent format going forward.",
+    patientSafetyImpact: "none", productQualityImpact: "none", regulatoryImpact: "low",
+    rcaMethod: "BarrierAnalysis", rcaData: JSON.stringify({ freeform: dev5root }), rootCause: dev5root,
+    investigationCompletedAt: dAgo(14), investigationCompletedById: rahul.id,
+    capaDecisionMade: true, capaDecisionRequired: false,
+    capaDecisionReason: "Isolated formatting issue, no regulatory impact. Reviewer has been informed. No CAPA needed. Closing without action.",
+    capaDecisionAt: dAgo(12), capaDecisionById: priya.id,
+    closedBy: priya.name, closedDate: dAgo(11),
+    closureNotes: "Closed — no CAPA required per QA decision (isolated formatting issue).",
+  } });
+
+  // ── Audit trail (module "Deviation Management") ──
+  const devAuditRow = (
+    action: string,
+    recordId: string,
+    daysAgo: number,
+    u: { id: string; name: string; role: string },
+    extra: Partial<Prisma.AuditLogCreateManyInput> = {},
+  ): Prisma.AuditLogCreateManyInput => ({
+    tenantId: demo.id, userId: u.id, userName: u.name, userRole: u.role,
+    module: "Deviation Management", action, recordId, createdAt: dAgo(daysAgo), ...extra,
+  });
+  const devAuditRows: Prisma.AuditLogCreateManyInput[] = [
+    devAuditRow("DEVIATION_REPORTED", dev1.id, 2, anita),
+    devAuditRow("DEVIATION_REPORTED", dev2.id, 3, rahul),
+    devAuditRow("DEVIATION_INVESTIGATION_SAVED", dev2.id, 2, nisha, { newValue: JSON.stringify({ rcaMethod: "5Why" }) }),
+    devAuditRow("DEVIATION_REPORTED", dev3.id, 5, anita),
+    devAuditRow("DEVIATION_INVESTIGATION_SAVED", dev3.id, 2, vikram, { newValue: JSON.stringify({ rcaMethod: "Fishbone" }) }),
+    devAuditRow("DEVIATION_INVESTIGATION_COMPLETED", dev3.id, 1, vikram, { newValue: JSON.stringify({ rcaMethod: "Fishbone", completedBy: vikram.name }) }),
+    devAuditRow("DEVIATION_REPORTED", dev4.id, 14, nisha),
+    devAuditRow("DEVIATION_INVESTIGATION_SAVED", dev4.id, 9, anita, { newValue: JSON.stringify({ rcaMethod: "5Why" }) }),
+    devAuditRow("DEVIATION_INVESTIGATION_COMPLETED", dev4.id, 7, anita, { newValue: JSON.stringify({ rcaMethod: "5Why", completedBy: anita.name }) }),
+    devAuditRow("DEVIATION_CAPA_DECISION_MADE", dev4.id, 5, priya, { newValue: JSON.stringify({ capaRequired: true }) }),
+    devAuditRow("DEVIATION_CAPA_RAISED", dev4.id, 5, priya, { recordTitle: "CAPA-MUM-2026-005", newValue: dev4capa.id }),
+    devAuditRow("DEVIATION_REPORTED", dev5.id, 20, vikram),
+    devAuditRow("DEVIATION_INVESTIGATION_SAVED", dev5.id, 16, rahul, { newValue: JSON.stringify({ rcaMethod: "BarrierAnalysis" }) }),
+    devAuditRow("DEVIATION_INVESTIGATION_COMPLETED", dev5.id, 14, rahul, { newValue: JSON.stringify({ rcaMethod: "BarrierAnalysis", completedBy: rahul.name }) }),
+    devAuditRow("DEVIATION_CAPA_DECISION_MADE", dev5.id, 12, priya, { newValue: JSON.stringify({ capaRequired: false }) }),
+    devAuditRow("DEVIATION_CLOSED", dev5.id, 11, priya),
+  ];
+  await prisma.auditLog.createMany({ data: devAuditRows });
+
+  // ── Verify ──
+  const [devCount, devCapaCount, devAuditCount] = await Promise.all([
+    prisma.deviation.count(),
+    prisma.cAPA.count({ where: { source: "Deviation" } }),
+    prisma.auditLog.count({ where: { module: "Deviation Management" } }),
+  ]);
+  console.log("  Deviations seeded:", { deviations: devCount, deviationCapas: devCapaCount, auditEntries: devAuditCount });
+  console.table([
+    { Reference: "DEV-CHN-2026-001", Status: "open", Reporter: anita.name, Owner: vikram.name, Investigation: "Not started", CAPADecision: "Not made" },
+    { Reference: "DEV-CHN-2026-002", Status: "under_investigation", Reporter: rahul.name, Owner: nisha.name, Investigation: "In progress", CAPADecision: "Not made" },
+    { Reference: "DEV-CHN-2026-003", Status: "under_investigation", Reporter: anita.name, Owner: vikram.name, Investigation: "Completed", CAPADecision: "Pending" },
+    { Reference: "DEV-MUM-2026-001", Status: "under_investigation", Reporter: nisha.name, Owner: anita.name, Investigation: "Completed", CAPADecision: "Required + raised" },
+    { Reference: "DEV-CHN-2026-004", Status: "closed", Reporter: vikram.name, Owner: rahul.name, Investigation: "Completed", CAPADecision: "Not required" },
+  ]);
+
+  // ── Demo gap-assessment findings ──
+  // Seeded with explicit site-scoped references (FND-{siteCode}-YYYY-NNN) so
+  // they mirror the CAPA-/DEV- schemes and never fall back to the
+  // "FND-LEGACY-<id>" display label. Upsert keyed on the stable id so
+  // re-seeding an existing DB heals any null reference (matching the
+  // password-heal pattern above), and a fresh db:reset recreates them.
+  // New findings raised in-app continue the sequence from FND-BLR-2026-004
+  // because generateReference() reads the max existing reference. Severities
+  // use the app's Critical/High/Low vocabulary (CreateFindingSchema enum).
+  const findings = [
+    {
+      id: "demo-find-001",
+      reference: "FND-BLR-2026-001",
+      requirement: "Temperature excursion in stability chamber — 25C ± 2C limit breached for 4hrs",
+      area: "Manufacturing",
+      framework: "21 CFR 211",
+      severity: "High",
+      status: "Open",
+      owner: "Dr. Priya Sharma",
+      targetDate: new Date("2026-05-27T14:16:16Z"),
+      evidenceLink: null as string | null,
+    },
+    {
+      id: "demo-find-002",
+      reference: "FND-BLR-2026-002",
+      requirement: "Missing operator signature on batch record BMR-2026-0143",
+      area: "QC Lab",
+      framework: "21 CFR 211",
+      severity: "Low",
+      status: "In Progress",
+      owner: "Anita Patel",
+      targetDate: new Date("2026-05-20T14:16:16Z"),
+      evidenceLink: null as string | null,
+    },
+    {
+      id: "demo-find-003",
+      reference: "FND-BLR-2026-003",
+      requirement: "Validation gap in HVAC monitoring — no continuous data integrity",
+      area: "Utilities",
+      framework: "EU GMP Annex 11",
+      severity: "Critical",
+      status: "Open",
+      owner: "Vikram Singh",
+      targetDate: new Date("2026-05-16T14:16:16Z"),
+      evidenceLink: null as string | null,
+    },
+  ];
+  for (const f of findings) {
+    const evidenceLink = f.evidenceLink ?? null;
+    await prisma.finding.upsert({
+      where: { id: f.id },
+      update: { reference: f.reference, evidenceLink },
+      create: {
+        id: f.id,
+        reference: f.reference,
+        tenantId: demo.id,
+        siteId: bangalore.id,
+        requirement: f.requirement,
+        area: f.area,
+        framework: f.framework,
+        severity: f.severity,
+        status: f.status,
+        owner: f.owner,
+        targetDate: f.targetDate,
+        evidenceLink,
+        createdBy: f.owner,
+      },
     });
   }
+  console.log("  Findings:", findings.length);
 
-  console.log("✓ Inspections: 4 (1 completed, 3 upcoming) with", readinessActions1.length, "readiness actions and", simulations.length, "simulations");
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // AUDIT LOGS - Comprehensive history
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const auditLogs = [
-    // Recent critical actions
-    { userName: "Anita Patel", userRole: "QA Head", userId: users["u-004"], module: "CAPA Tracker", action: "CAPA_SIGNED_AND_CLOSED", recordId: "CAPA-1417", recordTitle: "Audit trail not enabled in LIMS", oldValue: "Pending QA Review", newValue: "Closed", ipAddress: "192.168.1.12", createdAt: new Date("2026-04-16T09:02:00Z") },
-    { userName: "Anita Patel", userRole: "QA Head", userId: users["u-004"], module: "CAPA Tracker", action: "DI_GATE_CLEARED", recordId: "CAPA-1417", recordTitle: "Audit trail not enabled in LIMS", newValue: "DI Gate Cleared", ipAddress: "192.168.1.12", createdAt: new Date("2026-04-16T04:45:00Z") },
-    { userName: "Rahul Mehta", userRole: "Regulatory Affairs", userId: users["u-003"], module: "Gap Assessment", action: "FINDING_CREATED", recordId: "FIND-001", recordTitle: "Audit trail not enabled in LIMS — 21 CFR 11.10(e)", newValue: "Critical", ipAddress: "192.168.1.15", createdAt: new Date("2026-04-15T04:00:00Z") },
-    { userName: "Rahul Mehta", userRole: "Regulatory Affairs", userId: users["u-003"], module: "Gap Assessment", action: "CAPA_RAISED_FROM_FINDING", recordId: "FIND-001", recordTitle: "FIND-001 → CAPA-1417 raised", ipAddress: "192.168.1.15", createdAt: new Date("2026-04-15T04:15:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "FDA 483", action: "RESPONSE_SUBMITTED", recordId: "FEI-3004795103-2026", recordTitle: "FDA 483 — Chennai QC Laboratory", newValue: "Submitted to FDA", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-14T10:30:00Z") },
-    { userName: "Anita Patel", userRole: "CSV/Val Lead", userId: users["u-004"], module: "CSV/CSA", action: "AUDIT_TRAIL_ENABLED", recordId: "SYS-001", recordTitle: "LIMS — LabWare 8.x", oldValue: "Not Enabled", newValue: "Enabled", ipAddress: "192.168.1.12", createdAt: new Date("2026-04-13T05:50:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "Customer Admin", userId: users["u-002"], module: "Settings", action: "USER_CREATED", recordId: "u-007", recordTitle: "Vikram Singh — Operations Head", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-12T03:30:00Z") },
-    { userName: "Rahul Mehta", userRole: "Regulatory Affairs", userId: users["u-003"], module: "FDA 483", action: "EVENT_CREATED", recordId: "FEI-3004795103-2026", recordTitle: "FDA 483 — Chennai QC Laboratory", newValue: "Warning Letter", ipAddress: "192.168.1.15", createdAt: new Date("2026-04-11T07:00:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "Governance", action: "RAID_ITEM_ADDED", recordId: "RAID-004", recordTitle: "LIMS audit trail remediation overdue", newValue: "Risk — Critical", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-10T08:15:00Z") },
-    { userName: "Anita Patel", userRole: "CSV/Val Lead", userId: users["u-004"], module: "CSV/CSA", action: "VALIDATION_STAGE_UPDATED", recordId: "SYS-001", recordTitle: "LIMS — LabWare 8.x", oldValue: "IQ", newValue: "OQ", ipAddress: "192.168.1.12", createdAt: new Date("2026-04-09T06:00:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "Training & Awareness", action: "SIMULATION_COMPLETED", recordId: "sim-003", recordTitle: "SME Q&A Practice — QC Lab", newValue: "Score: 78%", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-08T09:30:00Z") },
-    { userName: "Dr. Nisha Rao", userRole: "QC/Lab Director", userId: users["u-005"], module: "Evidence & Documents", action: "DOCUMENT_ADDED", recordId: "DOC-012", recordTitle: "LIMS Validation Master Plan v2.1", newValue: "Draft", ipAddress: "192.168.1.20", createdAt: new Date("2026-04-07T04:00:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "Customer Admin", userId: users["u-002"], module: "Settings", action: "SITE_ADDED", recordId: "site-gl-3", recordTitle: "Chennai QC Laboratory", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-06T10:00:00Z") },
-    { userName: "Rahul Mehta", userRole: "Regulatory Affairs", userId: users["u-003"], module: "Gap Assessment", action: "FINDING_STATUS_CHANGED", recordId: "FIND-002", recordTitle: "E-signature not enforced in CDS", oldValue: "Open", newValue: "In Progress", ipAddress: "192.168.1.15", createdAt: new Date("2026-04-05T07:30:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "CAPA Tracker", action: "CAPA_CREATED", recordId: "CAPA-1418", recordTitle: "E-signature validation for CDS", newValue: "High", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-04T11:45:00Z") },
-    // Older entries
-    { userName: "Dr. Nisha Rao", userRole: "QC/Lab Director", userId: users["u-005"], module: "Deviation", action: "DEVIATION_CREATED", recordId: "DEV-2026-001", recordTitle: "Temperature excursion in cold room #3", newValue: "Major", ipAddress: "192.168.1.20", createdAt: new Date("2026-04-10T05:30:00Z") },
-    { userName: "Suresh Kumar", userRole: "Operations Head", userId: users["u-007"], module: "Deviation", action: "DEVIATION_CREATED", recordId: "DEV-2026-002", recordTitle: "Batch yield below specification", newValue: "Major", ipAddress: "192.168.1.25", createdAt: new Date("2026-04-08T06:15:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "Deviation", action: "DEVIATION_CLOSED", recordId: "DEV-2026-003", recordTitle: "Missing signature on batch record page 5", oldValue: "Under Investigation", newValue: "Closed", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-15T09:00:00Z") },
-    { userName: "Vikram Singh", userRole: "IT/CDO", userId: users["u-006"], module: "CSV/CSA", action: "SYSTEM_ADDED", recordId: "SYS-008", recordTitle: "Stability Manager — In-house v2.1", newValue: "Not Started", ipAddress: "192.168.1.30", createdAt: new Date("2026-04-03T08:00:00Z") },
-    { userName: "Anita Patel", userRole: "CSV/Val Lead", userId: users["u-004"], module: "CSV/CSA", action: "ROADMAP_ACTIVITY_COMPLETED", recordId: "SYS-003", recordTitle: "Part 11 Gap Assessment — Empower CDS", newValue: "Completed", ipAddress: "192.168.1.12", createdAt: new Date("2026-02-15T14:00:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "Training & Awareness", action: "INSPECTION_CREATED", recordId: "INSP-2026-001", recordTitle: "FDA GMP Inspection Q2 2026", newValue: "Preparation", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-01T09:00:00Z") },
-    { userName: "Rahul Mehta", userRole: "Regulatory Affairs", userId: users["u-003"], module: "FDA 483", action: "OBSERVATION_ADDED", recordId: "OBS-001", recordTitle: "21 CFR 211.160(b) — Laboratory Controls", newValue: "Critical", ipAddress: "192.168.1.15", createdAt: new Date("2026-03-15T11:00:00Z") },
-    { userName: "Rahul Mehta", userRole: "Regulatory Affairs", userId: users["u-003"], module: "FDA 483", action: "COMMITMENT_ADDED", recordId: "CMT-001", recordTitle: "Implement revised method validation protocol", newValue: "Due: 2026-05-30", ipAddress: "192.168.1.15", createdAt: new Date("2026-03-16T10:00:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "Governance", action: "KPI_UPDATED", recordId: "KPI-CAPA-TIME", recordTitle: "CAPA Timeliness Score", oldValue: "72%", newValue: "78%", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-01T06:00:00Z") },
-    { userName: "Admin", userRole: "Customer Admin", userId: demo.id, module: "Auth", action: "USER_LOGIN", recordId: users["u-002"], recordTitle: "Dr. Priya Sharma", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-16T08:00:00Z") },
-    { userName: "Admin", userRole: "Customer Admin", userId: demo.id, module: "Auth", action: "USER_LOGIN", recordId: users["u-003"], recordTitle: "Rahul Mehta", ipAddress: "192.168.1.15", createdAt: new Date("2026-04-16T08:15:00Z") },
-    { userName: "Admin", userRole: "Customer Admin", userId: demo.id, module: "Auth", action: "USER_LOGIN", recordId: users["u-004"], recordTitle: "Anita Patel", ipAddress: "192.168.1.12", createdAt: new Date("2026-04-16T08:30:00Z") },
-    { userName: "Dr. Priya Sharma", userRole: "QA Head", userId: users["u-002"], module: "Evidence & Documents", action: "DOCUMENT_APPROVED", recordId: "DOC-015", recordTitle: "CAPA Effectiveness Report CAPA1417", newValue: "Approved", ipAddress: "192.168.1.10", createdAt: new Date("2026-04-16T11:00:00Z") },
-    { userName: "Anita Patel", userRole: "CSV/Val Lead", userId: users["u-004"], module: "CAPA Tracker", action: "CAPA_STATUS_CHANGED", recordId: "CAPA-1418", recordTitle: "E-signature validation for CDS", oldValue: "Open", newValue: "In Progress", ipAddress: "192.168.1.12", createdAt: new Date("2026-04-10T10:00:00Z") },
-    { userName: "Dr. Nisha Rao", userRole: "QC/Lab Director", userId: users["u-005"], module: "Deviation", action: "DEVIATION_STATUS_CHANGED", recordId: "DEV-2026-002", recordTitle: "Batch yield below specification", oldValue: "Open", newValue: "Investigation", ipAddress: "192.168.1.20", createdAt: new Date("2026-04-09T14:00:00Z") },
-  ];
-
-  for (const log of auditLogs) {
-    const { createdAt, userId, ...data } = log;
-    await prisma.auditLog.create({
-      data: { tenantId: demo.id, userId, ...data, createdAt },
+  // ── Regulatory regions (Item #3, parity-critical) ──
+  // Seed the RegulatoryRegion lookup from the load-bearing REGULATORY_REGIONS
+  // constant so the DB reproduces the EXACT 8 value strings that Tenant.
+  // regulatoryRegion + FrameworkRegion.region already reference. Idempotent by
+  // value; `update: {}` never clobbers an admin-edited label on re-seed.
+  for (const r of REGULATORY_REGIONS) {
+    await prisma.regulatoryRegion.upsert({
+      where: { value: r.value },
+      update: {},
+      create: { value: r.value, label: r.label },
     });
   }
-  console.log("✓ Audit Logs:", auditLogs.length);
+  // Reserved GLOBAL region (Stage 1). A REAL, protected RegulatoryRegion row —
+  // not just the Framework.appliesToAllRegions flag — so GLOBAL can be the
+  // archive → reassignment target and appear in region dropdowns. Idempotent by
+  // value; `update: {}` never clobbers the label on re-seed. PARITY: this row
+  // adds no FrameworkRegion links, so no tenant's effective framework set moves.
+  await prisma.regulatoryRegion.upsert({
+    where: { value: GLOBAL_REGION_VALUE },
+    update: {},
+    create: { value: GLOBAL_REGION_VALUE, label: GLOBAL_REGION_LABEL },
+  });
+  console.log("  Regulatory regions:", REGULATORY_REGIONS.length + 1, "(incl. reserved GLOBAL)");
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // CAPA DOCUMENTS
-  // ══════════════════════════════════════════════════════════════════════════
-
-  const capaDocuments = [
-    { capaId: "CAPA-1417", fileName: "LIMS_Audit_Trail_Configuration_Report.pdf", fileSize: "456 KB", fileType: "application/pdf", version: "v1.0", status: "approved", uploadedBy: users["u-004"], approvedBy: users["u-002"], approvedAt: new Date("2026-04-15"), description: "Audit trail configuration verification report" },
-    { capaId: "CAPA-1417", fileName: "LIMS_Part11_Compliance_Checklist.xlsx", fileSize: "78 KB", fileType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", version: "v1.0", status: "approved", uploadedBy: users["u-004"], approvedBy: users["u-002"], approvedAt: new Date("2026-04-15"), description: "Part 11 compliance checklist - completed" },
-    { capaId: "CAPA-1418", fileName: "CDS_E-Signature_OQ_Protocol.pdf", fileSize: "234 KB", fileType: "application/pdf", version: "v0.2", status: "current", uploadedBy: users["u-005"], description: "OQ protocol for e-signature validation - draft" },
-    { capaId: "CAPA-1421", fileName: "Line_Clearance_SOP_Rev5.pdf", fileSize: "189 KB", fileType: "application/pdf", version: "v5.0", status: "current", uploadedBy: users["u-007"], description: "Updated line clearance procedure" },
-    { capaId: "CAPA-1423", fileName: "Method_Validation_Protocol_Rev.pdf", fileSize: "567 KB", fileType: "application/pdf", version: "v2.0", status: "current", uploadedBy: users["u-005"], description: "Revised method validation protocol per ICH Q2" },
-  ];
-
-  for (const doc of capaDocuments) {
-    await prisma.cAPADocument.create({ data: doc });
+  // ── Frameworks catalog + per-tenant enablement (Phase 1, parity-critical) ──
+  // Seed the 9 reserved frameworks as GLOBAL (appliesToAllRegions) + platform-
+  // enabled, then enable all 9 for every existing customer tenant. This exactly
+  // reproduces today's "all frameworks enabled" default so the Gap dropdown is
+  // unchanged. Idempotent: upsert by key and by (tenantId, frameworkId), and the
+  // tenant upsert `update:{}` never clobbers a later admin toggle on re-seed.
+  const frameworkRows = await Promise.all(
+    RESERVED_FRAMEWORKS.map((f, i) =>
+      prisma.framework.upsert({
+        where: { key: f.key },
+        update: { name: f.name, description: f.description },
+        create: {
+          key: f.key,
+          name: f.name,
+          description: f.description,
+          platformEnabled: true,
+          appliesToAllRegions: true,
+          sortOrder: i + 1, // stable display order (Item #5) — no all-0 ties
+        },
+      }),
+    ),
+  );
+  const customerTenants = await prisma.tenant.findMany({
+    where: { role: { not: "super_admin" } }, // platform admin doesn't raise gaps
+    select: { id: true },
+  });
+  for (const t of customerTenants) {
+    for (const fw of frameworkRows) {
+      await prisma.tenantFramework.upsert({
+        where: { tenantId_frameworkId: { tenantId: t.id, frameworkId: fw.id } },
+        update: {}, // preserve any explicit admin enable/disable on re-seed
+        create: { tenantId: t.id, frameworkId: fw.id, enabled: true },
+      });
+    }
   }
-  console.log("✓ CAPA Documents:", capaDocuments.length);
+  console.log("  Frameworks:", frameworkRows.length, "catalog; enabled for", customerTenants.length, "tenants");
 
-  console.log("\n══════════════════════════════════════════════════════════════");
-  console.log("✅ Comprehensive seed complete!");
-  console.log("══════════════════════════════════════════════════════════════");
-  console.log("\nData Summary:");
-  console.log("  • Tenants: 2 (Super Admin + Demo)");
-  console.log("  • Sites: 4");
-  console.log("  • Users: 7");
-  console.log("  • Findings: " + findings.length);
-  console.log("  • CAPAs: " + capas.length);
-  console.log("  • Deviations: " + deviations.length);
-  console.log("  • FDA 483 Events: 1 with 3 observations, 5 commitments");
-  console.log("  • GxP Systems: " + systems.length);
-  console.log("  • RTM Entries: " + rtmEntries.length);
-  console.log("  • Documents: " + documents.length);
-  console.log("  • RAID Items: " + raidItems.length);
-  console.log("  • Inspections: 4 with readiness actions and simulations");
-  console.log("  • Audit Logs: " + auditLogs.length);
-  console.log("\nLogin credentials:");
-  console.log("  Super Admin: superadmin@glimmora.com / 1");
-  console.log("  Customer Admin: admin@pharmaglimmora.com / Admin@123");
-  console.log("  QA Head: qa@pharmaglimmora.com / QaHead@123");
-  console.log("  Regulatory: ra@pharmaglimmora.com / RegAff@123");
-  console.log("  CSV Lead: csv@pharmaglimmora.com / CsvVal@123");
-  console.log("  QC Director: qc@pharmaglimmora.com / QcLab@123");
-  console.log("  IT CDO: it@pharmaglimmora.com / ItCdo@123");
-  console.log("  Operations: ops@pharmaglimmora.com / OpsHead@123");
-  console.log("══════════════════════════════════════════════════════════════\n");
+  // Per-plan role-cap DEFAULTS (idempotent — fills missing rows, never clobbers
+  // an admin-edited cap). Kills the ∞ display on standard plans.
+  const rl = await seedPlanRoleLimits(prisma);
+  console.log("  Plan role limits:", `${rl.created} created, ${rl.updated} updated, ${rl.keptEdited} kept across ${rl.plans} plans`);
+
+  console.log("Seed complete.");
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
+  .catch((e) => { console.error(e); process.exit(1); })
   .finally(() => prisma.$disconnect());

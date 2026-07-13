@@ -3,11 +3,12 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Save } from "lucide-react";
-import type { GxPSystem } from "@/store/systems.slice";
+import type { GxPSystem } from "@/types/csv-csa";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
+import { roleLabel } from "@/lib/labels/roles";
 
 /* ── Schema ── */
 
@@ -115,7 +116,7 @@ export function AddActivityModal({ open, systems, users, onSave, onClose }: AddA
           <div className="col-span-2">
             <label className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Owner *</label>
             <Controller name="owner" control={form.control} render={({ field }) => (
-              <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner..." width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: u.name }))} />
+              <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner..." width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />
             )} />
             {form.formState.errors.owner && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{form.formState.errors.owner.message}</p>}
           </div>

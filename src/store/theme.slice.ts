@@ -1,6 +1,7 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 
 type Theme = "dark" | "light";
+type Density = "comfortable" | "compact";
 
 export type ColorTheme =
   | "sky-blue"
@@ -40,12 +41,50 @@ function persistTheme(next: Theme) {
 }
 
 function getInitialColorTheme(): ColorTheme {
+  // Green (emerald) is the app-wide DEFAULT for a new / unset user. A user who
+  // has explicitly picked another colour keeps it — the stored value always
+  // wins; only the fallback changed.
   try {
     return (
-      (localStorage.getItem("glimmora-color-theme") as ColorTheme) ?? "coffee-brown"
+      (localStorage.getItem("glimmora-color-theme") as ColorTheme) ?? "emerald"
     );
   } catch {
-    return "coffee-brown";
+    return "emerald";
+  }
+}
+
+// Mirrors persistTheme / persistDensity: write BOTH the localStorage key the
+// pre-paint bootstrap script (app/layout.tsx) reads AND the live DOM attribute
+// the CSS accent blocks (src/index.css) select on, so a colour change sticks
+// across reload (localStorage) and takes effect immediately (data-color-theme).
+function persistColorTheme(next: ColorTheme) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("glimmora-color-theme", next);
+    document.documentElement.setAttribute("data-color-theme", next);
+  } catch {
+    // ignore
+  }
+}
+
+function getInitialDensity(): Density {
+  if (typeof window === "undefined") return "comfortable";
+  try {
+    const stored = localStorage.getItem("glimmora-density");
+    if (stored === "comfortable" || stored === "compact") return stored;
+  } catch {
+    // ignore
+  }
+  return "comfortable";
+}
+
+function persistDensity(next: Density) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("glimmora-density", next);
+    document.documentElement.setAttribute("data-density", next);
+  } catch {
+    // ignore
   }
 }
 
@@ -54,7 +93,8 @@ const themeSlice = createSlice({
   initialState: {
     mode: getInitialTheme(),
     colorTheme: getInitialColorTheme(),
-  } as { mode: Theme; colorTheme: ColorTheme },
+    density: getInitialDensity(),
+  } as { mode: Theme; colorTheme: ColorTheme; density: Density },
   reducers: {
     toggleTheme(state) {
       const next: Theme = state.mode === "dark" ? "light" : "dark";
@@ -67,9 +107,20 @@ const themeSlice = createSlice({
     },
     setColorTheme(state, { payload }: PayloadAction<ColorTheme>) {
       state.colorTheme = payload;
+      persistColorTheme(payload);
+    },
+    toggleDensity(state) {
+      const next: Density = state.density === "compact" ? "comfortable" : "compact";
+      state.density = next;
+      persistDensity(next);
+    },
+    setDensity(state, { payload }: PayloadAction<Density>) {
+      state.density = payload;
+      persistDensity(payload);
     },
   },
 });
 
-export const { toggleTheme, setTheme, setColorTheme } = themeSlice.actions;
+export const { toggleTheme, setTheme, setColorTheme, toggleDensity, setDensity } =
+  themeSlice.actions;
 export default themeSlice.reducer;

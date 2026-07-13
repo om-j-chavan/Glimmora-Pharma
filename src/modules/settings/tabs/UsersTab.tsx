@@ -6,11 +6,16 @@ import clsx from "clsx";
 import {
   Plus,
   Pencil,
+  Trash2,
   Users,
   UserPlus,
   Save,
   Lock,
   CreditCard,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Power,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -26,30 +31,51 @@ import {
 import {
   addTenantUser,
   updateTenantUser,
+  removeTenantUser,
   type TenantUserConfig,
 } from "@/store/auth.slice";
+import { aiSignup, generateUserId, AiAuthError } from "@/lib/aiAuth";
+import {
+  createUser,
+  updateUser,
+  setUserStatus,
+  setUserGxpSignatoryWithPassword,
+  deleteUserWithPassword,
+} from "@/actions/settings";
+import { planLabel } from "@/lib/plans";
+import { roleLabel } from "@/lib/labels/roles";
+import { errorCodeLabel } from "@/lib/labels/errorCodes";
 import { Popup } from "@/components/ui/Popup";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Dropdown } from "@/components/ui/Dropdown";
+import { Dropdown, type DropdownOption } from "@/components/ui/Dropdown";
+import { getMyRoleMatrix } from "@/actions/roleLimits";
+import { roleCapStatus, type RoleMatrixSummary } from "@/lib/roleLimits";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
+import { PasswordConfirmModal } from "@/components/ui/PasswordConfirmModal";
+import { useToast } from "@/components/ui/Toast";
 
-const ROLES = [
-  { value: "super_admin", label: "Super Admin" },
-  { value: "customer_admin", label: "Customer Admin" },
-  { value: "qa_head", label: "QA Head" },
-  { value: "qc_lab_director", label: "QC/Lab Director" },
-  { value: "regulatory_affairs", label: "Regulatory Affairs" },
-  { value: "csv_val_lead", label: "CSV/Val Lead" },
-  { value: "it_cdo", label: "IT/CDO" },
-  { value: "operations_head", label: "Operations Head" },
-  { value: "viewer", label: "Viewer" },
+// Role ordering for the dropdowns. Display text comes from roleLabel() — the
+// shared label layer — so labels never drift between screens.
+const ROLE_ORDER = [
+  "super_admin",
+  "customer_admin",
+  "qa_head",
+  "qa",
+  "qc_lab_director",
+  "regulatory_affairs",
+  "csv_val_lead",
+  "it_cdo",
+  "operations_head",
+  "viewer",
 ] as const;
 
 const TENANT_ROLES_FOR_CUSTOMER_ADMIN = [
   "qa_head",
+  "qa",
   "qc_lab_director",
   "regulatory_affairs",
   "csv_val_lead",
@@ -58,12 +84,12 @@ const TENANT_ROLES_FOR_CUSTOMER_ADMIN = [
   "viewer",
 ];
 
-const ALL_SITES_ROLES = ["super_admin", "customer_admin", "qa_head", "it_cdo"];
 
 const roleChip: Record<string, string> = {
   super_admin: "bg-(--danger-bg) text-(--danger)",
   customer_admin: "bg-(--brand-muted) text-(--brand)",
   qa_head: "bg-(--info-bg) text-(--info)",
+  qa: "bg-indigo-500/12 text-indigo-400",
   qc_lab_director: "bg-(--success-bg) text-(--success)",
   regulatory_affairs: "bg-pink-500/12 text-pink-400",
   csv_val_lead: "bg-(--brand-muted) text-(--brand)",
@@ -72,6 +98,9 @@ const roleChip: Record<string, string> = {
   viewer:
     "bg-(--bg-elevated) text-(--text-secondary) border border-(--bg-border)",
 };
+
+// Matches the server min (CreateUserSchema/UpdateUserSchema password .min(6)).
+const PASSWORD_MIN = 6;
 
 function makeUserSchema(mode: "add" | "edit") {
   const base = z.object({
@@ -83,81 +112,189 @@ function makeUserSchema(mode: "add" | "edit") {
     allSites: z.boolean(),
     assignedSites: z.array(z.string()),
     password: mode === "add"
-      ? z.string().min(1, "Password is required")
+      ? z.string().min(PASSWORD_MIN, `Password must be at least ${PASSWORD_MIN} characters`)
       : z.string().optional(),
     confirmPassword: z.string().optional(),
   });
-  return base.refine((d) => !d.password || d.password === d.confirmPassword, {
-    message: "Passwords do not match",
-    path: ["confirmPassword"],
-  });
+  return base
+    // Edit mode: changing the password is optional, but if EITHER field is
+    // touched the password itself must be present and meet the min length.
+    // Closes the gap where entering only confirmPassword passed validation.
+    .refine(
+      (d) => {
+        if (mode !== "edit") return true;
+        const touched = !!(d.password || d.confirmPassword);
+        return !touched || (!!d.password && d.password.length >= PASSWORD_MIN);
+      },
+      { message: `Password must be at least ${PASSWORD_MIN} characters`, path: ["password"] },
+    )
+    // Whenever a password is being set (always in add; in edit when either field
+    // is touched), confirmPassword must match it.
+    .refine(
+      (d) => {
+        const settingPw = mode === "add" || !!(d.password || d.confirmPassword);
+        return !settingPw || d.password === d.confirmPassword;
+      },
+      { message: "Passwords do not match", path: ["confirmPassword"] },
+    );
 }
 
 type UserFormValues = z.infer<ReturnType<typeof makeUserSchema>>;
 
-const ROLE_OPTIONS_ALL = ROLES.map((r) => ({ value: r.value, label: r.label }));
-const ROLE_OPTIONS_CUSTOMER_ADMIN = ROLES.filter((r) =>
-  TENANT_ROLES_FOR_CUSTOMER_ADMIN.includes(r.value),
-).map((r) => ({ value: r.value, label: r.label }));
+const ROLE_OPTIONS_ALL = ROLE_ORDER.map((v) => ({ value: v, label: roleLabel(v) }));
+const ROLE_OPTIONS_CUSTOMER_ADMIN = ROLE_ORDER.filter((v) =>
+  TENANT_ROLES_FOR_CUSTOMER_ADMIN.includes(v),
+).map((v) => ({ value: v, label: roleLabel(v) }));
 const STATUS_OPTIONS = [
   { value: "Active", label: "Active" },
   { value: "Inactive", label: "Inactive" },
 ];
 
+/** Show/hide eye button for a password field. Rendered as an Input
+ *  rightAdornment. Real <button> → keyboard-focusable; aria-label + aria-pressed
+ *  announce state. */
+function PasswordToggle({
+  shown,
+  onToggle,
+  target,
+}: {
+  shown: boolean;
+  onToggle: () => void;
+  target: string;
+}) {
+  const Icon = shown ? EyeOff : Eye;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={shown ? `Hide ${target}` : `Show ${target}`}
+      aria-pressed={shown}
+      className="inline-flex items-center justify-center w-7 h-7 rounded-md border-none bg-transparent cursor-pointer text-(--text-muted) hover:text-(--text-primary) hover:bg-(--bg-hover) transition-colors"
+    >
+      <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+    </button>
+  );
+}
+
 function UserForm({
+  open,
+  onClose,
+  title,
   defaultValues,
   onSubmit,
-  onCancel,
   submitLabel,
   submitIcon,
   roleOptions,
   mode = "add",
 }: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
   defaultValues: UserFormValues;
-  onSubmit: (data: UserFormValues) => void;
-  onCancel: () => void;
+  onSubmit: (data: UserFormValues) => Promise<{ emailError?: string } | void>;
   submitLabel: string;
   submitIcon: typeof Plus;
-  roleOptions: { value: string; label: string }[];
+  roleOptions: DropdownOption[];
   mode?: "add" | "edit";
 }) {  const { allSites: tenantSites } = useTenantConfig();
+
+  // Password visibility — default hidden, one toggle per field, covers both the
+  // Add and Edit modals (this form backs both).
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  // "Discard changes?" gate — shown when Cancel/backdrop/Escape is used while
+  // the form has unsaved edits (U6).
+  const [discardOpen, setDiscardOpen] = useState(false);
 
   const {
     register,
     handleSubmit,
     watch,
     setValue,
-    formState: { errors, isSubmitting },
+    setError,
+    formState: { errors, isSubmitting, isDirty, isValid },
   } = useForm<UserFormValues>({
     resolver: zodResolver(makeUserSchema(mode)),
     defaultValues,
+    // Live validity so the submit button can stay disabled until every required
+    // field is filled, the email is valid, a role is selected, and (add mode)
+    // the password rules pass. Role caps are enforced separately: at-cap roles
+    // are disabled in the dropdown and the plan/account limit gates modal open.
+    mode: "onChange",
   });
 
+  // The sticky-footer submit button lives OUTSIDE the <form> (Modal renders the
+  // footer in its own region), so it associates via the HTML `form` attribute.
+  const formId = `user-form-${mode}`;
+
   const watchRole = watch("role");
-  const watchAllSites = watch("allSites");
   const watchSites = watch("assignedSites") ?? [];
 
-  // Auto-set allSites when role changes
+  // EVERY role — QA Head included — is a SINGLE-site assignment (User.siteId is a
+  // 1:1 FK): one site, or none. No role gets an all-sites ASSIGNMENT here. Force
+  // allSites=false so a freshly picked site is never nulled at write time (also
+  // heals a legacy allSites=true row, e.g. a qa_head created under the old rule).
   useEffect(() => {
-    if (ALL_SITES_ROLES.includes(watchRole)) {
-      setValue("allSites", true);
-      setValue("assignedSites", []);
-    }
+    setValue("allSites", false);
   }, [watchRole, setValue]);
 
-  const toggleSite = (siteId: string, checked: boolean) => {
-    if (checked) {
-      setValue("assignedSites", [...watchSites, siteId]);
-    } else {
-      setValue(
-        "assignedSites",
-        watchSites.filter((id) => id !== siteId),
-      );
+  // Single-site select: one site, or none. Keeps assignedSites as a 1-element (or
+  // empty) array so the existing write path (nextSiteId = assignedSites[0] ?? null)
+  // is unchanged — no regression to the site-persist fix.
+  const siteOptions: DropdownOption[] = [
+    { value: "", label: "No specific site" },
+    ...tenantSites.map((s) => ({ value: s.id, label: s.name, description: `${s.location} · ${s.gmpScope}` })),
+  ];
+  const setSingleSite = (siteId: string) => {
+    setValue("allSites", false, { shouldDirty: true });
+    setValue("assignedSites", siteId ? [siteId] : [], { shouldDirty: true });
+  };
+
+  // Wrap the parent's onSubmit so a returned duplicate-email error is surfaced
+  // inline on the email field instead of as a global popup (U4).
+  const submit = async (data: UserFormValues) => {
+    const res = await onSubmit(data);
+    if (res?.emailError) {
+      setError("email", { type: "server", message: res.emailError });
     }
   };
 
+  // Confirm before discarding unsaved edits; close directly when clean (U6).
+  const requestClose = () => {
+    if (isDirty) setDiscardOpen(true);
+    else onClose();
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+    <>
+    <Modal
+      open={open}
+      onClose={requestClose}
+      title={title}
+      footer={
+        <div className="flex justify-end gap-2">
+          {/* type="button" so this footer button never acts as a submit for the
+              form it's associated with — it only ever requests close. */}
+          <Button type="button" variant="secondary" onClick={requestClose}>
+            Cancel
+          </Button>
+          <Button
+            icon={submitIcon}
+            type="submit"
+            form={formId}
+            loading={isSubmitting}
+            disabled={!isValid || isSubmitting}
+          >
+            {submitLabel}
+          </Button>
+        </div>
+      }
+    >
+    {/* autoComplete="off" on the form + fields below stops the browser's
+        credential manager from auto-filling the signed-in admin's OWN email and
+        password into a fresh "Add user" form (the reported pre-fill bug — the
+        React form state is already empty; the values came from browser autofill). */}
+    <form id={formId} onSubmit={handleSubmit(submit)} noValidate autoComplete="off" className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <Input
           id="user-name"
@@ -173,6 +310,7 @@ function UserForm({
           type="email"
           required
           placeholder="priya@company.com"
+          autoComplete="off"
           error={errors.email?.message}
           {...register("email")}
         />
@@ -214,149 +352,107 @@ function UserForm({
         <Input
           id="user-password"
           label={mode === "edit" ? "New Password (optional)" : "Password"}
-          type="password"
+          type={showPassword ? "text" : "password"}
           required={mode === "add"}
           placeholder="Enter password"
+          autoComplete="new-password"
           error={errors.password?.message}
+          rightAdornment={
+            <PasswordToggle
+              shown={showPassword}
+              onToggle={() => setShowPassword((v) => !v)}
+              target="password"
+            />
+          }
           {...register("password")}
         />
         <Input
           id="user-confirm-password"
           label="Confirm Password"
-          type="password"
+          type={showConfirmPassword ? "text" : "password"}
           required={mode === "add"}
           placeholder="Re-enter password"
+          autoComplete="new-password"
           error={errors.confirmPassword?.message}
+          rightAdornment={
+            <PasswordToggle
+              shown={showConfirmPassword}
+              onToggle={() => setShowConfirmPassword((v) => !v)}
+              target="confirm password"
+            />
+          }
           {...register("confirmPassword")}
         />
       </div>
 
-      {/* GxP Signatory toggle */}
+      {/* GxP Signatory toggle. In edit mode this is a Part 11 change that must
+          go through the password-gated table toggle (U3), so it is read-only
+          here; it is set at creation time in add mode. */}
       <div className="py-3 border-t border-(--bg-border)">
         <Toggle
           id="form-gxp-sig"
           checked={watch("gxpSignatory")}
           onChange={(v) => setValue("gxpSignatory", v)}
           label="GxP Signatory Authority"
-          description="Enables Sign & Approve buttons"
+          description={
+            mode === "edit"
+              ? "Change this from the table — it requires your password (Part 11)"
+              : "Enables Sign & Approve buttons"
+          }
+          disabled={mode === "edit"}
         />
       </div>
 
-      {/* Site assignment */}
-      <div className="py-3 border-t border-(--bg-border) space-y-3">
-        <div
-          className={clsx(
-            "flex items-center justify-between p-3 rounded-lg border",
-            "bg-(--bg-surface) border-(--bg-border)",
-          )}
-        >
-          <div>
-            <p
-              id="all-sites-label"
-              className="text-[13px] font-medium"
-              style={{ color: "var(--text-primary)" }}
-            >
-              Access all sites
-            </p>
-            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-              User can see data from every site
-            </p>
-          </div>
-          <Toggle
-            id="form-all-sites"
-            checked={watchAllSites}
-            onChange={(v) => {
-              setValue("allSites", v);
-              if (v) setValue("assignedSites", []);
-            }}
-            label="Access all sites"
-            hideLabel
-            disabled={ALL_SITES_ROLES.includes(watchRole)}
-          />
-        </div>
-
-        {ALL_SITES_ROLES.includes(watchRole) && (
-          <p className="text-[11px] text-[#10b981]">
-            This role automatically gets access to all sites
+      {/* Site assignment — SINGLE site (User.siteId is a 1:1 FK) for EVERY role,
+          QA Head included: one site, or none. No all-sites assignment path. */}
+      <div className="py-3 border-t border-(--bg-border) space-y-2">
+        <p className="text-[11px] font-medium text-(--text-secondary)">Site assignment</p>
+        {tenantSites.length === 0 ? (
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            No sites configured yet. Add sites in the Sites tab first.
           </p>
-        )}
-
-        {!watchAllSites && !ALL_SITES_ROLES.includes(watchRole) && (
-          <div>
-            <p className="text-[11px] font-medium text-(--text-secondary) mb-2">
-              Assigned sites
+        ) : (
+          <>
+            <Dropdown
+              options={siteOptions}
+              value={watchSites[0] ?? ""}
+              onChange={setSingleSite}
+              placeholder="Select a site"
+              width="w-full"
+            />
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              Assign this user to a single site, or leave unassigned. A user with no site won&apos;t see location-specific data.
             </p>
-            {tenantSites.length === 0 ? (
-              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                No sites configured yet. Add sites in the Sites tab first.
-              </p>
-            ) : (
-              <div className="space-y-1.5">
-                {tenantSites.map((site) => (
-                  <label
-                    key={site.id}
-                    className={clsx(
-                      "flex items-center gap-3 p-3 rounded-lg cursor-pointer border transition-colors",
-                      watchSites.includes(site.id)
-                        ? "bg-(--brand-muted) border-[#0ea5e9]"
-                        : "bg-(--bg-surface) border-(--bg-border)",
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 accent-[#0ea5e9]"
-                      checked={watchSites.includes(site.id)}
-                      onChange={(e) => toggleSite(site.id, e.target.checked)}
-                      aria-label={`Assign ${site.name}`}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className="text-[12px] font-medium"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {site.name}
-                      </p>
-                      <p
-                        className="text-[10px]"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        {site.location} &middot; {site.gmpScope}
-                      </p>
-                    </div>
-                    <Badge
-                      variant={
-                        site.risk === "HIGH"
-                          ? "red"
-                          : site.risk === "MEDIUM"
-                            ? "amber"
-                            : "green"
-                      }
-                    >
-                      {site.risk}
-                    </Badge>
-                  </label>
-                ))}
-              </div>
-            )}
-            {tenantSites.length > 0 && watchSites.length === 0 && (
-              <p className="text-[11px] text-[#f59e0b] mt-2">
-                No sites assigned — user won&apos;t see any location-specific
-                data
-              </p>
-            )}
-          </div>
+          </>
         )}
-      </div>
-
-      <div className="flex justify-end gap-2 pt-3 border-t border-(--bg-border)">
-        <Button variant="secondary" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button icon={submitIcon} type="submit" loading={isSubmitting}>
-          {submitLabel}
-        </Button>
       </div>
     </form>
+    </Modal>
+
+    {/* Unsaved-changes gate (U6) */}
+    <Popup
+      isOpen={discardOpen}
+      variant="confirmation"
+      title="Discard changes?"
+      description="You have unsaved changes. Discard them and close this form?"
+      onDismiss={() => setDiscardOpen(false)}
+      actions={[
+        {
+          label: "Keep editing",
+          style: "ghost",
+          onClick: () => setDiscardOpen(false),
+        },
+        {
+          label: "Discard",
+          style: "primary",
+          onClick: () => {
+            setDiscardOpen(false);
+            onClose();
+          },
+        },
+      ]}
+    />
+    </>
   );
 }
 
@@ -364,7 +460,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();  const {
     users,
     tenantId,
-    activePlan,
+    plan,
     daysRemaining,
     isExpired,
     isNearExpiry,
@@ -372,6 +468,8 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
     usedAccounts,
     isAtAccountLimit,
   } = useTenantConfig();
+  const toast = useToast();
+  const { allSites } = useTenantConfig();
   const { isSuperAdmin, isCustomerAdmin } = useRole();
   const visibleUsers = users.filter((u) => u.role !== "super_admin" && u.role !== "customer_admin");
   const { isAtLimit, getCount, getLimit, tenantPlan } =
@@ -393,16 +491,182 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const [deactivatePopup, setDeactivatePopup] = useState(false);
   const [userToDeactivate, setUserToDeactivate] = useState<string | null>(null);
   const [planLimitOpen, setPlanLimitOpen] = useState(false);
+  // Human-labelled message from a server-side cap block (hard enforcement).
+  const [capError, setCapError] = useState<string | null>(null);
+  // Server-side error for the signatory / status mutations (Part 11 controls).
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Pending password-gated GxP signatory change (U3): the target user + intended
+  // value. Non-null = the password dialog is open.
+  const [gxpTarget, setGxpTarget] = useState<{ user: TenantUserConfig; value: boolean } | null>(null);
+  // The user pending a password-gated delete (U7). Non-null = dialog open.
+  const [userToDelete, setUserToDelete] = useState<TenantUserConfig | null>(null);
+  // The user being VIEWED (read-only detail modal). Stored by id and derived
+  // from the live `users` list so a status change made from inside the modal is
+  // reflected immediately without re-opening it.
+  const [viewUserId, setViewUserId] = useState<string | null>(null);
+  const viewUser = viewUserId ? users.find((u) => u.id === viewUserId) ?? null : null;
+  // The user pending a status-change confirmation (from the View modal).
+  const [statusConfirmUser, setStatusConfirmUser] = useState<TenantUserConfig | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
+
+  // GxP signatory authority is a Part 11 change — it requires the Customer Admin
+  // to re-enter their password, verified server-side (U3). Only on success is the
+  // change mirrored to Redux.
+  const confirmGxpChange = async (password: string) => {
+    if (!gxpTarget) return { success: false, error: "No change selected." };
+    const res = await setUserGxpSignatoryWithPassword(gxpTarget.user.id, gxpTarget.value, password);
+    if (res.success) {
+      dispatch(updateTenantUser({ tenantId, userId: gxpTarget.user.id, patch: { gxpSignatory: gxpTarget.value } }));
+    }
+    return res;
+  };
+
+  // Password-gated user delete (U7): verified server-side, then removed from
+  // Redux. Audit-first via deleteUserWithPassword → deleteUser.
+  const confirmDeleteUser = async (password: string) => {
+    if (!userToDelete) return { success: false, error: "No user selected." };
+    const res = await deleteUserWithPassword(userToDelete.id, password);
+    if (res.success) {
+      dispatch(removeTenantUser({ tenantId, userId: userToDelete.id }));
+    }
+    return res;
+  };
+
+  // Persist active/inactive status server-side (with audit), then mirror to Redux.
+  // Returns whether the write succeeded so callers (e.g. the View modal confirm)
+  // can toast/gate on it.
+  const persistStatus = async (userId: string, isActive: boolean): Promise<boolean> => {
+    const res = await setUserStatus(userId, isActive);
+    if (!res.success) { setActionError(res.error || "Failed to update user status."); return false; }
+    dispatch(updateTenantUser({ tenantId, userId, patch: { status: isActive ? "Active" : "Inactive" } }));
+    return true;
+  };
+
+  // Confirm the status change requested from the View modal. Reuses the existing
+  // audited status action; on success shows a toast. The View modal stays open
+  // and re-renders with the new status (derived from the live `users` list).
+  const confirmUserStatusChange = async () => {
+    if (!statusConfirmUser) return;
+    const nextActive = statusConfirmUser.status !== "Active";
+    setStatusBusy(true);
+    const ok = await persistStatus(statusConfirmUser.id, nextActive);
+    setStatusBusy(false);
+    setStatusConfirmUser(null);
+    if (ok) toast.success(nextActive ? "User reactivated." : "User suspended.");
+  };
+
+  // Site names for a user's assignment (single-site model → 0 or 1 id).
+  const siteNamesFor = (u: TenantUserConfig): string =>
+    u.assignedSites.length === 0
+      ? "No site assigned"
+      : u.assignedSites
+          .map((id) => allSites.find((s) => s.id === id)?.name ?? id)
+          .join(", ");
   const [subPopupOpen, setSubPopupOpen] = useState(false);
 
   const roleOptions = isSuperAdmin
     ? ROLE_OPTIONS_ALL
     : ROLE_OPTIONS_CUSTOMER_ADMIN;
 
-  const getRoleLabel = (value: string) =>
-    ROLES.find((r) => r.value === value)?.label ?? value;
+  // Item 4a — per-role usage for the Add-User role dropdown. Read-only view of
+  // the resolver (getMyRoleMatrix, this tenant). Refetched when the Add modal
+  // opens so counts are current.
+  const [roleMatrix, setRoleMatrix] = useState<RoleMatrixSummary | null>(null);
+  useEffect(() => {
+    if (!addModal) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await getMyRoleMatrix();
+      if (!cancelled && res.success) setRoleMatrix(res.data);
+    })();
+    return () => { cancelled = true; };
+  }, [addModal]);
 
-  const handleAdd = (data: UserFormValues) => {
+  // Annotate each role option with "used/cap" and disable a FULL role (reason in
+  // the badge). Super Admin is EXEMPT (Phase B) — never disable for SA, only show
+  // usage. Uncapped roles render plain. Mirrors the gate's decision; the server
+  // stays authoritative if a create is attempted anyway.
+  const addRoleOptions: DropdownOption[] = roleOptions.map((opt) => {
+    const row = roleMatrix?.rows.find((r) => r.role === opt.value);
+    if (!row || row.cap === "unlimited") return opt;
+    const status = roleCapStatus(row.cap, row.used);
+    const full = status === "full";
+    return {
+      ...opt,
+      label: `${opt.label} · ${row.used}/${row.cap}`,
+      ...(full && !isSuperAdmin
+        ? { disabled: true, badge: "Full", badgeVariant: "red" as const }
+        : full
+          ? { badge: "Full", badgeVariant: "red" as const }
+          : status === "near"
+            ? { badge: "Near", badgeVariant: "amber" as const }
+            : {}),
+    };
+  });
+
+  const handleAdd = async (data: UserFormValues) => {
+    // AI backend + our @@unique([tenantId, username]) require username ≥ 3 chars;
+    // pad a short email local-part with a random suffix.
+    const localPart = data.email.split("@")[0] ?? "";
+    const aiId = generateUserId();
+    const username =
+      localPart.length >= 3 ? localPart : `${localPart}_${aiId.slice(-4)}`;
+
+    // 1) Authoritative DB User row so the account can actually authenticate via
+    //    NextAuth (which reads the User table). The hard cap, role-grant ceiling,
+    //    tenant isolation (tenant from session, not client), and the USER_CREATED
+    //    audit are all enforced server-side inside createUser. Must succeed
+    //    before we touch Redux.
+    const created = await createUser({
+      name: data.name,
+      email: data.email,
+      username,
+      role: data.role,
+      siteId: data.allSites ? undefined : (data.assignedSites[0] ?? undefined),
+      password: data.password ?? "",
+      gxpSignatory: data.gxpSignatory,
+    });
+    if (!created.success) {
+      // Duplicate email → surface inline on the email field (U4). Covers both the
+      // explicit case-insensitive pre-check (fieldErrors.email) and the DB
+      // @@unique backstop ("Email or username already exists").
+      const emailErr =
+        created.fieldErrors?.email?.[0] ??
+        (/email/i.test(created.error ?? "") ? "This email is already registered." : null);
+      if (emailErr) return { emailError: emailErr };
+      // Cap codes map to friendly labels; other errors (role ceiling, validation)
+      // pass through unchanged.
+      setCapError(errorCodeLabel(created.error ?? "Failed to create user"));
+      return;
+    }
+    const dbUser = created.data as { id: string };
+
+    // 2) Best-effort AI backend provisioning (unchanged). A failure here is
+    //    non-fatal — the DB user already exists and can log in.
+    const customerAdmin = users.find(
+      (u) => u.role === "customer_admin" && u.aiUserId,
+    );
+    const customerId = customerAdmin?.aiUserId ?? tenantId;
+    let aiUserId: string | undefined;
+    let aiAccessToken: string | undefined;
+    try {
+      const res = await aiSignup({
+        user_id: aiId,
+        username,
+        email: data.email,
+        password: data.password ?? "",
+        customer_id: customerId,
+        role: data.role,
+      });
+      aiUserId = aiId;
+      aiAccessToken = res.access_token;
+    } catch (err) {
+      const reason = err instanceof AiAuthError ? err.message : "unknown";
+      console.error("[UsersTab] AI signup failed — DB user created, AI token deferred:", reason);
+    }
+
+    // 3) Mirror to Redux using the DB id so #5's status/signatory toggles and
+    //    edits operate on the real User row.
     dispatch(
       addTenantUser({
         tenantId,
@@ -413,9 +677,12 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           gxpSignatory: data.gxpSignatory,
           status: data.status,
           allSites: data.allSites,
-          id: crypto.randomUUID(),
+          id: dbUser.id,
           assignedSites: data.allSites ? [] : data.assignedSites,
           password: data.password,
+          username,
+          aiUserId,
+          aiAccessToken,
         },
       }),
     );
@@ -428,20 +695,87 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
     setEditModal(true);
   };
 
-  const handleEdit = (data: UserFormValues) => {
-    if (editingUser) {
-      const patch: Partial<TenantUserConfig> = {
-        name: data.name,
-        email: data.email,
-        role: data.role,
-        gxpSignatory: data.gxpSignatory,
-        status: data.status,
-        allSites: data.allSites,
-        assignedSites: data.allSites ? [] : data.assignedSites,
-      };
-      if (data.password) patch.password = data.password;
-      dispatch(updateTenantUser({ tenantId, userId: editingUser.id, patch }));
+  const handleEdit = async (data: UserFormValues) => {
+    if (!editingUser) return;
+    // Duplicate-email guard (U4) — case-insensitive, excluding this user and the
+    // Tenant-row admins. Edits mirror to Redux (+ AI) rather than the DB User
+    // row, so this is the guard for the edit path; surfaced inline on the field.
+    const dupe = users.find(
+      (u) =>
+        u.id !== editingUser.id &&
+        u.role !== "super_admin" &&
+        u.role !== "customer_admin" &&
+        u.email.toLowerCase() === data.email.trim().toLowerCase(),
+    );
+    if (dupe) return { emailError: "This email is already registered." };
+
+    // Persist the edit to the DB FIRST — previously handleEdit only touched
+    // Redux, so a site assignment (User.siteId) was never written and vanished
+    // on the next DB hydration. User.siteId is a 1:1 nullable FK, so the
+    // multi-select collapses to a single id (null = all sites / none); we
+    // normalize the optimistic patch to the SAME value so the immediate view
+    // matches what re-hydrates from the DB after a refresh.
+    const nextSiteId = data.allSites ? null : (data.assignedSites[0] ?? null);
+    const res = await updateUser(editingUser.id, {
+      name: data.name,
+      email: data.email,
+      role: data.role,
+      siteId: nextSiteId,
+      ...(data.password ? { password: data.password } : {}),
+    });
+    if (!res.success) {
+      const emailErr = /email/i.test(res.error ?? "") ? "This email is already registered." : null;
+      if (emailErr) return { emailError: emailErr };
+      setActionError(res.error || "Failed to update user.");
+      return;
     }
+
+    const patch: Partial<TenantUserConfig> = {
+      name: data.name,
+      email: data.email,
+      role: data.role,
+      // gxpSignatory is a Part 11 change gated by the password-protected table
+      // toggle (U3) — it is intentionally NOT persisted from this modal.
+      status: data.status,
+      allSites: data.allSites,
+      // Mirror the single persisted siteId (not the raw multi-select) so the
+      // optimistic row agrees with the DB-hydrated row.
+      assignedSites: nextSiteId ? [nextSiteId] : [],
+    };
+    if (data.password) patch.password = data.password;
+
+    // Retry AI signup only if it never succeeded for this user (missing
+    // aiUserId sentinel). Once aiUserId is set we never re-sign-up — edits
+    // become local + Neon-only.
+    if (!editingUser.aiUserId) {
+      const customerAdmin = users.find(
+        (u) => u.role === "customer_admin" && u.aiUserId,
+      );
+      const customerId = customerAdmin?.aiUserId ?? tenantId;
+      // AI backend requires username ≥ 3 chars. The email's local part can
+      // be shorter (e.g. "qa@..." → "qa"), so pad with the user id suffix.
+      const localPart = data.email.split("@")[0] ?? "";
+      const username =
+        localPart.length >= 3 ? localPart : `${localPart}_${editingUser.id.slice(-4)}`;
+      try {
+        const res = await aiSignup({
+          user_id: editingUser.id,
+          username,
+          email: data.email,
+          password: data.password ?? editingUser.password ?? "",
+          customer_id: customerId,
+          role: data.role,
+        });
+        patch.aiUserId = editingUser.id;
+        patch.aiAccessToken = res.access_token;
+        patch.username = username;
+      } catch (err) {
+        const reason = err instanceof AiAuthError ? err.message : "unknown";
+        console.error("[UsersTab] AI signup retry on edit failed:", reason);
+      }
+    }
+
+    dispatch(updateTenantUser({ tenantId, userId: editingUser.id, patch }));
     setEditModal(false);
     setEditingUser(null);
     setSavedPopup(true);
@@ -452,15 +786,14 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       setUserToDeactivate(userId);
       setDeactivatePopup(true);
     } else {
-      dispatch(
-        updateTenantUser({ tenantId, userId, patch: { status: "Active" } }),
-      );
+      void persistStatus(userId, true);
     }
   };
 
   return (
     <section aria-labelledby="users-heading" className="space-y-6">
       {/* Header */}
+      <div>
       <div className="flex items-center justify-between">
         <div className="flex items-center">
           <h2
@@ -491,6 +824,16 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           </Button>
         )}
       </div>
+        {/* Single-line description: truncates with an ellipsis and exposes the
+            full text via the native tooltip so the header never wraps. */}
+        <p
+          className="mt-1 text-[12px] text-(--text-secondary) truncate"
+          title="Users are the people in your organisation who log in — manage their roles, site access, GxP signatory authority and account status here."
+        >
+          Users are the people in your organisation who log in — manage their
+          roles, site access, GxP signatory authority and account status here.
+        </p>
+      </div>
 
       {/* Subscription badge */}
       <div
@@ -520,11 +863,11 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
               className="text-[12px] font-medium"
               style={{ color: "var(--text-primary)" }}
             >
-              {activePlan
-                ? `${activePlan.status} plan`
-                : "No active subscription"}
+              {plan
+                ? `${planLabel(plan.tier, plan.displayName)} plan`
+                : "No plan assigned"}
             </span>
-            {activePlan && (
+            {plan && (
               <Badge
                 variant={isExpired ? "red" : isNearExpiry ? "amber" : "green"}
               >
@@ -535,25 +878,24 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             )}
           </div>
 
-          {activePlan && (
+          {plan && (
             <>
               <div
                 className="flex items-center gap-3 text-[11px] mb-2 flex-wrap"
                 style={{ color: "var(--text-muted)" }}
               >
                 <span>
-                  {usedAccounts} of{" "}
-                  {maxAccounts === -1 ? "unlimited" : maxAccounts} accounts used
+                  {usedAccounts} of {maxAccounts} accounts used
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>
-                  {dayjs.utc(activePlan.startDate).format("DD MMM YYYY")}
+                  {dayjs.utc(plan.startDate).format("DD MMM YYYY")}
                   {" — "}
-                  {dayjs.utc(activePlan.endDate).format("DD MMM YYYY")}
+                  {dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}
                 </span>
               </div>
 
-              {maxAccounts !== -1 && (
+              {maxAccounts > 0 && (
                 <div
                   className={clsx(
                     "h-1.5 rounded-full",
@@ -672,7 +1014,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                 <span
                   className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${roleChip[u.role] ?? "bg-(--bg-elevated) text-(--text-secondary)"}`}
                 >
-                  {getRoleLabel(u.role)}
+                  {roleLabel(u.role)}
                 </span>
               ),
             },
@@ -681,17 +1023,15 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
               header: "Sites",
               width: "w-[12%]",
               render: (u) =>
-                u.allSites || ALL_SITES_ROLES.includes(u.role) ? (
-                  <Badge variant="green">All sites</Badge>
-                ) : u.assignedSites.length === 0 ? (
-                  <Badge variant="red">No sites</Badge>
+                // Single-site model for every role (QA Head included): one site, or none.
+                u.assignedSites.length === 0 ? (
+                  <Badge variant="red">No site</Badge>
                 ) : (
                   <span
                     className="text-[12px]"
                     style={{ color: "var(--text-secondary)" }}
                   >
                     {u.assignedSites.length} site
-                    {u.assignedSites.length !== 1 ? "s" : ""}
                   </span>
                 ),
             },
@@ -703,15 +1043,9 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                 <Toggle
                   id={`sig-${u.id}`}
                   checked={u.gxpSignatory}
-                  onChange={() =>
-                    dispatch(
-                      updateTenantUser({
-                        tenantId,
-                        userId: u.id,
-                        patch: { gxpSignatory: !u.gxpSignatory },
-                      }),
-                    )
-                  }
+                  // Part 11 change — opens the password gate instead of
+                  // persisting directly (U3).
+                  onChange={() => setGxpTarget({ user: u, value: !u.gxpSignatory })}
                   label={`GxP Signatory for ${u.name}`}
                   disabled={readOnly}
                   hideLabel
@@ -741,15 +1075,23 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                 </span>
               ),
             },
-            ...(!readOnly
-              ? [
-                  {
-                    key: "actions",
-                    header: "Actions",
-                    srOnly: true,
-                    width: "w-[10%]",
-                    align: "right" as const,
-                    render: (u: TenantUserConfig) => (
+            {
+              key: "actions",
+              header: "Actions",
+              srOnly: true,
+              width: "w-[12%]",
+              align: "right" as const,
+              render: (u: TenantUserConfig) => (
+                <div className="inline-flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Eye}
+                    aria-label={`View ${u.name}`}
+                    onClick={() => setViewUserId(u.id)}
+                  />
+                  {!readOnly && (
+                    <>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -757,21 +1099,28 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                         aria-label={`Edit ${u.name}`}
                         onClick={() => openEdit(u)}
                       />
-                    ),
-                  },
-                ]
-              : []),
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={Trash2}
+                        aria-label={`Delete ${u.name}`}
+                        onClick={() => setUserToDelete(u)}
+                      />
+                    </>
+                  )}
+                </div>
+              ),
+            },
           ]}
         />
       </div>
 
-      {/* Add modal */}
-      <Modal
-        open={addModal}
-        onClose={() => setAddModal(false)}
-        title="Add New User"
-      >
+      {/* Add modal — UserForm owns its Modal (sticky footer + discard gate). */}
+      {addModal && (
         <UserForm
+          open
+          onClose={() => setAddModal(false)}
+          title="Add New User"
           defaultValues={{
             name: "",
             email: "",
@@ -784,50 +1133,42 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             confirmPassword: "",
           }}
           onSubmit={handleAdd}
-          onCancel={() => setAddModal(false)}
           submitLabel="Add user"
           submitIcon={UserPlus}
-          roleOptions={roleOptions}
+          roleOptions={addRoleOptions}
         />
-      </Modal>
+      )}
 
       {/* Edit modal */}
-      <Modal
-        open={editModal}
-        onClose={() => {
-          setEditModal(false);
-          setEditingUser(null);
-        }}
-        title="Edit User"
-      >
-        {editingUser && (
-          <UserForm
-            key={editingUser.id}
-            defaultValues={{
-              name: editingUser.name,
-              email: editingUser.email,
-              role: editingUser.role,
-              gxpSignatory: editingUser.gxpSignatory,
-              status: editingUser.status,
-              allSites:
-                editingUser.allSites ??
-                ALL_SITES_ROLES.includes(editingUser.role),
-              assignedSites: editingUser.assignedSites ?? [],
-              password: "",
-              confirmPassword: "",
-            }}
-            onSubmit={handleEdit}
-            onCancel={() => {
-              setEditModal(false);
-              setEditingUser(null);
-            }}
-            submitLabel="Save changes"
-            submitIcon={Save}
-            roleOptions={roleOptions}
-            mode="edit"
-          />
-        )}
-      </Modal>
+      {editModal && editingUser && (
+        <UserForm
+          key={editingUser.id}
+          open
+          onClose={() => {
+            setEditModal(false);
+            setEditingUser(null);
+          }}
+          title="Edit User"
+          defaultValues={{
+            name: editingUser.name,
+            email: editingUser.email,
+            role: editingUser.role,
+            gxpSignatory: editingUser.gxpSignatory,
+            status: editingUser.status,
+            // Single-site model — never prefill an all-sites assignment; the
+            // form normalizes to false and shows the single-site picker.
+            allSites: false,
+            assignedSites: editingUser.assignedSites ?? [],
+            password: "",
+            confirmPassword: "",
+          }}
+          onSubmit={handleEdit}
+          submitLabel="Save changes"
+          submitIcon={Save}
+          roleOptions={roleOptions}
+          mode="edit"
+        />
+      )}
 
       {/* Subscription plans popup — Super Admin only */}
       {isSuperAdmin && (
@@ -862,6 +1203,20 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         count={userCount}
       />
       <Popup
+        isOpen={!!capError}
+        variant="error"
+        title="Cannot add user"
+        description={capError ?? ""}
+        onDismiss={() => setCapError(null)}
+      />
+      <Popup
+        isOpen={!!actionError}
+        variant="error"
+        title="Action failed"
+        description={actionError ?? ""}
+        onDismiss={() => setActionError(null)}
+      />
+      <Popup
         isOpen={deactivatePopup}
         variant="confirmation"
         title="Deactivate this user?"
@@ -883,19 +1238,145 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             label: "Yes, deactivate",
             style: "primary",
             onClick: () => {
-              if (userToDeactivate)
-                dispatch(
-                  updateTenantUser({
-                    tenantId,
-                    userId: userToDeactivate,
-                    patch: { status: "Inactive" },
-                  }),
-                );
+              if (userToDeactivate) void persistStatus(userToDeactivate, false);
               setDeactivatePopup(false);
               setUserToDeactivate(null);
             },
           },
         ]}
+      />
+
+      {/* GxP signatory change — Part 11 password gate (U3) */}
+      <PasswordConfirmModal
+        open={!!gxpTarget}
+        onClose={() => setGxpTarget(null)}
+        onConfirm={confirmGxpChange}
+        title={gxpTarget?.value ? "Grant signatory authority?" : "Revoke signatory authority?"}
+        confirmLabel={gxpTarget?.value ? "Grant authority" : "Revoke authority"}
+        variant="primary"
+        icon={ShieldCheck}
+        message={
+          <>
+            {gxpTarget?.value ? "Granting" : "Revoking"} GxP signatory authority
+            for <strong>{gxpTarget?.user.name}</strong> is a Part 11 change. Enter
+            your Customer Admin password to confirm.
+          </>
+        }
+      />
+
+      {/* Delete user — recommend inactive over delete + password gate (U7).
+          onSuccess also closes the View modal (when the delete was triggered
+          from inside it) and toasts. */}
+      <PasswordConfirmModal
+        open={!!userToDelete}
+        onClose={() => setUserToDelete(null)}
+        onConfirm={confirmDeleteUser}
+        onSuccess={() => {
+          setViewUserId(null);
+          toast.success("User deleted.");
+        }}
+        title="Delete this user?"
+        confirmLabel="Delete user"
+        variant="danger"
+        icon={Trash2}
+        message={
+          <>
+            Deleting <strong>{userToDelete?.name}</strong> permanently removes the
+            account. We recommend setting the user to <strong>Inactive</strong>{" "}
+            instead — an inactive user can&apos;t log in, but their records,
+            signatures and audit trail stay intact and reassignable. Enter your
+            Customer Admin password to delete.
+          </>
+        }
+      />
+
+      {/* View user modal — read-only details + Change Status / Delete actions,
+          each gated behind its own confirmation. */}
+      <Modal
+        open={!!viewUser}
+        onClose={() => setViewUserId(null)}
+        title="User details"
+        footer={
+          !readOnly && viewUser ? (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                icon={Power}
+                onClick={() => setStatusConfirmUser(viewUser)}
+              >
+                {viewUser.status === "Active" ? "Suspend user" : "Reactivate user"}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                icon={Trash2}
+                onClick={() => setUserToDelete(viewUser)}
+              >
+                Delete user
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {viewUser && (
+          <div className="space-y-0">
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Full name</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{viewUser.name}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Email</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{viewUser.email}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Role</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{roleLabel(viewUser.role)}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Site assignment</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{siteNamesFor(viewUser)}</span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">GxP signatory</span>
+              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">
+                {viewUser.gxpSignatory ? "Yes" : "No"}
+              </span>
+            </div>
+            <div className="flex items-start justify-between gap-4 py-2.5">
+              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Status</span>
+              <span className="text-right min-w-0">
+                <Badge variant={viewUser.status === "Active" ? "green" : "gray"}>{viewUser.status}</Badge>
+              </span>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Change-status confirmation (from the View modal) */}
+      <ConfirmModal
+        open={!!statusConfirmUser}
+        onClose={() => setStatusConfirmUser(null)}
+        onConfirm={() => void confirmUserStatusChange()}
+        loading={statusBusy}
+        icon={Power}
+        variant={statusConfirmUser?.status === "Active" ? "warning" : "primary"}
+        title={statusConfirmUser?.status === "Active" ? "Suspend this user?" : "Reactivate this user?"}
+        confirmLabel={statusConfirmUser?.status === "Active" ? "Suspend" : "Reactivate"}
+        message={
+          statusConfirmUser?.status === "Active" ? (
+            <>
+              Suspending <strong>{statusConfirmUser?.name}</strong> stops them
+              logging in and removes them from all owner dropdowns. Their records,
+              signatures and audit trail are preserved and reassignable.
+            </>
+          ) : (
+            <>
+              Reactivating <strong>{statusConfirmUser?.name}</strong> restores
+              login access and returns them to the owner dropdowns.
+            </>
+          )
+        }
       />
     </section>
   );

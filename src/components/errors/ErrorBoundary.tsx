@@ -2,6 +2,7 @@
 
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 
 interface Props {
   children: ReactNode;
@@ -49,14 +50,14 @@ export class ErrorBoundary extends Component<Props, State> {
         <p className="text-[11px] mb-4" style={{ color: "var(--text-muted)" }}>
           Try refreshing, or contact support if the problem persists.
         </p>
-        <button
+        <Button
           type="button"
+          variant="primary"
+          icon={RotateCcw}
           onClick={this.handleReset}
-          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold cursor-pointer border-none transition-colors"
-          style={{ background: "var(--brand)", color: "#fff" }}
         >
-          <RotateCcw className="w-4 h-4" aria-hidden="true" /> Try again
-        </button>
+          Try again
+        </Button>
       </div>
     );
   }

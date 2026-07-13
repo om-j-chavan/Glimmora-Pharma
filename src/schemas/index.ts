@@ -4,6 +4,8 @@
  */
 
 import { z } from "zod";
+import { FDA_SEVERITY, GENERIC_SEVERITY } from "@/lib/severity";
+import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
 
 /* ── Gap Assessment ── */
 
@@ -11,7 +13,7 @@ export const FindingSchema = z.object({
   requirement: z.string().min(10, "Describe the compliance gap (min 10 chars)"),
   area: z.string().min(1, "Select an area"),
   framework: z.string().min(1, "Select a regulatory framework"),
-  severity: z.enum(["Critical", "High", "Low"]),
+  severity: z.enum(GENERIC_SEVERITY),
   owner: z.string().min(1, "Assign an owner"),
   targetDate: z.string().min(1, "Set a target date"),
   siteId: z.string().min(1, "Select a site"),
@@ -24,13 +26,13 @@ export type FindingFormData = z.infer<typeof FindingSchema>;
 export const CAPASchema = z.object({
   description: z.string().min(10, "Description required (min 10 chars)"),
   source: z.enum(["483", "Internal Audit", "Deviation", "Complaint", "OOS", "Change Control", "Gap Assessment"]),
-  risk: z.enum(["Critical", "High", "Low"]),
+  risk: z.enum(GENERIC_SEVERITY),
   owner: z.string().min(1, "Assign an owner"),
   dueDate: z.string().min(1, "Set a due date"),
   siteId: z.string().min(1, "Select a site"),
   diGate: z.boolean().optional(),
   effectivenessCheck: z.boolean().optional(),
-  rcaMethod: z.enum(["5 Why", "Fishbone", "Fault Tree", "Other"]).optional(),
+  rcaMethod: z.enum(CAPA_RCA_METHODS).optional(),
   findingId: z.string().optional(),
 });
 export type CAPAFormData = z.infer<typeof CAPASchema>;
@@ -50,10 +52,10 @@ export type FDA483FormData = z.infer<typeof FDA483EventSchema>;
 export const ObservationSchema = z.object({
   number: z.coerce.number().min(1, "Number required"),
   text: z.string().min(5, "Observation text required"),
-  severity: z.enum(["Critical", "High", "Low"]),
+  severity: z.enum(GENERIC_SEVERITY),
   area: z.string().optional(),
   regulation: z.string().optional(),
-  status: z.enum(["Open", "In Progress", "RCA In Progress", "CAPA Linked", "Response Ready", "Response Drafted", "Closed"]),
+  status: z.enum(["Open", "In Progress", "CAPA Linked", "Response Drafted", "Closed"]),
 });
 export type ObservationFormData = z.infer<typeof ObservationSchema>;
 
@@ -64,7 +66,7 @@ export const DeviationSchema = z.object({
   description: z.string().min(10, "Description required"),
   type: z.enum(["planned", "unplanned"]),
   category: z.enum(["process", "equipment", "material", "environmental", "personnel", "documentation", "system", "other"]),
-  severity: z.enum(["critical", "major", "minor"]),
+  severity: z.preprocess((v) => (typeof v === "string" && v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : v), z.enum(FDA_SEVERITY)),
   area: z.string().min(1, "Area required"),
   immediateAction: z.string().min(5, "Immediate action required"),
   patientSafetyImpact: z.enum(["high", "medium", "low", "none"]),
@@ -77,20 +79,6 @@ export const DeviationSchema = z.object({
 });
 export type DeviationFormData = z.infer<typeof DeviationSchema>;
 
-/* ── RAID ── */
-
-export const RAIDSchema = z.object({
-  type: z.enum(["Risk", "Action", "Issue", "Decision"]),
-  title: z.string().min(3, "Title required"),
-  description: z.string().min(5, "Description required"),
-  priority: z.enum(["Critical", "High", "Medium", "Low"]),
-  owner: z.string().min(1, "Owner required"),
-  dueDate: z.string().min(1, "Due date required"),
-  impact: z.string().optional(),
-  mitigation: z.string().optional(),
-});
-export type RAIDFormData = z.infer<typeof RAIDSchema>;
-
 /* ── CSV/CSA System ── */
 
 export const SystemSchema = z.object({
@@ -98,7 +86,7 @@ export const SystemSchema = z.object({
   type: z.enum(["QMS", "LIMS", "ERP", "CDS", "SCADA", "MES", "CMMS", "Other"]),
   vendor: z.string().min(1, "Vendor required"),
   version: z.string().min(1, "Version required"),
-  gxpRelevance: z.enum(["Critical", "Major", "Minor"]),
+  gxpRelevance: z.enum(FDA_SEVERITY),
   gamp5Category: z.enum(["1", "3", "4", "5"]),
   riskLevel: z.enum(["HIGH", "MEDIUM", "LOW"]),
   siteId: z.string().min(1, "Select a site"),

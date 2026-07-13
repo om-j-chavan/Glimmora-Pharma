@@ -1,3 +1,5 @@
+"use client";
+
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { CheckCircle2 } from "lucide-react";

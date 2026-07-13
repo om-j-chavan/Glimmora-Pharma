@@ -1,59 +1,34 @@
-import clsx from "clsx";
+"use client";
+
+import { useState, useEffect } from "react";
 import {
   FileWarning,
-  Clock,
-  AlertCircle,
-  ClipboardList,
+  Filter,
   Plus,
-  ChevronRight,
+  ArrowRight,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
-import type {
-  FDA483Event,
-  EventType,
-  EventStatus,
-} from "@/store/fda483.slice";
+import type { FDA483Event, EventStatus } from "@/types/fda483";
 import { Button } from "@/components/ui/Button";
-import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
+import { Dropdown } from "@/components/ui/Dropdown";
+import { Pagination } from "@/components/ui/Pagination";
+import { DataTable, type Column } from "@/components/shared";
+import {
+  daysUntil,
+  getEffectiveEventStatus,
+  eventStatusBadge,
+  isEventLocked,
+} from "../_shared";
 
 /* ── Helpers ── */
 
-function eventTypeBadge(t: EventType) {
-  const m: Record<EventType, "red" | "amber" | "blue"> = {
-    "FDA 483": "red",
-    "Warning Letter": "red",
-    "EMA Inspection": "amber",
-    "MHRA Inspection": "amber",
-    "WHO Inspection": "blue",
-  };
-  return <Badge variant={m[t]}>{t}</Badge>;
-}
-
-function eventStatusBadge(s: EventStatus) {
-  const m: Record<EventStatus, "blue" | "red" | "amber" | "green" | "purple" | "gray"> = {
-    Open: "blue",
-    "Under Investigation": "amber",
-    "Response Due": "red",
-    "Response Drafted": "purple",
-    "Pending QA Sign-off": "amber",
-    "Response Submitted": "green",
-    "FDA Acknowledged": "green",
-    Closed: "gray",
-    "Warning Letter": "red",
-  };
-  return <Badge variant={m[s] ?? "gray"}>{s}</Badge>;
-}
-
-function daysLeft(d: string) {
-  return dayjs.utc(d).diff(dayjs(), "day");
+function daysLeft(d: string): number {
+  return daysUntil(d) ?? 0;
 }
 
 function getEffectiveStatus(e: FDA483Event): EventStatus {
-  if (e.status === "Closed") return "Closed";
-  if (e.status === "Response Submitted") return "Response Submitted";
-  if (daysLeft(e.responseDeadline) <= 15) return "Response Due";
-  return e.status;
+  return getEffectiveEventStatus(e.status, e.responseDeadline);
 }
 
 interface Site {
@@ -89,9 +64,6 @@ export interface EventsTabProps {
 export function EventsTab({
   events,
   filteredEvents,
-  openCount,
-  dueCount,
-  closedCount,
   typeFilter,
   agencyFilter,
   statusFilter,
@@ -108,88 +80,28 @@ export function EventsTab({
   onClearFilters,
   onOpenEvent,
   onAddEvent,
-  computeReadiness,
 }: EventsTabProps) {
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  // Client-side pagination — same shared Pagination + page size (25) the other
+  // list modules use. Reset to page 1 whenever the filters change.
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
+  useEffect(() => {
+    setPage(1);
+  }, [typeFilter, agencyFilter, statusFilter, siteFilter]);
+  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageEvents = filteredEvents.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   return (
     <>
-      {/* Tiles */}
+      {/* ── Filter bar — standard pattern (Filter icon + Filters + Dropdowns) ── */}
       <section
-        aria-label="Event statistics"
-        className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+        aria-label="FDA 483 event filters"
+        className="flex items-center gap-3 flex-wrap p-3 rounded-xl mb-4"
+        style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
       >
-        <div className="stat-card" role="region" aria-label="Total events">
-          <div className="flex items-center gap-2 mb-2">
-            <FileWarning
-              className="w-5 h-5 text-[#0ea5e9]"
-              aria-hidden="true"
-            />
-            <span className="stat-label mb-0">Total events</span>
-          </div>
-          <div className="stat-value">{events.length}</div>
-          <div className="stat-sub">
-            {events.length === 0
-              ? "Log first event"
-              : `${closedCount} closed`}
-          </div>
-        </div>
-        <div className="stat-card" role="region" aria-label="Open events">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock
-              className="w-5 h-5"
-              style={{ color: openCount > 0 ? "#f59e0b" : "#10b981" }}
-              aria-hidden="true"
-            />
-            <span className="stat-label mb-0">Open</span>
-          </div>
-          <div
-            className="stat-value"
-            style={{ color: openCount > 0 ? "#f59e0b" : "#10b981" }}
-          >
-            {openCount}
-          </div>
-          <div className="stat-sub">Require action</div>
-        </div>
-        <div className="stat-card" role="region" aria-label="Response due">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertCircle
-              className="w-5 h-5"
-              style={{ color: dueCount > 0 ? "#ef4444" : "#10b981" }}
-              aria-hidden="true"
-            />
-            <span className="stat-label mb-0">Response due</span>
-          </div>
-          <div
-            className="stat-value"
-            style={{ color: dueCount > 0 ? "#ef4444" : "#10b981" }}
-          >
-            {dueCount}
-          </div>
-          <div className="stat-sub">
-            {dueCount > 0 ? "15-day FDA deadline" : "No overdue"}
-          </div>
-        </div>
-        <div
-          className="stat-card"
-          role="region"
-          aria-label="Total observations"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <ClipboardList
-              className="w-5 h-5 text-[#6366f1]"
-              aria-hidden="true"
-            />
-            <span className="stat-label mb-0">Total observations</span>
-          </div>
-          <div className="stat-value text-[#6366f1]">
-            {events.reduce((s, e) => s + e.observations.length, 0)}
-          </div>
-          <div className="stat-sub">Across all events</div>
-        </div>
-      </section>
-
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap mb-4">
+        <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+        <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         <Dropdown
           placeholder="All types"
           value={typeFilter}
@@ -197,13 +109,7 @@ export function EventsTab({
           width="w-40"
           options={[
             { value: "", label: "All types" },
-            ...[
-              "FDA 483",
-              "Warning Letter",
-              "EMA Inspection",
-              "MHRA Inspection",
-              "WHO Inspection",
-            ].map((t) => ({ value: t, label: t })),
+            ...["FDA 483", "Warning Letter", "EMA Inspection", "MHRA Inspection", "WHO Inspection"].map((t) => ({ value: t, label: t })),
           ]}
         />
         <Dropdown
@@ -223,9 +129,7 @@ export function EventsTab({
           width="w-40"
           options={[
             { value: "", label: "All statuses" },
-            ...["Open", "Response Due", "Response Submitted", "Closed"].map(
-              (s) => ({ value: s, label: s }),
-            ),
+            ...["Open", "Response Due", "Response Submitted", "Closed"].map((s) => ({ value: s, label: s })),
           ]}
         />
         <Dropdown
@@ -238,213 +142,152 @@ export function EventsTab({
             ...sites.map((s) => ({ value: s.id, label: s.name })),
           ]}
         />
-        {anyFilter && (
-          <Button variant="ghost" size="sm" onClick={onClearFilters}>
-            Clear
-          </Button>
-        )}
-      </div>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+            {filteredEvents.length} of {events.length}
+          </span>
+          {anyFilter && (
+            <Button variant="ghost" size="sm" onClick={onClearFilters}>Clear</Button>
+          )}
+        </div>
+      </section>
 
-      {/* Event cards */}
+      {/* ── List ── */}
       {events.length === 0 ? (
         <div className="card p-10 text-center">
-          <FileWarning
-            className="w-12 h-12 mx-auto mb-3"
-            style={{ color: "#334155" }}
-            aria-hidden="true"
-          />
-          <p
-            className="text-[13px] font-medium mb-1"
-            style={{ color: "var(--text-primary)" }}
-          >
+          <FileWarning className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+          <p className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
             No regulatory events logged yet
           </p>
-          <p
-            className="text-[12px] mb-3"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            Log FDA 483 observations, Warning Letters and EMA/MHRA inspection
-            findings to track responses and commitments.
+          <p className="text-[12px] mb-3" style={{ color: "var(--text-secondary)" }}>
+            Log FDA 483 observations, Warning Letters and EMA/MHRA inspection findings to track responses and commitments.
           </p>
           {role !== "viewer" && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={onAddEvent}
-            >
+            <Button variant="primary" size="sm" icon={Plus} onClick={onAddEvent}>
               Log first event
             </Button>
           )}
         </div>
       ) : filteredEvents.length === 0 ? (
         <div className="card p-8 text-center">
-          <p
-            className="text-[13px]"
-            style={{ color: "var(--text-secondary)" }}
-          >
+          <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
             No events match the current filters
           </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2"
-            onClick={onClearFilters}
-          >
+          <Button variant="ghost" size="sm" className="mt-2" onClick={onClearFilters}>
             Clear filters
           </Button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filteredEvents.map((ev) => {
-            const days = daysLeft(ev.responseDeadline);
-            const effectiveStatus = getEffectiveStatus(ev);
-            const isClosed = effectiveStatus === "Closed" || effectiveStatus === "Response Submitted";
-            const isOverdue = !isClosed && days < 0;
-            const isUrgent = !isClosed && days >= 0 && days <= 5;
-            const obsCount = ev.observations.length;
-            const capaCount = ev.observations.filter((o) => !!o.capaId).length;
-            const rcaDone = ev.observations.filter((o) => !!o.rootCause?.trim()).length;
-            return (
-              <div
-                key={ev.id}
-                className={clsx(
-                  "card cursor-pointer transition-all duration-150 hover:border-[#0ea5e9]",
-                  isDark ? "hover:bg-[#071e38]" : "hover:bg-[#eff6ff]",
-                )}
-                onClick={() => onOpenEvent(ev)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenEvent(ev); } }}
-                aria-label={`Open ${ev.type} ${ev.referenceNumber}`}
-              >
-                <div className="card-body">
-                  {/* Top */}
-                  <div className="flex items-start justify-between flex-wrap gap-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {eventTypeBadge(ev.type)}
-                      {eventStatusBadge(getEffectiveStatus(ev))}
-                      <span className="font-mono text-[11px] font-semibold text-[#0ea5e9]">
-                        {ev.referenceNumber}
-                      </span>
-                    </div>
-                    {isClosed ? (
-                      <div
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium"
-                        style={{ background: "rgba(16,185,129,0.12)", color: "#10b981" }}
-                      >
-                        <Clock className="w-3 h-3" aria-hidden="true" />
-                        {effectiveStatus === "Closed" ? "Closed" : "Submitted"}
-                      </div>
-                    ) : (
-                      <div
-                        className={clsx(
-                          "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium",
-                          isOverdue
-                            ? "bg-[rgba(239,68,68,0.12)] text-[#ef4444]"
-                            : isUrgent
-                              ? "bg-[rgba(245,158,11,0.12)] text-[#f59e0b]"
-                              : "bg-[rgba(16,185,129,0.12)] text-[#10b981]",
-                        )}
-                      >
-                        <Clock className="w-3 h-3" aria-hidden="true" />
-                        {isOverdue
-                          ? `${Math.abs(days)} days overdue`
-                          : days === 0
-                            ? "Due today"
-                            : `${days} days remaining`}
-                      </div>
-                    )}
-                  </div>
-                  {/* Info row */}
-                  <div
-                    className="flex items-center gap-4 mt-2 flex-wrap text-[11px]"
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    <span>
-                      {sites.find((s) => s.id === ev.siteId)?.name ??
-                        "\u2014"}
+        <div className="card overflow-hidden">
+          <DataTable
+            ariaLabel="FDA 483 events"
+            caption="Regulatory events with type, site, observations, RCA progress, status, and response deadline"
+            minWidth={880}
+            data={pageEvents}
+            rowKey={(ev) => ev.id}
+            onRowClick={onOpenEvent}
+            rowStyle={(ev) =>
+              isEventLocked(getEffectiveStatus(ev))
+                ? { opacity: 0.6 }
+                : undefined
+            }
+            footer={
+              <Pagination
+                page={safePage}
+                pageSize={pageSize}
+                total={filteredEvents.length}
+                onChange={setPage}
+                itemLabel="event"
+                className="mt-4"
+              />
+            }
+            columns={[
+              {
+                key: "reference",
+                header: "Reference",
+                cellClassName: "font-mono text-[12px] font-semibold text-(--brand)",
+                render: (ev) => ev.referenceNumber,
+              },
+              {
+                key: "type",
+                header: "Type",
+                render: (ev) => <Badge variant="gray">{ev.type}</Badge>,
+              },
+              {
+                key: "site",
+                header: "Site",
+                cellClassName: "text-[12px] text-(--text-secondary)",
+                render: (ev) => sites.find((s) => s.id === ev.siteId)?.name ?? "—",
+              },
+              {
+                key: "obs",
+                header: "Obs",
+                cellClassName: "text-[12px] text-(--text-secondary)",
+                render: (ev) => ev.observations.length,
+              },
+              {
+                key: "rca",
+                header: "RCA",
+                render: (ev) => {
+                  const obsCount = ev.observations.length;
+                  const rcaDone = ev.observations.filter((o) => !!o.rootCause?.trim()).length;
+                  const rcaColor =
+                    obsCount === 0 ? "var(--text-muted)"
+                    : rcaDone === obsCount ? "var(--success)"
+                    : rcaDone > 0 ? "var(--brand)"
+                    : "var(--text-muted)";
+                  return (
+                    <span className="text-[12px]" style={{ color: rcaColor }}>
+                      {obsCount === 0 ? "—" : `${rcaDone}/${obsCount}`}
                     </span>
-                    <span>{ev.agency}</span>
-                    <span>
-                      {dayjs
-                        .utc(ev.inspectionDate)
-                        .tz(timezone)
-                        .format(dateFormat)}
-                    </span>
-                  </div>
-
-                  {/* Response readiness progress */}
-                  {(() => {
-                    const readiness = computeReadiness(ev);
-                    const col = readiness >= 100 ? "#10b981" : readiness >= 80 ? "#f59e0b" : readiness >= 41 ? "#f59e0b" : "#ef4444";
-                    return (
-                      <div className="flex items-center gap-2 mt-3">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider shrink-0" style={{ color: "var(--text-muted)" }}>Readiness</span>
-                        <div className={clsx("h-1.5 flex-1 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}>
-                          <div className="h-full rounded-full transition-all" style={{ width: `${readiness}%`, background: col }} />
-                        </div>
-                        <span className="text-[11px] font-bold shrink-0" style={{ color: col }}>{readiness}%</span>
-                      </div>
-                    );
-                  })()}
-                  {/* Counts row */}
-                  <div className="flex items-center gap-4 mt-3 text-[11px]" style={{ color: "var(--text-secondary)" }}>
-                    <span>
-                      <span style={{ color: "var(--text-muted)" }}>Observations:</span>{" "}
-                      <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{obsCount}</span>
-                    </span>
-                    <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>|</span>
-                    <span>
-                      <span style={{ color: "var(--text-muted)" }}>CAPAs:</span>{" "}
-                      <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{capaCount}</span>
-                    </span>
-                    <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>|</span>
-                    <span>
-                      <span style={{ color: "var(--text-muted)" }}>RCA:</span>{" "}
-                      <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{rcaDone}/{obsCount}</span>
-                    </span>
-                  </div>
-                  {/* Mini step indicator */}
-                  {(() => {
-                    const rcaState = obsCount === 0 ? "none" : rcaDone === obsCount ? "done" : rcaDone > 0 ? "progress" : "none";
-                    const respDone = ev.status === "Response Submitted" || ev.status === "Closed";
-                    const miniSteps: { label: string; icon: string; color: string }[] = [
-                      { label: "Event", icon: "\u2713", color: "#10b981" },
-                      { label: "Observations", icon: obsCount > 0 ? "\u2713" : "\u25CB", color: obsCount > 0 ? "#10b981" : "#64748b" },
-                      { label: "RCA", icon: rcaState === "done" ? "\u2713" : rcaState === "progress" ? "\u21BB" : "\u25CB", color: rcaState === "done" ? "#10b981" : rcaState === "progress" ? "#f59e0b" : "#64748b" },
-                      { label: "Response", icon: respDone ? "\u2713" : "\u25CB", color: respDone ? "#10b981" : "#64748b" },
-                    ];
-                    return (
-                      <div className="flex items-center gap-3 mt-2 text-[10px]">
-                        {miniSteps.map((s, idx) => (
-                          <span key={idx} className="flex items-center gap-1" style={{ color: s.color }}>
-                            <span aria-hidden="true">{s.icon}</span>
-                            <span>{s.label}</span>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                  {/* Open event action */}
-                  <div className="flex justify-end gap-2 mt-3">
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      icon={ChevronRight}
-                      iconPosition="right"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenEvent(ev);
-                      }}
-                    >
-                      Open event
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                  );
+                },
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (ev) => {
+                  const stat = eventStatusBadge(getEffectiveStatus(ev));
+                  return <Badge variant={stat.variant}>{stat.label}</Badge>;
+                },
+              },
+              {
+                key: "deadline",
+                header: "Deadline",
+                cellClassName: "text-[12px] text-(--text-secondary)",
+                render: (ev) => {
+                  const days = daysLeft(ev.responseDeadline);
+                  const effectiveStatus = getEffectiveStatus(ev);
+                  const isClosed = isEventLocked(effectiveStatus);
+                  return isClosed ? (
+                    "—"
+                  ) : (
+                    <>
+                      {dayjs.utc(ev.responseDeadline).tz(timezone).format(dateFormat)}
+                      {days < 0 && (
+                        <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
+                          {Math.abs(days)}d overdue
+                        </span>
+                      )}
+                      {days >= 0 && days <= 5 && (
+                        <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
+                          {days === 0 ? "Due today" : `${days}d left`}
+                        </span>
+                      )}
+                    </>
+                  );
+                },
+              },
+              {
+                key: "open",
+                header: "Open",
+                srOnly: true,
+                render: () => (
+                  <ArrowRight className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                ),
+              },
+            ] satisfies Column<FDA483Event>[]}
+          />
         </div>
       )}
     </>

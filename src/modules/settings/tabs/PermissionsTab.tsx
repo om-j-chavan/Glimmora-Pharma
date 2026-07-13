@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import clsx from "clsx";
 import { Info, ShieldCheck, RotateCw } from "lucide-react";
@@ -10,8 +12,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Popup } from "@/components/ui/Popup";
 
-const ROLES: RoleKey[] = ["super_admin", "customer_admin", "qa_head", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head", "viewer"];
-const ROLE_LABELS: Record<string, string> = { super_admin: "Super Admin", customer_admin: "Customer Admin", qa_head: "QA Head", qc_lab_director: "QC / Lab Director", regulatory_affairs: "Regulatory Affairs", csv_val_lead: "CSV / Val Lead", it_cdo: "IT / CDO", operations_head: "Operations Head", viewer: "Viewer" };
+const ROLES: RoleKey[] = ["super_admin", "customer_admin", "qa_head", "qa", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head", "viewer"];
+const ROLE_LABELS: Record<string, string> = { super_admin: "Super Admin", customer_admin: "Customer Admin", qa_head: "QA Head", qa: "Quality Assurance", qc_lab_director: "QC / Lab Director", regulatory_affairs: "Regulatory Affairs", csv_val_lead: "CSV / Val Lead", it_cdo: "IT / CDO", operations_head: "Operations Head", viewer: "Viewer" };
 const MODULES: { key: ModuleKey; label: string }[] = [
   { key: "dashboard", label: "Dashboard" }, { key: "gap", label: "Gap Assessment" }, { key: "capa", label: "CAPA" },
   { key: "csv", label: "CSV/CSA" }, { key: "fda483", label: "FDA 483" }, { key: "evidence", label: "Evidence" },
@@ -30,7 +32,11 @@ export function PermissionsTab() {
   const dispatch = useAppDispatch();
   const matrix = useAppSelector((s) => s.permissions?.matrix);  const user = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
-  const isSuperAdmin = role === "super_admin" || role === "customer_admin";
+  // Only super_admin may edit the role-permission matrix. customer_admin is a
+  // tenant-scoped admin and must NOT be able to rewrite the permission model
+  // (privilege escalation) — the UI copy already states "only Super Admin can
+  // edit". This gate is presentational; server actions enforce the same rule.
+  const isSuperAdmin = role === "super_admin";
 
   const [savedPopup, setSavedPopup] = useState(false);
   const [resetConfirm, setResetConfirm] = useState<RoleKey | null>(null);
@@ -60,6 +66,10 @@ export function PermissionsTab() {
       </div>
 
       {/* Matrix */}
+      {/* NOTE: intentionally NOT migrated to the shared <DataTable>. This is a
+          role×module permissions MATRIX (dynamic module columns + an
+          interactive access-level toggle button in every cell), not a record
+          list — DataTable's row-per-record model doesn't fit it. */}
       <div className="card overflow-hidden"><div className="overflow-x-auto">
         <table className="w-full" aria-label="Role permissions matrix"><caption className="sr-only">Role-based access levels \u2014 click to edit</caption>
           <thead><tr className="border-b border-(--bg-border)">

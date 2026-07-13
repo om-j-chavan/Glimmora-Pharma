@@ -1,0 +1,319 @@
+"use client";
+
+import { useState } from "react";
+import { Send, Clock } from "lucide-react";
+import dayjs from "@/lib/dayjs";
+import { Modal } from "@/components/ui/Modal";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { CategorizedDocUploader, type DocUploadEntry } from "@/components/shared/CategorizedDocUploader";
+import { useToast } from "@/components/ui/Toast";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { displayUserName } from "@/lib/identity-display";
+import { roleLabel as fmtRole } from "@/lib/labels/roles";
+import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
+import { DocList, type DocItemView } from "@/components/shared/DocList";
+import {
+  startDeviationTask, submitDeviationTask, attachDeviationTaskDocument,
+  postDeviationTaskMessage, removeDeviationTaskDocument,
+} from "@/actions/deviation-tasks";
+import { EVIDENCE_CATEGORIES, EVIDENCE_CATEGORY_LABEL, type EvidenceCategory } from "@/lib/queries/evidence";
+import type { WorklistDeviationTask, WorklistDoc } from "@/lib/queries/worklist";
+
+/** Map a worklist Document row → the shared DocList view shape. */
+const toDocItem = (d: WorklistDoc): DocItemView => ({
+  id: d.id,
+  fileName: d.fileName,
+  downloadHref: `/api/documents/${d.id}`,
+  uploadedBy: d.uploadedBy,
+  uploadedAt: d.uploadedAt,
+});
+
+/** Group task docs by GxP category (canonical order, then Uncategorized). */
+function groupTaskDocsByCategory(docs: WorklistDoc[]): { category: EvidenceCategory | null; docs: WorklistDoc[] }[] {
+  const groups: { category: EvidenceCategory | null; docs: WorklistDoc[] }[] = [];
+  for (const cat of EVIDENCE_CATEGORIES) {
+    const ds = docs.filter((d) => d.category === cat);
+    if (ds.length) groups.push({ category: cat, docs: ds });
+  }
+  const uncategorized = docs.filter((d) => !d.category || !(EVIDENCE_CATEGORIES as readonly string[]).includes(d.category));
+  if (uncategorized.length) groups.push({ category: null, docs: uncategorized });
+  return groups;
+}
+
+/** Task docs rendered grouped by category — a labeled DocList per group. DocList
+ *  stays category-agnostic; the grouping lives here. */
+export function GroupedTaskDocs({ docs, emptyText, onRemove, busyId }: {
+  docs: WorklistDoc[];
+  emptyText: string;
+  onRemove?: (id: string) => void;
+  busyId?: string | null;
+}) {
+  if (docs.length === 0) {
+    return <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>{emptyText}</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {groupTaskDocsByCategory(docs).map((g) => (
+        <div key={g.category ?? "uncategorized"}>
+          <p className="text-[10px] font-medium mb-0.5" style={{ color: "var(--text-secondary)" }}>
+            {g.category ? EVIDENCE_CATEGORY_LABEL[g.category] : "Uncategorized"}
+          </p>
+          <DocList docs={g.docs.map(toDocItem)} onRemove={onRemove} busyId={busyId} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const DEV_TASK_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending", in_progress: "In Progress", submitted: "Submitted for Review", rework: "Needs Rework",
+};
+const roleLabel = (r?: string | null) => (r ? fmtRole(r) : "");
+
+/**
+ * Stage 4/5 (deviation redesign) — the ASSIGNEE's panel for a low-priority
+ * DeviationTask. Single-person + simple (escalate to CAPA if it needs more).
+ *   • context — the worker sees the deviation's problem + key fields, who
+ *     assigned the task + when, and the deviation's docs READ-ONLY.
+ *   • do — start, then SEND a response to QA via a confirm modal that holds the
+ *     completion notes + the supporting-document upload (req 5).
+ *   • talk — a FLAT append-only QA↔worker conversation (no threading); QA's
+ *     rework feedback persists here across resubmits.
+ */
+export function DeviationTaskPanel({
+  task,
+  onClose,
+  onChanged,
+}: {
+  task: WorklistDeviationTask;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const { org, users, allSites } = useTenantConfig();
+  const currentUser = useAppSelector((s) => s.auth.user);
+  const [busy, setBusy] = useState(false);
+  const [submitOpen, setSubmitOpen] = useState(false); // the "Send to QA" confirm modal
+  const [notes, setNotes] = useState("");
+  const [msgBody, setMsgBody] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const canWork = task.status === "pending" || task.status === "in_progress" || task.status === "rework";
+  const fmtDate = (iso: string | null) => (iso ? dayjs.utc(iso).tz(org.timezone).format(org.dateFormat) : "—");
+  const siteName = task.context.siteId
+    ? allSites.find((s) => s.id === task.context.siteId)?.name ?? task.context.siteId
+    : "—";
+  const assignerName = task.assignerId ? displayUserName(task.assignerId, users) : "—";
+  const assignerRole = users.find((u) => u.id === task.assignerId)?.role;
+
+  async function start() {
+    setBusy(true); setErr(null);
+    const res = await startDeviationTask(task.id);
+    setBusy(false);
+    if (!res.success) { setErr(res.error || "Could not start task."); toast.error(res.error || "Could not start task."); return; }
+    toast.success("Task started."); onChanged();
+  }
+
+  // Multi-document upload (each with its own required category) — loop the
+  // audit-first, permission-enforcing attachDeviationTaskDocument per document.
+  async function handleUploadDocs(entries: DocUploadEntry[]) {
+    let failed = 0;
+    let lastErr = "";
+    for (const { file, category } of entries) {
+      const fd = new FormData();
+      fd.set("fileName", file.name);
+      fd.set("file", file);
+      const res = await attachDeviationTaskDocument(task.id, fd, category);
+      if (!res.success) { failed += 1; lastErr = res.error ?? "Upload failed."; }
+    }
+    onChanged();
+    if (failed > 0) {
+      toast.error(`${failed} document${failed === 1 ? "" : "s"} failed to upload.`);
+      return { success: false, error: lastErr };
+    }
+    toast.success(`${entries.length} document${entries.length === 1 ? "" : "s"} attached.`);
+    return { success: true };
+  }
+
+  async function handleRemoveDoc(docId: string) {
+    const res = await removeDeviationTaskDocument(task.id, docId);
+    if (!res.success) { toast.error(res.error || "Failed to remove document."); return { success: false, error: res.error }; }
+    toast.success("Document removed.");
+    onChanged();
+    return { success: true };
+  }
+
+  async function submit() {
+    setBusy(true); setErr(null);
+    const res = await submitDeviationTask(task.id, { completionNotes: notes.trim() });
+    setBusy(false);
+    if (!res.success) { setErr(res.error || "Submit failed."); toast.error(res.error || "Submit failed."); return; }
+    toast.success("Response sent to QA for review."); setSubmitOpen(false); onChanged(); onClose();
+  }
+
+  async function postMsg() {
+    if (msgBody.trim().length === 0) return;
+    setPosting(true);
+    const res = await postDeviationTaskMessage(task.id, { body: msgBody.trim() });
+    setPosting(false);
+    if (!res.success) { toast.error(res.error || "Failed to post message."); return; }
+    setMsgBody(""); onChanged();
+  }
+
+  return (
+    <>
+      <Modal
+        open
+        onClose={busy ? () => undefined : onClose}
+        title={`Task · ${task.deviationReference ?? task.deviationId.slice(0, 8)}`}
+        footer={canWork ? (
+          <div className="flex justify-end gap-2">
+            {(task.status === "pending" || task.status === "rework") && (
+              <Button variant="secondary" size="sm" icon={Clock} disabled={busy} onClick={() => void start()}>Mark in progress</Button>
+            )}
+            <Button variant="primary" size="sm" icon={Send} disabled={busy} onClick={() => { setErr(null); setSubmitOpen(true); }}>Submit to QA</Button>
+          </div>
+        ) : undefined}
+      >
+        <div className="space-y-3">
+          {/* Status */}
+          <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Status: <Badge variant={task.status === "submitted" ? "purple" : task.status === "rework" ? "red" : "amber"}>{DEV_TASK_STATUS_LABEL[task.status] ?? task.status}</Badge></p>
+
+          {/* Deviation context */}
+          <div className="p-3 rounded-lg border" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
+            <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{task.deviationTitle}</p>
+            <p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}>{task.context.description}</p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mt-2 text-[11px]">
+              <div><span style={{ color: "var(--text-muted)" }}>Severity</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{task.context.severity}</span></div>
+              <div><span style={{ color: "var(--text-muted)" }}>Priority</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{task.context.priority ?? "—"}</span></div>
+              <div><span style={{ color: "var(--text-muted)" }}>Area</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{task.context.area}</span></div>
+              <div><span style={{ color: "var(--text-muted)" }}>Site</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{siteName}</span></div>
+              <div><span style={{ color: "var(--text-muted)" }}>Detected by</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{task.context.detectedBy}</span></div>
+              <div><span style={{ color: "var(--text-muted)" }}>Detected</span><br /><span className="font-medium" style={{ color: "var(--text-primary)" }}>{fmtDate(task.context.detectedDate)}</span></div>
+            </div>
+            {task.context.immediateAction && (
+              <p className="text-[11px] mt-2" style={{ color: "var(--text-secondary)" }}><span style={{ color: "var(--text-muted)" }}>Immediate action: </span>{task.context.immediateAction}</p>
+            )}
+          </div>
+
+          {/* Who assigned + QA's instruction */}
+          <div>
+            <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>Assigned by <span className="font-medium" style={{ color: "var(--text-secondary)" }}>{assignerName}{assignerRole ? ` · ${roleLabel(assignerRole)}` : ""}</span> on {fmtDate(task.assignedAt)}{task.dueDate ? ` · due ${fmtDate(task.dueDate)}` : ""}</p>
+            <p className="text-[12px] mt-1" style={{ color: "var(--text-primary)" }}>{task.message}</p>
+          </div>
+
+          {/* Rework "current ask" banner */}
+          {task.status === "rework" && task.reworkReason && (
+            <div className="p-2 rounded-lg" style={{ background: "var(--danger-bg)" }}>
+              <p className="text-[11px]" style={{ color: "var(--danger)" }}><span className="font-semibold">Rework requested:</span> {task.reworkReason}</p>
+            </div>
+          )}
+
+          {/* Deviation documents — FOREIGN origin (the parent deviation's docs).
+              Rendered on the shared <DocumentCard> but LOCKED: canDelete=()=>false
+              → Lock icon + no Delete (a worker can't remove the deviation's own
+              evidence). Server would reject a delete here regardless. */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Deviation documents (read-only)</p>
+            <CategorizedDocUploader
+              docs={task.deviationDocs}
+              canDelete={() => false}
+              emptyText="None attached to the deviation."
+            />
+          </div>
+
+          {/* Worker's own task documents — read-only MIRROR here (no lock icon:
+              they're yours). Add / delete live in the "Send to QA" modal (req 5). */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Your task documents</p>
+            <CategorizedDocUploader docs={task.taskDocs} readOnly emptyText="No documents uploaded yet — add them when you send your response." />
+          </div>
+
+          {/* Conversation — flat QA↔worker thread */}
+          <div className="pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
+            <TaskThread messages={task.messages} currentUserId={currentUser?.id} fmt={(iso) => dayjs.utc(iso).tz(org.timezone).format(`${org.dateFormat} HH:mm`)} />
+            <div className="flex items-end gap-2 mt-2">
+              <textarea className="input text-[12px] w-full min-h-14" placeholder="Reply to QA…" value={msgBody} onChange={(e) => setMsgBody(e.target.value)} maxLength={2000} disabled={posting} />
+              <Button variant="secondary" size="sm" icon={Send} disabled={posting || msgBody.trim().length === 0} loading={posting} onClick={() => void postMsg()}>Send</Button>
+            </div>
+          </div>
+
+          {err && !submitOpen && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{err}</p>}
+        </div>
+      </Modal>
+
+      {/* Req 5 — "Send response to QA" confirm modal: completion notes + the
+          supporting-document upload live HERE, not on the main panel. */}
+      <Modal
+        open={submitOpen}
+        onClose={busy ? () => undefined : () => setSubmitOpen(false)}
+        title="Send response to QA"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setSubmitOpen(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" icon={Send} disabled={busy || notes.trim().length < 5} loading={busy} onClick={() => void submit()}>Send Response to QA</Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Send your completed work to QA for review. Summarise what you did and attach any supporting documents.</p>
+          <div>
+            <label htmlFor="dev-task-notes" className="text-[10px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Completion notes <span style={{ color: "var(--danger)" }}>*</span></label>
+            <textarea id="dev-task-notes" className="input text-[12px] w-full min-h-24" placeholder="What was done? (≥ 5 characters)" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} disabled={busy} />
+          </div>
+          {/* Supporting documents — multi-document upload with a REQUIRED per-doc
+              category, on the shared <DocumentCard> (Delete confirms). These are
+              the worker's OWN docs, so each is deletable here. */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Supporting documents (optional)</p>
+            <CategorizedDocUploader
+              docs={task.taskDocs}
+              onUpload={handleUploadDocs}
+              onRemove={handleRemoveDoc}
+              emptyText="No documents attached yet — use Add Document to attach one or more."
+            />
+          </div>
+          {err && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{err}</p>}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+/* ── Shared sub-component (also used by the QA-side panel) ── */
+
+export function TaskThread({
+  messages,
+  currentUserId,
+  fmt,
+}: {
+  messages: WorklistDeviationTask["messages"];
+  currentUserId?: string;
+  fmt: (iso: string) => string;
+}) {
+  if (messages.length === 0) {
+    return <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No messages yet.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {messages.map((m) => {
+        const isQA = DEVIATION_QA_ROLES.includes(m.authorRole);
+        const isMine = !!currentUserId && m.authorId === currentUserId;
+        return (
+          <div key={m.id} className="rounded-lg p-2" style={{ background: isMine ? "var(--brand-muted)" : "var(--bg-surface)", border: "1px solid var(--bg-border)" }}>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className="text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>{m.authorName}</span>
+              <Badge variant={isQA ? "purple" : "gray"}>{isQA ? "QA" : (roleLabel(m.authorRole) || "Worker")}</Badge>
+              <span className="text-[10px] ml-auto" style={{ color: "var(--text-muted)" }}>{fmt(m.createdAt)}</span>
+            </div>
+            <p className="text-[12px] whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>{m.body}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
 import { Shield, CheckCircle2, Bot, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { displayName } from "@/lib/identity-display";
 
 interface CAPA {
   id: string;
@@ -14,11 +15,10 @@ export interface OversightTabProps {
   approvedCount: number;
   agiAssistedCount: number;
   closedCAPAs: CAPA[];
-  ownerName: (id: string) => string;
 }
 
 export function OversightTab({
-  pendingReviewCount, approvedCount, agiAssistedCount, closedCAPAs, ownerName,
+  pendingReviewCount, approvedCount, agiAssistedCount, closedCAPAs,
 }: OversightTabProps) {
   return (
     <div className="space-y-4">
@@ -39,7 +39,7 @@ export function OversightTab({
           <div className="space-y-0">{closedCAPAs.slice(0, 5).map((c) => (
             <div key={c.id} className="flex items-center justify-between py-2.5 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
               <div className="flex items-center gap-2"><span className="font-mono text-[11px] font-semibold text-[#0ea5e9]">{c.id}</span><span className="text-[11px] truncate" style={{ color: "var(--text-secondary)", maxWidth: 300 }}>{c.description}</span></div>
-              <div className="flex items-center gap-2"><span className="text-[10px]" style={{ color: "var(--text-muted)" }}>by {ownerName(c.closedBy ?? "")}</span><Badge variant="green">Closed</Badge></div>
+              <div className="flex items-center gap-2"><span className="text-[10px]" style={{ color: "var(--text-muted)" }}>by {displayName({ name: c.closedBy })}</span><Badge variant="green">Closed</Badge></div>
             </div>
           ))}</div>
         )}
