@@ -459,7 +459,7 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
 
       {/* Framework banner */}
       {!showPart11 && !showAnnex11 && !showGAMP5 && (
-        <MotionListItem className={clsx("flex items-start gap-2 p-3 rounded-xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
+        <MotionListItem className={clsx("flex items-start gap-2 p-3 rounded-2xl border", isDark ? "bg-[rgba(245,158,11,0.06)] border-[rgba(245,158,11,0.15)]" : "bg-[#fffbeb] border-[#fde68a]")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1">
             <p className="text-[12px] font-medium text-[#f59e0b]">No compliance frameworks active</p>

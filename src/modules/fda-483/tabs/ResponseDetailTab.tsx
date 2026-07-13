@@ -365,7 +365,7 @@ export function ResponseDetailTab({
       {/* ── Submitted success card (only when terminal) ── */}
       {isSubmitted && (
         <div
-          className="rounded-xl p-5 border bg-(--success-bg) border-(--success)/30"
+          className="rounded-2xl p-5 border bg-(--success-bg) border-(--success)/30"
           role="status"
           aria-live="polite"
           style={{ borderColor: "rgba(16,185,129,0.3)" }}

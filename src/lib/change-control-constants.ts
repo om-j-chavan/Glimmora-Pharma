@@ -9,6 +9,17 @@
  * change — every consumer now imports from "@/lib/change-control-constants".
  */
 
+/**
+ * Phase 2 UI mothball switch. The Change Control MODULE is fully built and its
+ * schema / actions / queries / module code all stay intact — but every
+ * user-facing touchpoint (route, related-module option, audit-trail deep-link,
+ * CAPA-detail integration) is hidden while this is `false`. Flip to `true` to
+ * re-expose the module in a single edit. Typed `boolean` (not the literal
+ * `false`) on purpose so `if (!CHANGE_CONTROL_ENABLED)` guards don't trip
+ * TypeScript unreachable-code / ESLint constant-condition analysis.
+ */
+export const CHANGE_CONTROL_ENABLED: boolean = false;
+
 export const CHANGE_TYPES = [
   "SOP",
   "Equipment",

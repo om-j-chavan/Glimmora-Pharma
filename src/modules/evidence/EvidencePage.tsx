@@ -208,7 +208,7 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
       {/* ── GRID view ── */}
       {view === "grid" ? (
         gridFiltered.length === 0 ? (
-          <div className="rounded-xl border border-(--bg-border) bg-(--bg-elevated) p-10 text-center">
+          <div className="rounded-2xl border border-(--bg-border) bg-(--bg-elevated) p-10 text-center">
             <FileText className="w-10 h-10 mx-auto mb-2 text-(--text-muted)" aria-hidden="true" />
             <p className="text-[13px] text-(--text-muted)">{documents.length === 0 ? "No documents yet." : "No documents match the current filters."}</p>
           </div>

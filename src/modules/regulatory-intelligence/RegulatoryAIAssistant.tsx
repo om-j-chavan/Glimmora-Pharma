@@ -255,7 +255,7 @@ export function RegulatoryAIAssistant({
             animation: "reg-ai-panel-in 0.24s cubic-bezier(0.16, 1, 0.3, 1)",
             background: "var(--card-bg)",
             border: "1px solid var(--card-border)",
-            borderRadius: 16,
+            borderRadius: "var(--radius-card)",
             boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
             display: "flex",
             flexDirection: "column",
@@ -334,7 +334,7 @@ export function RegulatoryAIAssistant({
           {thread.length === 0 && uiState !== "loading" && (
             <div className="space-y-4">
               <div
-                className="flex items-start gap-2.5 rounded-xl p-3"
+                className="flex items-start gap-2.5 rounded-2xl p-3"
                 style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
               >
                 <Sparkles className="w-4 h-4 mt-0.5 shrink-0 text-[#6366f1]" aria-hidden="true" />
@@ -424,7 +424,7 @@ export function RegulatoryAIAssistant({
           {uiState === "error" && error && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-xl px-3 py-2.5"
+              className="flex items-start gap-2 rounded-2xl px-3 py-2.5"
               style={{ background: "var(--danger-bg)", border: "1px solid var(--danger)" }}
             >
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--danger)" }} aria-hidden="true" />

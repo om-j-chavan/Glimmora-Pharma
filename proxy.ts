@@ -8,7 +8,8 @@ import { getToken } from "next-auth/jwt";
  *   1. Reads the NextAuth JWT via getToken (Edge-safe; getServerSession is not).
  *   2. Unauthenticated → page requests redirect to /login?callbackUrl=…; /api/*
  *      requests get a 401 (defense-in-depth — each route also checks auth()).
- *   3. /admin pages require role super_admin OR customer_admin (E1=B).
+ *   3. /admin pages require role super_admin ONLY (customer_admin manages its
+ *      own tenant via /settings, not the cross-tenant admin console — H1 fix).
  *   4. super_admin's world is the admin console ONLY — it is bounced off every
  *      non-/admin page to /admin (the (app) layout enforces the same server-side).
  *
@@ -68,8 +69,10 @@ export async function proxy(req: NextRequest) {
   if (!isApi) {
     const role = token.role as string | undefined;
 
-    // Admin route role gate — allow super_admin OR customer_admin (E1=B).
-    if (pathname.startsWith("/admin") && role !== "super_admin" && role !== "customer_admin") {
+    // Admin route role gate — super_admin ONLY (H1 fix). customer_admin manages
+    // its own tenant via /settings, never the cross-tenant admin console; it is
+    // redirected to the dashboard here (each /admin page re-checks server-side).
+    if (pathname.startsWith("/admin") && role !== "super_admin") {
       return NextResponse.redirect(new URL("/", req.url));
     }
 

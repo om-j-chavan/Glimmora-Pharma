@@ -1,7 +1,24 @@
 import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { Providers } from "@/components/Providers";
 import { SEO } from "@/constants/seo";
 import "@/index.css";
+
+// Self-hosted fonts via next/font (no render-blocking Google-Fonts request).
+// The CSS variables intentionally match Tailwind's own theme-token names
+// (--font-sans / --font-mono), so the `font-sans`/`font-mono` utilities AND the
+// body / .display-id rules in index.css all resolve to Inter / JetBrains Mono.
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -35,9 +52,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
         {/* Pre-paint theme application — eliminates the light-flash (FOUC) a
             dark-mode user otherwise sees before <ThemeSync> runs in an effect.
             Reads the same two keys the theme slice persists (glimmora-theme /

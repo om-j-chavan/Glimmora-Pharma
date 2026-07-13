@@ -227,7 +227,7 @@ export function LogoCropModal({ open, onClose, tenantId, tenantName, currentLogo
             </div>
             {/* Cropper needs a positioned, sized container. Rounded mask previews
                 the final circular avatar; drag to reposition, slider to zoom. */}
-            <div className="relative w-full h-[300px] rounded-xl overflow-hidden border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
+            <div className="relative w-full h-[300px] rounded-2xl overflow-hidden border" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
               <Cropper
                 image={imageSrc}
                 crop={crop}

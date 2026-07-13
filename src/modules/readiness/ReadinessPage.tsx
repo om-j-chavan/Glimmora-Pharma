@@ -456,7 +456,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         actions={role !== "viewer" ? [{ label: "Add action", variant: "primary", icon: Plus, onClick: () => setAddCardOpen(true) }] : []}
         headerRight={
           /* The readiness-score chip is a display widget, not a PageAction. */
-          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
+          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-2xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
             <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span>
             <span className="text-[20px] font-bold" style={{ color: rsCol }}>{`${readinessScore}%`}</span>
           </div>
@@ -519,7 +519,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
             <RoadmapPrismaTab inspection={selectedPrismaInspection} isAdmin={isAdmin} />
           ) : (
             <div
-              className="text-center py-10 rounded-xl border"
+              className="text-center py-10 rounded-2xl border"
               style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
             >
               <Map className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -582,7 +582,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
                     {BUCKETS.map((bucket) => {
                       const bc = tenantCards.filter((c) => c.lane === lane && c.bucket === bucket);
                       return (
-                        <div key={bucket} className={clsx("min-h-[80px] rounded-xl p-2.5 space-y-2", "bg-(--bg-surface) border border-(--bg-border)")}>
+                        <div key={bucket} className={clsx("min-h-[80px] rounded-2xl p-2.5 space-y-2", "bg-(--bg-surface) border border-(--bg-border)")}>
                           {bc.length === 0 && <div className="flex items-center justify-center h-10"><span className="text-[10px] italic" style={{ color: "var(--text-muted)" }}>No actions</span></div>}
                           {bc.map((card) => {
                             const isOd = card.status !== "Complete" && dayjs.utc(card.dueDate).isBefore(dayjs());
@@ -697,7 +697,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         <section aria-label="Governance model" className="flex flex-col gap-3">
           {/* ─── SECTION 1 — War room model ─── */}
           <CollapsibleSection id="war-room" icon={AlertTriangle} iconColor="#f59e0b" title="War room model" isOpen={openSections.has("war-room")} onToggle={() => toggleSection("war-room")}>
-            <div className={clsx("flex items-start gap-3 p-4 rounded-xl border", "bg-(--brand-muted) border-(--brand)")}>
+            <div className={clsx("flex items-start gap-3 p-4 rounded-2xl border", "bg-(--brand-muted) border-(--brand)")}>
               <AlertTriangle className="w-4 h-4 text-[#0ea5e9] shrink-0 mt-0.5" aria-hidden="true" />
               <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>During an FDA inspection, two parallel teams operate. Front room faces the inspector. Back room coordinates evidence and responses.</p>
             </div>
@@ -766,7 +766,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
 
           {/* ─── SECTION 4 — Escalation path ─── */}
           <CollapsibleSection id="escalation" icon={ChevronUp} iconColor="#ef4444" title="Escalation path" isOpen={openSections.has("escalation")} onToggle={() => toggleSection("escalation")}>
-            <div className={clsx("rounded-xl border p-4", "bg-(--bg-surface) border-(--bg-border)")}>
+            <div className={clsx("rounded-2xl border p-4", "bg-(--bg-surface) border-(--bg-border)")}>
               {["QA Head \u2192 Operations Head \u2192 Super Admin", "CSV Lead \u2192 IT/CDO \u2192 QA Head", "Reg Affairs \u2192 QA Head \u2192 Legal"].map((p) => (
                 <div key={p} className="flex items-center gap-2 py-2 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
                   <ChevronRight className="w-3 h-3 text-[#ef4444] shrink-0" aria-hidden="true" /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{p}</span>
@@ -777,7 +777,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
 
           {/* ─── SECTION 5 — Daily touchpoints ─── */}
           <CollapsibleSection id="touchpoints" icon={Clock} iconColor="#f59e0b" title="Daily touchpoints" isOpen={openSections.has("touchpoints")} onToggle={() => toggleSection("touchpoints")}>
-            <div className={clsx("rounded-xl border p-4", "bg-(--bg-surface) border-(--bg-border)")}>
+            <div className={clsx("rounded-2xl border p-4", "bg-(--bg-surface) border-(--bg-border)")}>
               {[{ time: "08:00", event: "Back room morning briefing" }, { time: "12:00", event: "Midday status check" }, { time: "17:00", event: "Front/back room debrief" }, { time: "20:00", event: "Overnight action review" }].map((t) => (
                 <div key={t.time} className="flex items-center gap-3 py-2 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
                   <span className="text-[11px] font-mono font-semibold text-[#f59e0b] w-12 shrink-0">{t.time}</span>
@@ -825,7 +825,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
           <TrainingPrismaTab inspection={selectedPrismaInspection} isAdmin={isAdmin} />
         ) : (
           <div
-            className="text-center py-10 rounded-xl border"
+            className="text-center py-10 rounded-2xl border"
             style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
           >
             <GraduationCap className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -1163,7 +1163,7 @@ function CollapsibleSection({ id, icon: Icon, iconColor, title, isOpen, onToggle
         className="w-full flex items-center justify-between cursor-pointer border transition-colors"
         style={{
           padding: "14px 20px",
-          borderRadius: 12,
+          borderRadius: "var(--radius-card)",
           borderWidth: 1,
           borderColor: "var(--bg-border)",
           background: "var(--bg-elevated)",

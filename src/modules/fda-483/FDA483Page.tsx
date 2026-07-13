@@ -719,7 +719,7 @@ export function FDA483Page({
           {urgentEvents.length > 0 ? (
             <div
               className={clsx(
-                "flex items-start gap-3 p-4 rounded-xl border",
+                "flex items-start gap-3 p-4 rounded-2xl border",
                 isDark
                   ? "bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.25)]"
                   : "bg-[#fef2f2] border-[#fca5a5]",

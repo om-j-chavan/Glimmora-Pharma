@@ -142,7 +142,7 @@ function DriftAlertList({ alerts, loading }: { alerts: DriftAlert[]; loading: bo
       {alerts.map((a) => (
         <li
           key={a.id}
-          className="rounded-xl border p-3"
+          className="rounded-2xl border p-3"
           style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}
         >
           <div className="flex items-start justify-between gap-2 flex-wrap">

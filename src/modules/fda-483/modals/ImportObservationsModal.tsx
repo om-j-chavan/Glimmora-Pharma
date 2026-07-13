@@ -262,7 +262,7 @@ export function ImportObservationsModal({
       {/* ── Step 1: Upload ── */}
       {step === "upload" && (
         <label
-          className="flex flex-col items-center justify-center text-center gap-3 rounded-xl border-2 border-dashed cursor-pointer py-12 px-6"
+          className="flex flex-col items-center justify-center text-center gap-3 rounded-2xl border-2 border-dashed cursor-pointer py-12 px-6"
           style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)" }}
         >
           <UploadCloud className="w-10 h-10" style={{ color: "var(--brand)" }} aria-hidden="true" />

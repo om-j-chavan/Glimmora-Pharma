@@ -132,6 +132,7 @@ export function OverviewPanel({ system, role, onNavigateTab }: OverviewPanelProp
               <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>Welcome to your new system. To complete its profile:</p>
             </div>
             <ol className="space-y-1.5 mb-3">
+              {/* eslint-disable-next-line react-hooks/refs -- false positive: intendedUseRef.current is read only inside item 1's onClick handler (deferred), never during render; the ref is otherwise just passed as a prop. */}
               {welcomeItems.map((it) => (
                 <li key={it.n} className="flex items-center justify-between gap-3 text-[12px]" style={{ color: "var(--text-secondary)" }}>
                   <span>{it.n}. {it.label}</span>

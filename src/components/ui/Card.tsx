@@ -30,7 +30,7 @@ export function Card({ children, header, footer, className, padding = "md" }: Ca
   return (
     <div
       className={clsx(
-        "rounded-xl overflow-hidden bg-(--card-bg) border border-(--card-border) shadow-[var(--shadow-card)]",
+        "rounded-2xl overflow-hidden bg-(--card-bg) border border-(--card-border) shadow-[var(--shadow-card)]",
         className,
       )}
     >

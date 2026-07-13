@@ -114,7 +114,7 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
+      <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden">
         {settings === null ? (
           <p className="text-[12px] text-(--text-muted) px-5 py-6">Loading frameworks…</p>
         ) : settings.length === 0 ? (

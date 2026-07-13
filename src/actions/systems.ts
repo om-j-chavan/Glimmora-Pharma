@@ -1553,17 +1553,14 @@ export async function resetToAutoDerivedStatus(systemId: string): Promise<Action
  * ══════════════════════════════════════ */
 
 function canManageSystemLinks(role: string): boolean {
-  // Gap-link-fix-2 — broadened to the compliance-authoring set (mirrors
-  // CAPA_WRITE_ROLES in capas/lifecycle.ts): every role that can author a
-  // Finding/CAPA can link it to a system at creation time. Excludes viewer
-  // (read-only). raiseCAPAFromSystem also uses this gate but stays effectively
-  // bound by createCAPA's own CAPA_WRITE_ROLES check, so the sets now align.
+  // Mirrors the compliance-authoring set (COMPLIANCE_AUTHOR_ROLES / CAPA_WRITE_ROLES):
+  // every role that can author a Finding/CAPA can link it to a system. SME Pass 2 —
+  // the admin identities are view-only on quality, so customer_admin and super_admin
+  // are excluded here too (raiseCAPAFromSystem stays bound by createCAPA's own gate).
   return (
     role === "csv_val_lead" ||
     role === "qa_head" ||
-    role === "regulatory_affairs" ||
-    role === "customer_admin" ||
-    role === "super_admin"
+    role === "regulatory_affairs"
   );
 }
 

@@ -1,5 +1,6 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
+/* Fonts are self-hosted via next/font (app/layout.tsx) and exposed as
+   --font-sans (Inter) / --font-mono (JetBrains Mono) on <html>. */
 
 /* ══════════════════════════════════════════════════════════════════
    Light theme (default) — warm white/cream, amber-brown accents
@@ -52,7 +53,7 @@
   --card: #ffffff;
   --shadow-sm: 0 1px 2px rgba(16,24,40,.06);
   --shadow-md: 0 4px 12px rgba(16,24,40,.08);
-  --radius-card: 12px;
+  --radius-card: 16px;
   --radius-ctl: 8px;
   --text-secondary-muted: #667085;  /* Phase D body-secondary */
   --card-bg: #ffffff;
@@ -125,7 +126,7 @@
   --card: #1c1c21;
   --shadow-sm: 0 1px 2px rgba(0,0,0,.45);
   --shadow-md: 0 6px 16px rgba(0,0,0,.55);
-  --radius-card: 12px;
+  --radius-card: 16px;
   --radius-ctl: 8px;
   --text-secondary-muted: #9aa3b2;  /* Phase D body-secondary (dark, AA) */
   --card-bg: #17171a;
@@ -398,7 +399,7 @@ body {
 body {
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: "Inter", system-ui, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   transition:
     background-color 0.2s ease,
@@ -408,7 +409,7 @@ body {
 
 /* Tabular figures wherever numbers line up in columns — stat values, table
    cells, and monospace data — so digits align and are easier to scan/compare
-   (batch IDs, deviation counts, dates). Inter and IBM Plex Mono both ship the
+   (batch IDs, deviation counts, dates). Inter and JetBrains Mono both ship the
    tnum feature. */
 .stat-value,
 .data-table td,
@@ -423,8 +424,8 @@ body {
    font-mono default) with tabular figures + a touch of tracking so uppercased
    codes stay scannable. Cosmetic only. */
 .display-id {
-  font-family: "Cascadia Code", "JetBrains Mono", "IBM Plex Mono", "Roboto Mono",
-    ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-family: var(--font-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas,
+    monospace;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
   font-weight: 500;
@@ -603,7 +604,7 @@ body {
   }
 
   .card {
-    @apply rounded-xl overflow-hidden;
+    @apply rounded-2xl overflow-hidden;
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     box-shadow: var(--shadow-card);
@@ -757,7 +758,7 @@ body {
   }
 
   .agi-panel {
-    @apply rounded-xl p-4;
+    @apply rounded-2xl p-4;
     background: var(--info-bg);
     border: 1px solid rgba(74, 143, 168, 0.3);
   }
@@ -829,7 +830,7 @@ body {
   }
 
   .stat-card {
-    @apply rounded-xl p-5;
+    @apply rounded-2xl p-5;
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     box-shadow: var(--shadow-card);

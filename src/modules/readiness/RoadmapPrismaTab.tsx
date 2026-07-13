@@ -70,7 +70,7 @@ export function RoadmapPrismaTab({ inspection, isAdmin }: RoadmapPrismaTabProps)
     <div className="space-y-6">
       {/* Progress header */}
       <div
-        className="flex items-center justify-between p-4 rounded-xl border"
+        className="flex items-center justify-between p-4 rounded-2xl border"
         style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
       >
         <div>

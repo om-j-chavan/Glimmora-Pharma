@@ -93,7 +93,7 @@ export function ChangeControlListPage({ initial }: Props) {
       {/* Filters */}
       <section
         aria-label="Change control filters"
-        className="flex items-center gap-3 flex-wrap p-3 rounded-xl"
+        className="flex items-center gap-3 flex-wrap p-3 rounded-2xl"
         style={{
           background: "var(--bg-elevated)",
           border: "1px solid var(--bg-border)",
@@ -194,7 +194,7 @@ export function ChangeControlListPage({ initial }: Props) {
         </div>
       ) : (
         <div
-          className="rounded-xl overflow-hidden"
+          className="rounded-2xl overflow-hidden"
           style={{
             background: "var(--card-bg)",
             border: "1px solid var(--card-border)",

@@ -254,7 +254,7 @@ export function Popup({
         aria-labelledby="popup-title"
         onClick={(e) => e.stopPropagation()}
         className={clsx(
-          "relative rounded-xl overflow-hidden w-full max-w-[380px] border shadow-2xl",
+          "relative rounded-2xl overflow-hidden w-full max-w-[380px] border shadow-2xl",
           "bg-(--bg-surface)",
           cfg.border[m],
           className,

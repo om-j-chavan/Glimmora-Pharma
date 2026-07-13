@@ -699,7 +699,6 @@ model CAPA {
   createdByUser          User?                        @relation("CAPACreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   ownerUser              User?                        @relation("CAPAOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   rejectedByUser         User?                        @relation("CAPARejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
-  documents              CAPADocument[]
   evidenceItems          EvidenceItem[]
   effectivenessCriteria  CAPAEffectivenessCriterion[]
   approvals              CAPAApproval[]
@@ -785,23 +784,6 @@ model CAPAActionItem {
   // Phase 2 — Worklist foundation: getMyActionItems filters by ownerId.
   @@index([ownerId])
   @@index([deletedAt])
-}
-
-model CAPADocument {
-  id          String    @id @default(cuid())
-  capaId      String
-  fileName    String
-  fileSize    String?
-  fileType    String?
-  version     String    @default("v1.0")
-  status      String    @default("current")
-  uploadedBy  String
-  approvedBy  String?
-  approvedAt  DateTime?
-  description String?
-  createdAt   DateTime  @default(now())
-
-  capa CAPA @relation(fields: [capaId], references: [id], onDelete: Cascade)
 }
 
 // ── DEVIATION ──
@@ -1710,7 +1692,6 @@ model Inspection {
   createdByUser   User?             @relation("InspectionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   actions         ReadinessAction[]
   simulations     Simulation[]
-  readinessCards  ReadinessCard[]
   trainingRecords TrainingRecord[]
 }
 
@@ -1769,26 +1750,7 @@ model AuditLog {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
-// ── READINESS — extended (cards / playbooks / training) ──
-
-model ReadinessCard {
-  id           String    @id @default(cuid())
-  inspectionId String
-  title        String
-  description  String?
-  category     String
-  status       String    @default("not_started")
-  priority     String    @default("medium")
-  owner        String?
-  dueDate      DateTime?
-  completedBy  String?
-  completedAt  DateTime?
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
-}
+// ── READINESS — extended (playbooks / training) ──
 
 model Playbook {
   id          String   @id @default(cuid())

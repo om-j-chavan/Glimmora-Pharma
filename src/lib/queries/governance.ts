@@ -2,21 +2,7 @@ import { cache } from "react";
 import { Prisma, type AuditLog } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { frameworkLabel } from "@/constants/frameworks";
-
-// Hard cap on how many audit-log rows the in-app /audit-trail view loads
-// per request. The view is in-memory: filters and the CSV "Export" button
-// operate on the loaded slice, not on the database. Without surfacing the
-// total population the UI silently dropped older rows past the limit —
-// for a Part-11 audit log that's an honest-display violation, hence the
-// truncation flag exposed by getAuditLogs below.
-const AUDIT_LOG_DISPLAY_LIMIT = 500;
-
-export interface AuditLogQueryResult {
-  logs: AuditLog[];
-  totalCount: number;
-  truncated: boolean;
-  limit: number;
-}
+import { CHANGE_CONTROL_ENABLED } from "@/lib/change-control-constants";
 
 // Governance Phase 1 — `getRAIDItems` was removed together with the RAIDItem
 // table. The Risk Register's reads live in ./risks.ts, where every one of them
@@ -29,124 +15,6 @@ export const getDocuments = cache(async (tenantId: string) => {
     where: { tenantId, deletedAt: null },
     orderBy: { createdAt: "desc" },
   });
-});
-
-/**
- * Band-aid for the Evidence & Documents global view: surface CAPA-side
- * EvidenceFile rows alongside the Document table. Tenant scope is enforced
- * via the parent CAPA (EvidenceFile → EvidenceItem → CAPA.tenantId).
- *
- * Throwaway aggregator. Phase 4 of the document-store unification will
- * fold these rows into the main Document table and drop this query.
- */
-export const getCAPAEvidenceFiles = cache(async (tenantId: string) => {
-  return prisma.evidenceFile.findMany({
-    where: {
-      deletedAt: null,
-      evidenceItem: {
-        capa: { tenantId },
-      },
-    },
-    include: {
-      evidenceItem: {
-        include: {
-          capa: {
-            select: {
-              id: true,
-              reference: true,
-              tenantId: true,
-              siteId: true,
-              // Surfaced into the global Evidence view's complianceTags as
-              // ["CAPA", capa.source] — matches the existing CAPA-Redux
-              // upload-row convention so the page-level source filter
-              // ("Inspection", "Internal Audit", etc.) catches these rows.
-              source: true,
-            },
-          },
-        },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-});
-
-/**
- * Surface real CSV/CSA validation stage documents into the global Evidence &
- * Documents library. These are genuine uploaded files living on ValidationStage
- * records; the Evidence workspace is the app's single evidence shelf, so it
- * should gather them alongside standalone Documents and CAPA evidence. Tenant
- * scope is enforced through the stage's parent system (StageDocument →
- * ValidationStage → GxPSystem.tenantId). Read-only mirror — managed in CSV/CSA.
- */
-export const getValidationStageDocuments = cache(async (tenantId: string) => {
-  return prisma.stageDocument.findMany({
-    where: {
-      deletedAt: null,
-      validationStage: { system: { tenantId } },
-    },
-    include: {
-      validationStage: {
-        select: {
-          stageName: true,
-          status: true,
-          system: { select: { id: true, name: true, reference: true } },
-        },
-      },
-    },
-    orderBy: { uploadedAt: "desc" },
-  });
-});
-
-/**
- * Surface real FDA 483 documents (response packages, uploaded artefacts) into
- * the global Evidence library. These live on FDA483Document rows keyed to an
- * FDA483Event; `useTenantData().fda483Events` is hardcoded `[]` in the
- * server-first architecture, so the page-level client aggregation could never
- * see them. Tenant scope via the parent event. Read-only mirror — managed in
- * the FDA 483 module.
- */
-export const getFDA483EvidenceDocuments = cache(async (tenantId: string) => {
-  return prisma.fDA483Document.findMany({
-    where: { event: { tenantId } },
-    include: {
-      event: { select: { referenceNumber: true, tenantId: true, status: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-});
-
-export const getDocumentStats = cache(async (tenantId: string) => {
-  const docs = await getDocuments(tenantId);
-  return {
-    total: docs.length,
-    approved: docs.filter((d) => d.status === "approved").length,
-    underReview: docs.filter((d) => d.status === "under_review").length,
-    draft: docs.filter((d) => d.status === "draft").length,
-    rejected: docs.filter((d) => d.status === "rejected").length,
-  };
-});
-
-export const getAuditLogs = cache(async (tenantId: string): Promise<AuditLogQueryResult> => {
-  const where = { tenantId };
-  const [logs, totalCount] = await Promise.all([
-    prisma.auditLog.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: AUDIT_LOG_DISPLAY_LIMIT,
-    }),
-    // The where clause MUST stay identical to the findMany above. The
-    // truncated flag (totalCount > limit) is meaningful only when both
-    // queries count the same population — if these drift, the
-    // "showing X of Y" notice becomes a lie and the Part-11
-    // honest-display promise breaks.
-    prisma.auditLog.count({ where }),
-  ]);
-  return {
-    logs,
-    totalCount,
-    truncated: totalCount > AUDIT_LOG_DISPLAY_LIMIT,
-    limit: AUDIT_LOG_DISPLAY_LIMIT,
-  };
 });
 
 /* ── Platform audit: server-side paginated + filtered feed ─────────────────
@@ -223,7 +91,7 @@ export const getPlatformAuditLogs = cache(async (
       take: pageSize,
     }),
     // Same `where` as the findMany so the total honestly reflects the filtered
-    // population (Part-11 honest-display, mirrors getAuditLogs).
+    // population (Part-11 honest-display).
     prisma.auditLog.count({ where }),
   ]);
 
@@ -418,13 +286,6 @@ export type AuditTrailRow = AuditLog & {
   href: string | null;
 };
 
-export interface AuditTrailView {
-  rows: AuditTrailRow[];
-  totalCount: number;
-  truncated: boolean;
-  limit: number;
-}
-
 /** Resolve recordId → reference for the loaded slice, batched per family. */
 async function resolveAuditReferences(
   tenantId: string,
@@ -479,29 +340,9 @@ async function resolveAuditReferences(
   return ref;
 }
 
-/**
- * Audit-trail view: the same tenant-scoped, capped slice as getAuditLogs, with
- * each row enriched with a proper domain id + source link. Used by the
- * /audit-trail page so the table and detail modal can reference records by
- * their real ids (CAPA-…, DEV-…, CC-…) instead of raw UUIDs.
- */
-export const getAuditTrailView = cache(async (tenantId: string): Promise<AuditTrailView> => {
-  const where = { tenantId };
-  const [logs, totalCount] = await Promise.all([
-    prisma.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: AUDIT_LOG_DISPLAY_LIMIT }),
-    prisma.auditLog.count({ where }),
-  ]);
-
-  const refMap = await resolveAuditReferences(tenantId, logs);
-
-  const rows: AuditTrailRow[] = logs.map((log) => toAuditTrailRow(log, refMap));
-
-  return { rows, totalCount, truncated: totalCount > AUDIT_LOG_DISPLAY_LIMIT, limit: AUDIT_LOG_DISPLAY_LIMIT };
-});
-
-/** Enrich a raw AuditLog with its resolved domain id + source href. Shared by
- *  the capped getAuditTrailView and the server-paged getAuditTrailPage so the
- *  reference/route logic lives in exactly one place. */
+/** Enrich a raw AuditLog with its resolved domain id + source href. Used by the
+ *  server-paged getAuditTrailPage so the reference/route logic lives in exactly
+ *  one place. */
 function toAuditTrailRow(log: AuditLog, refMap: Map<string, string>): AuditTrailRow {
   const fam = auditModuleFamily(log.module);
   const resolved = log.recordId ? refMap.get(log.recordId) : undefined;
@@ -511,19 +352,24 @@ function toAuditTrailRow(log: AuditLog, refMap: Map<string, string>): AuditTrail
   const href =
     fam === "capa" && resolved && log.recordId
       ? `/capa/${log.recordId}`
-      : fam
-        ? AUDIT_LIST_ROUTE[fam]
-        : null;
+      : // Change Control UI mothballed (Phase 2) — historical CC audit rows still
+      // resolve their reference for `displayId`, but we suppress the deep-link so
+      // the row isn't clickable into the hidden route. Re-links when the flag flips.
+      fam === "changeControl" && !CHANGE_CONTROL_ENABLED
+        ? null
+        : fam
+          ? AUDIT_LIST_ROUTE[fam]
+          : null;
   return { ...log, displayId, href };
 }
 
 /* ── Audit-trail: server-side paginated + filtered + sorted (tenant-scoped) ──
-   Backs the /audit-trail page's <DataTable mode="server">. SAME scope pin as
-   getAuditTrailView (where.tenantId === caller's tenant — NEVER widened; a
-   super_admin sees only their own/platform tenant, a tenant user sees theirs);
-   filters only ever narrow. Unlike the capped view, paging + sorting + filtering
-   all run in the DB so the (potentially large) AuditLog table is never loaded
-   whole AND a column sort orders the WHOLE result set, not just a loaded page. */
+   Backs the /audit-trail page's <DataTable mode="server">. Scope pin:
+   where.tenantId === caller's tenant — NEVER widened; a super_admin sees only
+   their own/platform tenant, a tenant user sees theirs; filters only ever
+   narrow. Paging + sorting + filtering all run in the DB so the (potentially
+   large) AuditLog table is never loaded whole AND a column sort orders the
+   WHOLE result set, not just a loaded page. */
 
 export interface AuditTrailFilters {
   /** Exact module string (matches AuditLog.module). */

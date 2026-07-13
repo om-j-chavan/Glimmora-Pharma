@@ -375,7 +375,7 @@ export function AccountModal({
       >
         {/* Drop overlay — visible only during active drag */}
         {isDragging && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl pointer-events-none" style={{ background: "var(--brand-muted)", border: "2px dashed var(--brand)" }}>
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl pointer-events-none" style={{ background: "var(--brand-muted)", border: "2px dashed var(--brand)" }}>
             <div className="text-center">
               <Upload className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--brand)" }} aria-hidden="true" />
               <p className="text-[13px] font-semibold" style={{ color: "var(--brand)" }}>Drop logo here</p>

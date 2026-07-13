@@ -675,6 +675,31 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </button>
             </div>
           }
+          footer={
+            ((selected.status === "open" && isQAHead) ||
+              (selected.status === "pending_qa_review" && isQAHead && !selected.activeTask)) ? (
+              <div className="flex justify-end gap-2">
+                {selected.status === "open" && isQAHead && (
+                  <Button variant="primary" size="sm" icon={Search} onClick={handleStartInvestigation}>Start Investigation</Button>
+                )}
+                {selected.status === "pending_qa_review" && isQAHead && !selected.activeTask && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => setRejectModal(true)}>Reject</Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={CheckCircle2}
+                      onClick={() => setCloseModal(true)}
+                      disabled={capaRequired}
+                      title={capaRequired ? "Critical deviations require a linked CAPA before closure" : undefined}
+                    >
+                      Sign & Close Deviation
+                    </Button>
+                  </>
+                )}
+              </div>
+            ) : undefined
+          }
         >
           <div className="space-y-4">
             {/* Governance Phase 2 — provenance when this deviation was raised by converting a Risk. */}
@@ -961,41 +986,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </div>
             )}
 
-            {/* Action buttons — only the phases that own a status-action button:
-                "open" (Start Investigation) and "pending_qa_review" (Sign & Close
-                / Reject). under_investigation acts via the InvestigationSection;
-                capa_pending waits on the CAPA. */}
-            {(selected.status === "open" || selected.status === "pending_qa_review") && (
-              <div className="space-y-2 pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
-                {selected.status === "open" && isQAHead && (
-                  <Button variant="primary" size="sm" fullWidth icon={Search} onClick={handleStartInvestigation}>Start Investigation</Button>
-                )}
-                {/* INVESTIGATION-FIRST — the former "Submit for QA Review" step is
-                    gone: completeInvestigation now advances under_investigation →
-                    pending_qa_review directly. During under_investigation the RCA
-                    lives in the InvestigationSection above ("Complete Investigation").
-                    Req 3 — when a low-priority TASK is in flight, the disposition is
-                    the task: its own panel owns Sign & Close (only once submitted),
-                    so don't show the generic close here (it appeared prematurely
-                    right after assigning). Only the no-task path closes here. */}
-                {selected.status === "pending_qa_review" && isQAHead && !selected.activeTask && (
-                  <>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      fullWidth
-                      icon={CheckCircle2}
-                      onClick={() => setCloseModal(true)}
-                      disabled={capaRequired}
-                      title={capaRequired ? "Critical deviations require a linked CAPA before closure" : undefined}
-                    >
-                      Sign & Close Deviation
-                    </Button>
-                    <Button variant="ghost" size="sm" fullWidth onClick={() => setRejectModal(true)}>Reject</Button>
-                  </>
-                )}
-              </div>
-            )}
           </div>
         </Modal>
       )}

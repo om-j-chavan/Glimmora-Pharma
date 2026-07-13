@@ -20,30 +20,30 @@ import {
 import { readSigningProvenance } from "./_shared";
 import { sanitizeServerError } from "@/lib/errors";
 
-/* â”€â”€ SME Section 1, Stage 6 (FULL) â€” 90-day Effectiveness Review â”€â”€
+/* â”€â”€ SME Section 1, Stage 6 (FULL) — 90-day Effectiveness Review â”€â”€
  *
- * Manual review (no scheduled trigger â€” that's a deployment-platform
+ * Manual review (no scheduled trigger — that's a deployment-platform
  * concern parked for post-launch). The reviewer attests that the CAPA
  * has been effective (or not) at preventing recurrence, ~90 days after
  * closure.
  *
  * SoD invariants enforced here:
- *   1. Reviewer â‰  closure signer. The user who signed the CAPA closure
+ *   1. Reviewer ≠ closure signer. The user who signed the CAPA closure
  *      cannot review their own work.
- *   2. Reviewer â‰  verification signer. The independent verifier from
+ *   2. Reviewer ≠ verification signer. The independent verifier from
  *      Stage 5 cannot also conclude effectiveness.
- *   3. super_admin does NOT bypass SoD â€” same posture as verifyCAPA.
+ *   3. super_admin does NOT bypass SoD — same posture as verifyCAPA.
  *
  * Status invariants: only "closed" CAPAs are subject to effectiveness
  * review (rejected ones aren't). The CAPA stays in "closed" through
- * the review â€” verdict is recorded as metadata + a SignedRecord; no
+ * the review — verdict is recorded as metadata + a SignedRecord; no
  * status flip. An "ineffective" verdict surfaces a strong warning but
  * does not auto-create a new CAPA in this rung (future enhancement).
  *
  * Note: the lookup for closure-signer and verifier identities reads
  * the SignedRecord.signerId column directly (which is the real userId
  * across this codebase) rather than going through display-name
- * comparison â€” strong SoD signal, not brittle.
+ * comparison — strong SoD signal, not brittle.
  */
 
 const RecordEffectivenessSchema = z.object({
@@ -102,7 +102,7 @@ export async function recordEffectivenessReview(
   });
   if (!existing) return { success: false, error: "CAPA not found" };
 
-  // Status gate â€” only closed CAPAs are subject to effectiveness review.
+  // Status gate — only closed CAPAs are subject to effectiveness review.
   if (existing.status !== "closed") {
     return {
       success: false,
@@ -125,15 +125,15 @@ export async function recordEffectivenessReview(
     };
   }
 
-  // Role gate â€” same set approveCAPA permits for this tier.
+  // Role gate — same set approveCAPA permits for this tier.
   if (!canApproveCAPA(session.user.role, existing.risk)) {
     return {
       success: false,
-      error: `Your role cannot review effectiveness for a ${existing.risk} CAPA â€” only QA roles authorised for approval may review.`,
+      error: `Your role cannot review effectiveness for a ${existing.risk} CAPA — only QA roles authorised for approval may review.`,
     };
   }
 
-  // SoD â€” fetch the signer ids of the closure + verification signing
+  // SoD — fetch the signer ids of the closure + verification signing
   // events. Block if the current user signed either.
   const blockingSigners: { recordType: string; signerId: string | null }[] = [];
   if (existing.closureSignatureId) {
@@ -223,7 +223,7 @@ export async function recordEffectivenessReview(
     notes: parsed.data.notes,
   });
   const contentHash = computeContentHash(canonicalContent);
-  const contentSummary = `${existing.reference ?? existing.id} effectiveness reviewed by ${session.user.name} (${session.user.role}) â€” verdict: ${parsed.data.verdict}`;
+  const contentSummary = `${existing.reference ?? existing.id} effectiveness reviewed by ${session.user.name} (${session.user.role}) — verdict: ${parsed.data.verdict}`;
   const provenance = await readSigningProvenance();
 
   try {
@@ -237,7 +237,7 @@ export async function recordEffectivenessReview(
           signerName: session.user.name,
           signerRole: session.user.role,
           signerEmail: session.user.email,
-          signatureMeaning: `Effectiveness Review â€” ${parsed.data.verdict}`,
+          signatureMeaning: `Effectiveness Review — ${parsed.data.verdict}`,
           contentHash,
           contentSummary,
           passwordVerifiedAt,
@@ -259,7 +259,7 @@ export async function recordEffectivenessReview(
       return { capa: updated, signedRecord: sig };
     });
 
-    // Paired audit rows â€” workflow + signing event.
+    // Paired audit rows — workflow + signing event.
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,
@@ -297,7 +297,7 @@ export async function recordEffectivenessReview(
       },
     });
 
-    // Forensic breadcrumb â€” "ineffective" verdicts are searchable on
+    // Forensic breadcrumb — "ineffective" verdicts are searchable on
     // their own dedicated action code so a coordinator can pull every
     // CAPA found ineffective in a date range without scanning JSON.
     if (parsed.data.verdict === "ineffective") {
@@ -331,7 +331,7 @@ export async function recordEffectivenessReview(
 
 /**
  * Revoke an effectiveness review the caller themselves recorded.
- * Mirrors revokeCAPAVerification â€” same-reviewer only, mints a
+ * Mirrors revokeCAPAVerification — same-reviewer only, mints a
  * CAPA_EFFECTIVENESS_REVIEW_REVOCATION SignedRecord, clears the
  * review fields. Original signature row preserved (Part 11
  * immutability).

@@ -40,7 +40,7 @@ export function SystemHeaderCard({ system, isDark, canEdit, onEdit, resolveUser,
   const nextStep = computeNextStep(system);
 
   return (
-    <div className={clsx("rounded-xl p-4 border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+    <div className={clsx("rounded-2xl p-4 border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div className="min-w-0">
           {/* Reference anchor */}

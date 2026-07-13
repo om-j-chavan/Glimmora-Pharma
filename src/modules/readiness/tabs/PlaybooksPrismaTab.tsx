@@ -110,7 +110,7 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
 
       {playbooks.length === 0 ? (
         <div
-          className="text-center py-8 rounded-xl border border-dashed"
+          className="text-center py-8 rounded-2xl border border-dashed"
           style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
         >
           <BookOpen className="w-9 h-9 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -129,7 +129,7 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
             return (
               <article
                 key={pb.id}
-                className="rounded-xl border overflow-hidden"
+                className="rounded-2xl border overflow-hidden"
                 style={{ borderColor: "var(--bg-border)" }}
               >
                 <button

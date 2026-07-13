@@ -204,13 +204,13 @@ export function CAPATrackerTab({
           const active = cardFilter === card.key;
           return (
             // h-full through the wrapper keeps the cards equal-height in the grid.
-            <MotionHoverCard key={card.key} className="h-full rounded-xl">
+            <MotionHoverCard key={card.key} className="h-full rounded-2xl">
               <button
                 type="button"
                 onClick={() => setCardFilter((prev) => (prev === card.key ? null : card.key))}
                 aria-pressed={active}
                 className={clsx(
-                  "w-full h-full text-left rounded-xl transition",
+                  "w-full h-full text-left rounded-2xl transition",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-(--brand)",
                   active && "ring-2 ring-(--brand)",
                   count === 0 && "opacity-60",

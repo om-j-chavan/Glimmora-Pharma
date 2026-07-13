@@ -290,7 +290,7 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
   }
 
   return (
-    <section aria-label="Plain-English record search" className="rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
+    <section aria-label="Plain-English record search" className="rounded-2xl overflow-hidden" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)" }}>
       {/* Title bar */}
       <div className="flex items-center justify-between px-4 py-2" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--card-border)" }}>
         <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: "var(--card-text)" }}>

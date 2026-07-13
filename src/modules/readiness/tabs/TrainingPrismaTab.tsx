@@ -118,7 +118,7 @@ export function TrainingPrismaTab({ inspection, isAdmin }: TrainingPrismaTabProp
 
         {simulations.length === 0 ? (
           <div
-            className="text-center py-10 rounded-xl border border-dashed"
+            className="text-center py-10 rounded-2xl border border-dashed"
             style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
           >
             <Calendar className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
@@ -215,7 +215,7 @@ export function TrainingPrismaTab({ inspection, isAdmin }: TrainingPrismaTabProp
         </div>
         {trainings.length === 0 ? (
           <div
-            className="text-center py-8 rounded-xl border border-dashed text-[12px]"
+            className="text-center py-8 rounded-2xl border border-dashed text-[12px]"
             style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)", color: "var(--text-secondary)" }}
           >
             No training records logged for this inspection yet.
