@@ -7,7 +7,7 @@ export * from "./deviations";
 export * from "./fda483";
 export * from "./systems";
 export * from "./documents";
-export * from "./raid";
+export * from "./risks";
 export * from "./inspections";
 export * from "./auditLogs";
 export * from "./settings";

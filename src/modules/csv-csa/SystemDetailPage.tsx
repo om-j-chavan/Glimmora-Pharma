@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import { ArrowLeft, Clock, AlertTriangle } from "lucide-react";
+import { Clock, AlertTriangle } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import { useRole } from "@/hooks/useRole";
@@ -13,6 +13,7 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 import { adaptPrismaSystem, adaptPrismaRTM, adaptPrismaRoadmap, type SystemFromPrisma } from "@/types/csv-csa";
 import { updateSystem as updateSystemServer, saveNextReview as saveNextReviewServer } from "@/actions/systems";
 import { Popup } from "@/components/ui/Popup";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { OverviewPanel } from "@/modules/csv-csa/detail/OverviewPanel";
 import { ValidationPanel } from "@/modules/csv-csa/detail/ValidationPanel";
 import { SystemHeaderCard } from "@/modules/csv-csa/detail/SystemHeaderCard";
@@ -101,11 +102,11 @@ export function SystemDetailPage({ system: prismaSystem, availableFindings, rece
   const inReviewStage = stages.find((s) => s.status === "in_review");
 
   return (
-    <main id="main-content" aria-label={`System ${system.reference ?? system.name}`} className="w-full space-y-4">
-      <button type="button" onClick={() => router.push("/csv-csa")} className="inline-flex items-center gap-1.5 text-[12px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">
-        <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" /> All systems
-      </button>
-
+    <PageLayout
+      breadcrumb={{ parent: "CSV/CSA", parentHref: "/csv-csa", current: system.reference ?? system.name }}
+      description="Validation lifecycle, RTM, sign-off, and inspection readiness for this GxP computerized system."
+    >
+      <div className="space-y-4">
       <SystemHeaderCard
         system={system} isDark={isDark} canEdit={!isViewOnly} onEdit={() => setEditOpen(true)}
         resolveUser={resolveUser} siteName={siteName} timezone={org.timezone} dateFormat={org.dateFormat}
@@ -197,10 +198,12 @@ export function SystemDetailPage({ system: prismaSystem, availableFindings, rece
         </div>
       )}
 
+      </div>
+
       <EditSystemModal open={editOpen} sites={sites} users={complianceUsers} system={system} onSave={onEditSave} onClose={() => setEditOpen(false)} />
 
       <Popup isOpen={!!okMsg} variant="success" title="Saved" description={okMsg ?? ""} onDismiss={() => setOkMsg(null)} />
       <Popup isOpen={!!errorMsg} variant="error" title="Action failed" description={errorMsg ?? ""} onDismiss={() => setErrorMsg(null)} />
-    </main>
+    </PageLayout>
   );
 }

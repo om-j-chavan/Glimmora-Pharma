@@ -2,108 +2,85 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useForm, Controller } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import clsx from "clsx";
-import { BarChart3, AlertTriangle, Download, BarChart2, Gauge } from "lucide-react";
-import type { RAIDItem as PrismaRAIDItem } from "@prisma/client";
+import { BarChart3, ShieldAlert, Download, BarChart2, Gauge, Gavel, Archive } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { escapeHtml } from "@/lib/escapeHtml";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useTenantData } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
-import { setRAIDItems, type RAIDItem, type RAIDType, type RAIDStatus, type RAIDPriority } from "@/store/raid.slice";
 import {
-  createRAIDItem as createRAIDAction,
-  updateRAIDItem as updateRAIDAction,
-  closeRAIDItem as closeRAIDAction,
-  reopenRAIDItem as reopenRAIDAction,
-  deleteRAIDItem as deleteRAIDAction,
-} from "@/actions/raid";
+  canCreateRisk, canEditRisk, canManageGovernance,
+  canCreateManagementDecision, canEditManagementDecision,
+} from "@/lib/permissions/roleSets";
+import {
+  createRisk as createRiskAction,
+  updateRisk as updateRiskAction,
+  archiveRisk as archiveRiskAction,
+  uploadRiskDocument as uploadRiskDocumentAction,
+} from "@/actions/risks";
+import {
+  createManagementDecision,
+  updateManagementDecision,
+  archiveManagementDecision,
+  uploadDecisionDocument,
+} from "@/actions/management-decisions";
 import { auditLog } from "@/lib/audit";
 import { Button } from "@/components/ui/Button";
 import { PageLayout } from "@/components/layout/PageLayout";
-import { Dropdown } from "@/components/ui/Dropdown";
 import { Popup } from "@/components/ui/Popup";
-import { Modal } from "@/components/ui/Modal";
-import { DatePicker } from "@/components/ui/DatePicker";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { displayUserName } from "@/lib/identity-display";
-import { roleLabel } from "@/lib/labels/roles";
-
-/* ── Adapt Prisma RAIDItem → slice RAIDItem shape ── */
-function adaptRAID(p: PrismaRAIDItem): RAIDItem {
-  return {
-    id: p.id,
-    tenantId: p.tenantId,
-    siteId: "",
-    type: p.type as RAIDType,
-    title: p.title,
-    description: p.description,
-    priority: p.priority as RAIDPriority,
-    status: p.status as RAIDStatus,
-    owner: p.owner,
-    dueDate: p.dueDate ? p.dueDate.toISOString() : "",
-    impact: p.impact ?? "",
-    mitigation: p.mitigation ?? "",
-    resolution: p.mitigation ?? "",
-    raisedBy: p.createdBy,
-    createdAt: p.createdAt.toISOString(),
-    closedAt: p.closedAt ? p.closedAt.toISOString() : undefined,
-    reopenedBy: p.reopenedBy ?? undefined,
-    reopenedDate: p.reopenedAt ? p.reopenedAt.toISOString() : undefined,
-    reopenReason: p.reopenReason ?? undefined,
-  };
-}
+import type { RiskListRow } from "@/lib/queries/risks";
+import type { DocUploadEntry } from "@/components/shared/CategorizedDocUploader";
 
 import { KPIScorecardTab, type SiteKPI } from "./tabs/KPIScorecardTab";
-import { RAIDTab } from "./tabs/RAIDTab";
+import { RiskRegisterTab } from "./tabs/RiskRegisterTab";
+import { ManagementDecisionsTab } from "./tabs/ManagementDecisionsTab";
+import { RiskModal, type RiskOwnerOption, type RiskSiteOption } from "./modals/RiskModal";
+import {
+  ManagementDecisionModal,
+  type DecisionParticipant,
+  type ManagementDecisionFormValues,
+} from "./modals/ManagementDecisionModal";
+import type { ManagementDecisionRow } from "@/lib/queries/managementDecisions";
 
 // TODO: replace with /api/governance/kpis fetch once the route exists.
 const MOCK_SITE_KPIS: SiteKPI[] = [];
 const MOCK_SITE_TREND: { month: string; chennai: number; mumbai: number; bangalore: number; hyderabad: number }[] = [];
 
-type TabId = "kpis" | "raid";
+/** DIY tab bar (the SettingsPage pattern): a static list + useState + hidden panels. */
+type TabId = "risks" | "decisions" | "kpis";
 const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
+  { id: "risks", label: "Risk Register", Icon: ShieldAlert },
+  { id: "decisions", label: "Management Decisions", Icon: Gavel },
   { id: "kpis", label: "KPIs & Scorecards", Icon: BarChart3 },
-  { id: "raid", label: "RAID & Risks", Icon: AlertTriangle },
 ];
-
-const raidSchema = z.object({
-  type: z.enum(["Risk", "Action", "Issue", "Decision"]),
-  title: z.string().min(3, "Title required"),
-  description: z.string().min(5, "Description required"),
-  priority: z.enum(["Critical", "High", "Medium", "Low"]),
-  owner: z.string().min(1, "Owner required"),
-  dueDate: z.string().min(1, "Due date required"),
-  impact: z.string().optional(),
-  mitigation: z.string().optional(),
-});
-type RaidForm = z.infer<typeof raidSchema>;
-
-/* ══════════════════════════════════════ */
 
 export interface GovernancePageProps {
   /** Lowest readiness % across active inspections — server-computed. */
   readinessScore?: number;
-  /** Server-fetched RAID items (Prisma rows) — seeded into Redux on mount. */
-  raidItems?: PrismaRAIDItem[];
+  /** Server-fetched, ALREADY visibility-scoped risks. Never cached in Redux. */
+  risks?: RiskListRow[];
+  /** Server-scoped assignable owners (active, non-viewer, same tenant). */
+  riskOwners?: RiskOwnerOption[];
+  /** Server-fetched, ALREADY visibility-scoped management decisions. */
+  decisions?: ManagementDecisionRow[];
+  /** Server-scoped chairs / action-item owners. */
+  decisionParticipants?: DecisionParticipant[];
 }
 
-export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: serverRaidItems }: GovernancePageProps = {}) {
+export function GovernancePage({
+  readinessScore: readinessScoreProp,
+  risks: serverRisks = [],
+  riskOwners = [],
+  decisions: serverDecisions = [],
+  decisionParticipants = [],
+}: GovernancePageProps = {}) {
   const router = useRouter();
-  const dispatch = useAppDispatch();
 
-  // Seed Redux from server-fetched RAID items on mount / when props change.
-  useEffect(() => {
-    if (serverRaidItems) {
-      dispatch(setRAIDItems(serverRaidItems.map(adaptRAID)));
-    }
-  }, [serverRaidItems, dispatch]);
-
-  const { raidItems, capas, findings, systems, fda483Events: fda483 } = useTenantData();
+  const { capas, findings, systems, fda483Events: fda483 } = useTenantData();
   const { org, users, allSites } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -119,6 +96,21 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
     : allSites;
 
   function ownerName(id: string) { return displayUserName(id, users); }
+
+  /* ── Risk permissions — client MIRRORS of the server gates in actions/risks.ts.
+     The server stays authoritative; these only decide what to render. ── */
+  const actorUserId = user?.id ?? null;
+  const canCreate = canCreateRisk(role);
+  const canManage = canManageGovernance(role);
+  const canEditRow = (r: RiskListRow) => canEditRisk(role, actorUserId, r);
+
+  /* ── Management-decision permissions — the SAME create-vs-manage split as Risk:
+     create = any non-viewer; edit = manage role OR the meeting's creator;
+     archive = manage roles only. Client MIRRORS of the server gates. ── */
+  const canCreateDecision = canCreateManagementDecision(role);
+  const canEditDecisionRow = (d: ManagementDecisionRow) => canEditManagementDecision(role, actorUserId, d);
+
+  const siteOptions: RiskSiteOption[] = allSites.map((s) => ({ id: s.id, name: s.name }));
 
   /* ── Computed KPIs ── */
   const closedCAPAs = capas.filter((c) => c.status === "closed");
@@ -136,19 +128,19 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
   const noData = capas.length === 0 && findings.length === 0;
 
   /* ── State ── */
-  const [activeTab, setActiveTab] = useState<TabId>("kpis");
-  const [addRaidOpen, setAddRaidOpen] = useState(false);
-  const [editingRaid, setEditingRaid] = useState<RAIDItem | null>(null);
-  const [closeRaidOpen, setCloseRaidOpen] = useState(false);
-  const [reopenRaidOpen, setReopenRaidOpen] = useState(false);
-  const [reopenReason, setReopenReason] = useState("");
-  const [reopenedPopup, setReopenedPopup] = useState(false);
-  const [selectedRaid, setSelectedRaid] = useState<RAIDItem | null>(null);
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("");
-  const [raidAddedPopup, setRaidAddedPopup] = useState(false);
-  const [raidClosedPopup, setRaidClosedPopup] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>("risks");
+  const [riskModalOpen, setRiskModalOpen] = useState(false);
+  const [editingRisk, setEditingRisk] = useState<RiskListRow | null>(null);
+  const [archivingRisk, setArchivingRisk] = useState<RiskListRow | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [riskSavedPopup, setRiskSavedPopup] = useState(false);
+  const [riskArchivedPopup, setRiskArchivedPopup] = useState(false);
+  const [decisionModalOpen, setDecisionModalOpen] = useState(false);
+  const [editingDecision, setEditingDecision] = useState<ManagementDecisionRow | null>(null);
+  const [archivingDecision, setArchivingDecision] = useState<ManagementDecisionRow | null>(null);
+  const [decisionArchiveBusy, setDecisionArchiveBusy] = useState(false);
+  const [decisionSavedPopup, setDecisionSavedPopup] = useState(false);
+  const [decisionArchivedPopup, setDecisionArchivedPopup] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [reportGeneratedPopup, setReportGeneratedPopup] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
@@ -164,90 +156,139 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
     return () => document.removeEventListener("mousedown", onClick);
   }, [exportMenuOpen]);
 
-  const anyRaidFilter = !!(typeFilter || statusFilter || priorityFilter);
-  const filteredRaid = raidItems.filter((r) => {
-    // Default view: hide Closed items unless explicitly filtered in
-    if (!statusFilter && r.status === "Closed") return false;
-    if (typeFilter && r.type !== typeFilter) return false;
-    if (statusFilter && r.status !== statusFilter) return false;
-    if (priorityFilter && r.priority !== priorityFilter) return false;
-    return true;
-  });
-  const raidForm = useForm<RaidForm>({ resolver: zodResolver(raidSchema), defaultValues: { type: "Risk", priority: "Medium" } });
+  /* ── Risk handlers ── */
 
-  async function onRaidSave(data: RaidForm) {
+  // Holds the id minted by createRisk so the modal's post-save doc upload knows
+  // its parent. Set in handleRiskSubmit, consumed by handleUploadDocs.
+  const newRiskIdRef = useRef<string | null>(null);
+
+  function openAddRisk() { setEditingRisk(null); newRiskIdRef.current = null; setRiskModalOpen(true); }
+  function openEditRisk(r: RiskListRow) { setEditingRisk(r); setRiskModalOpen(true); }
+
+  /** Upload staged docs against a known risk id. Errors are aggregated. */
+  async function uploadDocsFor(riskId: string, entries: DocUploadEntry[]) {
+    for (const entry of entries) {
+      const fd = new FormData();
+      fd.append("file", entry.file);
+      const res = await uploadRiskDocumentAction(riskId, fd, entry.category);
+      if (!res.success) return { success: false, error: res.error };
+    }
+    return { success: true as const };
+  }
+
+  async function handleRiskSubmit(values: {
+    title: string; description: string; category: string; severity: string;
+    likelihood: string; status: string; ownerId: string; siteId: string;
+    targetDate: string; mitigationPlan: string;
+  }) {
     const payload = {
-      type: data.type,
-      title: data.title,
-      description: data.description,
-      priority: data.priority,
-      owner: data.owner,
-      dueDate: dayjs(data.dueDate).utc().toISOString(),
-      impact: data.impact ?? "",
-      mitigation: data.mitigation ?? "",
+      title: values.title,
+      description: values.description,
+      category: values.category as never,
+      severity: values.severity as never,
+      likelihood: values.likelihood as never,
+      ownerId: values.ownerId,
+      siteId: values.siteId || null,
+      targetDate: values.targetDate ? dayjs(values.targetDate).utc().toISOString() : null,
+      mitigationPlan: values.mitigationPlan || null,
     };
-    const result = editingRaid
-      ? await updateRAIDAction(editingRaid.id, payload)
-      : await createRAIDAction(payload);
-    if (!result.success) {
-      console.error("[governance] saveRaid failed:", result.error);
+
+    const res = editingRisk
+      ? await updateRiskAction(editingRisk.id, { ...payload, status: values.status as never })
+      : await createRiskAction(payload);
+
+    if (!res.success) return { success: false, error: res.error };
+
+    // CREATE: hand the new id back so the modal's staged docs can be uploaded.
+    if (!editingRisk) {
+      const created = res.data as { id: string };
+      newRiskIdRef.current = created.id;
+    }
+    setRiskSavedPopup(true);
+    router.refresh();
+    return { success: true as const };
+  }
+
+  async function handleUploadDocs(entries: DocUploadEntry[]) {
+    const riskId = editingRisk?.id ?? newRiskIdRef.current;
+    if (!riskId) return { success: false, error: "No risk to attach documents to." };
+    const res = await uploadDocsFor(riskId, entries);
+    if (res.success) router.refresh();
+    return res;
+  }
+
+  async function handleArchiveConfirm() {
+    if (!archivingRisk) return;
+    setArchiveBusy(true);
+    const res = await archiveRiskAction(archivingRisk.id);
+    setArchiveBusy(false);
+    if (!res.success) {
+      console.warn("[governance] archiveRisk rejected:", res.error);
       return;
     }
-    setEditingRaid(null);
-    setAddRaidOpen(false);
-    setRaidAddedPopup(true);
-    raidForm.reset();
+    setArchivingRisk(null);
+    setRiskArchivedPopup(true);
     router.refresh();
   }
 
-  async function handleDeleteRaid(item: RAIDItem) {
-    const result = await deleteRAIDAction(item.id);
-    if (!result.success) {
-      console.error("[governance] deleteRaid failed:", result.error);
-      return;
+  /* ── Management-decision handlers ── */
+
+  // Holds the id minted by createManagementDecision so the modal's post-save doc
+  // upload knows its parent (a document needs an existing meeting to attach to).
+  const newDecisionIdRef = useRef<string | null>(null);
+
+  function openAddDecision() { setEditingDecision(null); newDecisionIdRef.current = null; setDecisionModalOpen(true); }
+  function openEditDecision(d: ManagementDecisionRow) { setEditingDecision(d); setDecisionModalOpen(true); }
+
+  async function handleDecisionSubmit(values: ManagementDecisionFormValues) {
+    const payload = {
+      topic: values.topic,
+      meetingDate: dayjs(values.meetingDate).utc().toISOString(),
+      attendees: values.attendees,
+      chairedById: values.chairedById || null,
+      items: values.items.map((i) => ({
+        id: i.id,
+        text: i.text,
+        ownerId: i.ownerId || null,
+        dueDate: i.dueDate ? dayjs(i.dueDate).utc().toISOString() : null,
+      })),
+    };
+
+    const res = editingDecision
+      ? await updateManagementDecision(editingDecision.id, payload)
+      : await createManagementDecision(payload);
+
+    if (!res.success) return { success: false, error: res.error };
+    if (!editingDecision) newDecisionIdRef.current = (res.data as { id: string }).id;
+    setDecisionSavedPopup(true);
+    router.refresh();
+    return { success: true as const };
+  }
+
+  async function handleDecisionUploadDocs(entries: DocUploadEntry[]) {
+    const decisionId = editingDecision?.id ?? newDecisionIdRef.current;
+    if (!decisionId) return { success: false, error: "No meeting to attach documents to." };
+    for (const entry of entries) {
+      const fd = new FormData();
+      fd.append("file", entry.file);
+      const res = await uploadDecisionDocument(decisionId, fd, entry.category);
+      if (!res.success) return { success: false, error: res.error };
     }
     router.refresh();
+    return { success: true as const };
   }
 
-  function handleEditRaid(item: RAIDItem) {
-    setEditingRaid(item);
-    raidForm.reset({
-      type: item.type,
-      title: item.title,
-      description: item.description,
-      priority: item.priority,
-      owner: item.owner,
-      dueDate: dayjs.utc(item.dueDate).format("YYYY-MM-DD"),
-      impact: item.impact ?? "",
-      mitigation: item.mitigation ?? "",
-    });
-    setAddRaidOpen(true);
-  }
-
-  async function handleCloseRaid() {
-    if (!selectedRaid) return;
-    const result = await closeRAIDAction(selectedRaid.id, "");
-    if (!result.success) {
-      console.error("[governance] closeRaid failed:", result.error);
+  async function handleDecisionArchiveConfirm() {
+    if (!archivingDecision) return;
+    setDecisionArchiveBusy(true);
+    const res = await archiveManagementDecision(archivingDecision.id);
+    setDecisionArchiveBusy(false);
+    if (!res.success) {
+      console.warn("[governance] archiveManagementDecision rejected:", res.error);
       return;
     }
-    setCloseRaidOpen(false);
-    setSelectedRaid(null);
-    setRaidClosedPopup(true);
-    router.refresh();
-  }
-
-  async function handleReopenRaid() {
-    if (!selectedRaid || !reopenReason.trim()) return;
-    const result = await reopenRAIDAction(selectedRaid.id, reopenReason.trim());
-    if (!result.success) {
-      console.error("[governance] reopenRaid failed:", result.error);
-      return;
-    }
-    setReopenRaidOpen(false);
-    setSelectedRaid(null);
-    setReopenReason("");
-    setReopenedPopup(true);
+    setArchivingDecision(null);
+    setDecisionArchivedPopup(true);
     router.refresh();
   }
 
@@ -265,26 +306,19 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
   /* ── Site readiness ── */
   const siteReadiness = visibleSites.map((site) => { const sf = findings.filter((f) => f.siteId === site.id && f.status !== "Closed"); const sc = capas.filter((c) => { const lf = findings.find((f) => f.id === c.findingId); return lf?.siteId === site.id && c.status !== "closed"; }); const cr = sf.filter((f) => f.severity === "Critical").length; const sysRisk = systems.filter((s) => s.siteId === site.id && (s.part11Status === "Non-Compliant" || s.annex11Status === "Non-Compliant" || (s.riskLevel === "HIGH" && s.validationStatus !== "Validated"))).length; const score = Math.max(0, 100 - cr * 15 - sf.length * 5 - sysRisk * 25); return { site, findingsCount: sf.length, capasCount: sc.length, criticalCount: cr, score }; });
 
-  /* ── Export functions ── */
+  /* ── Export ── */
   function dl(html: string, fn: string) { const b = new Blob([html], { type: "text/html;charset=utf-8" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u); auditLog({ action: "GOVERNANCE_REPORT_EXPORTED", module: "governance", recordId: fn, newValue: { filename: fn, exportedBy: user?.id } }); }
 
   function exportMonthly() {
     // User-controlled strings are HTML-escaped before interpolation into the
     // exported .html (prevents HTML/script injection in the artifact).
-    const org = escapeHtml(companyName || "Pharma Glimmora"); const rd = dayjs().format("MMMM YYYY");
+    const orgName = escapeHtml(companyName || "Pharma Glimmora"); const rd = dayjs().format("MMMM YYYY");
     const prep = escapeHtml(ownerName(user?.id ?? ""));
-    const rows = [["CAPA Timeliness", closedCAPAs.length === 0 ? "N/A" : `${capaTimeliness}%`, capaTimeliness >= 90], ["Overdue Commitments", String(overdueCommitments), overdueCommitments === 0], ["Repeat Observation Risk", String(repeatObservationRisk), repeatObservationRisk === 0], ["DI Exceptions", String(diExceptions), diExceptions === 0], ["Audit Trail Coverage", systems.length === 0 ? "N/A" : `${auditTrailCoverage}%`, auditTrailCoverage >= 80], ["Validation Drift", String(csvDrift), csvDrift === 0]].map(([k, v, ok]) => `<tr><td style="padding:10px 12px;border:1px solid #e2e8f0;font-weight:500">${k}</td><td style="padding:10px 12px;border:1px solid #e2e8f0;font-size:16px;font-weight:700">${v}</td><td style="padding:10px 12px;border:1px solid #e2e8f0;color:${ok ? "#10b981" : "#f59e0b"}">${ok ? "\u2713 On target" : "\u26A0 Action needed"}</td></tr>`).join("");
-    dl(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Monthly KPI Report \u2014 ${rd}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,Arial,sans-serif;padding:40px;color:#0a1628}.header{border-bottom:2px solid #0ea5e9;padding-bottom:20px;margin-bottom:28px}.logo{font-size:14px;font-weight:700;color:#0ea5e9}h1{font-size:24px;font-weight:700;margin:12px 0 4px}.sub{color:#475569;font-size:13px}.score{display:inline-block;padding:16px 24px;border-radius:12px;background:#f0fdf4;border:1px solid #a7f3d0;margin:20px 0;font-size:40px;font-weight:700;color:${readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444"}}table{width:100%;border-collapse:collapse;margin:20px 0}thead tr{background:#0a1f38}th{padding:10px 12px;text-align:left;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;border:1px solid #1e3a5a}.footer{margin-top:32px;border-top:1px solid #e2e8f0;padding-top:16px;font-size:10px;color:#94a3b8}</style></head><body><div class="header"><div class="logo">${org}</div><h1>Monthly Quality KPI Report</h1><p class="sub">Period: ${rd} \u00b7 Generated: ${dayjs().format("DD MMM YYYY HH:mm")} UTC</p></div><p style="font-size:11px;color:#94a3b8;text-transform:uppercase">Overall readiness score</p><p class="score">${readinessScore}%</p><table><thead><tr><th>KPI</th><th>Value</th><th>Assessment</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">Generated by ${org} \u00b7 Prepared by: ${prep}</div></body></html>`, `Monthly-KPI-Report-${dayjs().format("YYYY-MM")}.html`);
+    const rows = [["CAPA Timeliness", closedCAPAs.length === 0 ? "N/A" : `${capaTimeliness}%`, capaTimeliness >= 90], ["Overdue Commitments", String(overdueCommitments), overdueCommitments === 0], ["Repeat Observation Risk", String(repeatObservationRisk), repeatObservationRisk === 0], ["DI Exceptions", String(diExceptions), diExceptions === 0], ["Audit Trail Coverage", systems.length === 0 ? "N/A" : `${auditTrailCoverage}%`, auditTrailCoverage >= 80], ["Validation Drift", String(csvDrift), csvDrift === 0]].map(([k, v, ok]) => `<tr><td style="padding:10px 12px;border:1px solid #e2e8f0;font-weight:500">${k}</td><td style="padding:10px 12px;border:1px solid #e2e8f0;font-size:16px;font-weight:700">${v}</td><td style="padding:10px 12px;border:1px solid #e2e8f0;color:${ok ? "#10b981" : "#f59e0b"}">${ok ? "✓ On target" : "⚠ Action needed"}</td></tr>`).join("");
+    dl(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Monthly KPI Report — ${rd}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,Arial,sans-serif;padding:40px;color:#0a1628}.header{border-bottom:2px solid #0ea5e9;padding-bottom:20px;margin-bottom:28px}.logo{font-size:14px;font-weight:700;color:#0ea5e9}h1{font-size:24px;font-weight:700;margin:12px 0 4px}.sub{color:#475569;font-size:13px}.score{display:inline-block;padding:16px 24px;border-radius:12px;background:#f0fdf4;border:1px solid #a7f3d0;margin:20px 0;font-size:40px;font-weight:700;color:${readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444"}}table{width:100%;border-collapse:collapse;margin:20px 0}thead tr{background:#0a1f38}th{padding:10px 12px;text-align:left;color:#94a3b8;font-size:11px;font-weight:600;text-transform:uppercase;border:1px solid #1e3a5a}.footer{margin-top:32px;border-top:1px solid #e2e8f0;padding-top:16px;font-size:10px;color:#94a3b8}</style></head><body><div class="header"><div class="logo">${orgName}</div><h1>Monthly Quality KPI Report</h1><p class="sub">Period: ${rd} · Generated: ${dayjs().format("DD MMM YYYY HH:mm")} UTC</p></div><p style="font-size:11px;color:#94a3b8;text-transform:uppercase">Overall readiness score</p><p class="score">${readinessScore}%</p><table><thead><tr><th>KPI</th><th>Value</th><th>Assessment</th></tr></thead><tbody>${rows}</tbody></table><div class="footer">Generated by ${orgName} · Prepared by: ${prep}</div></body></html>`, `Monthly-KPI-Report-${dayjs().format("YYYY-MM")}.html`);
   }
 
-  function exportRAID() {
-    // User-controlled strings are HTML-escaped before interpolation (prevents
-    // HTML/script injection in the exported artifact).
-    const rows = raidItems.map((r, i) => `<tr style="background:${i % 2 === 0 ? "#fff" : "#f8fafc"}"><td style="padding:8px 12px;border:1px solid #e2e8f0;font-family:monospace;font-size:11px">${escapeHtml(r.id.slice(0, 8).toUpperCase())}</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escapeHtml(r.type)}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:500">${escapeHtml(r.title)}</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escapeHtml(r.priority)}</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escapeHtml(r.status)}</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${escapeHtml(ownerName(r.owner))}</td><td style="padding:8px 12px;border:1px solid #e2e8f0">${dayjs.utc(r.dueDate).format(dateFormat)}</td><td style="padding:8px 12px;border:1px solid #e2e8f0;font-size:11px">${escapeHtml(r.resolution || r.mitigation || r.impact || "\u2014")}</td></tr>`).join("");
-    dl(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>RAID Log Export</title><style>body{font-family:-apple-system,Arial,sans-serif;padding:40px;color:#0a1628}h1{font-size:22px;font-weight:700;margin-bottom:4px}.meta{color:#475569;font-size:12px;margin-bottom:20px}table{width:100%;border-collapse:collapse}thead tr{background:#0a1f38}th{padding:9px 12px;text-align:left;color:#94a3b8;font-size:10px;font-weight:600;text-transform:uppercase;border:1px solid #1e3a5a}.footer{margin-top:24px;font-size:10px;color:#94a3b8}</style></head><body><h1>RAID Log Export</h1><p class="meta">${raidItems.length} items \u00b7 Generated: ${dayjs().format("DD MMM YYYY HH:mm")} UTC \u00b7 ${escapeHtml(companyName || "Pharma Glimmora")}</p><table><thead><tr><th>ID</th><th>Type</th><th>Title</th><th>Priority</th><th>Status</th><th>Owner</th><th>Due date</th><th>Resolution / Notes</th></tr></thead><tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:20px;color:#94a3b8">No RAID items</td></tr>'}</tbody></table><div class="footer">Exported by: ${escapeHtml(ownerName(user?.id ?? ""))}</div></body></html>`, `RAID-Log-${dayjs().format("YYYY-MM-DD")}.html`);
-  }
-
-  const lbl = "text-[11px] font-semibold uppercase tracking-wider block mb-1";
+  const openRisks = serverRisks.filter((r) => r.status === "Open" || r.status === "Mitigating").length;
 
   /* ══════════════════════════════════════ */
 
@@ -293,11 +327,12 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
         title="Governance & KPIs"
         titleIcon={Gauge}
         contentPadding={true}
-        description={`Monitor compliance governance, risks, and key performance indicators. · ${visibleSites.length} sites · ${capas.length} CAPAs · ${findings.length} findings · ${raidItems.length} RAID items`}
+        description={`Monitor compliance governance, risks, and key performance indicators. · ${visibleSites.length} sites · ${capas.length} CAPAs · ${findings.length} findings · ${serverRisks.length} risks (${openRisks} active) · ${serverDecisions.length} management decisions`}
         headerRight={
           /* "Export Reports" is a menu trigger with a ref-anchored dropdown, not a
              plain PageAction (which only models label/onClick/icon/variant), so it
-             lives in headerRight. Both menu items keep their original onClick. */
+             lives in headerRight. The Risk Register exports through the DataTable's
+             own Export menu (CSV/Excel/PDF), so no bespoke RAID-log export here. */
           <div className="flex items-center gap-2">
             <div className="relative" ref={exportMenuRef}>
             <Button
@@ -317,7 +352,6 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
               >
                 {[
                   { label: "Monthly Quality KPI Report", Icon: BarChart2, onClick: exportMonthly },
-                  { label: "RAID Log Export", Icon: AlertTriangle, onClick: exportRAID },
                 ].map((opt) => (
                   <button
                     key={opt.label}
@@ -337,8 +371,6 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
           </div>
         }
       >
-        {/* Content below the header is unchanged; the space-y-5 that used to sit
-            on <main> now wraps the children so their spacing is preserved. */}
         <div className="space-y-5">
 
       {/* Tabs */}
@@ -347,70 +379,91 @@ export function GovernancePage({ readinessScore: readinessScoreProp, raidItems: 
       </div>
 
       {/* Tab panels */}
+      <div role="tabpanel" id="panel-risks" aria-labelledby="tab-risks" tabIndex={0} hidden={activeTab !== "risks"}>
+        <RiskRegisterTab
+          risks={serverRisks}
+          timezone={timezone}
+          dateFormat={dateFormat}
+          canCreate={canCreate}
+          canManage={canManage}
+          canEditRow={canEditRow}
+          onAdd={openAddRisk}
+          onEdit={openEditRisk}
+          onArchive={(r) => setArchivingRisk(r)}
+        />
+      </div>
+
+      <div role="tabpanel" id="panel-decisions" aria-labelledby="tab-decisions" tabIndex={0} hidden={activeTab !== "decisions"}>
+        <ManagementDecisionsTab
+          decisions={serverDecisions}
+          timezone={timezone}
+          dateFormat={dateFormat}
+          canCreate={canCreateDecision}
+          canManage={canManage}
+          canEditRow={canEditDecisionRow}
+          onAdd={openAddDecision}
+          onEdit={openEditDecision}
+          onArchive={(d) => setArchivingDecision(d)}
+        />
+      </div>
+
       <div role="tabpanel" id="panel-kpis" aria-labelledby="tab-kpis" tabIndex={0} hidden={activeTab !== "kpis"}>
         <KPIScorecardTab companyName={companyName} readinessScore={readinessScore} noData={noData} capaTimeliness={capaTimeliness} closedCAPAsCount={closedCAPAs.length} overdueCommitments={overdueCommitments} repeatObservationRisk={repeatObservationRisk} diExceptions={diExceptions} auditTrailCoverage={auditTrailCoverage} csvDrift={csvDrift} systemsCount={systems.length} capaTrend={capaTrend} capaTrendEmpty={capaTrendEmpty} valBreakdown={valBreakdown} diByArea={diByArea} siteReadiness={siteReadiness} sites={visibleSites} isDark={isDark} currentMonth={dayjs().format("MMMM YYYY")} onNavigateSettings={() => router.push("/settings")} siteKPIs={MOCK_SITE_KPIS} siteTrend={MOCK_SITE_TREND} />
       </div>
 
-      <div role="tabpanel" id="panel-raid" aria-labelledby="tab-raid" tabIndex={0} hidden={activeTab !== "raid"}>
-        <RAIDTab raidItems={raidItems} filteredRaid={filteredRaid} typeFilter={typeFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} setStatusFilter={setStatusFilter} priorityFilter={priorityFilter} setPriorityFilter={setPriorityFilter} anyRaidFilter={anyRaidFilter} role={role} currentUserId={user?.id ?? ""} timezone={timezone} dateFormat={dateFormat} ownerName={ownerName} onAddRaidOpen={() => { setEditingRaid(null); raidForm.reset({ type: "Risk", priority: "Medium" }); setAddRaidOpen(true); }} onCloseRaid={(item) => { setSelectedRaid(item); setCloseRaidOpen(true); }} onEditRaid={handleEditRaid} onDeleteRaid={handleDeleteRaid} onReopenRaid={(item) => { setSelectedRaid(item); setReopenReason(""); setReopenRaidOpen(true); }} />
-      </div>
-
-      {/* Add RAID Modal */}
-      <Modal open={addRaidOpen} onClose={() => { setAddRaidOpen(false); setEditingRaid(null); }} title={editingRaid ? "Edit RAID Entry" : "Add RAID Entry"}>
-        <form onSubmit={raidForm.handleSubmit(onRaidSave)} noValidate className="space-y-4"><div className="grid grid-cols-2 gap-3">
-          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Type *</label><Controller name="type" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Risk", "Action", "Issue", "Decision"].map((t) => ({ value: t, label: t }))} />} /></div>
-          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Priority *</label><Controller name="priority" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} width="w-full" options={["Critical", "High", "Medium", "Low"].map((p) => ({ value: p, label: p }))} />} /></div>
-          <div className="col-span-2"><label htmlFor="raid-title" className={lbl} style={{ color: "var(--text-muted)" }}>Title *</label><input id="raid-title" className="input text-[12px]" placeholder="e.g. LIMS validation overdue" {...raidForm.register("title")} />{raidForm.formState.errors.title && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.title.message}</p>}</div>
-          <div className="col-span-2"><label htmlFor="raid-desc" className={lbl} style={{ color: "var(--text-muted)" }}>Description *</label><textarea id="raid-desc" rows={2} className="input text-[12px] resize-none" {...raidForm.register("description")} />{raidForm.formState.errors.description && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.description.message}</p>}</div>
-          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Owner *</label><Controller name="owner" control={raidForm.control} render={({ field }) => <Dropdown value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full" options={users.filter((u) => u.status === "Active").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} />} />{raidForm.formState.errors.owner && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.owner.message}</p>}</div>
-          <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Due date *</label><Controller name="dueDate" control={raidForm.control} render={({ field }) => <DatePicker id="raid-due" value={field.value ?? ""} onChange={field.onChange} placeholder="Select date" className="w-full" />} />{raidForm.formState.errors.dueDate && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{raidForm.formState.errors.dueDate.message}</p>}</div>
-          <div className="col-span-2"><label htmlFor="raid-impact" className={lbl} style={{ color: "var(--text-muted)" }}>Impact (optional)</label><input id="raid-impact" className="input text-[12px]" placeholder="Business or compliance impact" {...raidForm.register("impact")} /></div>
-          <div className="col-span-2"><label htmlFor="raid-mitig" className={lbl} style={{ color: "var(--text-muted)" }}>Mitigation (optional)</label><input id="raid-mitig" className="input text-[12px]" placeholder="How is this being mitigated?" {...raidForm.register("mitigation")} /></div>
-        </div><div className="flex justify-end gap-2 pt-2"><Button variant="ghost" type="button" onClick={() => { setAddRaidOpen(false); setEditingRaid(null); }}>Cancel</Button><Button variant="primary" type="submit" loading={raidForm.formState.isSubmitting}>{editingRaid ? "Save changes" : "Add item"}</Button></div></form>
-      </Modal>
-
-      {/* Close RAID confirmation */}
-      <Popup
-        isOpen={closeRaidOpen}
-        variant="confirmation"
-        title="Mark this item as closed?"
-        description={selectedRaid ? selectedRaid.title : ""}
-        onDismiss={() => { setCloseRaidOpen(false); setSelectedRaid(null); }}
-        actions={[
-          { label: "Cancel", style: "ghost", onClick: () => { setCloseRaidOpen(false); setSelectedRaid(null); } },
-          { label: "Confirm", style: "primary", onClick: handleCloseRaid },
-        ]}
+      {/* Add / Edit Risk */}
+      <RiskModal
+        open={riskModalOpen}
+        onClose={() => { setRiskModalOpen(false); setEditingRisk(null); newRiskIdRef.current = null; }}
+        risk={editingRisk}
+        owners={riskOwners}
+        sites={siteOptions}
+        onSubmit={handleRiskSubmit}
+        onUploadDocs={handleUploadDocs}
       />
 
-      {/* Reopen RAID modal */}
-      <Modal open={reopenRaidOpen} onClose={() => { setReopenRaidOpen(false); setSelectedRaid(null); setReopenReason(""); }} title="Reopen RAID item?">
-        {selectedRaid && (
-          <div className="space-y-4">
-            <p className="text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-primary)" }}>{selectedRaid.title}</p>
-            <div>
-              <label htmlFor="raid-reopen-reason" className={lbl} style={{ color: "var(--text-muted)" }}>Reason <span aria-hidden="true">*</span></label>
-              <textarea
-                id="raid-reopen-reason"
-                rows={3}
-                className="input text-[12px] resize-none w-full"
-                placeholder="Why is this being reopened?"
-                value={reopenReason}
-                onChange={(e) => setReopenReason(e.target.value)}
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="ghost" type="button" onClick={() => { setReopenRaidOpen(false); setSelectedRaid(null); setReopenReason(""); }}>Cancel</Button>
-              <Button variant="primary" type="button" disabled={!reopenReason.trim()} onClick={handleReopenRaid}>Reopen item</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {/* Archive confirmation — manage roles only (the row menu already gates it). */}
+      <ConfirmModal
+        open={!!archivingRisk}
+        onClose={() => setArchivingRisk(null)}
+        onConfirm={handleArchiveConfirm}
+        title="Archive this risk?"
+        message={archivingRisk ? `${archivingRisk.reference ?? ""} — ${archivingRisk.title}. It will be hidden from the register. The record itself is retained for the audit trail.` : ""}
+        confirmLabel="Archive"
+        variant="danger"
+        icon={Archive}
+        loading={archiveBusy}
+      />
+
+      {/* Record / amend a management decision */}
+      <ManagementDecisionModal
+        open={decisionModalOpen}
+        onClose={() => { setDecisionModalOpen(false); setEditingDecision(null); newDecisionIdRef.current = null; }}
+        decision={editingDecision}
+        participants={decisionParticipants}
+        onSubmit={handleDecisionSubmit}
+        onUploadDocs={handleDecisionUploadDocs}
+      />
+
+      {/* Archive a meeting — manage roles only (the row menu already gates it). */}
+      <ConfirmModal
+        open={!!archivingDecision}
+        onClose={() => setArchivingDecision(null)}
+        onConfirm={handleDecisionArchiveConfirm}
+        title="Archive this management decision?"
+        message={archivingDecision ? `${archivingDecision.reference ?? ""} — ${archivingDecision.topic}. It will be hidden from the register. The record itself is retained for the audit trail.` : ""}
+        confirmLabel="Archive"
+        variant="danger"
+        icon={Archive}
+        loading={decisionArchiveBusy}
+      />
 
       {/* Popups */}
-      <Popup isOpen={raidAddedPopup} variant="success" title="RAID item added" description="Added to the governance log." onDismiss={() => setRaidAddedPopup(false)} />
-      <Popup isOpen={raidClosedPopup} variant="success" title="RAID item closed" description="Resolution recorded." onDismiss={() => setRaidClosedPopup(false)} />
-      <Popup isOpen={reopenedPopup} variant="success" title="RAID item reopened \u2705" description="The item is back in the active list." onDismiss={() => setReopenedPopup(false)} />
-      <Popup isOpen={reportGeneratedPopup} variant="success" title="Report generated \u2705" description="Exported successfully." onDismiss={() => setReportGeneratedPopup(false)} />
+      <Popup isOpen={decisionSavedPopup} variant="success" title="Management decision recorded" description="Saved and recorded in the audit trail." onDismiss={() => setDecisionSavedPopup(false)} />
+      <Popup isOpen={decisionArchivedPopup} variant="success" title="Management decision archived" description="Removed from the active register." onDismiss={() => setDecisionArchivedPopup(false)} />
+      <Popup isOpen={riskSavedPopup} variant="success" title="Risk saved" description="Recorded in the risk register and the audit trail." onDismiss={() => setRiskSavedPopup(false)} />
+      <Popup isOpen={riskArchivedPopup} variant="success" title="Risk archived" description="Removed from the active register." onDismiss={() => setRiskArchivedPopup(false)} />
+      <Popup isOpen={reportGeneratedPopup} variant="success" title="Report generated ✅" description="Exported successfully." onDismiss={() => setReportGeneratedPopup(false)} />
         </div>
       </PageLayout>
   );

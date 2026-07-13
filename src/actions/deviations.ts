@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { DEVIATION_QA_ROLES, canReportDeviation } from "@/lib/permissions/roleSets";
+import { DEVIATION_QA_ROLES, canReportDeviation, canWriteQuality } from "@/lib/permissions/roleSets";
 import { createDocument } from "@/actions/documents";
 import {
   canonicalizeDeviationClosureContent,
@@ -367,7 +367,7 @@ export async function updateDeviation(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
+  if (!canWriteQuality(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   try {
@@ -778,7 +778,7 @@ export async function saveInvestigationProgress(
     return { success: false, error: "Cannot edit the investigation of a closed or rejected deviation." };
   }
   // Responsibility map - viewers are read-only; every mutation rejects viewer.
-  if (session.user.role === "viewer") {
+  if (!canWriteQuality(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   // SoD — the reporter cannot perform the investigation.
@@ -839,7 +839,7 @@ export async function completeInvestigation(
     return { success: false, error: "Cannot complete the investigation of a closed or rejected deviation." };
   }
   // Responsibility map - viewers are read-only; every mutation rejects viewer.
-  if (session.user.role === "viewer") {
+  if (!canWriteQuality(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   if (existing.createdById && existing.createdById === session.user.id) {

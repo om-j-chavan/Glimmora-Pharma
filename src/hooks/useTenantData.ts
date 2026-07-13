@@ -5,7 +5,6 @@ import type { Finding } from "@/store/findings.slice";
 import type { CAPA } from "@/store/capa.slice";
 import type { Deviation } from "@/store/deviation.slice";
 import type { EvidenceDocument, EvidencePack } from "@/store/evidence.slice";
-import type { RAIDItem } from "@/store/raid.slice";
 import type { GxPSystem, RoadmapActivity } from "@/types/csv-csa";
 import type { FDA483Event } from "@/types/fda483";
 import type { DriftAlert, DriftMetric } from "@/types/agi";
@@ -22,7 +21,6 @@ const EMPTY_DEVIATIONS: Deviation[] = [];
 const EMPTY_SYSTEMS: GxPSystem[] = [];
 const EMPTY_EVIDENCE_DOCS: EvidenceDocument[] = [];
 const EMPTY_EVIDENCE_PACKS: EvidencePack[] = [];
-const EMPTY_RAID: RAIDItem[] = [];
 
 /**
  * The tenant + accessible/selected-site predicate the slice filters below apply,
@@ -59,7 +57,6 @@ export function useTenantData() {
   const systemsRaw = useAppSelector((s) => s.systems?.items ?? EMPTY_SYSTEMS);
   const evidenceDocsRaw = useAppSelector((s) => s.evidence?.documents ?? EMPTY_EVIDENCE_DOCS);
   const evidencePacksRaw = useAppSelector((s) => s.evidence?.packs ?? EMPTY_EVIDENCE_PACKS);
-  const raidItemsRaw = useAppSelector((s) => s.raid?.items ?? EMPTY_RAID);
 
   const accessibleSiteIds = useMemo(
     () => accessibleSites.map((s) => s.id),
@@ -128,22 +125,6 @@ export function useTenantData() {
     [evidencePacksRaw, tenantId],
   );
 
-  const raidItems = useMemo(
-    () =>
-      raidItemsRaw.filter((r) => {
-        if (r.tenantId && r.tenantId !== tenantId) return false;
-        if (r.siteId && !accessibleSiteIds.includes(r.siteId)) return false;
-        // RAID items are tenant-level (no siteId) — only apply the selected-site
-        // filter to items that actually carry a site, mirroring the evidenceDocs
-        // guard above. Without the `r.siteId &&` guard, every RAID row (siteId
-        // "") was dropped whenever a site was selected, so newly-added items
-        // never appeared in the table.
-        if (selectedSiteId && r.siteId && r.siteId !== selectedSiteId) return false;
-        return true;
-      }),
-    [raidItemsRaw, tenantId, selectedSiteId, accessibleSiteIds],
-  );
-
   // The roadmap / fda483 / agiDrift slices were deleted in the server-first
   // migration. /csv-csa, /fda-483, etc. each fetch their own Prisma data
   // server-side now. We return empty arrays here typed as the real entity
@@ -170,7 +151,6 @@ export function useTenantData() {
     deviations,
     evidenceDocs,
     evidencePacks,
-    raidItems,
     driftAlerts,
     driftMetrics,
   };

@@ -20,6 +20,7 @@ import {
   SUPPORT_RELATED_MODULES,
   type TicketCategory,
 } from "@/lib/support/constants";
+import { CHANGE_CONTROL_ENABLED } from "@/lib/change-control-constants";
 
 const schema = z.object({
   subject: z.string().min(3, "Subject is required"),
@@ -292,7 +293,7 @@ export function RaiseTicketModal({
             <label className={lbl} style={{ color: "var(--text-muted)" }}>Related module (optional)</label>
             <Controller name="relatedModule" control={control} render={({ field }) => (
               <Dropdown value={field.value ?? ""} onChange={field.onChange} placeholder="None" width="w-full"
-                options={[{ value: "", label: "None" }, ...SUPPORT_RELATED_MODULES.map((m) => ({ value: m, label: m }))]} />
+                options={[{ value: "", label: "None" }, ...SUPPORT_RELATED_MODULES.filter((m) => CHANGE_CONTROL_ENABLED || m !== "Change Control").map((m) => ({ value: m, label: m }))]} />
             )} />
           </div>
           <div>

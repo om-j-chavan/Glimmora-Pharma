@@ -349,7 +349,7 @@ export function DocumentUpload({
               onDrop={handleDrop}
               onClick={() => inputRef.current?.click()}
               className={clsx(
-                "rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-colors",
+                "rounded-2xl border-2 border-dashed p-8 text-center cursor-pointer transition-colors",
                 dragOver ? "border-[#0ea5e9] bg-[rgba(14,165,233,0.06)]" : isDark ? "border-[#1e3a5a] hover:border-[#0ea5e9]" : "border-[#e2e8f0] hover:border-[#0ea5e9]",
               )}
             >

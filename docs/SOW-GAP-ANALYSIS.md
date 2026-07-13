@@ -73,7 +73,7 @@ These are bugs that are live on the deployed Vercel site right now.
 | Findings register (table) | ✅ | CRUD, filtering, severity badges |
 | Finding detail modal | ✅ | Requirement, AGI summary, evidence ref |
 | Link finding to CAPA | ✅ | `closeFinding` / `linkCapa` actions |
-| Evidence Index tab | ⚠️ | Not clear if fully wired — need to verify area/completeness status is live |
+| Documents Index tab | ⚠️ | Not clear if fully wired — need to verify area/completeness status is live |
 | Audit logging on mutations | ✅ | `auditLog()` calls present |
 
 ### 2.5 QMS & CAPA ✅

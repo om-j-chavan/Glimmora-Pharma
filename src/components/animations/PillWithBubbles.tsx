@@ -52,19 +52,20 @@ const NOISE_URL = `url("data:image/svg+xml,${encodeURIComponent(NOISE_SVG)}")`;
 export function PillWithBubbles() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      {/* Layer 2 — the static tilted pill. Larger (460×128) and shifted toward
-          center so it sits behind the heading as a design element; a soft blur
-          + halo keep the edge premium rather than sharp. opacity 0.08. */}
+      {/* Layer 2 — the static tilted pill. Sized as a fraction of the panel so it
+          stays proportional at every breakpoint. The fill stays white at a fixed
+          low alpha, and a subtle blur + halo keep the edge premium without adding
+          motion. */}
       <div
         className="absolute"
         style={{
-          left: "40%",
-          top: "48%",
-          width: 460,
-          height: 128,
+          left: "22%",
+          top: "46%",
+          width: "50%",
+          aspectRatio: "3.5 / 1",
           transform: "translate(-50%, -50%) rotate(-45deg)",
-          borderRadius: 9999,
-          background: "linear-gradient(135deg, rgb(255 255 255 / 0.9), rgb(255 255 255 / 0.45))",
+          borderRadius: "9999px",
+          background: "rgba(255, 255, 255, 0.09)",
           opacity: 0.08,
           filter: "blur(1.5px)",
           boxShadow: "0 10px 50px rgb(255 255 255 / 0.25)",

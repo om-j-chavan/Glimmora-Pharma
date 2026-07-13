@@ -78,7 +78,7 @@ export function ConfirmModal({
         onClick={(e) => e.stopPropagation()}
         className={clsx(
           "relative w-full max-w-[360px] flex flex-col items-center text-center gap-4 p-6",
-          "rounded-xl border shadow-2xl",
+          "rounded-2xl border shadow-2xl",
           "bg-(--bg-surface) border-(--bg-border)",
           "animate-[popupIn_0.15s_ease-out] focus:outline-none",
         )}

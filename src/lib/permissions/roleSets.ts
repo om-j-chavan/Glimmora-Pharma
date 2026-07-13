@@ -46,6 +46,31 @@ export function canAuthorGxP(role: string): boolean {
 }
 
 /**
+ * Tenant-user predicate. super_admin is a PLATFORM identity (a Tenant row, not a
+ * tenant user seat), so it must never appear in — or be a target of — a tenant's
+ * user-management paths. Everyone else is a manageable tenant user, which is why
+ * a customer_admin keeps full authority over every tenant role (qa_head, qa,
+ * csv_val_lead, other customer_admins, …); only super_admin is off-limits.
+ */
+export function isTenantUserRole(role: string): boolean {
+  return role !== "super_admin";
+}
+
+/**
+ * SME permission model (Pass 2): the two admin identities are VIEW-ONLY on the
+ * quality modules (Gap, Deviation, CAPA, CSV/CSA, FDA 483). They keep read
+ * visibility but may never create/edit/approve/execute a quality record —
+ * customer_admin manages the tenant (users/sites/settings), and super_admin is
+ * platform-only. `viewer` is read-only. Everyone else — the functional/QA seat
+ * roles — may do baseline quality authoring. Use this for the hardcoded
+ * "any non-viewer" write-guards that role sets don't cover (deviation/FDA-483
+ * child writes) so those gates match the role-set gates exactly.
+ */
+export function canWriteQuality(role: string): boolean {
+  return role !== "viewer" && role !== "customer_admin" && !isPlatformAdmin(role);
+}
+
+/**
  * TENANT-WIDE / site-less-by-design roles — they see ALL sites, so a single-site
  * assignment is neither required nor meaningful. Mirrors the "sees all sites"
  * set already used by useTenantConfig (accessibleSites) and tenantMapper
@@ -125,28 +150,31 @@ export function isAssignedToTask(
 /* ── Compliance authoring (findings, CAPA, evidence, action items, criteria) ──
  * Canonical home (moved here from src/lib/auth.ts, which now RE-EXPORTS these
  * so every existing `@/lib/auth` importer keeps working with ONE definition).
- * Contents unchanged — super_admin is listed but blocked at author-time by
- * requireGxPAuthor / canAuthorGxP. */
+ * SME Pass 2 — the admin identities are removed: customer_admin is VIEW-ONLY on
+ * quality (it manages the tenant, not quality records) and super_admin is
+ * platform-only (also blocked by requireGxPAuthor). Only the functional/QA
+ * authoring roles remain. */
 export const COMPLIANCE_AUTHOR_ROLES: readonly string[] = [
   "csv_val_lead",
   "qa_head",
   "regulatory_affairs",
-  "customer_admin",
-  "super_admin",
 ];
 
-/** Admin-tier destructive deletes (findings / CAPA / deviation). Effective
- *  deleter is customer_admin (super_admin blocked by canAuthorGxP). */
-export const ADMIN_DELETE_ROLES: readonly string[] = ["customer_admin", "super_admin"];
+/** Admin-tier destructive deletes (findings / CAPA / deviation). SME Pass 2 —
+ *  emptied: customer_admin is view-only on quality and super_admin is
+ *  platform-only, so neither admin may delete quality records. (No other role
+ *  currently holds quality-delete; grant one here if a deleter is required.) */
+export const ADMIN_DELETE_ROLES: readonly string[] = [];
 
-/* ── CAPA lifecycle role-sets (mirror the inline server checks) ── */
-export const CAPA_CLOSE_ROLES: readonly string[] = ["qa_head", "super_admin"];
-export const CAPA_REJECT_ROLES: readonly string[] = ["qa_head", "super_admin"];
-export const CAPA_DI_GATE_ROLES: readonly string[] = ["qa_head", "super_admin"];
-export const CAPA_REOPEN_ROLES: readonly string[] = ["qa_head", "customer_admin", "super_admin"];
+/* ── CAPA lifecycle role-sets (mirror the inline server checks). SME Pass 2 —
+ *   the admin identities are removed; these are QA-authority quality actions. ── */
+export const CAPA_CLOSE_ROLES: readonly string[] = ["qa_head"];
+export const CAPA_REJECT_ROLES: readonly string[] = ["qa_head"];
+export const CAPA_DI_GATE_ROLES: readonly string[] = ["qa_head"];
+export const CAPA_REOPEN_ROLES: readonly string[] = ["qa_head"];
 
 /** RCA review + alignment review share the same role-set today. */
-export const CAPA_REVIEW_ROLES: readonly string[] = ["qa_head", "super_admin", "customer_admin"];
+export const CAPA_REVIEW_ROLES: readonly string[] = ["qa_head"];
 export function canReviewRCA(role: string): boolean {
   return CAPA_REVIEW_ROLES.includes(role);
 }
@@ -154,18 +182,23 @@ export function canReviewAlignment(role: string): boolean {
   return CAPA_REVIEW_ROLES.includes(role);
 }
 
-/* ── CSV / CSA validation (systems.ts) ── */
-export const CSV_SYSTEM_WRITE_ROLES: readonly string[] = ["csv_val_lead", "qa_head", "customer_admin", "super_admin"];
-export const CSV_SYSTEM_DELETE_ROLES: readonly string[] = ["customer_admin", "super_admin"];
-export const CSV_STAGE_REVIEW_ROLES: readonly string[] = ["qa_head", "customer_admin", "super_admin"];
-export const CSV_SIGNOFF_ROLES: readonly string[] = ["qa_head", "super_admin"];
-export const CSV_REVOKE_SIGNOFF_ROLES: readonly string[] = ["super_admin"];
+/* ── CSV / CSA validation (systems.ts). SME Pass 2 — admin identities removed
+ *   (customer_admin view-only on quality; super_admin platform-only). ── */
+export const CSV_SYSTEM_WRITE_ROLES: readonly string[] = ["csv_val_lead", "qa_head"];
+// Emptied: quality-record delete is not an admin capability under the SME model.
+export const CSV_SYSTEM_DELETE_ROLES: readonly string[] = [];
+export const CSV_STAGE_REVIEW_ROLES: readonly string[] = ["qa_head"];
+export const CSV_SIGNOFF_ROLES: readonly string[] = ["qa_head"];
+// Revoke sign-off was a super_admin oversight override; super_admin is now
+// platform-only with no tenant quality write, so this is emptied.
+export const CSV_REVOKE_SIGNOFF_ROLES: readonly string[] = [];
 
-/* ── Deviation (deviations.ts) ── create/edit = any non-viewer; QA decisions
- *   (close / reject / CAPA-decision) = qa_head/super_admin. ── */
-export const DEVIATION_QA_ROLES: readonly string[] = ["qa_head", "super_admin"];
+/* ── Deviation (deviations.ts) ── create/edit = any FUNCTIONAL role (the admin
+ *   identities are view-only per SME Pass 2); QA decisions (close / reject /
+ *   CAPA-decision) = qa_head. ── */
+export const DEVIATION_QA_ROLES: readonly string[] = ["qa_head"];
 export function canWriteDeviation(role: string): boolean {
-  return role !== "viewer";
+  return canWriteQuality(role);
 }
 
 /* ── FDA 483 (fda483.ts) ── create/edit = any non-viewer; sign & submit =
@@ -175,8 +208,9 @@ export function canWriteDeviation(role: string): boolean {
 // Sign & submit the FDA 483 response + record the FDA outcome. Regulatory
 // Affairs owns external regulator communication (Response + Sign-off + Outcome
 // stages), so it signs alongside QA Head. RA seed users are gxpSignatory.
-export const FDA483_SIGN_ROLES: readonly string[] = ["qa_head", "regulatory_affairs", "super_admin"];
-export const FDA483_DELETE_ROLES: readonly string[] = ["qa_head", "customer_admin"];
+export const FDA483_SIGN_ROLES: readonly string[] = ["qa_head", "regulatory_affairs"];
+// SME Pass 2 — customer_admin is view-only on quality; delete is qa_head only.
+export const FDA483_DELETE_ROLES: readonly string[] = ["qa_head"];
 
 /* ── CAPA module surface (Phase-6 cleanup FIX 1) ── The CAPA module (nav +
  *   /capa routes) is locked to qa_head + customer_admin (the matrix grants
@@ -222,8 +256,115 @@ export const AGI_MANAGE_ROLES: readonly string[] = ["customer_admin", "super_adm
 export const SETTINGS_MANAGE_ROLES: readonly string[] = ["super_admin", "customer_admin"];
 export const PERMISSION_MATRIX_EDIT_ROLES: readonly string[] = ["super_admin"];
 
-/* ── Governance (RAID) ── non-GxP; create = any non-viewer; manage = admin/QA ── */
+/* ══════════════════════════════════════════════════════════════════════════
+ * Governance / Risk Register — non-GxP. ONE role set for the whole module.
+ *
+ * The retired `RAID_MANAGE_ROLES` (a private `Set` inside the old
+ * src/actions/raid.ts, membership {customer_admin, qa_head}) DISAGREED with
+ * this set — it omitted super_admin, so `usePermissions("governance")` told a
+ * super_admin they could edit while the server rejected them. That divergence
+ * is gone: RAID_MANAGE_ROLES no longer exists anywhere, and every governance
+ * gate — server action, capability map, and UI — now reads GOVERNANCE_MANAGE_ROLES.
+ *
+ * THE CREATE-vs-MANAGE RULE (Risk Register):
+ *   • CREATE (raise a risk)  — any non-viewer. A seat/functional role
+ *     (qa, csv_val_lead, operations_head, …) CAN raise a risk. `viewer` cannot.
+ *   • MANAGE (edit / archive someone else's risk) — GOVERNANCE_MANAGE_ROLES only.
+ *   • A non-manage creator/owner may still edit THEIR OWN risk (creator OR owner),
+ *     but may NEVER archive — archive is manage-only, for anyone's risk.
+ * Governance is non-GxP, so `requireGxPAuthor` does NOT apply and super_admin
+ * is a legitimate manager here (unlike the GxP-authoring modules).
+ * ══════════════════════════════════════════════════════════════════════════ */
 export const GOVERNANCE_MANAGE_ROLES: readonly string[] = ["customer_admin", "super_admin", "qa_head"];
+
+/** MANAGE: edit/archive ANY risk in the tenant. Mirrors the server gate. */
+export function canManageGovernance(role: string): boolean {
+  return GOVERNANCE_MANAGE_ROLES.includes(role);
+}
+
+/** CREATE: raise a risk. Any non-viewer — seat roles included, by design. */
+export function canCreateRisk(role: string): boolean {
+  return role !== "viewer";
+}
+
+/* ── Management Decisions (Governance Phase 3) ──────────────────────────────
+ * The SAME create-vs-manage split as the Risk Register, on the same
+ * GOVERNANCE_MANAGE_ROLES set. Management review is non-GxP, so `requireGxPAuthor`
+ * does not apply and super_admin is a legitimate manager here.
+ *
+ *   • CREATE (minute a meeting)          — any non-viewer.
+ *   • EDIT   (amend a meeting + items)   — a manage role, OR the meeting's creator.
+ *   • ARCHIVE                            — manage roles ONLY, for any meeting.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** CREATE: minute a management review. Any non-viewer — seat roles included. */
+export function canCreateManagementDecision(role: string): boolean {
+  return role !== "viewer";
+}
+
+/**
+ * EDIT one specific meeting: a manage role edits anything; otherwise the actor
+ * must be its creator. A meeting has no "owner" axis (unlike a Risk), so the
+ * creator is the only non-manage editor. Pure + id-keyed, so the client mirror
+ * and the `updateManagementDecision` server gate call the SAME function.
+ * NOTE: EDIT only. ARCHIVE is `canManageGovernance` alone.
+ */
+export function canEditManagementDecision(
+  role: string,
+  actorUserId: string | null | undefined,
+  decision: { createdById?: string | null },
+): boolean {
+  if (canManageGovernance(role)) return true;
+  if (role === "viewer") return false;
+  if (!actorUserId) return false; // fail-closed: never match a null column
+  return decision.createdById === actorUserId;
+}
+
+/**
+ * CONVERT a risk into a Gap / Deviation / CAPA (Governance Phase 2).
+ *
+ * TWO gates, both required:
+ *   1. `canManageGovernance` — conversion is a governance action.
+ *   2. The TARGET's own create gate — because conversion calls the target's REAL
+ *      create action, which enforces its own role set plus the `requireGxPAuthor`
+ *      bright line. Mirrored here so the UI hides exactly what the server rejects.
+ *
+ * The intersection today is `qa_head` ALONE: `customer_admin` is in no create set
+ * ("admin ≠ doer") and `super_admin` cannot author GxP records. Conversion mints a
+ * real GxP record, so it must be authored by a real quality authority. We narrow
+ * the governance set here; we never widen the GxP one.
+ *
+ * Pure — the server action and the client both call this exact function.
+ */
+export function canConvertRiskTo(target: "Gap" | "Deviation" | "CAPA", role: string): boolean {
+  if (!canManageGovernance(role)) return false;
+  if (target === "Gap") return GAP_CREATE_ROLES.includes(role) && canAuthorGxP(role);
+  if (target === "Deviation") return canReportDeviation(role) && canAuthorGxP(role);
+  return canCreateCAPA(role); // already folds in canAuthorGxP
+}
+
+/** True when the actor may convert a risk into AT LEAST ONE target (shows the section). */
+export function canConvertRiskToAny(role: string): boolean {
+  return canConvertRiskTo("Gap", role) || canConvertRiskTo("Deviation", role) || canConvertRiskTo("CAPA", role);
+}
+
+/**
+ * EDIT one specific risk: a manage role edits anything; otherwise the actor must
+ * be the risk's creator or its owner. Pure + id-keyed, so the client capability
+ * mirror and the `updateRisk` server gate call the SAME function.
+ * NOTE: this governs EDIT only. ARCHIVE is `canManageGovernance` alone.
+ */
+export function canEditRisk(
+  role: string,
+  actorUserId: string | null | undefined,
+  risk: { createdById?: string | null; ownerId?: string | null },
+): boolean {
+  if (canManageGovernance(role)) return true;
+  if (role === "viewer") return false;
+  // Fail-closed: an unresolvable actor id never matches a null column.
+  if (!actorUserId) return false;
+  return risk.createdById === actorUserId || risk.ownerId === actorUserId;
+}
 
 /* ── Inspection Readiness ── non-GxP; admin actions = QA Head / admins ── */
 export const READINESS_ADMIN_ROLES: readonly string[] = ["qa_head", "customer_admin", "super_admin"];
@@ -242,7 +383,7 @@ export const AUDIT_TRAIL_VIEW_ROLES: readonly string[] = ["qa_head", "customer_a
 
 /** QA authority — the quality judgments: assess/triage/disposition, ASSIGN work,
  *  APPROVE/return submitted work, CLOSE/verify. qa_head only (+SA oversight). */
-export const QA_AUTHORITY_ROLES: readonly string[] = ["qa_head", "super_admin"];
+export const QA_AUTHORITY_ROLES: readonly string[] = ["qa_head"];
 
 /** Client mirror of the `updateFinding` / `closeFinding` server gate: editing or
  *  assessing a gap finding is a QA authority judgment (QA_AUTHORITY_ROLES) and
@@ -264,7 +405,7 @@ export function canEditFinding(role: string): boolean {
 export const GAP_CREATE_ROLES: readonly string[] = [
   "qa_head", "qa", "qc_lab_director", "regulatory_affairs", "csv_val_lead", "it_cdo", "operations_head",
 ];
-export const CAPA_CREATE_ROLES: readonly string[] = ["qa_head", "super_admin"];           // a CAPA is raised ONLY by QA (SA blocked by requireGxPAuthor)
+export const CAPA_CREATE_ROLES: readonly string[] = ["qa_head"];           // a CAPA is raised ONLY by QA (super_admin is platform-only)
 /** Client mirror of the `createCAPA` server gate: a CAPA may be raised ONLY by
  *  QA (CAPA_CREATE_ROLES) and never by super_admin (the canAuthorGxP bright line
  *  that `requireGxPAuthor` enforces server-side) — i.e. qa_head today. Use this
@@ -275,8 +416,8 @@ export const CAPA_CREATE_ROLES: readonly string[] = ["qa_head", "super_admin"]; 
 export function canCreateCAPA(role: string): boolean {
   return CAPA_CREATE_ROLES.includes(role) && canAuthorGxP(role);
 }
-export const INSPECTION_CREATE_ROLES: readonly string[] = ["qa_head", "regulatory_affairs", "super_admin"];
-export const CSV_CREATE_ROLES: readonly string[] = ["csv_val_lead", "qa_head", "super_admin"]; // csv doer OR QA (NOT admin)
+export const INSPECTION_CREATE_ROLES: readonly string[] = ["qa_head", "regulatory_affairs"];
+export const CSV_CREATE_ROLES: readonly string[] = ["csv_val_lead", "qa_head"]; // csv doer OR QA (NOT admin)
 /** Deviation is REPORT-FIRST — any functional "doer" role OR qa_head may log one.
  *  Excludes viewer (read-only) and the admins (customer_admin: admin ≠ doer;
  *  super_admin: walled from the customer app). */

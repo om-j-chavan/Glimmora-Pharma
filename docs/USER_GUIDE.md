@@ -115,7 +115,7 @@ Top of the page has three tabs:
 - **Summary** — KPI cards and charts about your findings.
 - **Findings Register** — the table of all findings, with a side panel
   that shows full detail when you click a row.
-- **Evidence Index** — findings grouped by area, showing how complete
+- **Documents Index** — findings grouped by area, showing how complete
   the evidence is.
 
 What you can do:

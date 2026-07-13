@@ -48,7 +48,7 @@ export function AIPolicyPage() {
       <PageHeader title="AI Usage Policy" subtitle={`Glimmora Platform \u00b7 ${dayjs().format("MMMM YYYY")}`} />
 
       {/* Philosophy */}
-      <div className={clsx("rounded-xl p-5 border", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.2)]" : "bg-[#eef2ff] border-[#c7d2fe]")}>
+      <div className={clsx("rounded-2xl p-5 border", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.2)]" : "bg-[#eef2ff] border-[#c7d2fe]")}>
         <div className="flex items-start gap-3">
           <ShieldCheck className="w-5 h-5 text-[#6366f1] shrink-0 mt-0.5" aria-hidden="true" />
           <div>

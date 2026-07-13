@@ -122,7 +122,7 @@ mock data exists.
 This is the QC Director's primary workspace. Click **Gap Assessment** in the sidebar.
 
 **Expected:** A page titled **"Gap Assessment & Findings"** with a subtitle like
-`N findings · X critical · Y open`, and **three tabs**: Summary · Findings Register · Evidence Index.
+`N findings · X critical · Y open`, and **three tabs**: Summary · Findings Register · Documents Index.
 
 ### 3.1 Summary tab
 
@@ -156,11 +156,11 @@ This is the QC Director's primary workspace. Click **Gap Assessment** in the sid
 > ℹ️ Because you chose framework **Part 11**, the raised CAPA is automatically flagged as
 > **DI-gated** (data-integrity gate required) — you'll verify that next in Part 4.
 
-### 3.4 Evidence Index tab — inspection readiness
+### 3.4 Documents Index tab — inspection readiness
 
 | # | What to do | Expected |
 |---|------------|----------|
-| 3.4.1 | Click the **Evidence Index** tab | Areas listed (Manufacturing, QC Lab, …) each with a status: Complete / Partial / Missing |
+| 3.4.1 | Click the **Documents Index** tab | Areas listed (Manufacturing, QC Lab, …) each with a status: Complete / Partial / Missing |
 | 3.4.2 | Expand the **QC Lab** area | Rows show each finding's evidence status |
 | 3.4.3 | On a "Missing"/"Partial" row, click **link/upload evidence** | Evidence modal opens; you can paste a link or upload a file |
 | 3.4.4 | Save evidence on a finding, then close that finding | Status moves toward **Complete** |

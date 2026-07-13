@@ -2,8 +2,8 @@ import { requireAuth } from "@/lib/auth";
 import { requireRoleOrDeny } from "@/lib/authz";
 import { PlatformSettingsPage } from "@/modules/admin/platform-settings";
 
-// Platform-level screen — super_admin only (narrower than the /admin shell,
-// which also admits customer_admin).
+// Platform-level screen — super_admin only. (The whole /admin console is now
+// super_admin-only after the H1 fix; customer_admin no longer reaches it.)
 const ALLOWED_ROLES = new Set(["super_admin"]);
 
 export const metadata = {

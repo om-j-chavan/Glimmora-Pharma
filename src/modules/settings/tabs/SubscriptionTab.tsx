@@ -203,7 +203,7 @@ export function SubscriptionTab() {
 
       {/* 4. At/over-cap helper — informational only (no upgrade button) */}
       {(isAtAccountLimit || isAtSiteLimit) && (
-        <div className="rounded-xl p-4 space-y-2" style={{ background: "var(--warning-bg)", border: "1px solid var(--warning)" }}>
+        <div className="rounded-2xl p-4 space-y-2" style={{ background: "var(--warning-bg)", border: "1px solid var(--warning)" }}>
           {isAtAccountLimit && (
             <div className="flex items-start gap-2">
               <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--warning)" }} aria-hidden="true" />

@@ -2,13 +2,12 @@ import { cache } from "react";
 import { Prisma, type AuditLog } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { frameworkLabel } from "@/constants/frameworks";
+import { CHANGE_CONTROL_ENABLED } from "@/lib/change-control-constants";
 
-export const getRAIDItems = cache(async (tenantId: string) => {
-  return prisma.rAIDItem.findMany({
-    where: { tenantId },
-    orderBy: { createdAt: "desc" },
-  });
-});
+// Governance Phase 1 — `getRAIDItems` was removed together with the RAIDItem
+// table. The Risk Register's reads live in ./risks.ts, where every one of them
+// is scoped by `riskVisibilityWhere(session)`; this loader was tenant-wide and
+// carried no record-visibility narrowing at all.
 
 export const getDocuments = cache(async (tenantId: string) => {
   // Soft-deleted documents are retained but hidden from the library view.
@@ -353,9 +352,14 @@ function toAuditTrailRow(log: AuditLog, refMap: Map<string, string>): AuditTrail
   const href =
     fam === "capa" && resolved && log.recordId
       ? `/capa/${log.recordId}`
-      : fam
-        ? AUDIT_LIST_ROUTE[fam]
-        : null;
+      : // Change Control UI mothballed (Phase 2) — historical CC audit rows still
+      // resolve their reference for `displayId`, but we suppress the deep-link so
+      // the row isn't clickable into the hidden route. Re-links when the flag flips.
+      fam === "changeControl" && !CHANGE_CONTROL_ENABLED
+        ? null
+        : fam
+          ? AUDIT_LIST_ROUTE[fam]
+          : null;
   return { ...log, displayId, href };
 }
 

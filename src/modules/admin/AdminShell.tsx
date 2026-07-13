@@ -189,9 +189,8 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
           }`}
           style={{ background: "var(--sidebar-bg)", borderRight: "1px solid var(--sidebar-border)" }}
         >
-          {/* Logo — fixed height matches the admin Topbar (h-16 = 64px) so the
-              sidebar header and topbar share one continuous bottom edge across
-              the top of the admin shell. alignItems centers the brand vertically. */}
+          {/* Brand header — keeps the product name prominent while preserving the
+              admin-shell spacing and role label. */}
           <div
             style={{
               display: "flex",
@@ -202,19 +201,15 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
               borderBottom: "1px solid var(--sidebar-border)",
             }}
           >
-            <div
+            <Image
+              src="/app-icon.png"
+              alt=""
+              width={32}
+              height={32}
+              priority
+              className="object-contain"
               aria-hidden="true"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 32,
-                height: 32,
-                flexShrink: 0,
-              }}
-            >
-              <Image src="/app-icon.png" alt="" width={32} height={32} className="object-contain" aria-hidden="true" />
-            </div>
+            />
             <div style={{ minWidth: 0 }}>
               <div style={{ color: "var(--sidebar-text)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
                 Pharma Glimmora

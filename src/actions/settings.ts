@@ -10,6 +10,7 @@ import { BCRYPT_COST } from "@/lib/passwords";
 import { sanitizeServerError } from "@/lib/errors";
 import { assertCanAddUser, assertCanAddSite, type CapBlockCode } from "@/lib/planCaps";
 import { scopedWhere } from "@/lib/tenantScope";
+import { isTenantUserRole } from "@/lib/permissions/roleSets";
 
 type ActionResult<T = unknown> =
   | { success: true; data: T }
@@ -499,9 +500,16 @@ export async function setUserStatus(id: string, isActive: boolean): Promise<Acti
   }
   const target = await prisma.user.findFirst({
     where: scopedWhere(session, id, { allowPlatformAdmin: true }),
-    select: { id: true, name: true, isActive: true },
+    select: { id: true, name: true, isActive: true, role: true },
   });
   if (!target) return { success: false, error: "FORBIDDEN" };
+  // Defense-in-depth: super_admin is a platform identity, never a tenant user, so
+  // it must not be a target of tenant user-management — regardless of the actor.
+  // (Everyone else stays manageable: customer_admin keeps authority over every
+  // tenant role; super_admin keeps its authority over tenant users.)
+  if (!isTenantUserRole(target.role)) {
+    return { success: false, error: "This user cannot be modified." };
+  }
   if (target.isActive === isActive) return { success: true, data: null };
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {

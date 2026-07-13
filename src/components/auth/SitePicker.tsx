@@ -89,7 +89,7 @@ export function SitePicker() {
         {activeSites.length === 0 ? (
           /* ── No sites fallback ── */
           <div className="px-6 py-8">
-            <div className="rounded-xl p-5 text-center border bg-(--bg-elevated) border-(--bg-border)">
+            <div className="rounded-2xl p-5 text-center border bg-(--bg-elevated) border-(--bg-border)">
               <MapPin className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
               <p className="text-[14px] font-semibold mb-1" style={{ color: "var(--text-primary)" }}>No sites configured</p>
               <p className="text-[12px] mb-4" style={{ color: "var(--text-secondary)" }}>
@@ -140,7 +140,7 @@ export function SitePicker() {
                         onClick={() => setSelectedSite(site)}
                         aria-pressed={isSelected}
                         aria-label={site.name}
-                        className="w-full flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-150 outline-none text-left"
+                        className="w-full flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-150 outline-none text-left"
                         style={{
                           background: isSelected ? "var(--brand-muted)" : "transparent",
                           border: isSelected ? "1px solid var(--brand-border)" : "1px solid transparent",

@@ -12,11 +12,13 @@ export const getSites = cache(async (tenantId: string) => {
 });
 
 /**
- * Cached query: all users for a tenant. Excludes passwordHash.
+ * Cached query: all users for a tenant. Excludes passwordHash. Also excludes any
+ * super_admin row — super_admin is a platform identity, not a tenant user, so it
+ * must never surface in a tenant's user list / user-management UI (H1 hardening).
  */
 export const getUsers = cache(async (tenantId: string) => {
   return prisma.user.findMany({
-    where: { tenantId },
+    where: { tenantId, role: { not: "super_admin" } },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,

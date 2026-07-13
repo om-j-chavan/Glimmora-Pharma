@@ -215,7 +215,7 @@ export function RiskControlsPanel({
           </div>
         </div></div>
       ) : (
-        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", "bg-(--warning-bg) border-(--warning)")}>
+        <div className={clsx("flex items-start gap-2 p-3 rounded-2xl border", "bg-(--warning-bg) border-(--warning)")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1">
             <p className="text-[12px] font-medium text-[#f59e0b]">No compliance frameworks active</p>

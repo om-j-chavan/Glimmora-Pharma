@@ -211,7 +211,7 @@ function GroupSection({
       <h2 className="text-[12px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: headColor }}>
         <Icon className="w-3.5 h-3.5" aria-hidden="true" /> {title} ({count})
       </h2>
-      <div className="rounded-xl overflow-hidden" style={{ background: "var(--card-bg)", border: `1px solid ${borderColor}` }}>
+      <div className="rounded-2xl overflow-hidden" style={{ background: "var(--card-bg)", border: `1px solid ${borderColor}` }}>
         {children}
       </div>
     </section>

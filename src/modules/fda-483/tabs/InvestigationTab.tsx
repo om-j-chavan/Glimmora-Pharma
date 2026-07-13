@@ -2301,7 +2301,7 @@ export function InvestigationTab({
       {rcaComplete && capaComplete && (
         <div
           role="status"
-          className="flex items-start gap-2 p-4 rounded-xl border"
+          className="flex items-start gap-2 p-4 rounded-2xl border"
           style={{
             background: "var(--success-bg)",
             borderColor: "var(--success)",

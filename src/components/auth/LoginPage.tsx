@@ -315,9 +315,12 @@ export function LoginPage() {
             Replaces the former faint logo-mark watermark. */}
         <PillWithBubbles />
 
+        {/* Region-neutral badge: no US-only framing (Part 11 is FDA, Annex 11 is
+            EU, GxP is global). Not `uppercase` — the strings are cased on purpose
+            ("GxP", not "GXP"). */}
         <div className="relative z-[2] flex items-center gap-2.5 text-white/70">
           <Shield className="w-3.5 h-3.5" aria-hidden="true" />
-          <span className="text-[11px] font-medium tracking-wide uppercase">GxP · Part 11 · Annex 11</span>
+          <span className="text-[11px] font-medium tracking-wide">GxP · Part 11 · Annex 11</span>
         </div>
 
         <div className="relative z-[2] max-w-md">
@@ -545,7 +548,7 @@ export function LoginPage() {
           </button>
 
           {showCreds && (
-            <div className="mt-2 rounded-xl overflow-hidden border border-(--bg-border) bg-(--bg-surface)">
+            <div className="mt-2 rounded-2xl overflow-hidden border border-(--bg-border) bg-(--bg-surface)">
               <table className="w-full border-collapse text-[11px]">
                 <thead>
                   <tr className="border-b border-(--bg-border)">

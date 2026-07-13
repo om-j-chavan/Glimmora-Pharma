@@ -316,7 +316,7 @@ export function DeviationIntelligencePanel({
                   {clusters.map((c) => (
                     <li
                       key={c.id}
-                      className="rounded-xl border p-3"
+                      className="rounded-2xl border p-3"
                       style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}
                     >
                       {/* Header */}

@@ -1309,7 +1309,12 @@ function VoiceMeter({ level }: { level: number }) {
         }}
       />
       {Array.from({ length: BARS }, (_, i) => {
-        const jitter = recording ? 0.85 + Math.random() * 0.3 : 1;
+        // Deterministic per-bar jitter. Math.random() is impure and must not run
+        // during render (React flags it — it re-rolls on every unrelated re-render).
+        // A fract(sin()) hash seeded by the bar index + live mic `level` stays pure
+        // yet still shimmers as the level animates.
+        const noise = Math.sin((i + 1) * 12.9898 + level * 78.233) * 43758.5453;
+        const jitter = recording ? 0.85 + (noise - Math.floor(noise)) * 0.3 : 1;
         const h = Math.max(0.12, level * bellAt(i) * jitter);
         return (
           <span

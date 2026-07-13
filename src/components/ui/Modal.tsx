@@ -76,7 +76,7 @@ export function Modal({ open, onClose, title, header, children, footer, classNam
         aria-labelledby="modal-title"
         onClick={(e) => e.stopPropagation()}
         className={clsx(
-          "relative w-full max-w-[680px] max-h-[85vh] flex flex-col rounded-xl overflow-hidden border shadow-2xl",
+          "relative w-full max-w-[680px] max-h-[85vh] flex flex-col rounded-2xl overflow-hidden border shadow-2xl",
           "bg-(--bg-surface) border-(--bg-border)",
           "focus:outline-none",
           className,

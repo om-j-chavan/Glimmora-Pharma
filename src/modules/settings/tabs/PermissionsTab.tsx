@@ -51,7 +51,7 @@ export function PermissionsTab() {
 
       {/* Read-only banner */}
       {!isSuperAdmin && (
-        <div className={clsx("flex items-start gap-2 p-3 rounded-xl border", "bg-(--warning-bg) border-(--warning)")}>
+        <div className={clsx("flex items-start gap-2 p-3 rounded-2xl border", "bg-(--warning-bg) border-(--warning)")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
           <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Only Super Admin can edit permissions. You are viewing read-only.</p>
         </div>
@@ -129,7 +129,7 @@ export function PermissionsTab() {
       </div></div>
 
       {/* GxP note */}
-      <div className={clsx("flex items-start gap-2 p-4 rounded-xl border", "bg-(--info-bg) border-(--info)")}>
+      <div className={clsx("flex items-start gap-2 p-4 rounded-2xl border", "bg-(--info-bg) border-(--info)")}>
         <ShieldCheck className="w-4 h-4 text-[#6366f1] flex-shrink-0 mt-0.5" aria-hidden="true" />
         <div><p className="text-[12px] font-medium text-[#6366f1]">GxP Signatory &mdash; separate from module access</p><p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>Even with Full access to CAPA or FDA 483, users must have GxP Signatory toggle ON (Settings &rarr; Users) to electronically sign under 21 CFR Part 11.</p></div>
       </div>

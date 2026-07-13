@@ -79,20 +79,6 @@ export const DeviationSchema = z.object({
 });
 export type DeviationFormData = z.infer<typeof DeviationSchema>;
 
-/* ── RAID ── */
-
-export const RAIDSchema = z.object({
-  type: z.enum(["Risk", "Action", "Issue", "Decision"]),
-  title: z.string().min(3, "Title required"),
-  description: z.string().min(5, "Description required"),
-  priority: z.enum(GENERIC_SEVERITY),
-  owner: z.string().min(1, "Owner required"),
-  dueDate: z.string().min(1, "Due date required"),
-  impact: z.string().optional(),
-  mitigation: z.string().optional(),
-});
-export type RAIDFormData = z.infer<typeof RAIDSchema>;
-
 /* ── CSV/CSA System ── */
 
 export const SystemSchema = z.object({

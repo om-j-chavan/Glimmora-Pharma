@@ -25,6 +25,7 @@ import {
 } from "@/actions/findings";
 import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
 import { DocumentCard } from "@/components/shared/DocumentCard";
+import { RaisedFromRiskBanner } from "@/components/shared/RaisedFromRiskBanner";
 import { worklistDocToCardView } from "@/components/shared/documentCardAdapters";
 import type { WorklistTaskMessage, WorklistDoc } from "@/lib/queries/worklist";
 import type { CAPA } from "@/store/capa.slice";
@@ -499,7 +500,7 @@ export function GapRegisterTab({
         {/* 3 — Table card (its Phase-2 row-stagger runs inside once it reveals). */}
         <MotionListItem>
       {/* Table — wrapped in the shared table card (tableTokens.tableCard: the
-          same border + --card-bg + rounded-xl the Support Center queue gets from
+          same border + --card-bg + rounded-2xl the Support Center queue gets from
           the DataTable widget). The toolbar above stays OUTSIDE the card. The
           card's overflow-hidden rounds the corners; the inner overflow-x-auto
           keeps horizontal scrolling, and the empty state renders inside too. */}
@@ -689,6 +690,9 @@ export function GapRegisterTab({
                 remains in the audit/details section below + the header-clock modal). */}
             {/* Header: severity + status badges, with the Edit action on the
                 right (header action; ✕ closes; Save/Cancel in footer on edit). */}
+            {/* Governance Phase 2 — provenance when this finding was raised by converting a Risk. */}
+            <RaisedFromRiskBanner target="Gap" recordId={selectedFinding.id} />
+
             <div className="flex items-center justify-between gap-2">
               <div className="flex gap-2 flex-wrap">{severityBadge(selectedFinding.severity)}{statusBadge(selectedFinding.status)}</div>
               {!isEditing && (

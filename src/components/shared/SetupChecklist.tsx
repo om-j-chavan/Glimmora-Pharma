@@ -12,7 +12,7 @@ export function SetupChecklist() {
 
   return (
     <div
-      className={clsx("p-5 rounded-xl mb-6 border", "bg-(--brand-muted) border-(--brand)")}
+      className={clsx("p-5 rounded-2xl mb-6 border", "bg-(--brand-muted) border-(--brand)")}
       role="status"
       aria-label="Platform setup progress"
     >

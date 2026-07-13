@@ -113,7 +113,7 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
     <section aria-labelledby="org-heading" className="w-full space-y-4">
       <h2 id="org-heading" className="sr-only">Organisation</h2>
 
-      <div className="bg-(--card-bg) border border-(--card-border) rounded-xl overflow-hidden">
+      <div className="bg-(--card-bg) border border-(--card-border) rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-(--card-border)">
           <span className="text-[13px] font-semibold text-(--text-primary)">Organisation</span>
           {!readOnly && <Button icon={Pencil} size="xs" variant="ghost" onClick={openEdit}>Edit</Button>}

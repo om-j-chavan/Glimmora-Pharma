@@ -126,7 +126,7 @@ export function GapEvidenceTab({
       <MotionList {...entranceProps}>
         {/* 1 — Filters (same page-level filters as Summary/Register). */}
         <MotionListItem>
-      <section aria-label="Evidence filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-xl border"
+      <section aria-label="Evidence filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-2xl border"
         style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
         <Filter className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
@@ -193,7 +193,7 @@ export function GapEvidenceTab({
               return (
                 <MotionListItem key={area} className="mb-3">
                   <button type="button" onClick={() => onToggleArea(area)} aria-expanded={isExp} aria-controls={`evidence-area-${areaKey}`}
-                    className="w-full flex items-center justify-between p-4 rounded-xl border cursor-pointer text-left transition-all duration-150 bg-(--bg-elevated) border-(--bg-border) hover:bg-(--bg-hover)">
+                    className="w-full flex items-center justify-between p-4 rounded-2xl border cursor-pointer text-left transition-all duration-150 bg-(--bg-elevated) border-(--bg-border) hover:bg-(--bg-hover)">
                     <span className="flex items-center gap-2">
                       <ChevronDown className={clsx("w-4 h-4 transition-transform duration-150 shrink-0", isExp && "rotate-180")} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
                       <span className="font-semibold text-[13px]" style={{ color: "var(--text-primary)" }}>{area}</span>

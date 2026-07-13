@@ -17,7 +17,7 @@ export function PlanLimitUsageBar({ icon: Icon, label, count, limit, plan, atLim
   const remaining = limit === -1 ? -1 : limit - count;
 
   return (
-    <div className={clsx("flex items-center gap-4 p-4 rounded-xl border", atLimit ? "bg-(--danger-bg) border-(--danger)" : nearLimit ? "bg-(--warning-bg) border-(--warning)" : "bg-(--bg-surface) border-(--bg-border)")}>
+    <div className={clsx("flex items-center gap-4 p-4 rounded-2xl border", atLimit ? "bg-(--danger-bg) border-(--danger)" : nearLimit ? "bg-(--warning-bg) border-(--warning)" : "bg-(--bg-surface) border-(--bg-border)")}>
       <div className="flex-1">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">

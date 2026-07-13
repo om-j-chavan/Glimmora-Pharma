@@ -2,11 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { RefreshCw, Sparkles, AlertTriangle, Search, ChevronRight, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { RefreshCw, Sparkles, AlertTriangle, Search, ChevronRight, Plus, Loader2 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { Button } from "@/components/ui/Button";
+import { PageLayout } from "@/components/layout/PageLayout";
 import { Badge } from "@/components/ui/Badge";
-import { DataTable, type Column } from "@/components/shared";
+import { DataTable, type DataColumn } from "@/components/table/DataTable";
 import {
   capaListAll,
   capaListByCustomer,
@@ -44,6 +46,7 @@ export function AiCapaIndex() {
   const customerId = useAppSelector(selectAiCustomerId);
   const userRole = useAppSelector((s) => s.auth.user?.role ?? "");
   const isSuperAdmin = userRole === "super_admin";
+  const router = useRouter();
 
   const [scope, setScope] = useState<"customer" | "all">("customer");
   const [rows, setRows] = useState<AiCapaRow[]>([]);
@@ -98,31 +101,24 @@ export function AiCapaIndex() {
 
   if (!token) {
     return (
-      <main className="p-6">
+      <div className="p-6">
         <p className="text-[13px]" style={{ color: "var(--danger)" }}>
           AI session is missing. Sign out and sign in again to refresh your token.
         </p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main id="main-content" aria-label="AI CAPAs" className="w-full space-y-5">
-      <header className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="page-title flex items-center gap-2">
-            <Sparkles className="w-5 h-5" aria-hidden="true" style={{ color: "var(--brand)" }} />
-            AI CAPAs
-          </h1>
-          <p className="page-subtitle mt-1">
-            Backend-tracked CAPAs · {scope === "all" ? "all customers" : `customer ${customerId ?? "—"}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" icon={RefreshCw} onClick={refresh} loading={loading}>Refresh</Button>
-        </div>
-      </header>
-
+    <PageLayout
+      title="AI CAPAs"
+      titleIcon={Sparkles}
+      description={`Backend-tracked CAPAs · ${scope === "all" ? "all customers" : `customer ${customerId ?? "—"}`}`}
+      headerRight={
+        <Button variant="ghost" size="sm" icon={RefreshCw} onClick={refresh} loading={loading}>Refresh</Button>
+      }
+    >
+      <div className="space-y-5">
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat label="Total" value={stats.total} />
@@ -180,113 +176,137 @@ export function AiCapaIndex() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="card overflow-hidden">
-        <DataTable
-          ariaLabel="AI CAPAs"
-          data={filtered}
-          rowKey={(r) => r.capa_id}
-          minWidth={900}
-          loading={loading}
-          rowClassName={() => "cursor-pointer"}
-          emptyState={
-            <div className="text-center py-8">
-              <Sparkles className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-              <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                {rows.length === 0 ? "No AI CAPAs yet — create one from the CAPA Tracker." : "No CAPAs match your search."}
-              </p>
-            </div>
-          }
-          columns={[
-            {
-              key: "capa_id",
-              header: "CAPA ID",
-              cellClassName: "font-mono text-[11px] font-semibold",
-              render: (r) => (
-                <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} style={{ color: "var(--brand)", textDecoration: "none" }}>
-                  {r.capa_id}
-                </Link>
-              ),
-            },
-            {
-              key: "problem",
-              header: "Problem",
-              cellClassName: "text-[12px]",
-              render: (r) => (
-                <>
-                  <p className="line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 360 }}>{r.problem_statement}</p>
-                  {r.is_recurring && (
-                    <span className="inline-flex items-center gap-1 text-[10px] mt-0.5" style={{ color: "var(--warning)" }}>
-                      <AlertTriangle className="w-3 h-3" aria-hidden="true" /> recurring
-                    </span>
-                  )}
-                </>
-              ),
-            },
-            {
-              key: "source",
-              header: "Source",
-              cellClassName: "text-[11px] text-(--text-secondary)",
-              render: (r) => r.source,
-            },
-            {
-              key: "severity",
-              header: "Severity",
-              render: (r) => (
-                <Badge variant={
-                  /critical/i.test(r.severity) ? "red" :
-                  /high|major/i.test(r.severity) ? "amber" :
-                  /low/i.test(r.severity) ? "green" : "gray"
-                }>{r.severity}</Badge>
-              ),
-            },
-            {
-              key: "status",
-              header: "Status",
-              render: (r) => (
-                <Badge variant={
-                  /closed/i.test(r.status) ? "green" :
-                  /review|pending/i.test(r.status) ? "purple" :
-                  /progress|submitted/i.test(r.status) ? "amber" : "blue"
-                }>{r.status}</Badge>
-              ),
-            },
-            {
-              key: "risk",
-              header: "Risk",
-              render: (r) => {
-                const riskPct = Math.round(r.risk_score * 100);
-                const riskColor = r.risk_score >= 0.75 ? "var(--danger)" : r.risk_score >= 0.4 ? "var(--warning)" : "var(--success)";
-                return (
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-full overflow-hidden" style={{ width: 50, height: 4, background: "var(--bg-border)" }}>
-                      <div style={{ width: `${riskPct}%`, height: "100%", background: riskColor }} />
-                    </div>
-                    <span className="text-[11px] font-mono tabular-nums" style={{ color: riskColor }}>{riskPct}%</span>
+      {/* Table — canonical DataTable widget (uncontrolled client mode). The page
+          keeps ownership of scope + search + refresh; the widget only renders the
+          rows it is handed (already narrowed by the scope fetch + client search).
+          No widget `search`/`filters` props: search stays external and feeds
+          `data` pre-filtered, exactly as before. Loading is folded into the
+          empty state because the widget has no client-mode `loading` prop. */}
+      <DataTable
+        ariaLabel="AI CAPAs"
+        data={filtered}
+        rowKey={(r) => r.capa_id}
+        density="compact"
+        minWidth={1000}
+        pageSize={25}
+        onRowClick={(r) => router.push(`/ai-capa/${encodeURIComponent(r.capa_id)}`)}
+        emptyState={() => (
+          <div className="text-center py-8">
+            {loading ? (
+              <>
+                <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Loading CAPAs…</p>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                  {search.trim()
+                    ? `No CAPAs match “${search.trim()}”.`
+                    : "No AI CAPAs yet — create one from the CAPA Tracker."}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+        columns={[
+          {
+            key: "capa_id",
+            label: "CAPA ID",
+            sortable: true,
+            cellClassName: "font-mono text-[11px] font-semibold",
+            render: (r) => (
+              <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} onClick={(e) => e.stopPropagation()} style={{ color: "var(--brand)", textDecoration: "none" }}>
+                {r.capa_id}
+              </Link>
+            ),
+          },
+          {
+            key: "problem",
+            label: "Problem",
+            cellClassName: "text-[12px]",
+            render: (r) => (
+              <>
+                <p className="line-clamp-2" style={{ color: "var(--text-primary)", maxWidth: 360 }}>{r.problem_statement}</p>
+                {r.is_recurring && (
+                  <span className="inline-flex items-center gap-1 text-[10px] mt-0.5" style={{ color: "var(--warning)" }}>
+                    <AlertTriangle className="w-3 h-3" aria-hidden="true" /> recurring
+                  </span>
+                )}
+              </>
+            ),
+          },
+          {
+            key: "source",
+            label: "Source",
+            sortable: true,
+            cellClassName: "text-[11px] text-(--text-secondary)",
+            render: (r) => r.source,
+          },
+          {
+            key: "severity",
+            label: "Severity",
+            sortable: true,
+            render: (r) => (
+              <Badge variant={
+                /critical/i.test(r.severity) ? "red" :
+                /high|major/i.test(r.severity) ? "amber" :
+                /low/i.test(r.severity) ? "green" : "gray"
+              }>{r.severity}</Badge>
+            ),
+          },
+          {
+            key: "status",
+            label: "Status",
+            sortable: true,
+            render: (r) => (
+              <Badge variant={
+                /closed/i.test(r.status) ? "green" :
+                /review|pending/i.test(r.status) ? "purple" :
+                /progress|submitted/i.test(r.status) ? "amber" : "blue"
+              }>{r.status}</Badge>
+            ),
+          },
+          {
+            key: "risk",
+            label: "Risk",
+            sortable: true,
+            sortValue: (r) => r.risk_score,
+            render: (r) => {
+              const riskPct = Math.round(r.risk_score * 100);
+              const riskColor = r.risk_score >= 0.75 ? "var(--danger)" : r.risk_score >= 0.4 ? "var(--warning)" : "var(--success)";
+              return (
+                <div className="flex items-center gap-2">
+                  <div className="rounded-full overflow-hidden" style={{ width: 50, height: 4, background: "var(--bg-border)" }}>
+                    <div style={{ width: `${riskPct}%`, height: "100%", background: riskColor }} />
                   </div>
-                );
-              },
+                  <span className="text-[11px] font-mono tabular-nums" style={{ color: riskColor }}>{riskPct}%</span>
+                </div>
+              );
             },
-            {
-              key: "created",
-              header: "Created",
-              cellClassName: "text-[11px] whitespace-nowrap text-(--text-muted)",
-              render: (r) => formatDate(r.created_at),
-            },
-            {
-              key: "open",
-              header: "Open",
-              srOnly: true,
-              render: (r) => (
-                <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} aria-label={`Open ${r.capa_id}`}>
-                  <ChevronRight className="w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                </Link>
-              ),
-            },
-          ] satisfies Column<AiCapaRow>[]}
-        />
+          },
+          {
+            key: "created",
+            label: "Created",
+            sortable: true,
+            sortValue: (r) => r.created_at,
+            cellClassName: "text-[11px] whitespace-nowrap text-(--text-muted)",
+            render: (r) => formatDate(r.created_at),
+          },
+          {
+            key: "open",
+            label: "Open",
+            headerSrOnly: true,
+            render: (r) => (
+              <Link href={`/ai-capa/${encodeURIComponent(r.capa_id)}`} onClick={(e) => e.stopPropagation()} aria-label={`Open ${r.capa_id}`}>
+                <ChevronRight className="w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              </Link>
+            ),
+          },
+        ] satisfies DataColumn<AiCapaRow>[]}
+      />
       </div>
-    </main>
+    </PageLayout>
   );
 }
 

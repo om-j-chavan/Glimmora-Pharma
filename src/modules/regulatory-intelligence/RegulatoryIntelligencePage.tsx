@@ -166,7 +166,7 @@ export function RegulatoryIntelligencePage() {
               return (
                 <li
                   key={u.id}
-                  className="rounded-xl border p-4"
+                  className="rounded-2xl border p-4"
                   style={{
                     background: "var(--bg-surface)",
                     borderColor: "var(--bg-border)",

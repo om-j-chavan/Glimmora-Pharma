@@ -361,7 +361,7 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
       />
 
       {/* Table card */}
-      <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
+      <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden">
         <DataTable<TenantSiteConfig>
           variant="table-fixed"
           ariaLabel="Configured GMP sites"

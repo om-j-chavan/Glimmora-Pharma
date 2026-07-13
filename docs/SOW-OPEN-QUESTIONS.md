@@ -36,7 +36,7 @@
 
 13. Who can create/enter findings? Only Glimmora consultants during the sprint, or can `qa_head` and `super_admin` add findings from inside the platform?
 14. Can findings be deleted or only closed/resolved? Given audit trail requirements, deletion seems non-compliant — how is this handled?
-15. Evidence Index — who can upload documents? All roles or restricted?
+15. Documents Index — who can upload documents? All roles or restricted?
 16. Evidence Pack Status (Complete/Partial/Missing) — is this calculated automatically by the system or manually set?
 
 ---

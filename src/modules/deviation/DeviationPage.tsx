@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
@@ -33,6 +33,7 @@ import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { assignDeviationTask, reworkDeviationTask, postDeviationTaskMessage } from "@/actions/deviation-tasks";
 import { TaskThread, GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
 import { deleteDocument } from "@/actions/documents";
+import { RaisedFromRiskBanner } from "@/components/shared/RaisedFromRiskBanner";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
 import { Button } from "@/components/ui/Button";
@@ -203,10 +204,25 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
   // State
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  /* Open one deviation from `?open=<id>` — used by the risk-conversion "view →"
+     link. Deviations have no per-id route; the detail is this modal. Opens once,
+     after the tenant list has loaded. */
+  const searchParams = useSearchParams();
+  const openIdParam = searchParams.get("open");
+  const openedRef = useRef(false);
   const selected = useMemo(
     () => (selectedId ? tenantDevs.find((d) => d.id === selectedId) ?? null : null),
     [tenantDevs, selectedId],
   );
+
+  useEffect(() => {
+    if (!openIdParam || openedRef.current) return;
+    if (tenantDevs.some((d) => d.id === openIdParam)) {
+      openedRef.current = true;
+      setSelectedId(openIdParam);
+    }
+  }, [openIdParam, tenantDevs]);
   // SME Section 1, Stage 1 — CAPA Decision Gate (client mirror).
   // Server enforces the same rule in closeDeviation (incl. the orphan-link
   // case where linkedCAPAId is set but the CAPA was hard-deleted). The
@@ -659,8 +675,36 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </button>
             </div>
           }
+          footer={
+            ((selected.status === "open" && isQAHead) ||
+              (selected.status === "pending_qa_review" && isQAHead && !selected.activeTask)) ? (
+              <div className="flex justify-end gap-2">
+                {selected.status === "open" && isQAHead && (
+                  <Button variant="primary" size="sm" icon={Search} onClick={handleStartInvestigation}>Start Investigation</Button>
+                )}
+                {selected.status === "pending_qa_review" && isQAHead && !selected.activeTask && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => setRejectModal(true)}>Reject</Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={CheckCircle2}
+                      onClick={() => setCloseModal(true)}
+                      disabled={capaRequired}
+                      title={capaRequired ? "Critical deviations require a linked CAPA before closure" : undefined}
+                    >
+                      Sign & Close Deviation
+                    </Button>
+                  </>
+                )}
+              </div>
+            ) : undefined
+          }
         >
           <div className="space-y-4">
+            {/* Governance Phase 2 — provenance when this deviation was raised by converting a Risk. */}
+            <RaisedFromRiskBanner target="Deviation" recordId={selected.id} />
+
             <div className="flex items-center gap-2">
               <Badge variant={STATUS_VARIANT[selected.status]}>{STATUS_LABEL[selected.status]}</Badge>
               <Badge variant={getSeverityVariant(selected.severity, "fda")}>{normalizeSeverityForDisplay(selected.severity, "fda") ?? selected.severity}</Badge>
@@ -942,41 +986,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               </div>
             )}
 
-            {/* Action buttons — only the phases that own a status-action button:
-                "open" (Start Investigation) and "pending_qa_review" (Sign & Close
-                / Reject). under_investigation acts via the InvestigationSection;
-                capa_pending waits on the CAPA. */}
-            {(selected.status === "open" || selected.status === "pending_qa_review") && (
-              <div className="space-y-2 pt-2 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
-                {selected.status === "open" && isQAHead && (
-                  <Button variant="primary" size="sm" fullWidth icon={Search} onClick={handleStartInvestigation}>Start Investigation</Button>
-                )}
-                {/* INVESTIGATION-FIRST — the former "Submit for QA Review" step is
-                    gone: completeInvestigation now advances under_investigation →
-                    pending_qa_review directly. During under_investigation the RCA
-                    lives in the InvestigationSection above ("Complete Investigation").
-                    Req 3 — when a low-priority TASK is in flight, the disposition is
-                    the task: its own panel owns Sign & Close (only once submitted),
-                    so don't show the generic close here (it appeared prematurely
-                    right after assigning). Only the no-task path closes here. */}
-                {selected.status === "pending_qa_review" && isQAHead && !selected.activeTask && (
-                  <>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      fullWidth
-                      icon={CheckCircle2}
-                      onClick={() => setCloseModal(true)}
-                      disabled={capaRequired}
-                      title={capaRequired ? "Critical deviations require a linked CAPA before closure" : undefined}
-                    >
-                      Sign & Close Deviation
-                    </Button>
-                    <Button variant="ghost" size="sm" fullWidth onClick={() => setRejectModal(true)}>Reject</Button>
-                  </>
-                )}
-              </div>
-            )}
           </div>
         </Modal>
       )}

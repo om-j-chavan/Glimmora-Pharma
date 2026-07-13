@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BarChart3, ClipboardCheck, ClipboardList, FolderOpen, Plus, Sparkles } from "lucide-react";
 import type { Finding as PrismaFinding } from "@prisma/client";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
@@ -171,15 +171,23 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   const isAnyFilterActive = !!(siteFilter || areaFilter || frameworkFilter || severityFilter || statusFilter);
   function clearFilters() { setSiteFilter(""); setAreaFilter(""); setFrameworkFilter(""); setSeverityFilter(""); setStatusFilter(""); }
 
-  /* ── Open from route state ── */
+  /* ── Open one finding from `?open=<id>` ──
+     Revives the dead route-state hook this page carried since the router
+     migration. Used by the risk-conversion "view →" link, which needs to land on
+     a specific finding; findings have no per-id route, only this modal. Waits for
+     the Redux list to arrive, then opens once. */
+  const searchParams = useSearchParams();
+  const openIdParam = searchParams.get("open");
+  const openedRef = useRef(false);
   useEffect(() => {
-    const openId = null /*migration: location.state removed*/;
-    if (openId) {
-      const found = findings.find((f) => f.id === openId);
-      if (found) { setActiveTab("register"); setSelectedFinding(found); }
+    if (!openIdParam || openedRef.current) return;
+    const found = findings.find((f) => f.id === openIdParam);
+    if (found) {
+      openedRef.current = true;
+      setActiveTab("register");
+      setSelectedFinding(found);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [openIdParam, findings]);
 
   /* ── Keep the open detail in sync with the store ──
      selectedFinding is a local snapshot. When the Redux findings list updates

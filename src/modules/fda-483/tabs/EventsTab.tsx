@@ -97,7 +97,7 @@ export function EventsTab({
       {/* ── Filter bar — standard pattern (Filter icon + Filters + Dropdowns) ── */}
       <section
         aria-label="FDA 483 event filters"
-        className="flex items-center gap-3 flex-wrap p-3 rounded-xl mb-4"
+        className="flex items-center gap-3 flex-wrap p-3 rounded-2xl mb-4"
         style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
       >
         <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
