@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pharma Glimmora - Module Workflows & Feature Documentation</title>
+  <style>
+    :root {
+      --bg-base: #040e1e;
+      --bg-surface: #071526;
+      --bg-elevated: #0a1f38;
+      --bg-border: #1e3a5a;
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #475569;
+      --brand: #0ea5e9;
+      --brand-hover: #0284c7;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --info: #6366f1;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: var(--brand);
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+      border-bottom: 2px solid var(--brand);
+      padding-bottom: 1rem;
+    }
+
+    h2 {
+      color: var(--text-primary);
+      font-size: 1.75rem;
+      margin-top: 3rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--bg-border);
+    }
+
+    h3 {
+      color: var(--brand);
+      font-size: 1.25rem;
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+    }
+
+    h4 {
+      color: var(--text-secondary);
+      font-size: 1rem;
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    p {
+      margin-bottom: 1rem;
+      color: var(--text-secondary);
+    }
+
+    blockquote {
+      background: var(--bg-elevated);
+      border-left: 4px solid var(--brand);
+      padding: 1rem 1.5rem;
+      margin: 1rem 0;
+      border-radius: 0 8px 8px 0;
+      color: var(--text-secondary);
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--bg-border);
+      margin: 2rem 0;
+    }
+
+    ul, ol {
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+      color: var(--text-secondary);
+    }
+
+    li {
+      margin-bottom: 0.5rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border: 1px solid var(--bg-border);
+    }
+
+    th {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    td {
+      background: var(--bg-surface);
+      color: var(--text-secondary);
+    }
+
+    tr:hover td {
+      background: var(--bg-elevated);
+    }
+
+    code {
+      font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+      background: var(--bg-elevated);
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85em;
+      color: var(--brand);
+    }
+
+    pre {
+      background: var(--bg-elevated);
+      border: 1px solid var(--bg-border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+      font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      line-height: 1.4;
+      color: var(--text-secondary);
+    }
+
+    .toc {
+      background: var(--bg-surface);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      margin: 2rem 0;
+    }
+
+    .toc h2 {
+      margin-top: 0;
+      font-size: 1.25rem;
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .toc ol {
+      list-style-type: decimal;
+      padding-left: 1.25rem;
+    }
+
+    .toc a {
+      color: var(--brand);
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      text-decoration: underline;
+    }
+
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+    }
+
+    .card h3 {
+      margin-top: 0;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-critical { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+    .badge-high { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+    .badge-medium { background: rgba(14, 165, 233, 0.15); color: var(--brand); }
+    .badge-low { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+
+    .workflow-box {
+      background: var(--bg-elevated);
+      border: 1px solid var(--bg-border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 0.5rem 0;
+      font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    .workflow-box code {
+      background: transparent;
+      padding: 0;
+    }
+
+    .diagram {
+      background: var(--bg-surface);
+      border: 1px solid var(--bg-border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      overflow-x: auto;
+    }
+
+    .diagram pre {
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin: 0;
+      white-space: pre;
+      font-size: 0.75rem;
+      line-height: 1.3;
+    }
+
+    .phase-header {
+      background: linear-gradient(90deg, var(--brand), transparent);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin: 2rem 0 1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .feature-list {
+      background: var(--bg-surface);
+      border-left: 3px solid var(--brand);
+      padding: 1rem 1.5rem;
+      margin: 1rem 0;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .feature-list strong {
+      color: var(--text-primary);
+    }
+
+    .connections {
+      background: var(--bg-elevated);
+      border: 1px dashed var(--bg-border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1rem 0;
+    }
+
+    .connections strong {
+      color: var(--brand);
+    }
+
+    footer {
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--bg-border);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 1rem;
+      }
+
+      h1 {
+        font-size: 1.75rem;
+      }
+
+      h2 {
+        font-size: 1.5rem;
+      }
+
+      table {
+        font-size: 0.8rem;
+      }
+
+      th, td {
+        padding: 0.5rem;
+      }
+
+      pre {
+        font-size: 0.7rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Pharma Glimmora</h1>
+    <p style="font-size: 1.1rem; color: var(--text-secondary);">Module Workflows &amp; Feature Documentation</p>
+  </header>
+
+  <blockquote>
+    GxP/GMP Compliance Platform - Complete Module Reference
+  </blockquote>
+
+  <nav class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li><a href="#platform-overview">Platform Overview</a></li>
+      <li><a href="#module-summary">Module Summary</a></li>
+      <li><a href="#detailed-module-features">Detailed Module Features</a></li>
+      <li><a href="#inter-module-connections">Inter-Module Connections</a></li>
+      <li><a href="#critical-workflow-flows">Critical Workflow Flows</a></li>
+      <li><a href="#training-awareness-program-flow">Training &amp; Awareness Program Flow</a></li>
+      <li><a href="#data-flow-diagram">Data Flow Diagram</a></li>
+      <li><a href="#role-based-access-matrix">Role-Based Access Matrix</a></li>
+    </ol>
+  </nav>
+
+  <hr>
+
+  <section id="platform-overview">
+    <h2>Platform Overview</h2>
+    <p>Pharma Glimmora is a GxP/GMP inspection readiness and compliance management platform. It helps pharmaceutical, biotech, and medical device companies:</p>
+    <ul>
+      <li>Track regulatory gaps and findings</li>
+      <li>Manage corrective and preventive actions (CAPAs)</li>
+      <li>Handle FDA 483 observations and responses</li>
+      <li>Validate computer systems (CSV/CSA)</li>
+      <li>Prepare for regulatory inspections</li>
+      <li>Maintain 21 CFR Part 11 compliant audit trails</li>
+    </ul>
+  </section>
+
+  <hr>
+
+  <section id="module-summary">
+    <h2>Module Summary</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Purpose</th>
+          <th>Key Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Dashboard</strong></td>
+          <td>Executive overview of compliance status</td>
+          <td>KPIs, heatmap, trends</td>
+        </tr>
+        <tr>
+          <td><strong>Gap Assessment</strong></td>
+          <td>Identify and track regulatory gaps</td>
+          <td>Findings with severity, framework, evidence</td>
+        </tr>
+        <tr>
+          <td><strong>Deviation Management</strong></td>
+          <td>Track unplanned/planned deviations</td>
+          <td>Deviations with impact assessment, RCA</td>
+        </tr>
+        <tr>
+          <td><strong>CAPA Tracker</strong></td>
+          <td>Corrective &amp; Preventive Actions</td>
+          <td>CAPAs linked to sources, DI gate</td>
+        </tr>
+        <tr>
+          <td><strong>CSV/CSA Validation</strong></td>
+          <td>Computer system validation</td>
+          <td>Systems, validation stages, RTM</td>
+        </tr>
+        <tr>
+          <td><strong>FDA 483 &amp; Regulatory</strong></td>
+          <td>Inspection observations &amp; responses</td>
+          <td>Events, observations, commitments</td>
+        </tr>
+        <tr>
+          <td><strong>Evidence &amp; Documents</strong></td>
+          <td>Document library with compliance tags</td>
+          <td>SOPs, records, certificates</td>
+        </tr>
+        <tr>
+          <td><strong>Training &amp; Awareness</strong></td>
+          <td>Inspection prep, training, simulations</td>
+          <td>Cards, playbooks, training records</td>
+        </tr>
+        <tr>
+          <td><strong>Governance &amp; KPIs</strong></td>
+          <td>KPI scorecard, RAID log</td>
+          <td>Metrics, risks, actions, issues</td>
+        </tr>
+        <tr>
+          <td><strong>Audit Trail</strong></td>
+          <td>Immutable compliance log</td>
+          <td>All system actions (21 CFR 11)</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <hr>
+
+  <section id="detailed-module-features">
+    <h2>Detailed Module Features</h2>
+
+    <!-- Module 1: Dashboard -->
+    <div class="card">
+      <h3>1. Dashboard</h3>
+      <p><strong>Purpose:</strong> Real-time executive overview of compliance status across all sites.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>5 KPI cards (Readiness Score, Critical Findings, CAPA Overdue %, CSV High Risk, Training Compliance)</li>
+          <li>Multi-site compliance heatmap (color-coded by area)</li>
+          <li>6-month finding trend chart (by severity)</li>
+          <li>90-day action plan table</li>
+          <li>AGI insights panel (if enabled)</li>
+          <li>Site and date range filters</li>
+        </ul>
+      </div>
+
+      <p><strong>Data Sources:</strong> Aggregates from all other modules</p>
+    </div>
+
+    <!-- Module 2: Gap Assessment -->
+    <div class="card">
+      <h3>2. Gap Assessment</h3>
+      <p><strong>Purpose:</strong> Identify, document, and track regulatory compliance gaps.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>Create/edit findings with:
+            <ul>
+              <li>Regulatory framework (21 CFR 210/211, Part 11, EU GMP Annex 11, ICH Q9, GAMP 5)</li>
+              <li>Area (Manufacturing, QC Lab, Warehouse, Utilities, QMS, CSV/IT)</li>
+              <li>Severity (Critical, High, Low)</li>
+              <li>Owner assignment and target date</li>
+            </ul>
+          </li>
+          <li>Evidence linking (URL to documents)</li>
+          <li>Raise CAPA directly from finding</li>
+          <li>Summary view by area</li>
+          <li>Evidence index tab</li>
+        </ul>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Workflow:</strong><br>
+        <code>Create Finding &rarr; Assign Owner &rarr; Link Evidence &rarr; Raise CAPA (optional) &rarr; Close</code>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Status Progression:</strong><br>
+        <code>Open &rarr; In Progress &rarr; Pending Verification &rarr; Closed (or Risk Accepted)</code>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Creates CAPAs (source: "Gap Assessment")</li>
+          <li>Links to Evidence documents</li>
+          <li>Feeds Dashboard KPIs</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 3: Deviation Management -->
+    <div class="card">
+      <h3>3. Deviation Management</h3>
+      <p><strong>Purpose:</strong> Document and investigate unplanned/planned deviations from procedures.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>Deviation types: Planned, Unplanned</li>
+          <li>Categories: Equipment, Process, Material, Documentation, Environmental, Other</li>
+          <li>3-level impact assessment:
+            <ul>
+              <li>Patient Safety Impact</li>
+              <li>Product Quality Impact</li>
+              <li>Regulatory Impact</li>
+            </ul>
+          </li>
+          <li>Root Cause Analysis (5-Why, Fishbone, Fault Tree)</li>
+          <li>Immediate action logging</li>
+          <li>Batch tracking (affected batches)</li>
+          <li>Document upload</li>
+          <li>CAPA linkage</li>
+        </ul>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Workflow:</strong><br>
+        <code>Report Deviation &rarr; Immediate Action &rarr; RCA Investigation &rarr; Link CAPA &rarr; QA Review &rarr; Close</code>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Status Progression:</strong><br>
+        <code>Draft &rarr; Open &rarr; Under Investigation &rarr; Pending QA Review &rarr; Closed (or Rejected)</code>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Creates/links to CAPAs (source: "Deviation")</li>
+          <li>Feeds Governance KPIs</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 4: CAPA Tracker -->
+    <div class="card">
+      <h3>4. CAPA Tracker</h3>
+      <p><strong>Purpose:</strong> Manage Corrective and Preventive Actions from multiple sources.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>Multi-source CAPA creation:
+            <ul>
+              <li>Gap Assessment findings</li>
+              <li>Deviations</li>
+              <li>FDA 483 observations</li>
+              <li>Internal audits</li>
+              <li>Complaints</li>
+              <li>OOS (Out of Specification)</li>
+              <li>Change Control</li>
+            </ul>
+          </li>
+          <li>Root Cause Analysis with method selection</li>
+          <li>Corrective action planning</li>
+          <li>Effectiveness check tracking</li>
+          <li>Data Integrity (DI) Gate for high-risk CAPAs</li>
+          <li>Document management</li>
+          <li>GxP signatory Sign &amp; Close workflow</li>
+          <li>CAPA detail page with nested tabs</li>
+        </ul>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Workflow:</strong><br>
+        <code>Create CAPA &rarr; RCA &rarr; Corrective Actions &rarr; Evidence &rarr; QA Review &rarr; Sign &amp; Close</code>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Status Progression:</strong><br>
+        <code>Open &rarr; In Progress &rarr; Pending QA Review &rarr; Closed</code>
+      </div>
+
+      <div class="workflow-box">
+        <strong>DI Gate Flow (for high-risk systems):</strong><br>
+        <code>CAPA In Progress &rarr; DI Gate Review Required &rarr; DI Gate Cleared &rarr; QA Review &rarr; Sign &amp; Close</code>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Linked FROM: Gap Assessment, Deviation, FDA 483</li>
+          <li>Links TO: CSV/CSA systems (linkedSystemId)</li>
+          <li>Feeds Dashboard and Governance KPIs</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 5: CSV/CSA Validation -->
+    <div class="card">
+      <h3>5. CSV/CSA Validation</h3>
+      <p><strong>Purpose:</strong> Manage computer system validation lifecycle.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>System inventory (LIMS, ERP, CDS, SCADA, MES, CMMS, Custom)</li>
+          <li>GAMP 5 categorization (Cat 1-5)</li>
+          <li>Risk assessment (HIGH, MEDIUM, LOW)</li>
+          <li>7-stage validation lifecycle:
+            <ol>
+              <li>URS (User Requirements Specification)</li>
+              <li>FS (Functional Specification)</li>
+              <li>DS (Design Specification)</li>
+              <li>IQ (Installation Qualification)</li>
+              <li>OQ (Operational Qualification)</li>
+              <li>PQ (Performance Qualification)</li>
+              <li>RTR (Requirements Traceability Review)</li>
+            </ol>
+          </li>
+          <li>Compliance status per framework (Part 11, Annex 11, GAMP 5)</li>
+          <li>Validation roadmap (timeline view)</li>
+          <li>RTM (Requirements Traceability Matrix)</li>
+        </ul>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Workflow:</strong><br>
+        <code>Add System &rarr; Risk Assessment &rarr; URS &rarr; FS &rarr; DS &rarr; IQ &rarr; OQ &rarr; PQ &rarr; RTR &rarr; Validated</code>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Linked FROM: CAPAs (for system changes)</li>
+          <li>Feeds Dashboard (CSV High Risk KPI)</li>
+          <li>Feeds Governance (CSV Drift KPI)</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 6: FDA 483 & Regulatory -->
+    <div class="card">
+      <h3>6. FDA 483 &amp; Regulatory</h3>
+      <p><strong>Purpose:</strong> Manage regulatory inspection observations and responses.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>Event types: FDA 483, Warning Letter, EMA/MHRA/WHO Inspections</li>
+          <li>Observation tracking with:
+            <ul>
+              <li>Severity and area assignment</li>
+              <li>RCA per observation</li>
+              <li>CAPA linkage (multiple CAPAs per observation)</li>
+            </ul>
+          </li>
+          <li>Response drafting (manual or AGI-assisted)</li>
+          <li>Commitment tracking with due dates</li>
+          <li>Response document management</li>
+          <li>QA sign-off workflow</li>
+        </ul>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Workflow:</strong><br>
+        <code>Create Event &rarr; Add Observations &rarr; RCA per Obs &rarr; Link CAPAs &rarr; Draft Response &rarr; QA Sign-off &rarr; Submit</code>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Status Progression (Event):</strong><br>
+        <code>Open &rarr; Under Investigation &rarr; Response Due &rarr; Response Drafted &rarr; Pending QA Sign-off &rarr; Response Submitted &rarr; Closed</code>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Status Progression (Observation):</strong><br>
+        <code>Open &rarr; RCA In Progress &rarr; CAPA Linked &rarr; Response Ready &rarr; Response Drafted &rarr; Closed</code>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Creates/links CAPAs per observation</li>
+          <li>Links to Inspections in Training &amp; Awareness</li>
+          <li>Feeds Governance (Overdue Commitments, Repeat Observations)</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 7: Evidence & Documents -->
+    <div class="card">
+      <h3>7. Evidence &amp; Documents</h3>
+      <p><strong>Purpose:</strong> Central document library with compliance tagging.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>Document types: SOP, Record, Audit Trail, Validation, Report, Protocol, Certificate, Policy</li>
+          <li>Area categorization (Manufacturing, QC Lab, etc.)</li>
+          <li>Status tracking (Current, Draft, Superseded, Missing, Under Review)</li>
+          <li>Compliance tagging (Part 11, Annex 11, etc.)</li>
+          <li>Version control with effective/expiry dates</li>
+          <li>Document packs for inspection readiness</li>
+          <li>Grid and list view options</li>
+        </ul>
+      </div>
+
+      <div class="workflow-box">
+        <strong>Workflow:</strong><br>
+        <code>Add Document &rarr; Tag Compliance &rarr; Set Status &rarr; Create Pack (optional) &rarr; Export</code>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Referenced FROM: Gap Assessment (evidenceLink), CAPA, Deviation, FDA 483</li>
+          <li>Linked to specific findings, CAPAs, systems, events</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 8: Training & Awareness Program -->
+    <div class="card">
+      <h3>8. Training &amp; Awareness Program</h3>
+      <p><strong>Purpose:</strong> Prepare organization for regulatory inspections through training and simulations.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li><strong>Roadmap Tab:</strong> Kanban-style action cards
+            <ul>
+              <li>5 Lanes: People, Process, Data, Systems, Documentation</li>
+              <li>3 Buckets: Immediate, 31-60 days, 61-90 days</li>
+              <li>Action status tracking with due dates</li>
+            </ul>
+          </li>
+          <li><strong>Training Tab:</strong>
+            <ul>
+              <li>Training modules: GxP Fundamentals, Inspection Readiness, Front Room Protocol, Back Room Protocol, DIL Handling, Part 11 Compliance, CAPA Management, Data Integrity</li>
+              <li>User completion tracking with scores</li>
+            </ul>
+          </li>
+          <li><strong>Simulations Tab:</strong>
+            <ul>
+              <li>Mock inspection scheduling</li>
+              <li>Types: Front Room Q&amp;A, Back Room Document Review, SME Q&amp;A, DIL Handling</li>
+              <li>Score tracking per simulation</li>
+            </ul>
+          </li>
+          <li><strong>Playbooks Tab:</strong>
+            <ul>
+              <li>Front Room playbook (steps for inspector interactions)</li>
+              <li>Back Room playbook (document retrieval procedures)</li>
+              <li>SME playbook (subject matter expert guidance)</li>
+              <li>DIL Handling playbook (document/information list management)</li>
+            </ul>
+          </li>
+          <li><strong>Governance Tab:</strong>
+            <ul>
+              <li>Inspection scoring</li>
+              <li>RACI matrix</li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Links to FDA 483 events (when actual inspection occurs)</li>
+          <li>Feeds Dashboard (Readiness Score)</li>
+          <li>Feeds Governance KPIs</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 9: Governance & KPIs -->
+    <div class="card">
+      <h3>9. Governance &amp; KPIs</h3>
+      <p><strong>Purpose:</strong> Executive compliance metrics and risk management.</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li><strong>KPI Scorecard:</strong>
+            <ul>
+              <li>CAPA Timeliness (% closed on time)</li>
+              <li>DI Gate Exceptions (high-risk CAPAs pending)</li>
+              <li>CSV Drift (systems with validation issues)</li>
+              <li>Overdue Commitments (FDA 483)</li>
+              <li>Repeat Observations</li>
+              <li>Audit Trail Coverage</li>
+            </ul>
+          </li>
+          <li><strong>RAID Log:</strong>
+            <ul>
+              <li>Risks, Actions, Issues, Decisions</li>
+              <li>Priority levels (Critical, High, Medium, Low)</li>
+              <li>Owner assignment and due dates</li>
+              <li>Resolution tracking</li>
+            </ul>
+          </li>
+          <li><strong>Reports Tab:</strong>
+            <ul>
+              <li>Monthly Quality KPI Report</li>
+              <li>RAID Log Export</li>
+              <li>Training &amp; Awareness Pack</li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Reads from ALL modules to calculate KPIs</li>
+          <li>RAID items can be escalated from any module</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Module 10: Audit Trail -->
+    <div class="card">
+      <h3>10. Audit Trail</h3>
+      <p><strong>Purpose:</strong> Immutable log of all compliance-related actions (21 CFR Part 11).</p>
+
+      <div class="feature-list">
+        <strong>Features:</strong>
+        <ul>
+          <li>Records every create, update, delete action</li>
+          <li>Captures: timestamp (server-side), user, role, module, action, old/new values</li>
+          <li>Filter by module, action type, user, date range</li>
+          <li>Export to CSV</li>
+          <li>Color-coded by action type (Critical, Status Change, Create)</li>
+        </ul>
+      </div>
+
+      <p><strong>Immutability:</strong> No edit or delete capability (compliance requirement)</p>
+
+      <div class="connections">
+        <strong>Connections:</strong>
+        <ul>
+          <li>Receives logs from ALL modules via <code>auditLog()</code> utility</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <section id="inter-module-connections">
+    <h2>Inter-Module Connections</h2>
+
+    <h3>Data Flow Summary</h3>
+    <div class="diagram">
+<pre>
+┌─────────────────────────────────────────────────────────────────────┐
+│                         DASHBOARD                                    │
+│            (Aggregates KPIs from all modules)                       │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌───────────────┐      ┌───────────────┐      ┌───────────────┐
+│ Gap Assessment│      │     CAPA      │      │   FDA 483     │
+│   (Findings)  │─────▶│   (Actions)   │◀─────│(Observations) │
+└───────────────┘      └───────────────┘      └───────────────┘
+        │                       │                       │
+        │               ┌───────┴───────┐               │
+        │               │               │               │
+        ▼               ▼               ▼               ▼
+┌───────────────┐ ┌───────────┐ ┌───────────┐ ┌───────────────┐
+│   Deviation   │ │  CSV/CSA  │ │ Evidence  │ │   Training    │
+│    (RCA)      │ │ (Systems) │ │  (Docs)   │ │  & Awareness  │
+└───────────────┘ └───────────┘ └───────────┘ └───────────────┘
+        │               │               │               │
+        └───────────────┴───────────────┴───────────────┘
+                                │
+                    ┌───────────┴───────────┐
+                    │                       │
+                    ▼                       ▼
+            ┌───────────────┐      ┌───────────────┐
+            │  Governance   │      │  Audit Trail  │
+            │  (KPIs/RAID)  │      │  (Immutable)  │
+            └───────────────┘      └───────────────┘
+</pre>
+    </div>
+
+    <h3>Key Linkages</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>From</th>
+          <th>To</th>
+          <th>Link Type</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Gap Assessment</td>
+          <td>CAPA</td>
+          <td>Creates</td>
+          <td>Raise CAPA from finding</td>
+        </tr>
+        <tr>
+          <td>Deviation</td>
+          <td>CAPA</td>
+          <td>Creates/Links</td>
+          <td>CAPA for deviation correction</td>
+        </tr>
+        <tr>
+          <td>FDA 483 Observation</td>
+          <td>CAPA</td>
+          <td>Links</td>
+          <td>CAPA for observation response</td>
+        </tr>
+        <tr>
+          <td>CAPA</td>
+          <td>CSV/CSA System</td>
+          <td>Links</td>
+          <td>System change tracking</td>
+        </tr>
+        <tr>
+          <td>All Modules</td>
+          <td>Evidence</td>
+          <td>Links</td>
+          <td>Evidence trail</td>
+        </tr>
+        <tr>
+          <td>Training &amp; Awareness</td>
+          <td>FDA 483</td>
+          <td>Links</td>
+          <td>Actual inspection link</td>
+        </tr>
+        <tr>
+          <td>All Modules</td>
+          <td>Audit Trail</td>
+          <td>Logs</td>
+          <td>Compliance record</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <hr>
+
+  <section id="critical-workflow-flows">
+    <h2>Critical Workflow Flows</h2>
+
+    <h3>Flow 1: Finding &rarr; CAPA &rarr; Closure</h3>
+    <div class="diagram">
+<pre>
+┌─────────────────┐
+│ GAP ASSESSMENT  │
+│ Create Finding  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Assign Owner &  │
+│ Set Target Date │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Link Evidence   │
+│ (Document URL)  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│ Raise CAPA      │────▶│  CAPA TRACKER   │
+│ (Optional)      │     │  Create CAPA    │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ Root Cause      │
+         │              │ Analysis (RCA)  │
+         │              └────────┬────────┘
+         │                       │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ Corrective      │
+         │              │ Actions         │
+         │              └────────┬────────┘
+         │                       │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ Effectiveness   │
+         │              │ Check           │
+         │              └────────┬────────┘
+         │                       │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ QA Review       │
+         │              └────────┬────────┘
+         │                       │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ Sign & Close    │
+         │              │ (GxP Signatory) │
+         │              └────────┬────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│ Update Finding  │     │ CAPA Closed     │
+│ Status: Closed  │     │                 │
+└─────────────────┘     └─────────────────┘
+</pre>
+    </div>
+
+    <h3>Flow 2: FDA 483 Response</h3>
+    <div class="diagram">
+<pre>
+┌─────────────────┐
+│   FDA 483       │
+│ Create Event    │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Add Observations│
+│ (1, 2, 3...)    │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ RCA per         │
+│ Observation     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│ Create/Link     │────▶│  CAPA TRACKER   │
+│ CAPA(s)         │     │  (Complete)     │
+└────────┬────────┘     └─────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Draft Response  │
+│ (Manual or AGI) │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Add Commitments │
+│ (Due dates)     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ QA Sign-off     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Submit Response │
+│ (Immutable)     │
+└─────────────────┘
+</pre>
+    </div>
+
+    <h3>Flow 3: Deviation &rarr; CAPA &rarr; DI Gate</h3>
+    <div class="diagram">
+<pre>
+┌─────────────────┐
+│   DEVIATION     │
+│ Report Incident │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Immediate       │
+│ Action          │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Impact          │
+│ Assessment      │
+│ (3 levels)      │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ RCA             │
+│ (5-Why/Fishbone)│
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│ Create CAPA     │────▶│  CAPA TRACKER   │
+│ (Link)          │     └────────┬────────┘
+└────────┬────────┘              │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ High Risk?      │
+         │              │ DI Gate = Yes   │
+         │              └────────┬────────┘
+         │                       │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ DI Gate Review  │
+         │              │ Required        │
+         │              └────────┬────────┘
+         │                       │
+         │                       ▼
+         │              ┌─────────────────┐
+         │              │ DI Gate Cleared │
+         │              │ (Sign-off)      │
+         │              └────────┬────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│ QA Review       │     │ Sign & Close    │
+│ Deviation       │     │ CAPA            │
+└────────┬────────┘     └─────────────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Close Deviation │
+└─────────────────┘
+</pre>
+    </div>
+  </section>
+
+  <hr>
+
+  <section id="training-awareness-program-flow">
+    <h2>Training &amp; Awareness Program Flow</h2>
+
+    <h3>Complete Inspection Preparation Workflow</h3>
+
+    <div class="phase-header">PHASE 1: PLANNING (90+ days before inspection)</div>
+    <div class="diagram">
+<pre>
+┌─────────────────┐
+│ Create          │
+│ Inspection      │
+│ (Agency, Type)  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Set Expected    │
+│ Inspection Date │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Create Roadmap  │
+│ Cards           │
+└────────┬────────┘
+         │
+    ┌────┴────┬────────┬────────┬────────┐
+    │         │        │        │        │
+    ▼         ▼        ▼        ▼        ▼
+┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐
+│PEOPLE │ │PROCESS│ │ DATA  │ │SYSTEMS│ │ DOCS  │
+│ Lane  │ │ Lane  │ │ Lane  │ │ Lane  │ │ Lane  │
+└───────┘ └───────┘ └───────┘ └───────┘ └───────┘
+    │         │        │        │        │
+    └─────────┴────────┴────────┴────────┘
+                       │
+                       ▼
+         ┌─────────────────────────┐
+         │ Assign Cards to Buckets │
+         │ • Immediate             │
+         │ • 31-60 days            │
+         │ • 61-90 days            │
+         └─────────────────────────┘
+</pre>
+    </div>
+
+    <div class="phase-header">PHASE 2: TRAINING (60-30 days before inspection)</div>
+    <div class="card">
+      <h4>Training Modules</h4>
+      <table>
+        <tr>
+          <td>GxP Fundamentals</td>
+          <td>Inspection Readiness</td>
+          <td>Front Room Protocol</td>
+        </tr>
+        <tr>
+          <td>Back Room Protocol</td>
+          <td>DIL Handling</td>
+          <td>Part 11 Compliance</td>
+        </tr>
+        <tr>
+          <td>CAPA Management</td>
+          <td>Data Integrity</td>
+          <td></td>
+        </tr>
+      </table>
+      <div class="workflow-box">
+        <strong>Track Completion:</strong> User ID &bull; Module &bull; Score (optional) &bull; Completion Date
+      </div>
+    </div>
+
+    <div class="phase-header">PHASE 3: SIMULATIONS (30-7 days before inspection)</div>
+    <div class="card">
+      <h4>Mock Inspections - Simulation Types</h4>
+      <table>
+        <tr>
+          <td>Front Room Q&amp;A</td>
+          <td>Back Room Document Review</td>
+        </tr>
+        <tr>
+          <td>SME Q&amp;A Practice</td>
+          <td>DIL Handling Practice</td>
+        </tr>
+      </table>
+      <div class="workflow-box">
+        <strong>Schedule Simulation:</strong> Type &bull; Date/Time &bull; Duration &bull; Participants<br>
+        <strong>Run Simulation:</strong> Status: In Progress<br>
+        <strong>Complete &amp; Score:</strong> Score: 0-100% &bull; Notes &bull; Improvement Areas
+      </div>
+    </div>
+
+    <div class="phase-header">PHASE 4: PLAYBOOKS (Reference during inspection)</div>
+    <div class="card">
+      <h4>Front Room Playbook</h4>
+      <ul>
+        <li>Greeting inspector protocol</li>
+        <li>Conference room setup</li>
+        <li>SME introduction procedures</li>
+        <li>Question handling guidelines</li>
+        <li><strong style="color: var(--success);">DO:</strong> Provide accurate, concise answers</li>
+        <li><strong style="color: var(--danger);">DON'T:</strong> Volunteer extra information</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4>Back Room Playbook</h4>
+      <ul>
+        <li>Document retrieval SOP</li>
+        <li>Printer/scanner setup</li>
+        <li>Document tracking log</li>
+        <li>Communication with front room</li>
+        <li><strong style="color: var(--success);">DO:</strong> Log all documents requested</li>
+        <li><strong style="color: var(--danger);">DON'T:</strong> Send unreviewed documents</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4>SME Playbook</h4>
+      <ul>
+        <li>Preparation checklist</li>
+        <li>Common question areas</li>
+        <li>Escalation procedures</li>
+        <li><strong style="color: var(--success);">DO:</strong> Answer only what is asked</li>
+        <li><strong style="color: var(--danger);">DON'T:</strong> Speculate or guess</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h4>DIL Handling Playbook</h4>
+      <ul>
+        <li>Document/Information List management</li>
+        <li>Request logging</li>
+        <li>Response time tracking</li>
+        <li><strong style="color: var(--success);">DO:</strong> Track every request with timestamp</li>
+        <li><strong style="color: var(--danger);">DON'T:</strong> Delay responses without notification</li>
+      </ul>
+    </div>
+
+    <div class="phase-header">PHASE 5: ACTUAL INSPECTION</div>
+    <div class="diagram">
+<pre>
+┌─────────────────┐
+│ Day Start       │
+│ • Opening meeting│
+│ • Inspector intro│
+│ • Agenda review  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ During          │
+│ • Front room Q&A│
+│ • Back room docs│
+│ • DIL tracking  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Midday          │
+│ • Progress check│
+│ • Team huddle   │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Day End         │
+│ • Daily debrief │
+│ • Action items  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Evening         │
+│ • Team review   │
+│ • Next day prep │
+└─────────────────┘
+</pre>
+    </div>
+
+    <div class="phase-header">PHASE 6: POST-INSPECTION</div>
+    <div class="diagram">
+<pre>
+┌─────────────────┐
+│ Complete        │
+│ Inspection      │
+│ (Outcome)       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐
+│ FDA 483 Issued? │────▶│ Link to FDA 483 │
+│                 │ Yes │ Event           │
+└────────┬────────┘     └─────────────────┘
+         │ No
+         ▼
+┌─────────────────┐
+│ Update Readiness│
+│ Score           │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Archive         │
+│ Inspection      │
+│ Records         │
+└─────────────────┘
+</pre>
+    </div>
+
+    <h3>Readiness Score Calculation</h3>
+    <div class="card">
+<pre style="background: transparent; border: none; padding: 0; color: var(--text-secondary);">
+Score = (Completed Actions / Total Actions) × 100
+
+Weighting:
+• Completed on time: 1.0 points
+• Completed overdue: 0.5 points
+• Not completed: 0 points
+
+Example:
+• 18 actions completed on time (18 × 1.0 = 18)
+• 2 actions completed late (2 × 0.5 = 1)
+• Total cards: 20
+
+Score = (18 + 1) / 20 × 100 = <strong style="color: var(--success);">95%</strong>
+</pre>
+    </div>
+  </section>
+
+  <hr>
+
+  <section id="data-flow-diagram">
+    <h2>Data Flow Diagram</h2>
+    <div class="diagram">
+<pre>
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           USER ACTIONS                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        FRONTEND MODULES (React)                               │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │
+│  │Dashboard│ │Gap Asmt │ │Deviation│ │  CAPA   │ │ CSV/CSA │ │ FDA 483 │   │
+│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘   │
+│       │          │          │          │          │          │             │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                          │
+│  │Evidence │ │Training │ │Governanc│ │Audit Trl│                          │
+│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘                          │
+└───────┼──────────┼──────────┼──────────┼────────────────────────────────────┘
+        │          │          │          │
+        └──────────┴──────────┴──────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                      REDUX STORE (State Management)                           │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │
+│  │  findings   │ │    capa     │ │  deviation  │ │   systems   │           │
+│  │    slice    │ │    slice    │ │    slice    │ │    slice    │           │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │
+│  │   fda483    │ │  evidence   │ │  readiness  │ │    raid     │           │
+│  │    slice    │ │    slice    │ │    slice    │ │    slice    │           │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                           │
+│  │ auditTrail  │ │    auth     │ │  settings   │                           │
+│  │    slice    │ │    slice    │ │    slice    │                           │
+│  └─────────────┘ └─────────────┘ └─────────────┘                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                      API ROUTES (Next.js /api)                                │
+│  /api/findings  /api/capas  /api/deviations  /api/systems  /api/fda483      │
+│  /api/documents  /api/raid  /api/users  /api/sites  /api/auth               │
+└──────────────────────────────────────────────────────────────────────────────┘
+                        │
+                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                      DATABASE (Prisma + SQLite)                               │
+│  Finding | CAPA | Deviation | GxPSystem | FDA483Event | Document | RAIDItem │
+│  User | Site | Tenant | Subscription | AuditLog                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+</pre>
+    </div>
+  </section>
+
+  <hr>
+
+  <section id="role-based-access-matrix">
+    <h2>Role-Based Access Matrix</h2>
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Module</th>
+            <th>super_admin</th>
+            <th>customer_admin</th>
+            <th>qa_head</th>
+            <th>qc_lab_director</th>
+            <th>regulatory_affairs</th>
+            <th>csv_val_lead</th>
+            <th>it_cdo</th>
+            <th>operations_head</th>
+            <th>viewer</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Dashboard</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+          </tr>
+          <tr>
+            <td>Gap Assessment</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>Deviation</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>CAPA</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>CSV/CSA</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>FDA 483</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>Evidence</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>Training &amp; Awareness</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>Governance</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+          </tr>
+          <tr>
+            <td>Audit Trail</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+          <tr>
+            <td>Settings</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--success);">&#10003;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+            <td style="color: var(--text-muted);">&mdash;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr>
+
+  <section>
+    <h2>Compliance Requirements by Module</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Key Compliance Requirements</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Gap Assessment</strong></td>
+          <td>Evidence linking, framework compliance tracking</td>
+        </tr>
+        <tr>
+          <td><strong>Deviation</strong></td>
+          <td>3-level impact assessment, immediate action documentation</td>
+        </tr>
+        <tr>
+          <td><strong>CAPA</strong></td>
+          <td>GxP signatory e-signature, DI gate approval, immutable closure</td>
+        </tr>
+        <tr>
+          <td><strong>CSV/CSA</strong></td>
+          <td>Validation stage workflow, Part 11/Annex 11 compliance</td>
+        </tr>
+        <tr>
+          <td><strong>FDA 483</strong></td>
+          <td>Response deadline enforcement, observation-CAPA linkage</td>
+        </tr>
+        <tr>
+          <td><strong>Evidence</strong></td>
+          <td>Version control, compliance tagging, retention tracking</td>
+        </tr>
+        <tr>
+          <td><strong>Training &amp; Awareness</strong></td>
+          <td>Training record immutability, simulation documentation</td>
+        </tr>
+        <tr>
+          <td><strong>Governance</strong></td>
+          <td>KPI accuracy, RAID traceability</td>
+        </tr>
+        <tr>
+          <td><strong>Audit Trail</strong></td>
+          <td>Server-side timestamps, immutable entries (21 CFR Part 11)</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    <p><em>Document generated for Pharma Glimmora Platform</em></p>
+    <p><em>Version: 2.0</em></p>
+  </footer>
+</body>
+</html>
