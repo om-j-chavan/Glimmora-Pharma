@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const user = session?.user as { tenantId?: string } | undefined;
@@ -84,12 +84,13 @@ export async function POST(request: NextRequest) {
         siteId: body.siteId || null,
         findingId: body.findingId || null,
         source: body.source,
+        title: body.title || body.description?.substring(0, 120) || "Untitled CAPA",
         description: body.description,
         risk: body.risk,
         owner: body.owner,
         dueDate: body.dueDate ? new Date(body.dueDate) : null,
-        status: body.status || "Open",
-        createdBy: session.user.name || session.user.email || "System",
+        status: body.status || "open",
+        createdBy: session?.user?.name || session?.user?.email || "System",
       },
       include: { documents: true },
     });

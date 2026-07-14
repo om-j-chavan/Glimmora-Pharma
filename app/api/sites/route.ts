@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const user = session?.user as { tenantId?: string } | undefined;
@@ -21,9 +21,9 @@ export async function GET(request: NextRequest) {
       id: s.id,
       tenantId: s.tenantId,
       name: s.name,
+      code: s.code ?? "",
       location: s.location ?? "",
       gmpScope: s.gmpScope ?? "",
-      risk: s.risk as "HIGH" | "MEDIUM" | "LOW",
       status: s.isActive ? "Active" : "Inactive",
       createdAt: s.createdAt.toISOString(),
     }));
@@ -49,9 +49,9 @@ export async function POST(request: NextRequest) {
       data: {
         tenantId: user.tenantId,
         name: body.name,
+        code: body.code || null,
         location: body.location || null,
         gmpScope: body.gmpScope || null,
-        risk: body.risk || "MEDIUM",
         isActive: true,
       },
     });

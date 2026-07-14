@@ -13,11 +13,25 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
-// Initialize Razorpay instance
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID!,
-  key_secret: process.env.RAZORPAY_KEY_SECRET!,
-});
+// Lazy-initialized Razorpay instance
+let _razorpay: Razorpay | null = null;
+
+function getRazorpay(): Razorpay {
+  if (!_razorpay) {
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!keyId || !keySecret) {
+      throw new Error("Razorpay credentials not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables.");
+    }
+
+    _razorpay = new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret,
+    });
+  }
+  return _razorpay;
+}
 
 export interface CreateOrderParams {
   amount: number; // Amount in smallest currency unit (paise for INR)
@@ -74,7 +88,7 @@ export interface RazorpayPayment {
  * @returns Created order object
  */
 export async function createOrder(params: CreateOrderParams): Promise<RazorpayOrder> {
-  const order = await razorpay.orders.create({
+  const order = await getRazorpay().orders.create({
     amount: params.amount,
     currency: params.currency ?? "INR",
     receipt: params.receipt,
@@ -95,10 +109,15 @@ export async function createOrder(params: CreateOrderParams): Promise<RazorpayOr
  */
 export function verifyPaymentSignature(params: VerifyPaymentParams): boolean {
   const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = params;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!keySecret) {
+    throw new Error("RAZORPAY_KEY_SECRET not configured");
+  }
 
   const body = `${razorpayOrderId}|${razorpayPaymentId}`;
   const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+    .createHmac("sha256", keySecret)
     .update(body)
     .digest("hex");
 
@@ -118,8 +137,14 @@ export function verifyPaymentSignature(params: VerifyPaymentParams): boolean {
  * @returns true if signature is valid
  */
 export function verifyWebhookSignature(body: string, signature: string): boolean {
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    throw new Error("RAZORPAY_WEBHOOK_SECRET not configured");
+  }
+
   const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET!)
+    .createHmac("sha256", webhookSecret)
     .update(body)
     .digest("hex");
 
@@ -140,7 +165,7 @@ export function verifyWebhookSignature(body: string, signature: string): boolean
  * @returns Payment details
  */
 export async function fetchPayment(paymentId: string): Promise<RazorpayPayment> {
-  const payment = await razorpay.payments.fetch(paymentId);
+  const payment = await getRazorpay().payments.fetch(paymentId);
   return payment as RazorpayPayment;
 }
 
@@ -151,7 +176,7 @@ export async function fetchPayment(paymentId: string): Promise<RazorpayPayment> 
  * @returns Order details
  */
 export async function fetchOrder(orderId: string): Promise<RazorpayOrder> {
-  const order = await razorpay.orders.fetch(orderId);
+  const order = await getRazorpay().orders.fetch(orderId);
   return order as RazorpayOrder;
 }
 
@@ -168,7 +193,7 @@ export async function capturePayment(
   amount: number,
   currency: string = "INR"
 ): Promise<RazorpayPayment> {
-  const payment = await razorpay.payments.capture(paymentId, amount, currency);
+  const payment = await getRazorpay().payments.capture(paymentId, amount, currency);
   return payment as RazorpayPayment;
 }
 
@@ -177,7 +202,19 @@ export async function capturePayment(
  * This is safe to expose to the client.
  */
 export function getPublicKey(): string {
-  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? process.env.RAZORPAY_KEY_ID!;
+  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? process.env.RAZORPAY_KEY_ID ?? "";
 }
 
-export { razorpay };
+/**
+ * Check if Razorpay is configured.
+ */
+export function isConfigured(): boolean {
+  return !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+}
+
+// Export getter for the razorpay instance (lazy-loaded)
+export const razorpay = {
+  get instance() {
+    return getRazorpay();
+  }
+};
