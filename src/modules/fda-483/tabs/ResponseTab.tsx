@@ -180,7 +180,7 @@ export function ResponseTab({
       {isSubmitted && (
         <div
           className={clsx(
-            "rounded-xl p-5 mb-4 border",
+            "rounded-2xl p-5 mb-4 border",
             isDark ? "bg-[rgba(16,185,129,0.08)] border-[rgba(16,185,129,0.3)]" : "bg-[#f0fdf4] border-[#a7f3d0]",
           )}
           role="status"

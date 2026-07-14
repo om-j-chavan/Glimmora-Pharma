@@ -81,7 +81,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
 
       <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
       {/* AI Usage Policy banner */}
-      <div className={clsx("rounded-xl border p-5", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.2)]" : "bg-[#eef2ff] border-[#c7d2fe]")}>
+      <div className={clsx("rounded-2xl border p-5", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.2)]" : "bg-[#eef2ff] border-[#c7d2fe]")}>
         <div className="flex items-start gap-3">
           <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5 text-[#6366f1]" aria-hidden="true" />
           <div className="flex-1 space-y-3">
@@ -114,20 +114,20 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
 
       {/* Stat cards */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl p-5">
+        <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl p-5">
           <p className="text-[11px] font-medium text-(--card-muted) mb-2">Operating Mode</p>
           <p className={`text-2xl font-bold capitalize ${modeColor[computedMode]}`}>
             {computedMode}
           </p>
           <p className="text-[10px] text-(--text-muted) mt-1">Auto-calculated from agent toggles</p>
         </div>
-        <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl p-5">
+        <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl p-5">
           <p className="text-[11px] font-medium text-(--card-muted) mb-2">Confidence Threshold</p>
           <p className="text-2xl font-bold text-(--text-primary)">
             {agi.confidence}%
           </p>
         </div>
-        <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl p-5">
+        <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl p-5">
           <p className="text-[11px] font-medium text-(--card-muted) mb-2">Active Agents</p>
           <p className="text-2xl font-bold text-(--success)">
             {activeAgentCount} / 7
@@ -136,7 +136,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
       </div>
 
       {/* Mode + Confidence card */}
-      <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
+      <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden">
         <div className="flex items-center gap-2 px-5 py-4 border-b border-(--bg-border)">
           <Settings className="w-4 h-4 text-(--brand)" aria-hidden="true" />
           <span className="text-[13px] font-semibold text-(--text-primary)">AGI operating mode</span>
@@ -201,7 +201,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
       </div>
 
       {/* Agents card */}
-      <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
+      <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-(--brand)" aria-hidden="true" />

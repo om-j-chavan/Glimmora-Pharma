@@ -27,7 +27,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "/fda-483": "Inspections & Regulatory",
   "/evidence": "Evidence & Documents",
   "/governance": "Governance & KPIs",
-  "/readiness": "Inspection Readiness",
+  "/readiness": "Training & Awareness",
   "/audit-trail": "Audit Trail",
   "/agi-console": "AGI Console",
   "/ai-policy": "AI Usage Policy",

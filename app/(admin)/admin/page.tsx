@@ -3,7 +3,10 @@ import { requireRoleOrDeny } from "@/lib/authz";
 import { getTenants } from "@/lib/queries/tenants";
 import { CustomerAccountsPage } from "@/modules/admin/customer-accounts";
 
-const ALLOWED_ROLES = new Set(["super_admin", "customer_admin"]);
+// H1 fix — the cross-tenant Customer Accounts list is super_admin ONLY.
+// customer_admin manages its own tenant via /settings and is redirected to the
+// dashboard if it lands here (proxy.ts enforces the same at the edge).
+const ALLOWED_ROLES = new Set(["super_admin"]);
 
 export default async function Page() {
   const session = await requireAuth();
@@ -12,6 +15,7 @@ export default async function Page() {
     module: "admin",
     recordId: "admin-index",
     recordTitle: "/admin",
+    redirectTo: "/",
     extra: { path: "/admin" },
   });
 

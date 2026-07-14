@@ -500,7 +500,7 @@ export function GapRegisterTab({
         {/* 3 — Table card (its Phase-2 row-stagger runs inside once it reveals). */}
         <MotionListItem>
       {/* Table — wrapped in the shared table card (tableTokens.tableCard: the
-          same border + --card-bg + rounded-xl the Support Center queue gets from
+          same border + --card-bg + rounded-2xl the Support Center queue gets from
           the DataTable widget). The toolbar above stays OUTSIDE the card. The
           card's overflow-hidden rounds the corners; the inner overflow-x-auto
           keeps horizontal scrolling, and the empty state renders inside too. */}

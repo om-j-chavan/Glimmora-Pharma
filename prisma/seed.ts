@@ -30,6 +30,95 @@ async function main() {
   const superAdminHash = await bcrypt.hash("1", BCRYPT_COST);
   const demoHash = await bcrypt.hash("Admin@123", BCRYPT_COST);
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // SUBSCRIPTION PLANS (Razorpay)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const starterPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "starter" },
+    update: {},
+    create: {
+      id: "plan-starter",
+      name: "starter",
+      displayName: "Starter",
+      description: "Perfect for small teams getting started with GxP compliance",
+      priceMonthly: 999900,
+      priceYearly: 9999900,
+      currency: "INR",
+      maxAccounts: 5,
+      maxSites: 1,
+      features: JSON.stringify([
+        "Gap Assessment",
+        "CAPA Management",
+        "Document Control",
+        "Audit Trail",
+        "Email Support",
+      ]),
+      trialDays: 14,
+      isActive: true,
+      isPopular: false,
+      sortOrder: 1,
+    },
+  });
+
+  const professionalPlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "professional" },
+    update: {},
+    create: {
+      id: "plan-professional",
+      name: "professional",
+      displayName: "Professional",
+      description: "For growing organizations with multiple sites",
+      priceMonthly: 2499900,
+      priceYearly: 24999900,
+      currency: "INR",
+      maxAccounts: 15,
+      maxSites: 3,
+      features: JSON.stringify([
+        "Everything in Starter",
+        "FDA 483 Response Management",
+        "CSV/CSA Module",
+        "Inspection Readiness",
+        "Governance Dashboard",
+        "Priority Support",
+      ]),
+      trialDays: 14,
+      isActive: true,
+      isPopular: true,
+      sortOrder: 2,
+    },
+  });
+
+  const enterprisePlan = await prisma.subscriptionPlan.upsert({
+    where: { name: "enterprise" },
+    update: {},
+    create: {
+      id: "plan-enterprise",
+      name: "enterprise",
+      displayName: "Enterprise",
+      description: "Full platform access for large pharma organizations",
+      priceMonthly: 4999900,
+      priceYearly: 49999900,
+      currency: "INR",
+      maxAccounts: 50,
+      maxSites: 10,
+      features: JSON.stringify([
+        "Everything in Professional",
+        "AGI Console",
+        "Custom Integrations",
+        "Dedicated Account Manager",
+        "24/7 Phone Support",
+        "On-site Training",
+      ]),
+      trialDays: 30,
+      isActive: true,
+      isPopular: false,
+      sortOrder: 3,
+    },
+  });
+
+  console.log("  Subscription Plans: Starter, Professional, Enterprise");
+
   // ── Super Admin tenant ──
   const superAdmin = await prisma.tenant.upsert({
     where: { email: "superadmin@glimmora.com" },
@@ -80,6 +169,28 @@ async function main() {
       expiryDate: new Date("2026-12-31"),
     },
   });
+  console.log("  Plan created (PROFESSIONAL tier)");
+
+  // ── Subscription (Razorpay payment tracking) ──
+  await prisma.subscription.upsert({
+    where: { tenantId: demo.id },
+    update: {},
+    create: {
+      tenantId: demo.id,
+      planId: professionalPlan.id,
+      maxAccounts: 15,
+      startDate: new Date("2026-01-01"),
+      expiryDate: new Date("2026-12-31"),
+      status: "Active",
+      contractStartDate: new Date("2026-01-01"),
+      contractEndDate: new Date("2026-12-31"),
+      currentPeriodStart: new Date("2026-01-01"),
+      currentPeriodEnd: new Date("2026-12-31"),
+      currentYear: 1,
+      gracePeriodDays: 7,
+    },
+  });
+  console.log("  Subscription created (Professional Plan)");
 
   // ── Additional tenants: one per remaining tier so smoke tests can exercise
   // all four plans. Each gets a customer_admin (the tenant row itself), a

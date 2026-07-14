@@ -32,11 +32,12 @@ const AUDIT_MODULE = "CAPA / Discussion";
  *  immutable once the CAPA reaches a terminal state. */
 const TERMINAL_CAPA_STATUSES: ReadonlySet<string> = new Set(["closed", "rejected"]);
 
+// SME Pass 2 — resolving/reopening a discussion concern is a quality action, so
+// the admin identities are excluded (customer_admin is view-only on quality;
+// super_admin is platform-only).
 const RESOLVE_PERMITTED_ROLES: ReadonlySet<string> = new Set([
   "qa_head",
   "regulatory_affairs",
-  "customer_admin",
-  "super_admin",
 ]);
 
 // â”€â”€ Schemas â”€â”€

@@ -471,7 +471,10 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const toast = useToast();
   const { allSites } = useTenantConfig();
   const { isSuperAdmin, isCustomerAdmin } = useRole();
-  const visibleUsers = users.filter((u) => u.role !== "super_admin" && u.role !== "customer_admin");
+  // Show every tenant user — including other customer_admins — so a customer_admin
+  // can manage its whole tenant. Only super_admin (a platform identity, not a
+  // tenant user) is excluded, so its deactivate/edit/delete affordances never render.
+  const visibleUsers = users.filter((u) => u.role !== "super_admin");
   const { isAtLimit, getCount, getLimit, tenantPlan } =
     usePlanLimits();
 
@@ -838,7 +841,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       {/* Subscription badge */}
       <div
         className={clsx(
-          "flex items-center justify-between p-3 rounded-xl border",
+          "flex items-center justify-between p-3 rounded-2xl border",
           isExpired
             ? "bg-(--danger-bg) border-(--danger)"
             : isNearExpiry
@@ -948,7 +951,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         <div
           role="alert"
           className={clsx(
-            "rounded-xl p-3 border",
+            "rounded-2xl p-3 border",
             "bg-(--danger-bg) border-(--danger)",
           )}
         >
@@ -977,7 +980,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       /> */}
 
       {/* Table card */}
-      <div className="bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden">
+      <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden">
         <DataTable<TenantUserConfig>
           variant="table-fixed"
           ariaLabel="Configured platform users"

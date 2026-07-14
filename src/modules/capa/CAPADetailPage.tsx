@@ -120,7 +120,9 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
     if (el) { el.open = true; el.scrollIntoView({ behavior: "smooth", block: "start" }); }
   }
 
-  const actionItems = capa.actionItems ?? [];
+  // Memoized so the `?? []` fallback returns a stable reference — otherwise it
+  // builds a fresh array each render and defeats the `contributors` useMemo below.
+  const actionItems = useMemo(() => capa.actionItems ?? [], [capa.actionItems]);
   const liveActions = actionItems.filter((a) => a.status !== "skipped");
   const doneActions = actionItems.filter((a) => a.status === "complete" || a.status === "skipped").length;
   const reworkCount = actionItems.filter((a) => a.status === "rework" || a.reworkReason).length;

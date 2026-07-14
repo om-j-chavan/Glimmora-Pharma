@@ -152,7 +152,7 @@ export function SystemInventoryTab({
       </MotionListItem>
 
       {/* Filters */}
-      <MotionListItem aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
+      <MotionListItem aria-label="System filters" className={clsx("flex items-center gap-3 flex-wrap mb-4 p-4 rounded-2xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
         <Filter className="w-3.5 h-3.5 flex-shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         <Dropdown placeholder="All sites" value={siteFilter} onChange={onSiteFilterChange} width="w-36" options={[{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]} />

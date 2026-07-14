@@ -6,12 +6,20 @@
 -- sees their record") in addition to assignee + see-all.
 --
 -- Properties:
---   • ADDITIVE — plain `ADD COLUMN` (nullable) + `ADD CONSTRAINT` FK. Every
---     existing row keeps `createdById = NULL` (fail-closed until backfilled).
+--   • ADDITIVE — nullable `ADD COLUMN` with the FK declared INLINE as a
+--     `REFERENCES` clause. Every existing row keeps `createdById = NULL`
+--     (fail-closed until backfilled).
 --   • ZERO DATA LOSS — no column is dropped, altered, or rewritten.
---   • POSTGRES-SAFE — portable `TEXT` type + `ALTER TABLE … ADD CONSTRAINT …
---     FOREIGN KEY` (no SQLite table-rebuild). `migrate deploy` applies it
---     cleanly to a fresh/prod Postgres DB (the four tables exist since `init`).
+--   • PORTABLE (SQLite + PostgreSQL) — both engines accept
+--     `ALTER TABLE … ADD COLUMN … REFERENCES … ON DELETE SET NULL ON UPDATE CASCADE`
+--     for a NULL-defaulted column, so a single migration file applies on dev
+--     (SQLite) and CI/prod (Postgres) alike. On PostgreSQL the inline FK is
+--     auto-named `<Table>_createdById_fkey` — identical to the constraint names
+--     the previous revision declared explicitly.
+--       NOTE: the previous revision used a separate `ALTER TABLE … ADD CONSTRAINT
+--       … FOREIGN KEY`, which is Postgres-only — SQLite cannot add a standalone
+--       FK to an existing table (it requires a full table rebuild), so that form
+--       broke every `prisma migrate dev` run on the SQLite dev database.
 --   • The existing `createdBy` display-name string is retained (dual-field,
 --     mirroring Deviation.createdById).
 --
@@ -19,14 +27,8 @@
 -- separate, idempotent DATA step run out-of-band (see the phase reports) — this
 -- schema migration is columns + constraints only.
 
--- AlterTable
-ALTER TABLE "Finding" ADD COLUMN "createdById" TEXT;
-ALTER TABLE "GxPSystem" ADD COLUMN "createdById" TEXT;
-ALTER TABLE "Inspection" ADD COLUMN "createdById" TEXT;
-ALTER TABLE "FDA483Event" ADD COLUMN "createdById" TEXT;
-
--- AddForeignKey
-ALTER TABLE "Finding" ADD CONSTRAINT "Finding_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "GxPSystem" ADD CONSTRAINT "GxPSystem_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "Inspection" ADD CONSTRAINT "Inspection_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "FDA483Event" ADD CONSTRAINT "FDA483Event_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- AlterTable — add the nullable creator FK column with an inline FOREIGN KEY.
+ALTER TABLE "Finding" ADD COLUMN "createdById" TEXT REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "GxPSystem" ADD COLUMN "createdById" TEXT REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "Inspection" ADD COLUMN "createdById" TEXT REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "FDA483Event" ADD COLUMN "createdById" TEXT REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

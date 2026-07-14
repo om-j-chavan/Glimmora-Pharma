@@ -548,7 +548,7 @@ export function LoginPage() {
           </button>
 
           {showCreds && (
-            <div className="mt-2 rounded-xl overflow-hidden border border-(--bg-border) bg-(--bg-surface)">
+            <div className="mt-2 rounded-2xl overflow-hidden border border-(--bg-border) bg-(--bg-surface)">
               <table className="w-full border-collapse text-[11px]">
                 <thead>
                   <tr className="border-b border-(--bg-border)">

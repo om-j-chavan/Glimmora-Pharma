@@ -21,7 +21,7 @@ import {
 import { readSigningProvenance } from "./_shared";
 import { sanitizeServerError } from "@/lib/errors";
 
-/* â”€â”€ SME Section 1, Stage 5 (FULL) â€” Independent QA Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* â”€â”€ SME Section 1, Stage 5 (FULL) — Independent QA Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * Verification is the third QA signing event in the CAPA lifecycle:
  *   approveCAPA (per-approver) â†’ â€¦ â†’ all approvals satisfied
@@ -31,19 +31,19 @@ import { sanitizeServerError } from "@/lib/errors";
  *     verifiedAt !== null)
  *
  * SoD invariants enforced here:
- *   1. Verifier â‰  creator. Compares by Deviation.createdById when
+ *   1. Verifier ≠ creator. Compares by Deviation.createdById when
  *      available (post Stage-5 migration), falls back to display-name
  *      string. CAPA.createdBy is still display-name-only, so the
  *      comparison there remains by name with the same brittleness
  *      caveat as approveCAPA's self-approval guard.
- *   2. Verifier â‰  any approver. Queries CAPAApproval (revokedAt: null)
+ *   2. Verifier ≠ any approver. Queries CAPAApproval (revokedAt: null)
  *      and rejects if session.user.id appears in the approver set.
  *   3. super_admin does NOT bypass SoD. The verification record
- *      attests "an independent reviewer reviewed this CAPA" â€” that
+ *      attests "an independent reviewer reviewed this CAPA" — that
  *      property is broken if a participant in any other role also
  *      signs verification, regardless of how privileged they are.
  *
- * Part 11 Â§11.200(a)(1)(ii) â€” password re-verification required, same
+ * Part 11 Â§11.200(a)(1)(ii) — password re-verification required, same
  * pattern as approveCAPA / signAndCloseCAPA.
  */
 
@@ -126,15 +126,15 @@ export async function verifyCAPA(
     return { success: false, error: VERIFICATION_INVALID_STATUS_MESSAGE };
   }
 
-  // Role gate â€” same set approveCAPA permits for this tier.
+  // Role gate — same set approveCAPA permits for this tier.
   if (!canApproveCAPA(session.user.role, existing.risk)) {
     return {
       success: false,
-      error: `Your role cannot verify a ${existing.risk} CAPA â€” only QA roles authorised for approval may verify.`,
+      error: `Your role cannot verify a ${existing.risk} CAPA — only QA roles authorised for approval may verify.`,
     };
   }
 
-  // SoD 1 â€” verifier â‰  creator. CAPA.createdBy is a display-name string
+  // SoD 1 — verifier ≠ creator. CAPA.createdBy is a display-name string
   // (no createdById FK yet on this model; that migration lands in a
   // future rung). Name-equality only; same caveat as approveCAPA.
   // Prefer the authoritative createdById userId FK; fall back to display-name
@@ -171,7 +171,7 @@ export async function verifyCAPA(
     };
   }
 
-  // SoD 2 â€” verifier â‰  any approver. Approver identity is on
+  // SoD 2 — verifier ≠ any approver. Approver identity is on
   // CAPAApproval.approverId (a real userId, not a string), so this
   // comparison is robust.
   const approverSelf = await prisma.cAPAApproval.findFirst({
@@ -207,7 +207,7 @@ export async function verifyCAPA(
     };
   }
 
-  // Idempotency guard â€” if verification already exists, don't mint a
+  // Idempotency guard — if verification already exists, don't mint a
   // duplicate. Clearing must go through revokeCAPAVerification first.
   if (existing.verifiedAt !== null) {
     return {
@@ -216,7 +216,7 @@ export async function verifyCAPA(
     };
   }
 
-  // Â§11.200(a)(1)(ii) â€” re-authenticate at the moment of signing.
+  // Â§11.200(a)(1)(ii) — re-authenticate at the moment of signing.
   const passwordOk = await verifyPasswordForSigning(
     session.user.id,
     parsed.data.password,
@@ -257,12 +257,12 @@ export async function verifyCAPA(
     notes: parsed.data.notes,
   });
   const contentHash = computeContentHash(canonicalContent);
-  const contentSummary = `${existing.reference ?? existing.id} verified by ${session.user.name} (${session.user.role}) â€” risk: ${existing.risk}`;
+  const contentSummary = `${existing.reference ?? existing.id} verified by ${session.user.name} (${session.user.role}) — risk: ${existing.risk}`;
   const provenance = await readSigningProvenance();
 
   try {
     // Atomic: mint SignedRecord, flip CAPA fields (status stays
-    // pending_verification â€” closure is a separate step).
+    // pending_verification — closure is a separate step).
     const { capa, signedRecord } = await prisma.$transaction(async (tx) => {
       const sig = await tx.signedRecord.create({
         data: {
@@ -359,7 +359,7 @@ export async function verifyCAPA(
  * CAPA is still pending_verification (revocation after closure would
  * require closure to be undone first, intentionally not possible here).
  *
- * Mirrors revokeCAPAApproval â€” the original verification SignedRecord
+ * Mirrors revokeCAPAApproval — the original verification SignedRecord
  * is preserved (Part 11 immutability); a NEW CAPA_VERIFICATION_REVOCATION
  * SignedRecord is appended; CAPA's verifiedAt / verifiedBy* / verificationSignatureId
  * fields are wiped to null so re-verification is possible.
@@ -403,7 +403,7 @@ export async function revokeCAPAVerification(
   if (existing.status !== REQUIRED_STATUS) {
     return {
       success: false,
-      error: "Cannot revoke verification â€” the CAPA has already progressed past verification.",
+      error: "Cannot revoke verification — the CAPA has already progressed past verification.",
     };
   }
   if (existing.verifiedById !== session.user.id) {

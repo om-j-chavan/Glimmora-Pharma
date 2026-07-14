@@ -39,6 +39,7 @@ model Tenant {
   updatedAt           DateTime @updatedAt
 
   plan          Plan?
+  subscription  Subscription?
   sites         Site[]
   users         User[]
   findings      Finding[]
@@ -129,6 +130,155 @@ model RegulatoryRegion {
 
   aliasOf   RegulatoryRegion?  @relation("RegionLineage", fields: [aliasOfId], references: [id])
   aliasedBy RegulatoryRegion[] @relation("RegionLineage")
+}
+
+// ── RAZORPAY SUBSCRIPTION & PAYMENT MODELS (main branch) ──
+
+model Subscription {
+  id          String   @id @default(cuid())
+  tenantId    String   @unique
+  planId      String?
+  maxAccounts Int      @default(5)
+  startDate   DateTime
+  expiryDate  DateTime
+  status      String   @default("Active") // Active, Expired, Cancelled, Suspended
+
+  // Contract dates
+  contractStartDate DateTime?
+  contractEndDate   DateTime?
+
+  // Trial management
+  trialStartDate  DateTime?
+  trialEndDate    DateTime?
+  trialConverted  Boolean   @default(false)
+
+  // Current billing period
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  currentYear        Int       @default(1)
+
+  // Grace period and cancellation
+  gracePeriodDays Int       @default(7)
+  cancelledAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan     SubscriptionPlan? @relation(fields: [planId], references: [id])
+  payments Payment[]
+}
+
+model SubscriptionPlan {
+  id          String  @id @default(cuid())
+  name        String  @unique // "starter", "professional", "enterprise"
+  displayName String // "Starter Plan"
+  description String?
+
+  // Pricing (in smallest currency unit, e.g., paise for INR)
+  priceMonthly  Int // Monthly price
+  priceYearly   Int // Yearly price (discounted)
+  currency      String @default("INR")
+
+  // Features
+  maxAccounts   Int     @default(5)
+  maxSites      Int     @default(1)
+  features      String? // JSON array of feature strings
+
+  // Trial
+  trialDays Int @default(14)
+
+  // Plan status
+  isActive    Boolean @default(true)
+  isPopular   Boolean @default(false) // Highlight in UI
+  sortOrder   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+  pendingSignups PendingSignup[]
+}
+
+model PendingSignup {
+  id        String   @id @default(cuid())
+  expiresAt DateTime // 24 hours from creation
+
+  // Company details
+  companyName  String
+  customerCode String @unique
+
+  // Admin user details
+  adminName     String
+  adminEmail    String   @unique
+  adminUsername String   @unique
+  passwordHash  String // Pre-hashed password
+
+  // Contact
+  phone    String?
+  timezone String  @default("Asia/Kolkata")
+  language String  @default("en")
+
+  // Plan selection
+  planId       String
+  billingCycle String @default("yearly") // "monthly" or "yearly"
+
+  // Razorpay order tracking
+  razorpayOrderId String? @unique
+  orderAmount     Int? // Amount in paise
+  orderCurrency   String  @default("INR")
+
+  // Status
+  status String @default("pending") // pending, order_created, completed, expired
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+}
+
+model Payment {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  tenantId       String
+
+  // Razorpay identifiers
+  razorpayPaymentId String  @unique
+  razorpayOrderId   String
+  razorpaySignature String?
+
+  // Payment details
+  amount   Int // Amount in smallest currency unit (paise)
+  currency String @default("INR")
+
+  // Payment status
+  status       String  @default("pending") // pending, captured, failed, refunded
+  method       String? // card, netbanking, upi, wallet
+  bank         String?
+  wallet       String?
+  vpa          String? // UPI VPA
+
+  // Payment metadata
+  description String?
+  email       String?
+  contact     String?
+
+  // Failure details
+  errorCode        String?
+  errorDescription String?
+  errorSource      String?
+  errorStep        String?
+  errorReason      String?
+
+  // Invoice
+  invoiceId String?
+
+  // Timestamps
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 }
 
 // ── SETTINGS ──
@@ -549,7 +699,6 @@ model CAPA {
   createdByUser          User?                        @relation("CAPACreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   ownerUser              User?                        @relation("CAPAOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   rejectedByUser         User?                        @relation("CAPARejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
-  documents              CAPADocument[]
   evidenceItems          EvidenceItem[]
   effectivenessCriteria  CAPAEffectivenessCriterion[]
   approvals              CAPAApproval[]
@@ -635,23 +784,6 @@ model CAPAActionItem {
   // Phase 2 — Worklist foundation: getMyActionItems filters by ownerId.
   @@index([ownerId])
   @@index([deletedAt])
-}
-
-model CAPADocument {
-  id          String    @id @default(cuid())
-  capaId      String
-  fileName    String
-  fileSize    String?
-  fileType    String?
-  version     String    @default("v1.0")
-  status      String    @default("current")
-  uploadedBy  String
-  approvedBy  String?
-  approvedAt  DateTime?
-  description String?
-  createdAt   DateTime  @default(now())
-
-  capa CAPA @relation(fields: [capaId], references: [id], onDelete: Cascade)
 }
 
 // ── DEVIATION ──
@@ -1560,7 +1692,6 @@ model Inspection {
   createdByUser   User?             @relation("InspectionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   actions         ReadinessAction[]
   simulations     Simulation[]
-  readinessCards  ReadinessCard[]
   trainingRecords TrainingRecord[]
 }
 
@@ -1619,26 +1750,7 @@ model AuditLog {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
-// ── READINESS — extended (cards / playbooks / training) ──
-
-model ReadinessCard {
-  id           String    @id @default(cuid())
-  inspectionId String
-  title        String
-  description  String?
-  category     String
-  status       String    @default("not_started")
-  priority     String    @default("medium")
-  owner        String?
-  dueDate      DateTime?
-  completedBy  String?
-  completedAt  DateTime?
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
-}
+// ── READINESS — extended (playbooks / training) ──
 
 model Playbook {
   id          String   @id @default(cuid())

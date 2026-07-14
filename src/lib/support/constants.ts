@@ -5,6 +5,7 @@
  */
 
 import type { BadgeVariant } from "@/components/ui/Badge";
+import { CHANGE_CONTROL_ENABLED } from "@/lib/change-control-constants";
 
 /* ── Status ── */
 export const TICKET_STATUSES = [
@@ -179,11 +180,13 @@ export const SUPPORT_RELATED_MODULE_ROUTE: Record<string, string> = {
   Deviation: "/deviation",
   "FDA 483": "/fda-483",
   "CSV/CSA": "/csv-csa",
-  "Change Control": "/change-control",
+  // Change Control UI mothballed (Phase 2) — omit the deep-link so existing
+  // tickets tagged "Change Control" render the ref as plain text (no dead
+  // link). Re-appears automatically when CHANGE_CONTROL_ENABLED flips to true.
+  ...(CHANGE_CONTROL_ENABLED ? { "Change Control": "/change-control" } : {}),
   Findings: "/gap-assessment",
   Documents: "/evidence",
   Evidence: "/evidence",
-  Inspections: "/inspection",
   RAID: "/governance",
   Frameworks: "/admin/frameworks",
   Settings: "/settings",

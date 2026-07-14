@@ -195,8 +195,16 @@ function DescriptionBlock({ raw }: { raw: string | null }) {
   if (!raw || !raw.trim()) return <p className="text-[13px] text-(--text-muted)">—</p>;
   const trimmed = raw.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    // Only the parse is fragile — keep it (and nothing else) inside try/catch.
+    // JSON.parse never yields `undefined`, so it doubles as the failure sentinel.
+    // JSX is constructed OUTSIDE the try so render errors aren't silently swallowed.
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(trimmed);
+      parsed = JSON.parse(trimmed);
+    } catch {
+      parsed = undefined; /* not valid JSON → fall through to plain text */
+    }
+    if (parsed !== undefined) {
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const entries = Object.entries(parsed as Record<string, unknown>).filter(([, v]) => v != null && v !== "");
         if (entries.length) {
@@ -213,8 +221,6 @@ function DescriptionBlock({ raw }: { raw: string | null }) {
         }
       }
       return <p className="text-[13px] text-(--text-primary) whitespace-pre-wrap break-words">{typeof parsed === "string" ? parsed : JSON.stringify(parsed)}</p>;
-    } catch {
-      /* not valid JSON → fall through to plain text */
     }
   }
   return <p className="text-[13px] text-(--text-primary) whitespace-pre-wrap break-words">{raw}</p>;

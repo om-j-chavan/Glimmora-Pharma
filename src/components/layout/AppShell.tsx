@@ -192,7 +192,7 @@ export function AppShell({ children, initialTenant, initialUser, initialFramewor
 
           <div
             className={clsx(
-              "rounded-xl p-4 mb-6 text-left",
+              "rounded-2xl p-4 mb-6 text-left",
               "bg-(--bg-surface)",
             )}
           >

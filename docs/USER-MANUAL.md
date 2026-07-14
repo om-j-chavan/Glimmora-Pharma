@@ -175,7 +175,7 @@ Dashboard loads → Review KPI cards → Check heatmap for red areas
 
 **Tabs:**
 1. **Findings Register** — Full list of GxP/GMP findings with filters.
-2. **Evidence Index** — Documents grouped by area with completeness status.
+2. **Documents Index** — Documents grouped by area with completeness status.
 
 **Flow — Findings Register:**
 ```
@@ -186,9 +186,9 @@ Open Gap Assessment → Apply filters (area, severity, status)
 → Click "Link to CAPA" (if not viewer) to connect finding to a CAPA
 ```
 
-**Flow — Evidence Index:**
+**Flow — Documents Index:**
 ```
-Click "Evidence Index" tab
+Click "Documents Index" tab
 → See areas (QC Lab, QMS, CSV/IT, Training, Manufacturing)
 → Each area shows documents and Evidence Pack Status (Complete / Partial / Missing)
 → Missing/Partial areas require attention before inspection
@@ -588,7 +588,7 @@ Settings → AGI Policy tab
 **Reviewing lab findings:**
 1. Gap Assessment → Filter: Area = "QC Lab", Severity = "Critical".
 2. Click Eye on each finding → Review requirement, AGI summary, evidence ref.
-3. Check Evidence Index tab → Ensure "QC Lab" node is "Complete" before inspection.
+3. Check Documents Index tab → Ensure "QC Lab" node is "Complete" before inspection.
 
 **Tracking DI-gated CAPAs:**
 1. QMS & CAPA → Filter: DI Gate column shows purple "DI" badge.

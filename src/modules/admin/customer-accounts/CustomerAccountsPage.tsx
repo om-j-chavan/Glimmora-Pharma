@@ -306,7 +306,7 @@ export function CustomerAccountsPage({ initialTenants, isSuperAdmin: isSuperAdmi
       {ca.savedPopup && (
         <div
           role="status"
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg"
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-2xl shadow-lg"
           style={{ background: "var(--success-bg)", border: "1px solid var(--success)", color: "var(--success)" }}
         >
           <span className="text-[13px] font-semibold">{ca.savedPopup}</span>

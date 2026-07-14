@@ -563,7 +563,7 @@ export function ValidationPanel({
           completion-criteria banner, and overall-progress card into one view.
           No metric lost: overall %, execution/approval tracks, per-stage
           breakdown, and the completion criteria all live here. */}
-      <div className={clsx("rounded-xl p-4 border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
+      <div className={clsx("rounded-2xl p-4 border", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
         <div className="flex items-center justify-between mb-3">
           <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{system.name}</p>
           <div className="flex items-center gap-2">

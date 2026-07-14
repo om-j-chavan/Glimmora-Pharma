@@ -135,7 +135,7 @@ export function NotificationBell() {
       {/* Dropdown */}
       {open && (
         <div
-          className={clsx("absolute right-0 top-11 w-[calc(100vw-24px)] sm:w-80 max-w-80 rounded-xl border shadow-lg z-50 overflow-hidden", "bg-(--bg-elevated) border-(--bg-border)")}
+          className={clsx("absolute right-0 top-11 w-[calc(100vw-24px)] sm:w-80 max-w-80 rounded-2xl border shadow-lg z-50 overflow-hidden", "bg-(--bg-elevated) border-(--bg-border)")}
           role="dialog"
           aria-label="Notifications"
         >

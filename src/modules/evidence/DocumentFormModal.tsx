@@ -157,7 +157,7 @@ export function DocumentFormModal({
               <button
                 type="button"
                 onClick={() => inputRef.current?.click()}
-                className="w-full rounded-xl border-2 border-dashed border-(--bg-border) hover:border-(--brand) p-6 text-center cursor-pointer transition-colors bg-transparent"
+                className="w-full rounded-2xl border-2 border-dashed border-(--bg-border) hover:border-(--brand) p-6 text-center cursor-pointer transition-colors bg-transparent"
               >
                 <Upload className="w-6 h-6 mx-auto mb-1.5 text-(--text-muted)" aria-hidden="true" />
                 <p className="text-[12px] font-medium text-(--text-primary)">Click to choose a file</p>

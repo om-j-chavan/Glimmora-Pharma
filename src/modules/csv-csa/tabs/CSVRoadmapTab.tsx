@@ -71,7 +71,7 @@ export function CSVRoadmapTab({
       {/* Guidance banner */}
       <div
         className={clsx(
-          "flex items-start gap-2 p-3 rounded-xl mb-4 border",
+          "flex items-start gap-2 p-3 rounded-2xl mb-4 border",
           "bg-(--brand-muted) border-(--brand)",
         )}
         role="status"

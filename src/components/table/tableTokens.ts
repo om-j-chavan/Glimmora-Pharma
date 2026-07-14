@@ -22,7 +22,7 @@
 
 /** Card shell around a standalone table (widget) or an embedded sub-table. */
 export const tableCard =
-  "bg-(--card-bg) border border-(--bg-border) rounded-xl overflow-hidden";
+  "bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden";
 
 /**
  * Header cell chrome — matches `.data-table th` (padding, size, weight,

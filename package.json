@@ -38,6 +38,7 @@
     "next-auth": "^4.24.14",
     "nodemailer": "^9.0.3",
     "prisma": "^6.19.3",
+    "razorpay": "^2.9.6",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-easy-crop": "^6.1.0",

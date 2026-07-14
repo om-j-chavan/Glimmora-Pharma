@@ -16,6 +16,9 @@ import { authOptions } from "../../app/api/auth/[...nextauth]/route";
 import { prisma } from "@/lib/prisma";
 import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 
+// Re-export authOptions for use in API routes
+export { authOptions };
+
 export interface AuthSession {
   user: {
     id: string;

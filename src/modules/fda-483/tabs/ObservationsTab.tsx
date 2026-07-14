@@ -197,7 +197,7 @@ export function ObservationsTab({
       {fullyLocked && (
         <div
           role="status"
-          className="flex items-start gap-2 p-3 rounded-xl mb-4 border"
+          className="flex items-start gap-2 p-3 rounded-2xl mb-4 border"
           style={{
             background: isDark ? "rgba(16,185,129,0.08)" : "#f0fdf4",
             borderColor: isDark ? "rgba(16,185,129,0.25)" : "#a7f3d0",
@@ -219,7 +219,7 @@ export function ObservationsTab({
       {!fullyLocked && hasLinkedCapa && (
         <div
           role="alert"
-          className="flex items-start gap-2 p-3 rounded-xl mb-4 border"
+          className="flex items-start gap-2 p-3 rounded-2xl mb-4 border"
           style={{
             background: isDark ? "rgba(245,158,11,0.08)" : "#fffbeb",
             borderColor: isDark ? "rgba(245,158,11,0.25)" : "#fde68a",

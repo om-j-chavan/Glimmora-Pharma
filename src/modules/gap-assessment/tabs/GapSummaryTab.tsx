@@ -48,7 +48,7 @@ export function GapSummaryTab({
       <MotionList {...entranceProps}>
         {/* 1 \u2014 Filters */}
         <MotionListItem>
-      <section aria-label="Finding filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-xl border"
+      <section aria-label="Finding filters" className="flex items-center gap-3 flex-wrap mb-6 p-4 rounded-2xl border"
         style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
         <Filter className="w-4 h-4 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>

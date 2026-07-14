@@ -40,13 +40,13 @@ export function AccountStatCards({ stats, activeFilter, onSelect }: AccountStatC
           // h-full through the wrappers so the cards stay equal-height (grid
           // stretch → item → hover-card → button), exactly as before.
           <MotionListItem key={c.key} className="h-full">
-            <MotionHoverCard className="h-full rounded-xl">
+            <MotionHoverCard className="h-full rounded-2xl">
               <button
                 type="button"
                 onClick={() => onSelect(c.key)}
                 aria-pressed={active}
                 className={clsx(
-                  "w-full h-full text-left rounded-xl transition",
+                  "w-full h-full text-left rounded-2xl transition",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-(--brand)",
                   active && "ring-2 ring-(--brand)",
                   count === 0 && "opacity-60",

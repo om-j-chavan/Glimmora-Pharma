@@ -173,7 +173,7 @@ export function DatePicker({
       aria-label="Choose date"
       onKeyDown={onKeyDown}
       style={{ position: "fixed", top: pos.top, left: pos.left, width: 288 }}
-      className="z-9999 rounded-xl border p-3 shadow-lg bg-(--bg-elevated) border-(--bg-border)"
+      className="z-9999 rounded-2xl border p-3 shadow-lg bg-(--bg-elevated) border-(--bg-border)"
     >
       {/* Month nav */}
       <div className="flex items-center justify-between mb-2">

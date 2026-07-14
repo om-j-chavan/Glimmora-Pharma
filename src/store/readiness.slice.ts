@@ -111,6 +111,23 @@ const readinessSlice = createSlice({
   name: "readiness",
   initialState,
   reducers: {
+    setReadinessData(state, { payload }: PayloadAction<{
+      inspections: Inspection[];
+      cards: ReadinessCard[];
+      playbooks: Playbook[];
+      simulations: Simulation[];
+      training: TrainingRecord[];
+    }>) {
+      state.inspections = payload.inspections;
+      state.cards = payload.cards;
+      state.playbooks = payload.playbooks;
+      state.simulations = payload.simulations;
+      state.training = payload.training;
+      const s = calcScore(state.cards);
+      state.score = s.score;
+      state.complete = s.complete;
+      state.total = s.total;
+    },
     addCard(state, { payload }: PayloadAction<ReadinessCard>) {
       state.cards.push(payload);
       const s = calcScore(state.cards);
@@ -161,6 +178,7 @@ const readinessSlice = createSlice({
 });
 
 export const {
+  setReadinessData,
   addCard, updateCard, removeCard, addPlaybook, updatePlaybook,
   addSimulation, updateSimulation, addTraining, removeTraining,
   addInspection, updateInspection, setActiveInspection, completeInspection,
