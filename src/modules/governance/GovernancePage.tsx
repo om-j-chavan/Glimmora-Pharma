@@ -1,15 +1,24 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { BarChart3, ShieldAlert, Download, BarChart2, Gauge, Gavel, Archive } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { escapeHtml } from "@/lib/escapeHtml";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useRole } from "@/hooks/useRole";
-import { useTenantData } from "@/hooks/useTenantData";
+import { useTenantSitePredicate } from "@/hooks/useTenantData";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
+import { adaptFinding, type FindingWithEdits } from "@/modules/gap-assessment/GapPage.adapter";
+import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
+import { adaptPrismaSystem } from "@/types/csv-csa";
+import {
+  computeGovernanceKPIs, computeValidationBreakdown, computeDIByArea,
+  computeSiteKPIs, computeSiteReadiness, capaTimelinessTrend, isCapaTrendEmpty,
+  siteReadinessTrend,
+  type KPIFDA483Event,
+} from "@/lib/kpi";
 import {
   canCreateRisk, canEditRisk, canManageGovernance,
   canCreateManagementDecision, canEditManagementDecision,
@@ -35,7 +44,7 @@ import { displayUserName } from "@/lib/identity-display";
 import type { RiskListRow } from "@/lib/queries/risks";
 import type { DocUploadEntry } from "@/components/shared/CategorizedDocUploader";
 
-import { KPIScorecardTab, type SiteKPI } from "./tabs/KPIScorecardTab";
+import { KPIScorecardTab } from "./tabs/KPIScorecardTab";
 import { RiskRegisterTab } from "./tabs/RiskRegisterTab";
 import { ManagementDecisionsTab } from "./tabs/ManagementDecisionsTab";
 import { RiskModal, type RiskOwnerOption, type RiskSiteOption } from "./modals/RiskModal";
@@ -45,10 +54,6 @@ import {
   type ManagementDecisionFormValues,
 } from "./modals/ManagementDecisionModal";
 import type { ManagementDecisionRow } from "@/lib/queries/managementDecisions";
-
-// TODO: replace with /api/governance/kpis fetch once the route exists.
-const MOCK_SITE_KPIS: SiteKPI[] = [];
-const MOCK_SITE_TREND: { month: string; chennai: number; mumbai: number; bangalore: number; hyderabad: number }[] = [];
 
 /** DIY tab bar (the SettingsPage pattern): a static list + useState + hidden panels. */
 type TabId = "risks" | "decisions" | "kpis";
@@ -69,6 +74,18 @@ export interface GovernancePageProps {
   decisions?: ManagementDecisionRow[];
   /** Server-scoped chairs / action-item owners. */
   decisionParticipants?: DecisionParticipant[];
+  /**
+   * TENANT-WIDE server rows (Phase 6) — aggregates only, never rendered as rows,
+   * never dispatched into Redux. They back EVERY KPI on the Scorecard tab so a
+   * seat user and a QA head read the SAME totals as the Dashboard. Site-filtered
+   * client-side by `useTenantSitePredicate`. Adapted to the slice shape so the
+   * shared KPI lib runs identical maths to the Dashboard's.
+   */
+  allFindings?: FindingWithEdits[];
+  allCAPAs?: Parameters<typeof mapCAPAFromPrisma>[0][];
+  allSystems?: Parameters<typeof adaptPrismaSystem>[0][];
+  /** Raw getFDA483Events rows (observations + commitments included). */
+  allFDA483?: KPIFDA483Event[];
 }
 
 export function GovernancePage({
@@ -77,10 +94,36 @@ export function GovernancePage({
   riskOwners = [],
   decisions: serverDecisions = [],
   decisionParticipants = [],
+  allFindings: serverAllFindings,
+  allCAPAs: serverAllCAPAs,
+  allSystems: serverAllSystems,
+  allFDA483: serverAllFDA483,
 }: GovernancePageProps = {}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const { capas, findings, systems, fda483Events: fda483 } = useTenantData();
+  // TENANT-WIDE (props, never dispatched) → every KPI. Adapted to the slice
+  // shape and narrowed by the same tenant/site rule the Dashboard uses, so the
+  // two screens compute over an identical record set. Governance has no client
+  // record-CONTENT surface driven by Redux (risks/decisions come from their own
+  // server props), so it reads NOTHING from useTenantData anymore.
+  const sitePredicate = useTenantSitePredicate();
+  const findings = useMemo(
+    () => (serverAllFindings ?? []).map(adaptFinding).filter(sitePredicate),
+    [serverAllFindings, sitePredicate],
+  );
+  const capas = useMemo(
+    () => (serverAllCAPAs ?? []).map(mapCAPAFromPrisma).filter(sitePredicate),
+    [serverAllCAPAs, sitePredicate],
+  );
+  const systems = useMemo(
+    () => (serverAllSystems ?? []).map(adaptPrismaSystem).filter(sitePredicate),
+    [serverAllSystems, sitePredicate],
+  );
+  const fda483 = useMemo(
+    () => (serverAllFDA483 ?? []).filter(sitePredicate),
+    [serverAllFDA483, sitePredicate],
+  );
   const { org, users, allSites } = useTenantConfig();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -112,15 +155,17 @@ export function GovernancePage({
 
   const siteOptions: RiskSiteOption[] = allSites.map((s) => ({ id: s.id, name: s.name }));
 
-  /* ── Computed KPIs ── */
-  const closedCAPAs = capas.filter((c) => c.status === "closed");
-  const onTimeCAPAs = closedCAPAs.filter((c) => !dayjs.utc(c.closedAt || c.dueDate).isAfter(dayjs.utc(c.dueDate)));
-  const capaTimeliness = closedCAPAs.length === 0 ? 0 : Math.round((onTimeCAPAs.length / closedCAPAs.length) * 100);
-  const diExceptions = capas.filter((c) => c.diGate && c.status !== "closed").length;
-  const csvDrift = systems.filter((s) => s.validationStatus === "Overdue" || s.part11Status === "Non-Compliant" || s.annex11Status === "Non-Compliant").length;
-  const overdueCommitments = fda483.reduce((sum, e) => sum + e.commitments.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length, 0);
-  const repeatObservationRisk = fda483.reduce((sum, e) => sum + e.observations.filter((o) => o.status !== "Closed").length, 0);
-  const auditTrailCoverage = systems.length === 0 ? 0 : Math.round((systems.filter((s) => s.part11Status === "Compliant" || s.part11Status === "N/A").length / systems.length) * 100);
+  /* ── Computed KPIs — ALL from the shared KPI library (src/lib/kpi), the same
+     formulas the Dashboard uses, over the same tenant-wide record set. No KPI
+     formula is implemented inline here anymore (Phase 2/3/6). ── */
+  const kpis = useMemo(
+    () => computeGovernanceKPIs({ findings, capas, systems, fda483Events: fda483 }),
+    [findings, capas, systems, fda483],
+  );
+  const {
+    closedCAPAs, capaTimeliness, diExceptions, csvDrift,
+    overdueCommitments, repeatObservationRisk, auditTrailCoverage,
+  } = kpis;
   // Prefer server-computed score (Prisma actions completion %); fall back to
   // the legacy Redux card-based score for backward-compat during migration.
   const reduxReadinessScore = useAppSelector((s) => s.readiness.score);
@@ -128,7 +173,24 @@ export function GovernancePage({
   const noData = capas.length === 0 && findings.length === 0;
 
   /* ── State ── */
-  const [activeTab, setActiveTab] = useState<TabId>("risks");
+  // Deep-link support (Phase 8): a Dashboard KPI links to
+  // /governance?tab=kpis#kpi-<metric>. Honour ?tab= on first render and scroll
+  // to the #anchor once the KPI panel is visible.
+  const tabParam = searchParams.get("tab");
+  const initialTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : "risks";
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+
+  useEffect(() => {
+    if (activeTab !== "kpis" || typeof window === "undefined") return;
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    // Wait for the panel (hidden until active) to lay out, then scroll.
+    const id = window.setTimeout(() => {
+      document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+    return () => window.clearTimeout(id);
+  }, [activeTab]);
+
   const [riskModalOpen, setRiskModalOpen] = useState(false);
   const [editingRisk, setEditingRisk] = useState<RiskListRow | null>(null);
   const [archivingRisk, setArchivingRisk] = useState<RiskListRow | null>(null);
@@ -292,19 +354,33 @@ export function GovernancePage({
     router.refresh();
   }
 
-  /* ── Chart data ── */
-  const capaTrend = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mc = capas.filter((c) => c.status === "closed" && c.closedAt && dayjs.utc(c.closedAt).format("MMM YYYY") === mo.format("MMM YYYY")); const ot = mc.filter((c) => !dayjs.utc(c.closedAt).isAfter(dayjs.utc(c.dueDate))).length; m.push({ month: mo.format("MMM"), onTime: ot, late: mc.length - ot }); } return m; })();
-  const capaTrendEmpty = capaTrend.every((d) => d.onTime === 0 && d.late === 0);
-  const valBreakdown = [{ name: "Validated", value: systems.filter((s) => s.validationStatus === "Validated").length, color: "#10b981" }, { name: "In Progress", value: systems.filter((s) => s.validationStatus === "In Progress").length, color: "#f59e0b" }, { name: "Overdue", value: systems.filter((s) => s.validationStatus === "Overdue").length, color: "#ef4444" }, { name: "Not Started", value: systems.filter((s) => s.validationStatus === "Not Started").length, color: "#64748b" }].filter((d) => d.value > 0);
-  const diByArea = (() => { return ["Manufacturing", "QC Lab", "QMS", "CSV/IT", "Warehouse", "Utilities"].map((a) => {
-    const diCapas = capas.filter((c) => c.diGate && c.status !== "closed" && findings.filter((f) => f.area === a).some((f) => f.id === c.findingId)).length;
-    // For CSV/IT area, also count systems with non-compliant Part 11 or Annex 11
-    const diSystems = a === "CSV/IT" ? systems.filter((s) => s.part11Status === "Non-Compliant" || s.annex11Status === "Non-Compliant").length : 0;
-    return { area: a === "Manufacturing" ? "Mfg" : a, value: diCapas + diSystems };
-  }).filter((d) => d.value > 0); })();
+  /* ── Chart data — all from the shared KPI library ── */
+  const capaTrend = useMemo(() => capaTimelinessTrend(capas), [capas]);
+  const capaTrendEmpty = isCapaTrendEmpty(capaTrend);
+  const valBreakdown = useMemo(() => computeValidationBreakdown(systems), [systems]);
+  const diByArea = useMemo(() => computeDIByArea(capas, findings, systems), [capas, findings, systems]);
 
-  /* ── Site readiness ── */
-  const siteReadiness = visibleSites.map((site) => { const sf = findings.filter((f) => f.siteId === site.id && f.status !== "Closed"); const sc = capas.filter((c) => { const lf = findings.find((f) => f.id === c.findingId); return lf?.siteId === site.id && c.status !== "closed"; }); const cr = sf.filter((f) => f.severity === "Critical").length; const sysRisk = systems.filter((s) => s.siteId === site.id && (s.part11Status === "Non-Compliant" || s.annex11Status === "Non-Compliant" || (s.riskLevel === "HIGH" && s.validationStatus !== "Validated"))).length; const score = Math.max(0, 100 - cr * 15 - sf.length * 5 - sysRisk * 25); return { site, findingsCount: sf.length, capasCount: sc.length, criticalCount: cr, score }; });
+  /* ── Site readiness heatmap — one row per VISIBLE site, shared formula. ── */
+  const siteReadiness = useMemo(
+    () => computeSiteReadiness({ sites: visibleSites, findings, capas, systems, fda483Events: fda483 }),
+    [visibleSites, findings, capas, systems, fda483],
+  );
+
+  /* ── Multi-site KPIs + readiness trend (Phase 4/5 — replaces MOCK_SITE_KPIS /
+     MOCK_SITE_TREND). REAL, computed from tenant-wide records, for ANY number of
+     sites. Comparison/ranking/trend need ≥ 2 sites to be meaningful. ── */
+  const siteKPIs = useMemo(
+    () => (visibleSites.length >= 2
+      ? computeSiteKPIs({ sites: visibleSites, findings, capas, systems, fda483Events: fda483 })
+      : []),
+    [visibleSites, findings, capas, systems, fda483],
+  );
+  const siteTrend = useMemo(
+    () => (visibleSites.length >= 2
+      ? siteReadinessTrend(visibleSites, findings, capas, systems)
+      : { data: [], series: [] }),
+    [visibleSites, findings, capas, systems],
+  );
 
   /* ── Export ── */
   function dl(html: string, fn: string) { const b = new Blob([html], { type: "text/html;charset=utf-8" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u); auditLog({ action: "GOVERNANCE_REPORT_EXPORTED", module: "governance", recordId: fn, newValue: { filename: fn, exportedBy: user?.id } }); }
@@ -408,7 +484,7 @@ export function GovernancePage({
       </div>
 
       <div role="tabpanel" id="panel-kpis" aria-labelledby="tab-kpis" tabIndex={0} hidden={activeTab !== "kpis"}>
-        <KPIScorecardTab companyName={companyName} readinessScore={readinessScore} noData={noData} capaTimeliness={capaTimeliness} closedCAPAsCount={closedCAPAs.length} overdueCommitments={overdueCommitments} repeatObservationRisk={repeatObservationRisk} diExceptions={diExceptions} auditTrailCoverage={auditTrailCoverage} csvDrift={csvDrift} systemsCount={systems.length} capaTrend={capaTrend} capaTrendEmpty={capaTrendEmpty} valBreakdown={valBreakdown} diByArea={diByArea} siteReadiness={siteReadiness} sites={visibleSites} isDark={isDark} currentMonth={dayjs().format("MMMM YYYY")} onNavigateSettings={() => router.push("/settings")} siteKPIs={MOCK_SITE_KPIS} siteTrend={MOCK_SITE_TREND} />
+        <KPIScorecardTab companyName={companyName} readinessScore={readinessScore} noData={noData} capaTimeliness={capaTimeliness} closedCAPAsCount={closedCAPAs.length} overdueCommitments={overdueCommitments} repeatObservationRisk={repeatObservationRisk} diExceptions={diExceptions} auditTrailCoverage={auditTrailCoverage} csvDrift={csvDrift} systemsCount={systems.length} capaTrend={capaTrend} capaTrendEmpty={capaTrendEmpty} valBreakdown={valBreakdown} diByArea={diByArea} siteReadiness={siteReadiness} sites={visibleSites} isDark={isDark} currentMonth={dayjs().format("MMMM YYYY")} onNavigateSettings={() => router.push("/settings")} siteKPIs={siteKPIs} siteTrend={siteTrend.data} siteTrendSeries={siteTrend.series} />
       </div>
 
       {/* Add / Edit Risk */}
