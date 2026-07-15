@@ -2,9 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import type { AuditEntry } from "@/store/auditTrail.slice";
 
-export async function GET(request: NextRequest) {
+interface AuditEntry {
+  id: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  module: string;
+  action: string;
+  recordId: string;
+  recordTitle: string;
+  oldValue?: string;
+  newValue?: string;
+  ipAddress?: string;
+}
+
+export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
