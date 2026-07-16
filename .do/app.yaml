@@ -10,6 +10,11 @@ jobs:
       deploy_on_push: true
     source_dir: /
     build_command: NODE_OPTIONS="--max-old-space-size=1024" npm ci && npx prisma generate
+    # DO NOT use `prisma db push` here: this Neon DB is shared with the FastAPI
+    # backend (SQLAlchemy owns snake_case tables `tenants`, `users`, …). db push
+    # reconciles the WHOLE database to schema.prisma and would DROP those backend
+    # tables. Only `migrate deploy` (which touches just the migrations' own
+    # statements) is safe. The migrations lineage must be valid PostgreSQL.
     run_command: npx prisma migrate deploy
     instance_size_slug: basic-xs
     envs:

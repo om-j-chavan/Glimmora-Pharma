@@ -3,10 +3,11 @@ generator client {
 }
 
 datasource db {
-  // SQLite is the database for all environments (dev + deployed). Local dev
-  // syncs via `prisma db push`; deploys run `prisma migrate deploy` against the
-  // SQLite baseline in prisma/migrations/ (migration_lock.toml = sqlite).
-  provider = "sqlite"
+  // PostgreSQL for all environments. The deployed DB is Neon Postgres (shared
+  // with the FastAPI backend), so the schema provider MUST be postgresql to
+  // match migration_lock.toml and let `prisma migrate deploy` run. Local dev
+  // uses Postgres too (a Neon branch or local instance).
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
