@@ -2,9 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import type { AuditEntry } from "@/store/auditTrail.slice";
+// Local audit-log row shape. Formerly exported by src/store/auditTrail.slice.ts,
+// which was removed in the server-first migration (82cb2b9); this route is now
+// its only consumer, so the type lives here rather than in a resurrected slice.
+interface AuditEntry {
+  id: string;
+  timestamp: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  module: string;
+  action: string;
+  recordId: string;
+  recordTitle: string;
+  oldValue?: string;
+  newValue?: string;
+  ipAddress?: string;
+}
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
