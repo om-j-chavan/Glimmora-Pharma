@@ -16,6 +16,9 @@ jobs:
       - key: DATABASE_URL
         scope: RUN_AND_BUILD_TIME
         type: SECRET
+      - key: NPM_CONFIG_PRODUCTION
+        scope: BUILD_TIME
+        value: "false"
 
 services:
   # ── FastAPI AI backend ────────────────────────────────────────────────────
