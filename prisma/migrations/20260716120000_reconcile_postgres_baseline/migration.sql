@@ -42,9 +42,12 @@ ALTER TABLE "GxPSystem" ADD COLUMN     "createdById" TEXT;
 ALTER TABLE "Inspection" ADD COLUMN     "createdById" TEXT;
 
 -- AlterTable
-ALTER TABLE "Plan" ADD COLUMN     "durationMonths" INTEGER NOT NULL DEFAULT 12,
-DROP COLUMN "tier",
-ADD COLUMN     "tier" TEXT NOT NULL;
+-- Plan.tier: PlanTier enum -> TEXT. Convert IN PLACE (preserves the existing
+-- values TAILORED/PROFESSIONAL/ENTERPRISE/ESSENTIALS). The Prisma-generated
+-- DROP COLUMN + ADD COLUMN "tier" TEXT NOT NULL fails on the populated Plan
+-- table (6 rows) with error 23502 and would lose the values.
+ALTER TABLE "Plan" ADD COLUMN     "durationMonths" INTEGER NOT NULL DEFAULT 12;
+ALTER TABLE "Plan" ALTER COLUMN "tier" TYPE TEXT USING "tier"::TEXT;
 
 -- AlterTable
 ALTER TABLE "Site" DROP COLUMN "risk";
