@@ -62,6 +62,15 @@ DROP TABLE "RAIDItem";
 -- DropTable
 DROP TABLE "ReadinessCard";
 
+
+
+
+
+
+
+
+
+
 -- DropEnum
 DROP TYPE "PlanTier";
 
