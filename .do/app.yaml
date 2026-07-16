@@ -111,6 +111,18 @@ services:
         scope: RUN_AND_BUILD_TIME
         value: ${api.PRIVATE_URL}
 
+      # ── Build optimization ─────────────────────────────────────────────
+      # Prevent npm from pruning devDependencies during buildpack phase
+      # TypeScript and build tools are needed during custom build_command
+      - key: NPM_CONFIG_PRODUCTION
+        scope: BUILD_TIME
+        value: "false"
+
+      # Disable Turbopack for production builds (experimental, memory-heavy)
+      - key: TURBOPACK
+        scope: BUILD_TIME
+        value: "0"
+
       # ── File storage (DO Spaces) ───────────────────────────────────────
       - key: FILE_STORAGE_BACKEND
         scope: RUN_AND_BUILD_TIME
