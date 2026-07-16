@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12 <25"
+  },
   "scripts": {
     "dev": "concurrently -n web,api -c blue,magenta -k \"next dev --turbopack\" \"node scripts/dev-api.mjs\"",
     "dev:web": "next dev --turbopack",
