@@ -6,8 +6,8 @@
  * prisma directly in Server Components.
  */
 
-export { getFindings, getFinding, getFindingStats, getFindingEvidenceDocIds, getFindingAssignees, findingVisibilityWhere } from "./findings";
-export type { FindingAssignee } from "./findings";
+export { getFindings, getFinding, getFindingStats, getFindingEvidenceDocIds, getFindingAssignees, getFindingAuditTrail, findingVisibilityWhere } from "./findings";
+export type { FindingAssignee, FindingAuditEntry } from "./findings";
 export { getCAPAs, getCAPA, getCAPAStats, getCAPAApprovals, getCAPAComments, getEffectivenessChecksDue, getMyActionItems } from "./capas";
 export { getCAPAEffectivenessCriteria } from "./capa-criteria";
 export { getChangeControls } from "./change-control";

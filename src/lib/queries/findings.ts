@@ -105,6 +105,52 @@ export const getFindingEvidenceDocIds = cache(async (tenantId: string) => {
 });
 
 /**
+ * Gap→CAPA handoff (Stage 3) — the COMPLETE audit trail for a single finding,
+ * surfaced read-only inside the linked CAPA's "Raised from finding" block so the
+ * gap's in-progress history survives the handoff. Pulled from AuditLog (the full
+ * ALCOA+ trail — every FINDING_* action), NOT FindingEdit (which only records
+ * field edits; that partial trail is the modal's "Edit history"). Keyed by
+ * recordId = the finding id, module-scoped, newest first. READ-ONLY — mirrors
+ * getCapaAuditTrail; writes no audit rows.
+ */
+export interface FindingAuditEntry {
+  id: string;
+  action: string;
+  userName: string;
+  userRole: string | null;
+  recordTitle: string | null;
+  /** Raw newValue JSON. Only SOME finding actions carry a reason/detail here:
+   *  FINDING_REWORK → { reason }, FINDING_ESCALATED_TO_CAPA → { capaReference },
+   *  FINDING_CLOSED_BY_CAPA → { capaReference, closingNotes }. FINDING_SUBMITTED
+   *  and FINDING_REVIEW_CLOSED carry NOTHING — that is not a bug, so the History
+   *  renders those event-only rather than inventing a reason. Do NOT "fix" the
+   *  gaps by reading Finding.reworkReason/completionNotes: those hold the
+   *  LATEST value only and would mislabel older rows. */
+  newValue: string | null;
+  createdAt: string;
+}
+
+export const getFindingAuditTrail = cache(
+  async (findingId: string, tenantId: string): Promise<FindingAuditEntry[]> => {
+    const rows = await prisma.auditLog.findMany({
+      where: { tenantId, module: "Gap Assessment", recordId: findingId },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: { id: true, action: true, userName: true, userRole: true, recordTitle: true, newValue: true, createdAt: true },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      userName: r.userName,
+      userRole: r.userRole,
+      recordTitle: r.recordTitle,
+      newValue: r.newValue,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  },
+);
+
+/**
  * Computed stats for the Gap Assessment page header.
  */
 export const getFindingStats = cache(async (tenantId: string) => {

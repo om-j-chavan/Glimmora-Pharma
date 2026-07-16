@@ -2,6 +2,10 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { CAPAStatus } from "@/types/capa";
 // Phase 1.5 — RCA method values unified into one shared constant.
 import type { CapaRCAMethod } from "@/constants/rcaMethods";
+// Single source of truth for action-item statuses. `_types.ts` is a plain
+// (non-"use server") module with no imports, and this is a type-only import
+// (erased at compile time), so nothing server-side enters the client bundle.
+import type { ActionItemStatus } from "@/actions/capas/_types";
 
 export type CAPARisk = "Critical" | "High" | "Medium" | "Low";
 export type RCAMethod = CapaRCAMethod;
@@ -35,7 +39,12 @@ export interface CAPA {
   diGate: boolean;
   linkedSystemId?: string;
   linkedSystemName?: string;
-  diGateStatus?: "open" | "cleared";
+  // DI gate status vocabulary: "cleared" is the only "met" state; "pending"
+  // (written by createCAPA/seed) and legacy "open" both mean "not yet cleared";
+  // absent = gate not required. Superset keeps legacy "open" rows representable.
+  // TODO(debt): no canonical DI_GATE_STATUSES list exists — see
+  // src/constants/statusTaxonomy.ts. That absence is why this drifted.
+  diGateStatus?: "open" | "pending" | "cleared";
   diGateNotes?: string;
   diGateReviewedBy?: string;
   diGateReviewDate?: string;
@@ -83,6 +92,8 @@ export interface CAPA {
   ccBlockOverrideAt?: string;
   closedAt?: string;
   closedBy?: string;
+  // Phase 1 column; surfaced client-side in Phase 4 for the Summary History card.
+  closingNotes?: string;
   // Phase 4 — targeted reject metadata (CAPA bounced back to in_progress).
   rejectionReason?: string;
   rejectedById?: string;
@@ -131,7 +142,9 @@ export interface CAPA {
   effectivenessSignatureId?: string;
 }
 
-export type CAPAActionItemStatus = "pending" | "in_progress" | "complete" | "skipped" | "rework";
+// Derived from the canonical ACTION_ITEM_STATUSES so it can never drift again
+// (adding "accepted" there flows here automatically).
+export type CAPAActionItemStatus = ActionItemStatus;
 
 export interface CAPAActionItem {
   id: string;

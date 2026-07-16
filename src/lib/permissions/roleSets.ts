@@ -277,6 +277,17 @@ export const PERMISSION_MATRIX_EDIT_ROLES: readonly string[] = ["super_admin"];
  * ══════════════════════════════════════════════════════════════════════════ */
 export const GOVERNANCE_MANAGE_ROLES: readonly string[] = ["customer_admin", "super_admin", "qa_head"];
 
+/* ── Governance module VIEW gate (nav visibility + /governance route) ─────────
+ * DISTINCT from GOVERNANCE_MANAGE_ROLES. The module is restricted to the two
+ * tenant quality-oversight identities — qa_head + customer_admin — only. Note
+ * super_admin is deliberately EXCLUDED here (it manages records where present
+ * but is platform-only and does not browse the tenant governance module), and
+ * it is already walled to /admin regardless. */
+export const GOVERNANCE_VIEW_ROLES = ["qa_head", "customer_admin"] as const;
+export function canViewGovernance(role: string): boolean {
+  return (GOVERNANCE_VIEW_ROLES as readonly string[]).includes(role);
+}
+
 /** MANAGE: edit/archive ANY risk in the tenant. Mirrors the server gate. */
 export function canManageGovernance(role: string): boolean {
   return GOVERNANCE_MANAGE_ROLES.includes(role);

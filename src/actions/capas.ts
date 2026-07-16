@@ -38,11 +38,11 @@ export {
   clearCAPAAlignmentReview,
 } from "./capas/alignment";
 
-export {
-  loadApprovalsForCAPA,
-  approveCAPA,
-  revokeCAPAApproval,
-} from "./capas/approvals";
+// Phase 4 — approveCAPA / revokeCAPAApproval / loadApprovalsForCAPA removed.
+// A separate approve step added nothing after per-person accept (Phase 2) +
+// RCA-review SoD; Sign & Close IS the approval. capa-approvals.ts (canApproveCAPA
+// / APPROVAL_REQUIREMENTS) stays — effectiveness.ts still uses it. The
+// CAPAApproval model + CAPA_APPROVAL* SignedRecords stay (Part 11 immutability).
 
 export {
   reviewRCA,
@@ -60,6 +60,11 @@ export {
   updateActionItem,
   deleteActionItem,
   loadActionItemsForCAPA,
+  acceptWork,
+  sendWorkBack,
+  skipTask,
+  reassignTask,
+  nudgeActionItemOwner,
 } from "./capas/action-items";
 
 export {

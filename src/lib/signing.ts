@@ -176,6 +176,10 @@ export interface CAPAClosureCanonicalInput {
   riskLevel: string;
   closedAt: Date;
   closingComment: string | null;
+  // Phase 1 — required closure rationale (min 20 chars), bound into the
+  // closure signature's contentHash so an inspector can verify the recorded
+  // reason is exactly what was signed.
+  closingNotes: string;
   actionItemsSummary: CAPAActionItemHashedSummary[];
   // SME Section 1, Stage 6 (FULL) — bind the 90-day effectiveness due
   // date into the closure signature so the commitment is attested by
@@ -195,6 +199,7 @@ export function canonicalizeCAPAClosureContent(
     capaReference: input.capaReference,
     closedAt: input.closedAt.toISOString(),
     closingComment: input.closingComment ?? null,
+    closingNotes: input.closingNotes,
     effectivenessDueAt: input.effectivenessDueAt.toISOString(),
     riskLevel: input.riskLevel,
   });

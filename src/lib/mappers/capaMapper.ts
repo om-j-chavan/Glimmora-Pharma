@@ -1,5 +1,7 @@
 import type { CAPA, CAPARisk, CAPASource, RCAMethod } from "@/store/capa.slice";
 import type { CAPAStatus } from "@/types/capa";
+// Canonical action-item status union (type-only import; see capa.slice.ts note).
+import type { ActionItemStatus } from "@/actions/capas/_types";
 
 type PrismaCAPA = {
   id: string;
@@ -84,6 +86,7 @@ type PrismaCAPA = {
   ccBlockOverrideAt: Date | null;
   closedBy: string | null;
   closedAt: Date | null;
+  closingNotes: string | null;
   rejectionReason: string | null;
   rejectedById: string | null;
   rejectedAt: Date | null;
@@ -149,7 +152,7 @@ export function mapCAPAFromPrisma(row: PrismaCAPA): CAPA {
     effectivenessCheck: row.effectivenessCheck,
     effectivenessDate: row.effectivenessDate ? row.effectivenessDate.toISOString() : undefined,
     diGate: row.diGate,
-    diGateStatus: (row.diGateStatus as "open" | "cleared" | null) ?? undefined,
+    diGateStatus: (row.diGateStatus as "open" | "pending" | "cleared" | null) ?? undefined,
     diGateNotes: row.diGateNotes ?? undefined,
     diGateReviewedBy: row.diGateReviewedBy ?? undefined,
     diGateReviewDate: row.diGateReviewDate ? row.diGateReviewDate.toISOString() : undefined,
@@ -214,7 +217,7 @@ export function mapCAPAFromPrisma(row: PrismaCAPA): CAPA {
           owner: a.owner,
           ownerId: a.ownerId,
           dueDate: a.dueDate.toISOString(),
-          status: a.status as "pending" | "in_progress" | "complete" | "skipped" | "rework",
+          status: a.status as ActionItemStatus,
           completedBy: a.completedBy,
           completedById: a.completedById,
           completedAt: a.completedAt ? a.completedAt.toISOString() : null,
@@ -236,6 +239,7 @@ export function mapCAPAFromPrisma(row: PrismaCAPA): CAPA {
       : undefined,
     closedAt: row.closedAt ? row.closedAt.toISOString() : undefined,
     closedBy: row.closedBy ?? undefined,
+    closingNotes: row.closingNotes ?? undefined,
     rejectionReason: row.rejectionReason ?? undefined,
     rejectedById: row.rejectedById ?? undefined,
     rejectedAt: row.rejectedAt ? row.rejectedAt.toISOString() : undefined,

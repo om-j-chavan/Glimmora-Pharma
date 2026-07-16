@@ -29,6 +29,9 @@ export interface WorklistActionItem {
   capaRisk: string;
   /** open/in_progress → editable; anything else locks the work surface. */
   capaEditable: boolean;
+  /** Raw parent-CAPA status. Phase 7 — drives the worklist "accepted & the CAPA
+   *  is closed" closed-state message (capaStatus === "closed"). */
+  capaStatus: string;
   description: string;
   assigneeName: string;
   dueDate: string;
@@ -68,6 +71,9 @@ export interface WorklistDoc {
   /** Piece 1 — GxP category (one of EVIDENCE_CATEGORIES) for task docs; null for
    *  parent deviation docs and legacy/uncategorized task docs. */
   category: string | null;
+  /** Gap-doc bucket stamped at upload: "create" | "work". Null on legacy rows
+   *  until the backfill runs. Drives the gap detail's stable doc split. */
+  uploadSource?: string | null;
 }
 
 /** Stage 5 — one flat, append-only QA↔worker message (no threading/concern). */
@@ -385,7 +391,14 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
     capaReference: it.capa.reference,
     capaTitle: it.capa.description,
     capaRisk: it.capa.risk,
-    capaEditable: EDITABLE_CAPA_STATUSES.has(it.capa.status),
+    // Phase 5 — a rework item stays workable even while its parent CAPA is under
+    // QA review: sendWorkBack returns ONE person's items to rework without
+    // reopening the whole CAPA, and the server permits the owner's rework→complete
+    // when locked (action-items.ts:382-389). Without this the worklist shows the
+    // "Returned by QA" reason but the work surface is read-only — the button that
+    // does nothing.
+    capaEditable: EDITABLE_CAPA_STATUSES.has(it.capa.status) || it.status === "rework",
+    capaStatus: it.capa.status,
     description: it.description,
     assigneeName: it.owner,
     dueDate: it.dueDate.toISOString(),

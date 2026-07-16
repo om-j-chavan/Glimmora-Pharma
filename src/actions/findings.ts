@@ -22,7 +22,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES, GAP_CREATE_ROLES, QA_AUTHORITY_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
-import { findingVisibilityWhere } from "@/lib/queries/findings";
+import { findingVisibilityWhere, getFindingAuditTrail } from "@/lib/queries/findings";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import { notify } from "@/lib/notify";
 import { fileStorage } from "@/lib/fileStorage";
@@ -87,6 +87,17 @@ type ActionResult<T = unknown> =
   | { success: false; error: string; fieldErrors?: Record<string, string[]> };
 
 // â”€â”€ Actions â”€â”€
+
+/** A gap raised to a CAPA is LOCKED: once Finding.linkedCAPAId points at a LIVE
+ *  (non-closed) CAPA, all gap work moves to the CAPA — the finding stays readable
+ *  but every mutating action refuses. Orphan link (CAPA gone) or a closed CAPA
+ *  (the finding is then "Closed" anyway) do NOT lock. Mirrors closeFinding's guard. */
+async function findingLockedByCapa(linkedCAPAId: string | null | undefined, tenantId: string): Promise<boolean> {
+  if (!linkedCAPAId) return false;
+  const capa = await prisma.cAPA.findFirst({ where: { id: linkedCAPAId, tenantId }, select: { status: true } });
+  return !!capa && capa.status !== "closed";
+}
+const GAP_LOCKED_MESSAGE = "This gap is locked — a CAPA has been raised from it. Continue the work in the linked CAPA.";
 
 export async function createFinding(input: z.input<typeof CreateFindingSchema>): Promise<ActionResult> {
   const session = await requireAuth();
@@ -286,6 +297,34 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
       where: { id, tenantId: session.user.tenantId, deletedAt: null },
     });
     if (!before) return { success: false, error: "Finding not found" };
+    if (await findingLockedByCapa(before.linkedCAPAId, session.user.tenantId)) {
+      return { success: false, error: GAP_LOCKED_MESSAGE };
+    }
+
+    // Fix 1 — status-transition guards for Edit. updateFinding is a general
+    // editor; without these an Edit can bypass the dedicated actions' rules.
+    // Runs ONLY when the edit changes status; non-status edits and the
+    // QA-manages-directly Open/In-Progress→Closed direct close are unaffected.
+    if (parsed.data.status !== undefined && parsed.data.status !== before.status) {
+      // (a) Mirror closeFinding's guard: a gap escalated to a CAPA is closed BY
+      // its CAPA. Block an Edit-driven close while the linked CAPA is still open.
+      if (parsed.data.status === "Closed" && before.linkedCAPAId) {
+        const linkedCapa = await prisma.cAPA.findFirst({
+          where: { id: before.linkedCAPAId, tenantId: session.user.tenantId },
+          select: { status: true },
+        });
+        if (linkedCapa && linkedCapa.status !== "closed") {
+          return { success: false, error: "This finding is linked to an open CAPA. Close the CAPA to resolve the gap." };
+        }
+      }
+      // (b) A Submitted finding is dispositioned ONLY through the SoD review loop
+      // (reviewFinding → Closed / reworkFinding → Rework). Block ANY Edit-driven
+      // status change out of Submitted — stops Submitted→Open (backward) and
+      // Submitted→Closed (skipping independent review).
+      if (before.status === "Submitted") {
+        return { success: false, error: "A submitted finding is dispositioned through QA review (Accept or Send for rework), not by editing its status." };
+      }
+    }
 
     const { reason, ...updates } = parsed.data;
 
@@ -373,9 +412,12 @@ export async function assignFinding(
 
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, reference: true, requirement: true, owner: true, status: true },
+    select: { id: true, reference: true, requirement: true, owner: true, status: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
   if (finding.status === "Closed") {
     return { success: false, error: "This finding is closed and can no longer be reassigned." };
   }
@@ -494,31 +536,42 @@ export async function deleteFinding(id: string, reason?: string): Promise<Action
   try {
     const existing = await prisma.finding.findFirst({
       where: { id, tenantId: session.user.tenantId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, linkedCAPAId: true },
     });
     if (!existing) return { success: false, error: "Finding not found" };
+    // Uniform lock — deleting a gap that has a LIVE linked CAPA would strand the
+    // CAPA's provenance: getCAPAFindingDocs + the capa.finding relation filter
+    // deletedAt:null, so the "Raised from finding" block silently vanishes while
+    // CAPA.findingId still points here. Refuse (same helper as the 9 mutating
+    // guards); a closed/orphan CAPA does NOT lock. Restore stays unguarded — it
+    // RE-establishes provenance, so an accidental delete can be undone.
+    if (await findingLockedByCapa(existing.linkedCAPAId, session.user.tenantId)) {
+      return { success: false, error: "This gap is linked to an open CAPA and can't be deleted — its record is the CAPA's provenance. Close the CAPA first." };
+    }
     // Soft-delete (Part 11 retention) — row retained; list queries filter deletedAt.
-    await prisma.finding.update({
-      where: { id, tenantId: session.user.tenantId },
-      data: {
-        deletedAt: new Date(),
-        deletedById: actor.userId,
-        deletedByName: actor.displayName,
-        deletionReason: reason ? reason.slice(0, 200) : null,
-      },
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Gap Assessment",
-        action: "FINDING_DELETED",
-        recordId: id,
-        newValue: reason ? reason.slice(0, 200) : null,
-      },
+    // Fix 3 — mutation + audit in ONE transaction (matches every other finding action).
+    await prisma.$transaction(async (tx) => {
+      await tx.finding.update({
+        where: { id, tenantId: session.user.tenantId },
+        data: {
+          deletedAt: new Date(),
+          deletedById: actor.userId,
+          deletedByName: actor.displayName,
+          deletionReason: reason ? reason.slice(0, 200) : null,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Gap Assessment",
+          action: "FINDING_DELETED",
+          recordId: id,
+          newValue: reason ? reason.slice(0, 200) : null,
+        },
+      });
     });
 
     revalidatePath("/gap-assessment");
@@ -548,20 +601,23 @@ export async function restoreFinding(id: string): Promise<ActionResult> {
     });
     if (!existing) return { success: false, error: "Finding not found" };
     if (!existing.deletedAt) return { success: false, error: "Finding is not deleted." };
-    await prisma.finding.update({
-      where: { id, tenantId: session.user.tenantId },
-      data: { deletedAt: null, deletedById: null, deletedByName: null, deletionReason: null },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Gap Assessment",
-        action: "FINDING_RESTORED",
-        recordId: id,
-      },
+    // Fix 3 — mutation + audit in ONE transaction (matches every other finding action).
+    await prisma.$transaction(async (tx) => {
+      await tx.finding.update({
+        where: { id, tenantId: session.user.tenantId },
+        data: { deletedAt: null, deletedById: null, deletedByName: null, deletionReason: null },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Gap Assessment",
+          action: "FINDING_RESTORED",
+          recordId: id,
+        },
+      });
     });
     revalidatePath("/gap-assessment");
     return { success: true, data: null };
@@ -592,10 +648,21 @@ export async function closeFinding(id: string): Promise<ActionResult> {
     // deleted or already-closed finding could be "closed" again (a no-op audit).
     const existing = await prisma.finding.findFirst({
       where: { id, tenantId: session.user.tenantId, deletedAt: null },
-      select: { id: true, status: true, reference: true },
+      select: { id: true, status: true, reference: true, linkedCAPAId: true },
     });
     if (!existing) return { success: false, error: "Finding not found" };
     if (existing.status === "Closed") return { success: false, error: "This finding is already closed." };
+
+    // Fix 3 — a gap escalated to a CAPA is closed BY its CAPA (signAndCloseCAPA
+    // cascades the finding to "Closed" atomically). Block a direct finding-close
+    // while the linked CAPA is still live. Shared helper (same lock guard every
+    // finding-mutating action now uses); keeps the close-specific message.
+    if (await findingLockedByCapa(existing.linkedCAPAId, session.user.tenantId)) {
+      return {
+        success: false,
+        error: "This finding is linked to an open CAPA. Close the CAPA to resolve the gap.",
+      };
+    }
 
     // Mutation + audit in ONE transaction (ALCOA+).
     const finding = await prisma.$transaction(async (tx) => {
@@ -656,6 +723,10 @@ export async function uploadFindingEvidence(
   // map 1:1 to a CAPA evidence category on a future carryover. Invalid/absent
   // leaves category null (Uncategorized). Mirrors attachDeviationTaskDocument.
   category?: string,
+  // Gap-doc bucket (see Document.uploadSource in schema). Defaults to "create"
+  // so any un-updated caller records the non-worker bucket; the worklist passes
+  // "work" explicitly. Never re-derived from owner.
+  uploadSource: "create" | "work" = "create",
 ): Promise<ActionResult<{ fileName: string }>> {
   const session = await requireAuth();
 
@@ -671,9 +742,12 @@ export async function uploadFindingEvidence(
 
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId },
-    select: { id: true, reference: true, requirement: true, owner: true },
+    select: { id: true, reference: true, requirement: true, owner: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
 
   // Authorization: an author role OR the finding's assignee (owner == userId).
   // Mirrors addEvidenceFile / attachDeviationTaskDocument. requireGxPAuthor
@@ -715,6 +789,8 @@ export async function uploadFindingEvidence(
           linkedRecordId: findingId,
           // Gap Step 3 — GxP category (validated above; null = Uncategorized).
           category: cat,
+          // Stable upload bucket — create vs worker work (see the param note).
+          uploadSource,
           // Persist the retrieval metadata so the Evidence Index can serve
           // the bytes back via GET /api/findings/[id]/evidence. Without
           // storageKey the uploaded file was written to disk but orphaned —
@@ -734,8 +810,9 @@ export async function uploadFindingEvidence(
       await tx.auditLog.create({
         data: {
           tenantId: session.user.tenantId,
-          userName: session.user.name,
-          userRole: session.user.role,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
           module: "Gap Assessment",
           action: "FINDING_EVIDENCE_UPLOADED",
           recordId: findingId,
@@ -775,7 +852,7 @@ export async function loadFindingDocuments(findingId: string): Promise<ActionRes
     // uploadedById lets the detail split origin: docs uploaded by the finding's
     // OWNER (the worklist assignee/worker) = "Worklist Documents"; others = "Gap
     // Evidence" (uploaded on the gap detail).
-    select: { id: true, fileName: true, category: true, uploadedBy: true, uploadedById: true, createdAt: true },
+    select: { id: true, fileName: true, category: true, uploadSource: true, uploadedBy: true, uploadedById: true, createdAt: true },
   });
   return {
     success: true,
@@ -783,6 +860,7 @@ export async function loadFindingDocuments(findingId: string): Promise<ActionRes
       id: d.id,
       fileName: d.fileName,
       category: d.category,
+      uploadSource: d.uploadSource,
       uploadedBy: d.uploadedBy,
       uploadedById: d.uploadedById,
       uploadedAt: d.createdAt.toISOString(),
@@ -802,9 +880,12 @@ export async function removeFindingEvidence(
   const session = await requireAuth();
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, owner: true, status: true, evidenceLink: true },
+    select: { id: true, owner: true, status: true, evidenceLink: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
   const isAuthorRole = COMPLIANCE_AUTHOR_ROLES.includes(session.user.role);
   const isAssignee = isAssignedToTask(session, { ownerId: finding.owner });
   if (!isAuthorRole && !isAssignee) {
@@ -890,9 +971,12 @@ export async function saveFindingWorkNotes(
 
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, reference: true, owner: true },
+    select: { id: true, reference: true, owner: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
@@ -959,9 +1043,12 @@ export async function submitFinding(
   }
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, reference: true, owner: true, status: true },
+    select: { id: true, reference: true, owner: true, status: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
   if (!isAssignedToTask(session, { ownerId: finding.owner })) {
     return { success: false, error: "Only the assigned user can submit this finding." };
   }
@@ -1009,9 +1096,12 @@ export async function reviewFinding(findingId: string): Promise<ActionResult> {
   }
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, reference: true, owner: true, status: true },
+    select: { id: true, reference: true, owner: true, status: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
   if (finding.status !== "Submitted") {
     return { success: false, error: "Only a submitted finding can be reviewed." };
   }
@@ -1073,9 +1163,12 @@ export async function reworkFinding(
   }
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, reference: true, owner: true, status: true },
+    select: { id: true, reference: true, owner: true, status: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
   if (finding.status !== "Submitted") {
     return { success: false, error: "Only a submitted finding can be sent back for rework." };
   }
@@ -1150,9 +1243,12 @@ export async function postFindingMessage(
   }
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, owner: true, status: true },
+    select: { id: true, owner: true, status: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
   const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
   const isAssignee = isAssignedToTask(session, { ownerId: finding.owner });
   if (!isQA && !isAssignee) {
@@ -1212,4 +1308,21 @@ export async function loadFindingReview(findingId: string): Promise<ActionResult
       })),
     },
   };
+}
+
+// Phase 7 — the gap-detail History section. Sourced from the AuditLog (via
+// getFindingAuditTrail), NOT FindingEdit: submit/review/rework/escalate/close
+// write only to the AuditLog, so the FindingEdit trail (what the "Edit history"
+// modal shows) is a PARTIAL story that would omit the finding→CAPA→closure arc
+// an inspector follows. Same PARENT-visibility re-check as loadFindingReview:
+// a hidden finding's history is not readable by a non-see-all non-owner.
+export async function loadFindingHistory(findingId: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, ...findingVisibilityWhere(session) },
+    select: { id: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  const entries = await getFindingAuditTrail(findingId, session.user.tenantId);
+  return { success: true, data: entries };
 }

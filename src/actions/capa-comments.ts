@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
 import { isAssignedToTask } from "@/lib/permissions/roleSets";
 import { sanitizeServerError } from "@/lib/errors";
+import { CONCERN_MIN } from "@/constants/capaValidation";
 
 /**
  * Substage 5.2 Â§5.3 â€” CAPA discussion thread.
@@ -45,7 +46,7 @@ const RESOLVE_PERMITTED_ROLES: ReadonlySet<string> = new Set([
 const AddCommentSchema = z.object({
   body: z
     .string()
-    .min(5, "Comment must be at least 5 characters")
+    .min(CONCERN_MIN, `Comment must be at least ${CONCERN_MIN} characters`)
     .max(4000, "Comment must be 4000 characters or fewer"),
   isConcern: z.boolean().default(false),
   parentId: z.string().min(1).optional(),
@@ -71,7 +72,7 @@ const ReopenSchema = z.object({
 const EditSchema = z.object({
   body: z
     .string()
-    .min(5, "Comment must be at least 5 characters")
+    .min(CONCERN_MIN, `Comment must be at least ${CONCERN_MIN} characters`)
     .max(4000, "Comment must be 4000 characters or fewer"),
 });
 

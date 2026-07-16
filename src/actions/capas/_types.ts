@@ -46,6 +46,9 @@ export const ACTION_ITEM_STATUSES = [
   // (targeted reject) is Phase 4; this only registers the value so the zod
   // enum accepts it.
   "rework",
+  // Phase 2 — QA reviewed this person's completed work and accepted it.
+  // Terminal-good for closure: complete -> (QA review) -> accepted | rework.
+  "accepted",
 ] as const;
 export type ActionItemStatus = (typeof ACTION_ITEM_STATUSES)[number];
 

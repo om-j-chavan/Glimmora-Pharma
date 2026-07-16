@@ -106,6 +106,23 @@ export const READINESS_STATUSES: Record<string, StatusDef> = {
   Blocked: { value: "Blocked", label: "Blocked", color: "#B91C1C", bg: "#FEF2F2", description: "Cannot proceed due to dependency or blocker", nextActions: ["Resolve blocker"] },
 };
 
+/* ── TODO(debt): CAPA DI-gate status has NO canonical list ──
+ *
+ * CAPA.diGateStatus is written as {"pending" (createCAPA/seed), "cleared"
+ * (clearDIGate), and legacy "open" (Edit modal)} but has no single source of
+ * truth — the same root cause as the lowercase-"closed" finding-status bug: one
+ * vocabulary written in several places, so it drifted. When this is paid down,
+ * add a canonical `DI_GATE_STATUSES = ["pending", "cleared"] as const` here (or
+ * a capa-di.ts mirroring src/lib/capa-alignment.ts) and have the schema comment,
+ * mapper (src/lib/mappers/capaMapper.ts), Edit form, and the read-API route all
+ * import it.
+ *
+ * A THIRD vocabulary already exists on the read side: app/api/capas/route.ts:41
+ * casts diGateStatus to "Pending" | "Cleared" | "Failed" — Title-case plus a
+ * phantom "Failed" that NOTHING writes. Fold it into the canonical list at the
+ * same time. NOT fixed this phase.
+ */
+
 /* ── Helper: look up any status ── */
 
 export function getStatusDef(taxonomy: Record<string, StatusDef>, status: string): StatusDef {
