@@ -22,7 +22,9 @@ import {
   postFindingMessage as postFindingMessageAction,
   loadFindingReview as loadFindingReviewAction,
   loadFindingDocuments as loadFindingDocumentsAction,
+  loadFindingHistory as loadFindingHistoryAction,
 } from "@/actions/findings";
+import type { FindingAuditEntry } from "@/lib/queries/findings";
 import { TaskThread } from "@/modules/worklist/DeviationTaskPanel";
 import { DocumentCard } from "@/components/shared/DocumentCard";
 import { RaisedFromRiskBanner } from "@/components/shared/RaisedFromRiskBanner";
@@ -77,6 +79,52 @@ function statusBadge(s: FindingStatus) {
   const cls = FINDING_STATUS_CLASS[key] ?? "badge badge-gray";
   return <span className={cls}>{label}</span>;
 }
+/* Phase 7 — gap-detail History. Labels for the AuditLog actions the finding
+   lifecycle writes (getFindingAuditTrail). Only SOME rows carry a reason in
+   newValue (see FindingAuditEntry): FINDING_REWORK → reason, ESCALATED →
+   capaReference, CLOSED_BY_CAPA → capaReference + closingNotes. SUBMITTED /
+   REVIEW_CLOSED carry none, so those render event-only — that is correct, not a
+   missing reason to backfill from the (latest-value-only) source columns. */
+const FINDING_HISTORY_LABEL: Record<string, string> = {
+  FINDING_CREATED: "Created",
+  FINDING_ASSIGNED: "Assigned",
+  FINDING_UPDATED: "Edited",
+  FINDING_NOTES_SAVED: "Work notes saved",
+  FINDING_EVIDENCE_UPLOADED: "Evidence uploaded",
+  FINDING_EVIDENCE_REMOVED: "Evidence removed",
+  FINDING_SUBMITTED: "Submitted for review",
+  FINDING_REVIEW_CLOSED: "Review closed",
+  FINDING_REWORK: "Sent back for rework",
+  FINDING_ESCALATED_TO_CAPA: "Escalated to CAPA",
+  FINDING_CLOSED_BY_CAPA: "Closed by CAPA",
+  FINDING_CLOSED: "Closed",
+  FINDING_DELETED: "Deleted",
+  FINDING_RESTORED: "Restored",
+  FINDING_LINKED_TO_PRIOR_CAPA_AS_RECURRENCE: "Linked to prior CAPA (recurrence)",
+};
+const FINDING_HISTORY_DOT: Record<string, string> = {
+  FINDING_REWORK: "#ef4444",
+  FINDING_ESCALATED_TO_CAPA: "#f59e0b",
+  FINDING_CLOSED_BY_CAPA: "#10b981",
+  FINDING_CLOSED: "#10b981",
+  FINDING_SUBMITTED: "#8b5cf6",
+  FINDING_CREATED: "var(--brand)",
+};
+/** Pull the inline detail (a CAPA ref appended to the label, and/or a quoted
+ *  reason line) from a finding audit row's newValue. Returns nothing when the
+ *  row carries no reason — the caller must NOT invent one. */
+function findingHistoryDetail(action: string, newValue: string | null): { suffix?: string; reason?: string } {
+  if (!newValue) return {};
+  try {
+    const v = JSON.parse(newValue) as Record<string, unknown>;
+    const capaRef = typeof v.capaReference === "string" ? v.capaReference : undefined;
+    if (action === "FINDING_REWORK") return { reason: typeof v.reason === "string" ? v.reason : undefined };
+    if (action === "FINDING_ESCALATED_TO_CAPA") return { suffix: capaRef };
+    if (action === "FINDING_CLOSED_BY_CAPA") return { suffix: capaRef, reason: typeof v.closingNotes === "string" ? v.closingNotes : undefined };
+    return {};
+  } catch { return {}; }
+}
+
 function capaStatusBadge(s: string) {
   const m: Record<string, string> = { open: "badge badge-blue", in_progress: "badge badge-amber", pending_qa_review: "badge badge-purple", closed: "badge badge-green", rejected: "badge badge-red" };
   const label = CAPA_STATUS_LABEL[s as keyof typeof CAPA_STATUS_LABEL] ?? s;
@@ -197,6 +245,9 @@ export function GapRegisterTab({
   const [findingDocs, setFindingDocs] = useState<WorklistDoc[]>([]);
   // #13 — Clock icon in the modal header opens a scrollable Audit Trail modal.
   const [auditModalOpen, setAuditModalOpen] = useState(false);
+  // Phase 7 — the gap-detail History (finding → CAPA → closure), sourced from
+  // the AuditLog (loadFindingHistory), NOT FindingEdit. Loaded on modal open.
+  const [history, setHistory] = useState<FindingAuditEntry[]>([]);
 
   useEffect(() => {
     const id = selectedFinding?.id;
@@ -222,12 +273,28 @@ export function GapRegisterTab({
     return () => { cancelled = true; };
   }, [selectedFinding?.id]);
 
+  // Phase 7 — load the finding's AuditLog history when the detail modal opens.
+  useEffect(() => {
+    const id = selectedFinding?.id;
+    if (!id) { setHistory([]); return; }
+    let cancelled = false;
+    void (async () => {
+      const res = await loadFindingHistoryAction(id);
+      if (!cancelled) setHistory(res.success ? (res.data as FindingAuditEntry[]) : []);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedFinding?.id]);
+
   // Item 4 — origin split (reuses the Worklist Detail pattern + shared DocumentCard):
   // docs uploaded by the finding's OWNER (the worklist assignee/worker) are the
   // "Worklist Documents"; docs uploaded by anyone else (QA/author, on the gap
   // detail) are "Gap Evidence". Origin is Document.uploadedById === finding.owner.
-  const worklistDocs = findingDocs.filter((d) => !!d.uploadedById && d.uploadedById === selectedFinding?.owner);
-  const gapDocs = findingDocs.filter((d) => !(d.uploadedById && d.uploadedById === selectedFinding?.owner));
+  // Bucket by the STABLE uploadSource stamped at upload — never re-derived from
+  // the mutable owner, so a doc's bucket can't flip on reassignment. "work" =
+  // the assigned worker's categorized uploads; everything else ("create" + any
+  // legacy null pre-backfill) is a gap-creation/supporting document.
+  const workDocs = findingDocs.filter((d) => d.uploadSource === "work");
+  const createDocs = findingDocs.filter((d) => d.uploadSource !== "work");
 
   async function refreshReview() {
     if (!selectedFinding) return;
@@ -284,9 +351,24 @@ export function GapRegisterTab({
   // the broad COMPLIANCE_AUTHOR_ROLES. Gating on canEditFinding keeps the Edit
   // button in lockstep with the server so csv_val_lead / regulatory_affairs /
   // customer_admin never see an Edit that dead-ends with "Only QA Head can edit".
+  // Gap→CAPA handoff lock (Stage 2) — mirrors the findings.ts server guard.
+  // Once a CAPA has been raised from this gap and that CAPA is still live
+  // (any status but "closed"), the gap is READ-ONLY; the work continues in the
+  // linked CAPA. Resolved from the CAPA store exactly like the Linked-CAPA
+  // panel below (finding.capaId, or the reverse findingId link). An orphan
+  // link (CAPA hard-deleted → absent from the store) does NOT lock, matching
+  // the server helper's orphan-link behaviour.
+  const lockCapa = selectedFinding
+    ? (selectedFinding.capaId
+        ? capas.find((c) => c.id === selectedFinding.capaId)
+        : capas.find((c) => c.findingId === selectedFinding.id))
+    : undefined;
+  const gapLocked = !!lockCapa && lockCapa.status !== "closed";
+
   const canEdit =
     !isViewOnly &&
     selectedFinding?.status !== "Closed" &&
+    !gapLocked &&
     canEditFinding(role);
 
   const form = useForm<EditForm>({
@@ -693,6 +775,45 @@ export function GapRegisterTab({
             {/* Governance Phase 2 — provenance when this finding was raised by converting a Risk. */}
             <RaisedFromRiskBanner target="Gap" recordId={selectedFinding.id} />
 
+            {/* Gap→CAPA handoff — read-only lock banner. Shown while a CAPA raised
+                from this gap is still live; the gap stays fully viewable but every
+                edit/assign/message control is hidden (canEdit + control gates on
+                !gapLocked), so work continues in the linked CAPA. */}
+            {gapLocked && lockCapa && (
+              <div role="status" className="flex items-start gap-2 text-[12px] p-2.5 rounded-lg" style={{ background: "var(--info-bg)", color: "var(--info)" }}>
+                <span aria-hidden="true">🔒</span>
+                <span>
+                  <strong>Locked</strong> — CAPA{" "}
+                  <button type="button" onClick={() => onNavigateCapa(lockCapa.id)} className="underline bg-transparent border-none p-0 cursor-pointer font-semibold" style={{ color: "inherit" }}>
+                    {lockCapa.reference ?? lockCapa.id}
+                  </button>{" "}
+                  raised from this gap. Work continues in the CAPA; this gap is read-only.
+                </span>
+              </div>
+            )}
+
+            {/* Gap Step 4 (relocated) — QA's decision lifted to the TOP of the
+                modal so the reviewer acts without scrolling past the whole record.
+                The buttons, their handlers, and the isQAHead SoD gate are
+                byte-identical to the former bottom placement; the leading
+                `review &&` only restores the null-guard the old enclosing wrapper
+                ({review && …}) used to provide. Actionable context only — the
+                submitter — with NO status/severity badge (the header row below
+                already carries those). The submission evidence + conversation stay
+                in the QA-review card lower down. */}
+            {review && isQAHead && review.status === "Submitted" && !gapLocked && (
+              <div className="rounded-lg border p-3" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
+                <p className="text-[12px] mb-2" style={{ color: "var(--text-secondary)" }}>
+                  Submitted for review by <strong style={{ color: "var(--text-primary)" }}>{ownerName(selectedFinding.owner)}</strong>
+                  {(() => { const u = users.find((x) => x.id === selectedFinding.owner); return u ? ` · ${roleLabel(u.role)}` : ""; })()}
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>
+                  <Button variant="secondary" size="sm" icon={Wrench} disabled={reviewBusy} onClick={() => { setReviewError(null); setReworkReasonInput(""); setReworkOpen(true); }}>Send for rework</Button>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-2">
               <div className="flex gap-2 flex-wrap">{severityBadge(selectedFinding.severity)}{statusBadge(selectedFinding.status)}</div>
               {!isEditing && (
@@ -1005,10 +1126,7 @@ export function GapRegisterTab({
                 the submit/rework loop. */}
             {review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0) && (
               <div className="rounded-lg border p-3 mt-3" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <h3 className={LABEL} style={{ margin: 0 }}>QA review</h3>
-                  <Badge variant={review.status === "Submitted" ? "purple" : review.status === "Rework" ? "red" : review.status === "Closed" ? "green" : "amber"}>{review.status}</Badge>
-                </div>
+                <h3 className={LABEL} style={{ margin: 0 }}>QA review</h3>
                 {review.completionNotes && (
                   <p className="text-[12px] mt-1.5" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {review.completionNotes}</p>
                 )}
@@ -1016,24 +1134,18 @@ export function GapRegisterTab({
                     (gap-native) vs Worklist Documents (received from the worker). */}
                 {findingDocs.length > 0 && (
                   <div className="mt-2 space-y-3">
-                    <DocGroup label="Gap Evidence" docs={gapDocs} />
-                    <DocGroup label="Worklist Documents" docs={worklistDocs} />
+                    <DocGroup label="Gap creation documents" docs={createDocs} />
+                    <DocGroup label="Worker documents" docs={workDocs} />
                   </div>
                 )}
                 {/* The rework reason renders ONCE — in the Conversation thread
                     below, where reworkFinding auto-posts it as a durable, attributed
                     FindingMessage. A separate "Returned:" banner here repeated the
                     exact same text (the duplicate-Rework render). */}
-                {isQAHead && review.status === "Submitted" && (
-                  <div className="flex gap-2 mt-2">
-                    <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>
-                    <Button variant="secondary" size="sm" icon={Wrench} disabled={reviewBusy} onClick={() => { setReviewError(null); setReworkReasonInput(""); setReworkOpen(true); }}>Send for rework</Button>
-                  </div>
-                )}
                 <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
                   <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
                   <TaskThread messages={review.messages} currentUserId={user?.id} fmt={(iso) => dayjs.utc(iso).tz(timezone).format(`${dateFormat} HH:mm`)} />
-                  {review.status !== "Closed" && (
+                  {review.status !== "Closed" && !gapLocked && (
                     <div className="flex items-end gap-2 mt-2">
                       <textarea className="input text-[12px] w-full min-h-14" placeholder="Message the assignee…" value={reviewMsg} onChange={(e) => setReviewMsg(e.target.value)} maxLength={2000} />
                       <Button variant="secondary" size="sm" icon={Send} disabled={reviewMsg.trim().length === 0} onClick={() => void handlePostReviewMsg()}>Send</Button>
@@ -1053,15 +1165,47 @@ export function GapRegisterTab({
                 placeholder). ── */}
             {!(review && (review.status === "Submitted" || review.status === "Rework" || review.messages.length > 0)) && findingDocs.length > 0 && (
               <div className="pt-4 border-t border-(--bg-border) space-y-3">
-                <DocGroup label="Gap Evidence" docs={gapDocs} />
-                <DocGroup label="Worklist Documents" docs={worklistDocs} />
+                <DocGroup label="Gap creation documents" docs={createDocs} />
+                <DocGroup label="Worker documents" docs={workDocs} />
               </div>
             )}
 
-            {/* #8 — the inline "Audit Trail" collapse was removed: it duplicated
-                the header-clock Audit Trail modal below. No audit DATA is dropped
-                — Created + CAPA-raised + linked-system + edit history all live in
-                that modal now. */}
+            {/* Phase 7 — History: the finding's full lifecycle from the AuditLog
+                (finding → CAPA → closure) — the trail an inspector follows
+                between the two records. DISTINCT from the header-Clock "Edit
+                history" modal, which shows granular FindingEdit field diffs.
+                Sourced from loadFindingHistory (AuditLog), never FindingEdit, so
+                submit / rework / escalate / close all appear. Reasons render
+                inline where the audit row carries one (rework, closure);
+                event-only otherwise (submit / review-close carry no reason —
+                that is correct, not a gap to backfill). Newest row is last so
+                the story reads top-to-bottom. */}
+            {history.length > 0 && (
+              <div className="pt-4 border-t border-(--bg-border)">
+                <p className="text-[11px] font-semibold uppercase tracking-wider mb-2.5" style={{ color: "var(--text-muted)" }}>History</p>
+                <div className="space-y-2.5 text-[11px]">
+                  {history.slice().reverse().map((e) => {
+                    const label = FINDING_HISTORY_LABEL[e.action] ?? e.action;
+                    const dot = FINDING_HISTORY_DOT[e.action] ?? "var(--text-muted)";
+                    const { suffix, reason } = findingHistoryDetail(e.action, e.newValue);
+                    return (
+                      <div key={e.id} className="flex items-start gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: dot }} />
+                        <div className="min-w-0">
+                          <p className="font-medium" style={{ color: "var(--text-primary)" }}>
+                            {label}{suffix ? <> &mdash; {suffix}</> : null}
+                          </p>
+                          <p style={{ color: "var(--text-muted)" }}>
+                            {displayName({ name: e.userName })}{e.userRole ? ` (${roleLabel(e.userRole)})` : ""} &mdash; {dayjs.utc(e.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
+                          </p>
+                          {reason && <p className="italic mt-0.5" style={{ color: "var(--text-secondary)" }}>&ldquo;{reason}&rdquo;</p>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
           </div>
         )}
@@ -1069,7 +1213,7 @@ export function GapRegisterTab({
 
       {/* #13 — scrollable Audit Trail modal (opened by the header Clock icon). */}
       {auditModalOpen && selectedFinding && (
-        <Modal open onClose={() => setAuditModalOpen(false)} title={`Audit Trail — ${findingRef(selectedFinding)}`}>
+        <Modal open onClose={() => setAuditModalOpen(false)} title={`Edit history — ${findingRef(selectedFinding)}`}>
           <div className="max-h-[60vh] overflow-y-auto space-y-2.5 text-[11px] pr-1">
             {selectedFinding.createdAt && (
               <div className="flex items-start gap-2">

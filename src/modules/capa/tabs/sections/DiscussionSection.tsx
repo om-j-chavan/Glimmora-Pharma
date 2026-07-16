@@ -9,7 +9,6 @@ import {
   MoreHorizontal,
   Pencil,
   RotateCcw,
-  Send,
   Trash2,
 } from "lucide-react";
 import type { CAPAComment as PrismaCAPAComment } from "@prisma/client";
@@ -27,6 +26,7 @@ import {
   softDeleteCAPAComment,
   loadCommentsForCAPA,
 } from "@/actions/capa-comments";
+import { CONCERN_MIN } from "@/constants/capaValidation";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL } from "@/types/capa";
 import { roleLabel } from "@/lib/labels/roles";
@@ -54,6 +54,15 @@ interface DiscussionSectionProps {
   onCommentsChange: () => void;
 }
 
+/** Phase 4 — this section is now "Concerns", not a general discussion. A thread
+ *  is surfaced iff it contains at least one concern anywhere (root or a reply),
+ *  so a concern keeps its full reply context while purely-general threads drop
+ *  out of the UI. Nothing is deleted — non-concern rows stay in CAPAComment for
+ *  Part 11 audit; they are just no longer rendered here. */
+function threadHasConcern(node: DiscussionNode): boolean {
+  return node.isConcern || node.children.some(threadHasConcern);
+}
+
 export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionProps) {
   const toast = useToast();
   const { role } = useRole();
@@ -71,9 +80,9 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // New top-level comment composer.
+  // New top-level concern composer (Phase 4 — concern-only; the general comment
+  // box is retired, so there is no isConcern toggle here anymore).
   const [newBody, setNewBody] = useState("");
-  const [newIsConcern, setNewIsConcern] = useState(false);
   const [postBusy, setPostBusy] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
 
@@ -135,8 +144,12 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
   }, [refresh]);
 
   const tree = buildCommentTree(comments);
+  // Phase 4 — render only concern threads (see threadHasConcern). Non-concern
+  // comments (including the retired worklist thread) remain in the table but are
+  // no longer surfaced in this Concerns section.
+  const concernRoots = tree.filter(threadHasConcern);
   const liveComments = comments.filter((c) => c.deletedAt === null);
-  const totalCount = liveComments.length;
+  const concernCount = liveComments.filter((c) => c.isConcern).length;
   const unresolvedConcerns = liveComments.filter(
     (c) => c.isConcern && c.resolvedAt === null,
   ).length;
@@ -144,28 +157,28 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
   /* ── Mutation handlers ── */
 
   const handlePostNew = async () => {
-    if (newBody.trim().length < 5) return; // button is disabled; gentle hint shown
+    if (newBody.trim().length < CONCERN_MIN) return; // button is disabled; gentle hint shown
     setPostBusy(true);
     setPostError(null);
+    // Phase 4 — this composer only raises concerns now (isConcern always true).
     const result = await addCAPAComment(capa.id, {
       body: newBody.trim(),
-      isConcern: newIsConcern,
+      isConcern: true,
     });
     setPostBusy(false);
     if (!result.success) {
       setPostError(result.error);
-      toast.error(result.error || "Could not post comment.");
+      toast.error(result.error || "Could not raise concern.");
       return;
     }
     setNewBody("");
-    setNewIsConcern(false);
-    toast.success(newIsConcern ? "Concern flagged." : "Comment posted.");
+    toast.success("Concern raised.");
     await refresh();
     onCommentsChange();
   };
 
   const handlePostReply = async (parentId: string) => {
-    if (replyBody.trim().length < 5) return;
+    if (replyBody.trim().length < CONCERN_MIN) return;
     setReplyBusy(true);
     const result = await addCAPAComment(capa.id, {
       body: replyBody.trim(),
@@ -185,7 +198,7 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
   };
 
   const handleSaveEdit = async (commentId: string) => {
-    if (editBody.trim().length < 5) return;
+    if (editBody.trim().length < CONCERN_MIN) return;
     setEditBusy(true);
     const result = await editCAPAComment(commentId, { body: editBody.trim() });
     setEditBusy(false);
@@ -442,7 +455,7 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={editBusy || editBody.trim().length < 5}
+                  disabled={editBusy || editBody.trim().length < CONCERN_MIN}
                   loading={editBusy}
                   onClick={() => void handleSaveEdit(node.id)}
                 >
@@ -577,7 +590,7 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={replyBusy || replyBody.trim().length < 5}
+                  disabled={replyBusy || replyBody.trim().length < CONCERN_MIN}
                   loading={replyBusy}
                   onClick={() => void handlePostReply(node.id)}
                 >
@@ -629,9 +642,9 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
           style={{ color: "var(--text-primary)" }}
         >
           <MessageSquare className="w-4 h-4" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-          Discussion
+          Concerns
           <span className="text-[12px] font-normal" style={{ color: "var(--text-muted)" }}>
-            ({totalCount} comment{totalCount === 1 ? "" : "s"} · {unresolvedConcerns} open concern{unresolvedConcerns === 1 ? "" : "s"})
+            ({concernCount} concern{concernCount === 1 ? "" : "s"} · {unresolvedConcerns} open)
           </span>
         </h3>
       </div>
@@ -673,23 +686,24 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
         </p>
       )}
 
-      {!loading && !loadError && tree.length === 0 && (
+      {!loading && !loadError && concernRoots.length === 0 && (
         <div
           className="rounded-lg border border-dashed p-5 text-center mb-3"
           style={{ borderColor: "var(--card-border, var(--bg-border))" }}
         >
           <MessageSquare className="w-6 h-6 mx-auto mb-1.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>No comments yet — start the discussion.</p>
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>No concerns raised.</p>
         </div>
       )}
 
-      {!loading && tree.length > 0 && (
+      {!loading && concernRoots.length > 0 && (
         <ul role="list" className="list-none p-0 m-0">
-          {tree.map((root) => renderNode(root, 0))}
+          {concernRoots.map((root) => renderNode(root, 0))}
         </ul>
       )}
 
-      {/* Add new comment composer (top-level). */}
+      {/* Phase 4 — concern-only composer (the general comment box is retired).
+          Every post here is a concern; the resolve/reopen flow below manages it. */}
       {!isFrozen && (
         <div
           className="mt-2 pt-2"
@@ -699,36 +713,31 @@ export function DiscussionSection({ capa, onCommentsChange }: DiscussionSectionP
             className="input text-[12px] min-h-[60px]"
             value={newBody}
             onChange={(e) => setNewBody(e.target.value)}
-            placeholder="Add a comment…"
+            placeholder="Describe a concern that must be resolved before closure…"
             maxLength={4000}
             disabled={postBusy}
-            aria-label="New comment body"
+            aria-label="New concern body"
           />
           <div className="flex items-center justify-between mt-2">
-            <label
+            <span
               className="flex items-center gap-1.5 text-[11px]"
               style={{ color: "var(--text-secondary)" }}
             >
-              <input
-                type="checkbox"
-                checked={newIsConcern}
-                onChange={(e) => setNewIsConcern(e.target.checked)}
-                disabled={postBusy}
-              />
-              Flag as concern (blocks closure)
-            </label>
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              Raising a concern blocks closure until it is resolved.
+            </span>
             <div className="flex items-center gap-2">
               {/* Batch 3a #4 — gentle hint instead of a "min N chars" scold. */}
-              {newBody.trim().length < 5 && <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Add a brief comment</span>}
+              {newBody.trim().length < CONCERN_MIN && <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Describe the concern</span>}
               <Button
                 variant="primary"
                 size="sm"
-                icon={Send}
-                disabled={postBusy || newBody.trim().length < 5}
+                icon={AlertTriangle}
+                disabled={postBusy || newBody.trim().length < CONCERN_MIN}
                 loading={postBusy}
                 onClick={() => void handlePostNew()}
               >
-                Comment
+                Raise concern
               </Button>
             </div>
           </div>

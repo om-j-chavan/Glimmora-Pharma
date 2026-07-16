@@ -20,7 +20,6 @@ import {
 } from "@/actions/deviation-tasks";
 import { updateActionItem } from "@/actions/capas";
 import { addEvidenceFile, addEvidenceFileToCategory, removeEvidenceFile } from "@/actions/evidence";
-import { addCAPAComment } from "@/actions/capa-comments";
 import type { WorklistActionItem } from "@/lib/queries/worklist";
 import type { WorkItem } from "./workItem";
 
@@ -70,7 +69,7 @@ export function WorkItemModal({
       let res: Result;
       if (item.source === "finding") {
         const fd = new FormData(); fd.set("file", file);
-        res = await uploadFindingEvidence(item.id, fd, category);
+        res = await uploadFindingEvidence(item.id, fd, category, "work");
       } else if (item.source === "deviation") {
         const fd = new FormData(); fd.set("fileName", file.name); fd.set("file", file);
         res = await attachDeviationTaskDocument(item.id, fd, category);
@@ -125,11 +124,15 @@ export function WorkItemModal({
 
   async function postMsg() {
     if (msgBody.trim().length === 0) return;
+    // Phase 6 — the CAPA worklist thread is retired; this composer only renders
+    // for finding + deviation now (the Conversation block below is gated off for
+    // CAPA). The former CAPA branch called addCAPAComment with an actionItemId;
+    // that server branch is left in place but is now write-dead from the client.
+    if (item.source === "capa") return;
     setPosting(true);
-    let res: Result;
-    if (item.source === "finding") res = await postFindingMessage(item.id, { body: msgBody.trim() });
-    else if (item.source === "deviation") res = await postDeviationTaskMessage(item.id, { body: msgBody.trim() });
-    else { const a = item.raw as WorklistActionItem; res = await addCAPAComment(a.capaId, { body: msgBody.trim(), actionItemId: a.id }); }
+    const res: Result = item.source === "finding"
+      ? await postFindingMessage(item.id, { body: msgBody.trim() })
+      : await postDeviationTaskMessage(item.id, { body: msgBody.trim() });
     setPosting(false);
     if (!res.success) { toast.error(res.error || "Failed to post message."); return; }
     setMsgBody(""); onChanged();
@@ -207,6 +210,18 @@ export function WorkItemModal({
           </div>
         )}
 
+        {/* Phase 7 — CAPA CLOSED state. When the parent CAPA is closed, the
+            worker's accepted task is done: a plain acknowledgement, read-only.
+            Deliberately NOT QA's closing notes or anyone else's rework history —
+            the worker only needs to know their part is complete. Distinct from
+            the deviation Close Message above (that carries the QA close text). */}
+        {item.source === "capa" && item.capaStatus === "closed" && (
+          <div className="rounded-lg border p-3 flex items-start gap-2.5" style={{ background: "var(--success-bg)", borderColor: "var(--success)" }}>
+            <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--success)" }} aria-hidden="true" />
+            <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>This work was accepted and the CAPA is closed. Nothing further needed.</p>
+          </div>
+        )}
+
         {/* MY UPLOADED DOCUMENTS — the worker's own docs on this item (editable:
             + Add Document, View/Download, delete-where-permitted). Shared uploader. */}
         <div>
@@ -251,17 +266,23 @@ export function WorkItemModal({
           )}
         </div>
 
-        {/* Conversation — flat QA ↔ worker thread */}
-        <div className="pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
-          <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
-          <TaskThread messages={item.messages} currentUserId={currentUserId} fmt={fmtDateTime} />
-          {item.statusLabel !== "Closed" && item.statusLabel !== "Done" && (
-            <div className="flex items-end gap-2 mt-2">
-              <textarea className="input text-[12px] w-full min-h-14" placeholder="Reply to QA…" value={msgBody} onChange={(e) => setMsgBody(e.target.value)} maxLength={2000} disabled={posting} />
-              <Button variant="secondary" size="sm" icon={Send} disabled={posting || msgBody.trim().length === 0} loading={posting} onClick={() => void postMsg()}>Send</Button>
-            </div>
-          )}
-        </div>
+        {/* Conversation — flat QA ↔ worker thread. Phase 6: retired for CAPA
+            action items (the CAPA worklist thread is gone; concerns now live on
+            the CAPA detail's Concerns section). Finding + Deviation keep it — it's
+            their ONLY QA channel, and it writes to their own tables
+            (FindingMessage / DeviationTaskMessage), untouched by this change. */}
+        {item.source !== "capa" && (
+          <div className="pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
+            <TaskThread messages={item.messages} currentUserId={currentUserId} fmt={fmtDateTime} />
+            {item.statusLabel !== "Closed" && item.statusLabel !== "Done" && (
+              <div className="flex items-end gap-2 mt-2">
+                <textarea className="input text-[12px] w-full min-h-14" placeholder="Reply to QA…" value={msgBody} onChange={(e) => setMsgBody(e.target.value)} maxLength={2000} disabled={posting} />
+                <Button variant="secondary" size="sm" icon={Send} disabled={posting || msgBody.trim().length === 0} loading={posting} onClick={() => void postMsg()}>Send</Button>
+              </div>
+            )}
+          </div>
+        )}
 
         {err && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{err}</p>}
       </div>

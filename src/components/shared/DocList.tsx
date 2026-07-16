@@ -30,6 +30,9 @@ export interface DocItemView {
   size?: string;
   /** Freeform second-line detail (SHA, version, …). */
   meta?: string;
+  /** Optional hover title for the subtitle line — e.g. the full SHA-256 when
+   *  `meta` shows a truncated form. Falls back to the subtitle text. */
+  title?: string;
 }
 
 export interface DocListProps {
@@ -78,7 +81,7 @@ export function DocList({
                 <span className="truncate font-medium" style={{ color: "var(--text-primary)" }}>{d.fileName}</span>
                 {d.badge && <Badge variant={d.badge.tone ?? "gray"}>{d.badge.label}</Badge>}
               </div>
-              {subtitle && <p className="text-[10px] truncate" style={{ color: "var(--text-muted)" }}>{subtitle}</p>}
+              {subtitle && <p className="text-[10px] truncate" title={d.title ?? subtitle} style={{ color: "var(--text-muted)" }}>{subtitle}</p>}
             </div>
             {showView && (
               <a href={viewTarget} target="_blank" rel="noreferrer" className="shrink-0" title="View" aria-label={`View ${d.fileName}`} style={{ color: "var(--text-muted)" }}>

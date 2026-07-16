@@ -429,7 +429,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       for (const ev of evidenceFiles) {
         const fd = new FormData();
         fd.append("file", ev.file);
-        const upRes = await uploadFindingEvidenceAction(created.id, fd);
+        const upRes = await uploadFindingEvidenceAction(created.id, fd, undefined, "create");
         if (!upRes.success) console.error("[gap] uploadFindingEvidence failed:", ev.name, upRes.error);
       }
     }
@@ -454,7 +454,9 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   async function handleUploadEvidence(findingId: string, file: File) {
     const fd = new FormData();
     fd.append("file", file);
-    const result = await uploadFindingEvidenceAction(findingId, fd);
+    // #2 — a QA/author doc attached on the gap detail is a supporting document,
+    // not the worker's categorized work → "create" bucket (confirmed decision).
+    const result = await uploadFindingEvidenceAction(findingId, fd, undefined, "create");
     if (!result.success) {
       console.error("[gap] handleUploadEvidence failed:", result.error);
       return { ok: false, error: result.error };

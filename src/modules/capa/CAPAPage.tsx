@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
-  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, Target, Sparkles,
+  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, ClipboardList, Sparkles,
 } from "lucide-react";
 import type { CAPA as PrismaCAPA } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
@@ -59,8 +59,12 @@ const UI_TO_SERVER_CAPA_SOURCE: Record<
   "Internal Audit": "Internal Audit",
   Deviation: "Deviation",
   Complaint: "Customer Complaint",
+  // OOS has no dedicated server enum → "Other" (lossy but kept: it's a real
+  // source, and recording it beats dropping the fact). Debt: add an OOS enum.
   OOS: "Other",
-  "Change Control": "Other",
+  // "Change Control" removed from the modal (Phase 7): the CC module is hidden
+  // app-wide and it collapsed to "Other" anyway. The AI free-text path still
+  // falls through to "Other" via the ?? below, so no create path breaks.
   "Gap Assessment": "Gap Assessment",
 };
 
@@ -253,15 +257,14 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
         // failed"). Mirrors the mapping the AI path already applies below.
         source: UI_TO_SERVER_CAPA_SOURCE[data.source] ?? "Other",
         risk: data.risk as never,
-        owner: data.owner,
+        // Phase 7 — no owner / RCA at create: the owner is the QA creator (set
+        // server-side to actor.userId) and RCA is authored later from the
+        // Worklist by the assignee. Both fields were removed from the modal.
         dueDate: data.dueDate,
         siteId: data.siteId,
         linkedFindingId: data.findingId || undefined,
         linkedDeviationId: data.deviationId || undefined,
         diGateRequired: data.diGate,
-        rca: data.rca,
-        rcaMethod: data.rcaMethod,
-        rcaDetail: data.rcaDetail,
       });
       if (!res.success) {
         // Surface which field failed (createCAPA returns fieldErrors) instead of
@@ -305,7 +308,7 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
   return (
       <PageLayout
         title="CAPA Tracker"
-        titleIcon={Target}
+        titleIcon={ClipboardList}
         contentPadding={true}
         className="capa-shell"
         description={`Track corrective and preventive actions from initiation through effectiveness. \u00b7 ${capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}`}
