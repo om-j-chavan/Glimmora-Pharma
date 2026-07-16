@@ -1,4 +1,5 @@
 import os
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database.db import engine, Base
@@ -27,7 +28,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-Base.metadata.create_all(bind=engine)
+# Initialize database with error handling
+try:
+    print(f"Connecting to database: {os.getenv('DATABASE_URL', 'NOT SET')[:50]}...")
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully")
+except Exception as e:
+    print(f"ERROR: Failed to initialize database: {e}", file=sys.stderr)
+    print(f"DATABASE_URL: {os.getenv('DATABASE_URL', 'NOT SET')[:50]}", file=sys.stderr)
+    raise
 
 app.include_router(auth_router.router)
 app.include_router(audit_router.router)

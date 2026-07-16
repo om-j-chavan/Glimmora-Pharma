@@ -26,7 +26,7 @@ services:
     source_dir: /backend
     environment_slug: python
     build_command: pip install -r requirements.txt
-    run_command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+    run_command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --log-level info
     http_port: 8080
     instance_size_slug: basic-xs
     instance_count: 1
@@ -36,8 +36,10 @@ services:
       - path: /api/v1
     health_check:
       http_path: /health
-      initial_delay_seconds: 10
+      initial_delay_seconds: 30
       period_seconds: 30
+      timeout_seconds: 10
+      failure_threshold: 5
     envs:
       - key: DATABASE_URL
         scope: RUN_AND_BUILD_TIME
@@ -54,6 +56,9 @@ services:
       - key: ALLOWED_ORIGINS
         scope: RUN_AND_BUILD_TIME
         value: ${APP_URL}
+      - key: TAVILY_API_KEY
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
 
   # ── Next.js frontend ──────────────────────────────────────────────────────
   - name: web
