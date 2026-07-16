@@ -13,7 +13,7 @@ export async function GET(_request: NextRequest) {
 
     const capas = await prisma.cAPA.findMany({
       where: { tenantId: user.tenantId },
-      include: { site: true, finding: true, documents: true },
+      include: { site: true, finding: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -46,19 +46,7 @@ export async function GET(_request: NextRequest) {
       closedAt: c.closedAt?.toISOString() ?? undefined,
       createdAt: c.createdAt.toISOString(),
       evidenceLinks: [], // Default empty array - evidence links are managed via documents
-      documents: c.documents.map((d) => ({
-        id: d.id,
-        fileName: d.fileName,
-        fileSize: d.fileSize ?? "",
-        fileType: d.fileType ?? "",
-        version: d.version,
-        status: d.status as "current" | "superseded",
-        uploadedBy: d.uploadedBy,
-        approvedBy: d.approvedBy ?? undefined,
-        approvedAt: d.approvedAt?.toISOString() ?? undefined,
-        description: d.description ?? undefined,
-        uploadedAt: d.createdAt.toISOString(),
-      })),
+      documents: [], // Documents link via Document.linkedModule/linkedRecordId, not a CAPA relation
     }));
 
     return NextResponse.json(transformed);
@@ -92,7 +80,6 @@ export async function POST(request: NextRequest) {
         status: body.status || "open",
         createdBy: session?.user?.name || session?.user?.email || "System",
       },
-      include: { documents: true },
     });
 
     return NextResponse.json(capa, { status: 201 });

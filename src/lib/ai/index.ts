@@ -40,15 +40,33 @@ import {
   fetchApprovalBrief,
   fetchReadinessGuidance,
   scanFda483Document,
+  selectAiToken,
 } from "../aiBackend";
+import { store } from "@/store";
 import type { DriftAlert } from "@/types/agi";
+
+/**
+ * Best-effort read of the signed-in user's AI backend access token from the
+ * Redux store (client-side). Attached to every real backend call so the
+ * now auth-gated AGI endpoints authenticate as the current user. Falls back to
+ * "anonymous" — dev backends accept it; strict/prod backends reply 401, and the
+ * caller's try/catch then degrades that surface to the deterministic mock.
+ * Never throws (safe during SSR / before the store hydrates).
+ */
+function currentAiToken(): string {
+  try {
+    return selectAiToken(store.getState());
+  } catch {
+    return "anonymous";
+  }
+}
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
 
 /**
  * Per-feature mock switches. A feature serves real backend data when its flag
- * is `false`. Features A/B/C (RCA suggestions, CAPA pre-fill, FDA-483 response
- * draft) have no real backend yet, so they stay mocked. D/E/F/G/H are wired to
- * the FastAPI backend (see src/lib/aiBackend.ts + the matching routers).
+ * is `false`. All features (A–K, M) are wired to the FastAPI backend (see
+ * src/lib/aiBackend.ts + the matching routers); every flag below is `false`
+ * (real). The deterministic mocks remain only as the crash-safety fallback.
  *
  * Robustness contract: each real branch falls back to the deterministic mock
  * if the backend call throws, so an advisory AGI surface never crashes its
@@ -66,7 +84,7 @@ export const AI_MOCK = {
   findingTriage: false, // Feature I — POST /api/v1/finding-triage/classify
   approvalBrief: false, // Feature J — POST /api/v1/capa-approval-brief/generate
   readinessGuidance: false, // Feature K — POST /api/v1/capa-readiness-guidance/generate
-  fda483Extraction: true, // Feature M — POST /api/v1/fda483-extraction/scan (no real backend flip until tested)
+  fda483Extraction: false, // Feature M — POST /api/v1/fda483-extraction/scan (real gpt-4o verbatim extraction; digital PDFs only, scanned→empty+note; mock fallback on hard error)
 } as const;
 
 /**
@@ -151,6 +169,7 @@ export async function getRcaSuggestions(
       observationText,
       observationSeverity,
       siteContext,
+      currentAiToken(),
     );
   } catch (err) {
     console.error(
@@ -186,6 +205,7 @@ export async function getCapaPrefill(
       observationText,
       rcaRootCause,
       observationSeverity,
+      currentAiToken(),
     );
   } catch (err) {
     console.error(
@@ -224,7 +244,7 @@ export async function getResponseDraft(
     return mockResponseDraft(event);
   }
   try {
-    return await fetchResponseDraft(event);
+    return await fetchResponseDraft(event, currentAiToken());
   } catch (err) {
     console.error(
       "[ai] getResponseDraft: backend failed, falling back to mock.",
@@ -399,7 +419,7 @@ export async function getRegulatoryIntelligence(): Promise<RegulatoryIntelligenc
     return mockRegulatoryIntelligence();
   }
   try {
-    return await fetchRegulatoryIntelligence();
+    return await fetchRegulatoryIntelligence(currentAiToken());
   } catch (err) {
     console.error(
       "[ai] getRegulatoryIntelligence: backend failed, falling back to mock.",
@@ -497,7 +517,7 @@ export async function getDeviationIntelligence(
     return mockDeviationIntelligence(deviations);
   }
   try {
-    return await fetchDeviationClusters(deviations);
+    return await fetchDeviationClusters(deviations, currentAiToken());
   } catch (err) {
     console.error(
       "[ai] getDeviationIntelligence: backend failed, falling back to mock.",
@@ -534,7 +554,7 @@ export async function getDriftDetection(): Promise<DriftDetectionResult> {
     return mockDriftDetection();
   }
   try {
-    return await fetchDriftDetection();
+    return await fetchDriftDetection(currentAiToken());
   } catch (err) {
     console.error(
       "[ai] getDriftDetection: backend failed, falling back to mock.",
@@ -616,7 +636,13 @@ export async function classifyFinding(
     return mockFindingTriage(requirement, area, purpose, activeFrameworks);
   }
   try {
-    return await fetchFindingTriage(requirement, area, purpose, activeFrameworks);
+    return await fetchFindingTriage(
+      requirement,
+      area,
+      purpose,
+      activeFrameworks,
+      currentAiToken(),
+    );
   } catch (err) {
     console.error(
       "[ai] classifyFinding: backend failed, falling back to mock.",
@@ -680,7 +706,7 @@ export async function getApprovalBrief(
     return mockApprovalBrief(input);
   }
   try {
-    return await fetchApprovalBrief(input);
+    return await fetchApprovalBrief(input, currentAiToken());
   } catch (err) {
     console.error(
       "[ai] getApprovalBrief: backend failed, falling back to mock.",
@@ -751,7 +777,7 @@ export async function getReadinessGuidance(
     return mockReadinessGuidance(input);
   }
   try {
-    return await fetchReadinessGuidance(input);
+    return await fetchReadinessGuidance(input, currentAiToken());
   } catch (err) {
     console.error(
       "[ai] getReadinessGuidance: backend failed, falling back to mock.",

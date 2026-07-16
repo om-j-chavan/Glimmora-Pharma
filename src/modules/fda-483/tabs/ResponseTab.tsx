@@ -54,7 +54,7 @@ export interface ResponseTabProps {
   onCancelEdit: () => void;
   onSaveDraft: () => void;
   onUseAGIDraft: () => void;
-  onGenerateAGIDraft: () => void;
+  onGenerateAGIDraft: () => Promise<string | null>;
   onSignSubmit: () => void;
 }
 
@@ -340,11 +340,13 @@ export function ResponseTab({
                 Edit Draft
               </Button>
               {agiMode !== "manual" && agiAgent && (
-                <Button variant="ghost" size="sm" icon={Bot} onClick={() => {
+                <Button variant="ghost" size="sm" icon={Bot} onClick={async () => {
                   setAgiModalOpen(true);
                   if (!liveEvent.agiDraft) {
                     setAgiLoading(true);
-                    setTimeout(() => { onGenerateAGIDraft(); setAgiLoading(false); }, 2000);
+                    // Tie the spinner to the REAL AI call completing (was a fake 2s timer).
+                    await onGenerateAGIDraft();
+                    setAgiLoading(false);
                   }
                 }}>
                   AGI Draft

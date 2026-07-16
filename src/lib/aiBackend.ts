@@ -488,37 +488,44 @@ export async function scanFda483Document(
  */
 
 /** Feature E — FDA/EMA/ICH guidance monitoring (LLM over the agent's prompt). */
-export function fetchRegulatoryIntelligence(): Promise<RegulatoryIntelligenceResult> {
+export function fetchRegulatoryIntelligence(
+  token?: string | null,
+): Promise<RegulatoryIntelligenceResult> {
   return request<RegulatoryIntelligenceResult>(
     "/api/v1/regulatory-intelligence/scan",
-    { method: "GET" },
+    { method: "GET", token },
   );
 }
 
 /** Feature F — semantic clustering of the tenant's own deviation history. */
 export function fetchDeviationClusters(
   deviations: DeviationClusterInput[],
+  token?: string | null,
 ): Promise<DeviationIntelligenceResult> {
   return request<DeviationIntelligenceResult>(
     "/api/v1/deviation-intelligence/analyze",
-    { method: "POST", jsonBody: { deviations } },
+    { method: "POST", jsonBody: { deviations }, token },
   );
 }
 
 /** Feature H — drift/anomaly detection grounded in the real audit trail. */
-export function fetchDriftDetection(): Promise<DriftDetectionResult> {
+export function fetchDriftDetection(
+  token?: string | null,
+): Promise<DriftDetectionResult> {
   return request<DriftDetectionResult>("/api/v1/drift-detection/scan", {
     method: "GET",
+    token,
   });
 }
 
 /** Feature C — formal FDA-483 response-letter draft (LLM long-form generation). */
 export function fetchResponseDraft(
   event: ResponseDraftEvent,
+  token?: string | null,
 ): Promise<{ draft: string; characterCount: number }> {
   return request<{ draft: string; characterCount: number }>(
     "/api/v1/response-draft/generate",
-    { method: "POST", jsonBody: event },
+    { method: "POST", jsonBody: event, token },
   );
 }
 
@@ -528,10 +535,12 @@ export function fetchRcaSuggestions(
   observationText: string,
   observationSeverity: string,
   siteContext: string,
+  token?: string | null,
 ): Promise<RcaSuggestion[]> {
   return request<RcaSuggestion[]>("/api/v1/rca-suggestions/generate", {
     method: "POST",
     jsonBody: { method, observationText, observationSeverity, siteContext },
+    token,
   });
 }
 
@@ -540,10 +549,12 @@ export function fetchCapaPrefill(
   observationText: string,
   rcaRootCause: string,
   observationSeverity: string,
+  token?: string | null,
 ): Promise<CAPAPrefill> {
   return request<CAPAPrefill>("/api/v1/capa-prefill/generate", {
     method: "POST",
     jsonBody: { observationText, rcaRootCause, observationSeverity },
+    token,
   });
 }
 
@@ -554,10 +565,12 @@ export function fetchFindingTriage(
   area: string,
   purpose: string,
   activeFrameworks: string[],
+  token?: string | null,
 ): Promise<FindingTriageResult> {
   return request<FindingTriageResult>("/api/v1/finding-triage/classify", {
     method: "POST",
     jsonBody: { requirement, area, purpose, activeFrameworks },
+    token,
   });
 }
 
@@ -565,10 +578,12 @@ export function fetchFindingTriage(
  *  prose + Python-appended gate facts). Reviewer assist only; never a verdict. */
 export function fetchApprovalBrief(
   input: ApprovalBriefInput,
+  token?: string | null,
 ): Promise<ApprovalBriefResult> {
   return request<ApprovalBriefResult>("/api/v1/capa-approval-brief/generate", {
     method: "POST",
     jsonBody: input,
+    token,
   });
 }
 
@@ -576,10 +591,11 @@ export function fetchApprovalBrief(
  *  (LLM prose grounded in the computed unmet list). Authoring guidance only. */
 export function fetchReadinessGuidance(
   input: ReadinessGuidanceInput,
+  token?: string | null,
 ): Promise<ReadinessGuidanceResult> {
   return request<ReadinessGuidanceResult>(
     "/api/v1/capa-readiness-guidance/generate",
-    { method: "POST", jsonBody: input },
+    { method: "POST", jsonBody: input, token },
   );
 }
 
