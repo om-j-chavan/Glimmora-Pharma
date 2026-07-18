@@ -13,11 +13,42 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
-// Initialize Razorpay instance
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID!,
-  key_secret: process.env.RAZORPAY_KEY_SECRET!,
-});
+/**
+ * Read a required Razorpay env var, or fail with a message that NAMES it.
+ *
+ * The `!` these replace asserted to TypeScript that values were present which are
+ * genuinely absent — a claim nobody checked. The cost was paid at the worst moment:
+ * "`key_id` or `oauthToken` is mandatory", thrown from a bundled chunk with no hint
+ * of which variable or which route.
+ */
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    throw new Error(
+      `${name} is not set. Razorpay is required for this request; add it to your environment (see .env.example).`,
+    );
+  }
+  return v;
+}
+
+/**
+ * LAZY singleton. Constructed on first USE, never at module load.
+ *
+ * Module-scope construction meant a payment SDK had to initialise for the app to
+ * COMPILE: `next build` collects page data by evaluating each route's module, so the
+ * constructor ran at build time and threw without runtime secrets. A route that is
+ * never called at build time now never needs a key.
+ */
+let _razorpay: Razorpay | null = null;
+function getRazorpay(): Razorpay {
+  if (!_razorpay) {
+    _razorpay = new Razorpay({
+      key_id: requireEnv("RAZORPAY_KEY_ID"),
+      key_secret: requireEnv("RAZORPAY_KEY_SECRET"),
+    });
+  }
+  return _razorpay;
+}
 
 export interface CreateOrderParams {
   amount: number; // Amount in smallest currency unit (paise for INR)
@@ -74,7 +105,7 @@ export interface RazorpayPayment {
  * @returns Created order object
  */
 export async function createOrder(params: CreateOrderParams): Promise<RazorpayOrder> {
-  const order = await razorpay.orders.create({
+  const order = await getRazorpay().orders.create({
     amount: params.amount,
     currency: params.currency ?? "INR",
     receipt: params.receipt,
@@ -98,7 +129,10 @@ export function verifyPaymentSignature(params: VerifyPaymentParams): boolean {
 
   const body = `${razorpayOrderId}|${razorpayPaymentId}`;
   const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+    // Was `RAZORPAY_KEY_SECRET!` — an undefined key makes crypto throw
+    // ERR_INVALID_ARG_TYPE ("The 'key' argument must be of type string… Received
+    // undefined"), which names neither the variable nor Razorpay.
+    .createHmac("sha256", requireEnv("RAZORPAY_KEY_SECRET"))
     .update(body)
     .digest("hex");
 
@@ -118,12 +152,20 @@ export function verifyPaymentSignature(params: VerifyPaymentParams): boolean {
  * @returns true if signature is valid
  */
 export function verifyWebhookSignature(body: string, signature: string): boolean {
+  // requireEnv stays OUTSIDE the try, deliberately. A MISSING SECRET is a config
+  // error; an unparseable signature is a security answer. Folding the first into
+  // the catch below returned `false` — "invalid signature" — for an unconfigured
+  // server, which is a config error wearing a security error's clothes: the webhook
+  // would silently reject every legitimate Razorpay callback and look like an
+  // attack. This throws instead, naming RAZORPAY_WEBHOOK_SECRET.
   const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET!)
+    .createHmac("sha256", requireEnv("RAZORPAY_WEBHOOK_SECRET"))
     .update(body)
     .digest("hex");
 
   try {
+    // The catch covers timingSafeEqual ONLY — it throws on a length mismatch,
+    // which genuinely means the signature is invalid.
     return crypto.timingSafeEqual(
       Buffer.from(expectedSignature),
       Buffer.from(signature)
@@ -140,7 +182,7 @@ export function verifyWebhookSignature(body: string, signature: string): boolean
  * @returns Payment details
  */
 export async function fetchPayment(paymentId: string): Promise<RazorpayPayment> {
-  const payment = await razorpay.payments.fetch(paymentId);
+  const payment = await getRazorpay().payments.fetch(paymentId);
   return payment as RazorpayPayment;
 }
 
@@ -151,7 +193,7 @@ export async function fetchPayment(paymentId: string): Promise<RazorpayPayment> 
  * @returns Order details
  */
 export async function fetchOrder(orderId: string): Promise<RazorpayOrder> {
-  const order = await razorpay.orders.fetch(orderId);
+  const order = await getRazorpay().orders.fetch(orderId);
   return order as RazorpayOrder;
 }
 
@@ -168,7 +210,7 @@ export async function capturePayment(
   amount: number,
   currency: string = "INR"
 ): Promise<RazorpayPayment> {
-  const payment = await razorpay.payments.capture(paymentId, amount, currency);
+  const payment = await getRazorpay().payments.capture(paymentId, amount, currency);
   return payment as RazorpayPayment;
 }
 
@@ -177,7 +219,16 @@ export async function capturePayment(
  * This is safe to expose to the client.
  */
 export function getPublicKey(): string {
-  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? process.env.RAZORPAY_KEY_ID!;
+  // Was `?? process.env.RAZORPAY_KEY_ID!`. That `!` was the QUIET one: with no key
+  // set it returned `undefined` TYPED AS string and handed it to the client's
+  // checkout — no throw, no log, and the type system asserting it was fine. A build
+  // failure is loud and stops you; this shipped. requireEnv makes the same absence
+  // fail where it happens, naming the variable.
+  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? requireEnv("RAZORPAY_KEY_ID");
 }
 
-export { razorpay };
+// The instance is deliberately NOT exported: exporting it hands callers a value that
+// can only exist once the keys do, which is how construction escaped into module
+// scope in the first place. All five importers (signup/create-order,
+// signup/verify-payment, subscriptions/renew, subscriptions/verify-renewal,
+// webhooks/razorpay) use the functions above; none used the instance.
