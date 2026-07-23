@@ -33,6 +33,7 @@ import { useAppSelector } from "@/hooks/useAppSelector";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { AIBadge } from "@/components/ai";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
 
 function sevBadge(s: DriftSeverity) {
@@ -60,6 +61,11 @@ export interface DriftDetectionState {
   /** Whether the AGI `drift` agent is active — the whole surface hides when false. */
   agentActive: boolean;
   alerts: DriftAlert[];
+  /** Provenance of the current alerts: "backend" = real scan, "mock" = the
+   *  gateway's fallback fixture (backend unreachable). null before the first
+   *  scan resolves. Surfaced as a badge so fixture alerts are never read as a
+   *  live finding about the tenant's systems. */
+  source: DriftDetectionResult["source"] | null;
   /** Alerts not yet Resolved (drives the "N open" count). */
   openCount: number;
   /** Alerts at Critical severity (drives the "· N critical" count). */
@@ -94,7 +100,15 @@ export function useDriftDetection(): DriftDetectionState {
   const openCount = alerts.filter((a) => a.status !== "Resolved").length;
   const criticalCount = alerts.filter((a) => a.severity === "Critical").length;
 
-  return { agentActive, alerts, openCount, criticalCount, loading, scan };
+  return {
+    agentActive,
+    alerts,
+    source: result?.source ?? null,
+    openCount,
+    criticalCount,
+    loading,
+    scan,
+  };
 }
 
 /** Short count summary reused by the header-button label and the modal footer.
@@ -116,7 +130,8 @@ function DriftAlertList({ alerts, loading }: { alerts: DriftAlert[]; loading: bo
         aria-live="polite"
       >
         <div
-          className="w-7 h-7 rounded-full border-2 border-[#6366f1] border-t-transparent animate-spin"
+          className="w-7 h-7 rounded-full border-2 animate-spin"
+          style={{ borderColor: "var(--ai-accent)", borderTopColor: "transparent" }}
           aria-hidden="true"
         />
         <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
@@ -190,7 +205,7 @@ export function DriftDetectionModal({
   onClose: () => void;
   drift: DriftDetectionState;
 }) {
-  const { alerts, loading, scan } = drift;
+  const { alerts, loading, scan, source } = drift;
   return (
     <Modal
       open={open}
@@ -198,8 +213,14 @@ export function DriftDetectionModal({
       title="Drift Detection"
       footer={
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-            {driftSummary(drift)}
+          <span className="flex items-center gap-2">
+            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {driftSummary(drift)}
+            </span>
+            {/* Provenance — getDriftDetection() silently falls back to the mock
+                fixture when the backend errors; without this the user cannot tell
+                a real scan from demo data. Mirrors ApprovalBriefPanel. */}
+            {!loading && source && <AIBadge source={source} />}
           </span>
           <Button
             variant="ghost"

@@ -22,7 +22,6 @@ import {
   buildRegulatoryUpdates,
   mockDeviationIntelligence,
   mockDriftDetection,
-  buildDriftAlerts,
   mockFindingTriage,
   mockApprovalBrief,
   mockReadinessGuidance,
@@ -231,6 +230,11 @@ export interface ResponseDraftEvent {
   agency: string;
   site: string;
   inspectionDate: string;
+  /** The responding company's legal name (the tenant's own name, NOT the
+   *  vendor's). Omitted/blank → the draft carries a visible "[Company Name]"
+   *  placeholder, because a letter addressed to a regulator must never be
+   *  signed with a guessed company. */
+  companyName?: string;
   observations: ResponseDraftObservation[];
 }
 
@@ -290,6 +294,10 @@ export interface DocumentReviewResult {
   scanDurationSeconds: number;
   rubricVersion: string;
   findings: DocumentReviewFinding[];
+  /** Set when the document yielded no reviewable text (scanned PDF, unsupported
+   *  type, parse error). `findings` is then empty because the rubric scan never
+   *  ran — this is NOT a clean pass, and the UI must not render it as one. */
+  note?: string;
   /** Provenance so the UI can badge mock vs real-backend results. */
   source: "mock" | "backend";
 }
@@ -351,6 +359,7 @@ export async function getDocumentReview(
     scanDurationSeconds:
       typeof dto.scan_duration_seconds === "number" ? dto.scan_duration_seconds : 0,
     rubricVersion: dto.rubric_version ?? "unknown",
+    note: dto.note ?? undefined,
     source: "backend",
     findings: (dto.findings ?? []).map((f, i) => ({
       id: `${input.stageKey}-be-${i}`,
@@ -493,14 +502,21 @@ export interface DeviationCluster {
   members: DeviationClusterMember[];
   /** AI-SUGGESTED candidate root cause — advisory only; QA investigates. */
   suggestedRootCause: string;
-  /** 0–100 heuristic confidence (scales with cluster size). */
+  /** 0–100 heuristic derived from cluster SIZE alone (min(95, 50 + count*12)) —
+   *  NOT the model's certainty in the root cause. Surfaced in the UI as
+   *  "pattern strength" so it is never read as an AI confidence score. */
   confidence: number;
 }
 
 export interface DeviationIntelligenceResult {
   clusters: DeviationCluster[];
-  /** Total deviations the agent analysed. */
+  /** Total deviations the agent actually analysed. */
   analyzedCount: number;
+  /** Present ONLY when the backend capped the input (MAX_ANALYZE): how many
+   *  deviations were sent. `analyzedCount` is then the risk-first subset that
+   *  was analysed, and the UI warns that coverage was partial. Absent on every
+   *  normal run. */
+  suppliedCount?: number;
   /** Number of recurring-pattern clusters surfaced. */
   patternCount: number;
   scannedAt: string;
@@ -564,23 +580,24 @@ export async function getDriftDetection(): Promise<DriftDetectionResult> {
   }
 }
 
-/**
- * Synchronous, deterministic snapshot for the Dashboard AGI Insights (which
- * computes alert counts inline during render). Same data the async
- * getDriftDetection() returns, minus the latency shim.
+/* REMOVED — driftAlertSummary().
+ *
+ * It counted the STATIC DRIFT_ALERTS fixture and returned it synchronously,
+ * ignoring AI_MOCK.driftDetection and never calling the backend. Its only
+ * caller (the Dashboard AGI Insights rail) therefore told every tenant
+ * "N critical system drift alerts detected" from a hardcoded array — a
+ * fabricated claim about their validated systems.
+ *
+ * The Dashboard now derives that insight from the tenant's real system records
+ * via isValidationDrift (@/lib/kpi). Real drift analysis is asynchronous by
+ * nature (it reads the audit trail through an LLM), so it cannot be served from
+ * a sync helper — use getDriftDetection() from an effect, as the CSV/CSA page
+ * does. Do not reintroduce a sync fixture-backed summary here.
+ *
+ * NOTE: regulatoryAlertSummary() above has the SAME defect (static fixture,
+ * rendered on the Dashboard as if live). It belongs to Feature E and was left
+ * untouched by this Drift audit — see the report.
  */
-export function driftAlertSummary(): {
-  total: number;
-  critical: number;
-  auditTrail: number;
-} {
-  const alerts = buildDriftAlerts();
-  return {
-    total: alerts.length,
-    critical: alerts.filter((a) => a.severity === "Critical").length,
-    auditTrail: alerts.filter((a) => a.type === "Audit Trail Anomaly").length,
-  };
-}
 
 /* ── Feature I — Finding Triage (Gap Assessment) ─────────────────────
  * When a compliance gap is reported, the user must pick the right regulatory

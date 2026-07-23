@@ -6,6 +6,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { ShieldAlert, Sparkles, Check, X } from "lucide-react";
+import { AIButton } from "@/components/ai";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
@@ -185,9 +186,9 @@ export function RaiseTicketModal({
         <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
           <span className="text-[14px] font-semibold text-(--text-primary)">Raise Ticket</span>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" type="button" icon={Sparkles} loading={triageBusy} onClick={runTriage}>
+            <AIButton variant="subtle" size="sm" loading={triageBusy} onClick={runTriage}>
               AI Smart Triage
-            </Button>
+            </AIButton>
             <button
               type="button"
               onClick={close}

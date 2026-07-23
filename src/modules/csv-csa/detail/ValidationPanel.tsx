@@ -38,6 +38,7 @@ import { Popup } from "@/components/ui/Popup";
 import { DataTable, type Column } from "@/components/shared";
 import { displayUserName } from "@/lib/identity-display";
 import { getDocumentReview, type DocumentReviewResult, type DocumentReviewSeverity } from "@/lib/ai";
+import { AIButton } from "@/components/ai";
 import { StageReworkTasks } from "./StageReworkTasks";
 import { selectAiToken } from "@/lib/aiBackend";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -159,15 +160,37 @@ function DocReviewBlock({
   if (!result) {
     if (!canAct) return null;
     return (
-      <button
-        type="button"
-        onClick={onRun}
-        className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium border-none bg-transparent cursor-pointer p-0"
-        style={{ color: "var(--brand)" }}
-      >
-        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+      <AIButton variant="quiet" size="sm" className="mt-1.5" onClick={onRun}>
         Run AI document review
-      </button>
+      </AIButton>
+    );
+  }
+
+  // Not reviewable — the backend could not read the document (scanned PDF,
+  // unsupported type, parse error), so the rubric scan never ran. This MUST come
+  // before the clean-pass branch: findings are empty here, but an unread document
+  // is unknown, not compliant, and "No issues flagged — looks complete" would be
+  // a false assurance on a validation record.
+  if (result.note) {
+    return (
+      <div
+        className="mt-1.5 rounded-lg p-2.5 flex items-center gap-2 text-[11px]"
+        style={{
+          background: "var(--warning-bg)",
+          border: "1px solid var(--warning)",
+          color: "var(--warning)",
+        }}
+        role="note"
+      >
+        <AlertCircle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+        <span className="font-semibold">Document Review</span>
+        <span>· Not reviewed — {result.note}</span>
+        {canAct && (
+          <button type="button" onClick={onRun} aria-label="Re-run review" className="ml-auto p-0.5 rounded border-none bg-transparent cursor-pointer" style={{ color: "inherit" }}>
+            <RefreshCw className="w-3 h-3" aria-hidden="true" />
+          </button>
+        )}
+      </div>
     );
   }
 

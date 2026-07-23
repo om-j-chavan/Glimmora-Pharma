@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { ClipboardCheck, Plus, Search, ChevronRight, Link2, CheckCircle2, Sparkles, RotateCcw, Clock, AlertTriangle, TrendingUp } from "lucide-react";
+import { ClipboardCheck, Plus, Search, ChevronRight, Link2, CheckCircle2, RotateCcw, Clock, AlertTriangle, TrendingUp } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { CAPA, CAPARisk } from "@/store/capa.slice";
@@ -10,6 +10,7 @@ import { isOverdue, STATUS_LABEL, type CAPAStatus } from "@/types/capa";
 import type { AuthUser } from "@/store/auth.slice";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
@@ -361,10 +362,10 @@ export function CAPATrackerTab({
                           doesn't fire as well. The button is shown for every
                           row; if the CAPA isn't AI-tracked the lifecycle page
                           surfaces an empty-state for the missing record. */}
-                      <Button
-                        variant="ghost"
+                      <AIButton
+                        variant="quiet"
                         size="xs"
-                        icon={Sparkles}
+                        iconOnly
                         aria-label={`Open ${referenceDisplay} in AI lifecycle`}
                         title="Open AI lifecycle"
                         onClick={(e) => {

@@ -2,25 +2,21 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BookOpen, Plus, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { BookOpen, Plus, Trash2, ChevronDown, ChevronUp, Search } from "lucide-react";
 import type { Playbook } from "@prisma/client";
 import { createPlaybook, deletePlaybook } from "@/actions/inspections";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
+import { useErrorPopup } from "@/components/ui/ErrorPopup";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
 
 export interface PlaybooksPrismaTabProps {
   playbooks: Playbook[];
   isAdmin: boolean;
 }
-
-const PLAYBOOK_TYPES = [
-  "Inspection Protocol",
-  "Emergency Response",
-  "Document Request",
-  "Communication Guide",
-  "Escalation Plan",
-];
 
 const PLAYBOOK_CATEGORIES = [
   { value: "general", label: "General" },
@@ -29,6 +25,11 @@ const PLAYBOOK_CATEGORIES = [
   { value: "documentation", label: "Documentation" },
   { value: "emergency", label: "Emergency" },
 ];
+
+/** Human label for a category value — reused for the derived `type` field. */
+function categoryLabel(value: string): string {
+  return PLAYBOOK_CATEGORIES.find((c) => c.value === value)?.label ?? "General";
+}
 
 const CATEGORY_VARIANT: Record<string, { bg: string; fg: string }> = {
   general: { bg: "var(--brand-muted)", fg: "var(--brand)" },
@@ -40,7 +41,6 @@ const CATEGORY_VARIANT: Record<string, { bg: string; fg: string }> = {
 
 interface PlaybookForm {
   title: string;
-  type: string;
   description: string;
   content: string;
   category: string;
@@ -48,7 +48,6 @@ interface PlaybookForm {
 
 const EMPTY_FORM: PlaybookForm = {
   title: "",
-  type: "Inspection Protocol",
   description: "",
   content: "",
   category: "general",
@@ -61,13 +60,27 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Playbook pending a delete confirmation (drives the shared ConfirmModal).
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // User-facing error surfaced when a server action fails (replaces silent console.error).
+  const { setError, errorPopup } = useErrorPopup();
+  const [search, setSearch] = useState("");
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? playbooks.filter((pb) =>
+        [pb.title, pb.description ?? "", pb.content, pb.category].some((f) => f.toLowerCase().includes(q)),
+      )
+    : playbooks;
 
   async function handleCreate() {
     if (!form.title.trim() || !form.content.trim()) return;
     setSaving(true);
     const result = await createPlaybook({
       title: form.title.trim(),
-      type: form.type,
+      // `type` is no longer a separate field — derive it from the category so
+      // the DB column contract is preserved without a redundant picker.
+      type: categoryLabel(form.category),
       description: form.description.trim() || undefined,
       content: form.content.trim(),
       category: form.category,
@@ -75,6 +88,7 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
     setSaving(false);
     if (!result.success) {
       console.error("[playbooks] createPlaybook failed:", result.error);
+      setError(result.error ?? "Could not add the playbook. Please try again.");
       return;
     }
     setAddOpen(false);
@@ -83,12 +97,13 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this playbook?")) return;
     setDeletingId(id);
     const result = await deletePlaybook(id);
     setDeletingId(null);
+    setConfirmDeleteId(null);
     if (!result.success) {
       console.error("[playbooks] deletePlaybook failed:", result.error);
+      setError(result.error ?? "Could not delete the playbook. Please try again.");
       return;
     }
     if (expanded === id) setExpanded(null);
@@ -108,6 +123,18 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
         )}
       </div>
 
+      {playbooks.length > 0 && (
+        <Input
+          id="pb-search"
+          type="search"
+          icon={Search}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search playbooks by title, content or category..."
+          aria-label="Search playbooks"
+        />
+      )}
+
       {playbooks.length === 0 ? (
         <div
           className="text-center py-8 rounded-2xl border border-dashed"
@@ -121,9 +148,16 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
             Add inspection protocols and procedures for your team to reference.
           </p>
         </div>
+      ) : filtered.length === 0 ? (
+        <div
+          className="text-center py-8 rounded-2xl border border-dashed text-[12px]"
+          style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)", color: "var(--text-secondary)" }}
+        >
+          No playbooks match &ldquo;{search.trim()}&rdquo;.
+        </div>
       ) : (
         <div className="space-y-3">
-          {playbooks.map((pb) => {
+          {filtered.map((pb) => {
             const variant = CATEGORY_VARIANT[pb.category] ?? CATEGORY_VARIANT.general;
             const isOpen = expanded === pb.id;
             return (
@@ -177,7 +211,7 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
                       {pb.content}
                     </pre>
                     <p className="text-[10px] mt-3" style={{ color: "var(--text-muted)" }}>
-                      {pb.type} · created by {pb.createdBy}
+                      Created by {pb.createdBy}
                     </p>
                     {isAdmin && (
                       <div className="mt-3 pt-3 border-t" style={{ borderColor: "var(--bg-border)" }}>
@@ -186,7 +220,7 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
                           size="sm"
                           icon={Trash2}
                           loading={deletingId === pb.id}
-                          onClick={() => handleDelete(pb.id)}
+                          onClick={() => setConfirmDeleteId(pb.id)}
                         >
                           Delete playbook
                         </Button>
@@ -210,72 +244,43 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
         title="Add playbook"
       >
         <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <Input
+            id="pb-title"
+            label="Title"
+            required
+            value={form.title}
+            onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
+            placeholder="Front Room Protocol"
+          />
+
           <div>
-            <label htmlFor="pb-title" className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
-              Title *
-            </label>
-            <input
-              id="pb-title"
-              type="text"
-              className="input w-full"
-              value={form.title}
-              onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-              placeholder="Front Room Protocol"
+            <label className="block text-[11px] font-medium text-(--text-secondary) mb-1.5">Category</label>
+            <Dropdown
+              value={form.category}
+              onChange={(v) => setForm((p) => ({ ...p, category: v }))}
+              width="w-full"
+              size="sm"
+              options={PLAYBOOK_CATEGORIES}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
-                Type
-              </label>
-              <Dropdown
-                value={form.type}
-                onChange={(v) => setForm((p) => ({ ...p, type: v }))}
-                width="w-full"
-                options={PLAYBOOK_TYPES.map((t) => ({ value: t, label: t }))}
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
-                Category
-              </label>
-              <Dropdown
-                value={form.category}
-                onChange={(v) => setForm((p) => ({ ...p, category: v }))}
-                width="w-full"
-                options={PLAYBOOK_CATEGORIES}
-              />
-            </div>
-          </div>
+          <Input
+            id="pb-desc"
+            label="Description"
+            value={form.description}
+            onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+            placeholder="Brief summary..."
+          />
 
-          <div>
-            <label htmlFor="pb-desc" className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
-              Description
-            </label>
-            <input
-              id="pb-desc"
-              type="text"
-              className="input w-full"
-              value={form.description}
-              onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-              placeholder="Brief summary..."
-            />
-          </div>
-
-          <div>
-            <label htmlFor="pb-content" className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
-              Content *
-            </label>
-            <textarea
-              id="pb-content"
-              rows={8}
-              className="input w-full resize-none font-mono text-[12px]"
-              value={form.content}
-              onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
-              placeholder={`Step 1: ...\nStep 2: ...\nStep 3: ...`}
-            />
-          </div>
+          <Textarea
+            id="pb-content"
+            label="Content"
+            required
+            rows={8}
+            value={form.content}
+            onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
+            placeholder={`Step 1: ...\nStep 2: ...\nStep 3: ...`}
+          />
 
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: "var(--bg-border)" }}>
             <Button variant="secondary" onClick={() => { setAddOpen(false); setForm(EMPTY_FORM); }}>
@@ -293,6 +298,22 @@ export function PlaybooksPrismaTab({ playbooks, isAdmin }: PlaybooksPrismaTabPro
           </div>
         </div>
       </Modal>
+
+      {/* Delete confirmation — shared ConfirmModal instead of window.confirm */}
+      <ConfirmModal
+        open={confirmDeleteId !== null}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={() => { if (confirmDeleteId) handleDelete(confirmDeleteId); }}
+        title="Delete this playbook?"
+        message="This removes the playbook from your team's reference library. This cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        icon={Trash2}
+        loading={deletingId !== null}
+      />
+
+      {/* Error feedback — canonical action-failure surface */}
+      {errorPopup}
     </div>
   );
 }

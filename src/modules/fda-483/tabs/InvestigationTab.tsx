@@ -46,13 +46,13 @@ import {
   Circle,
   CircleDot,
   ArrowRight,
-  Sparkles,
 } from "lucide-react";
 import type { FDA483Event, Observation, RCAMethod } from "@/types/fda483";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -526,9 +526,7 @@ function RaiseCAPAModal({
         {/* AI Pre-fill — manual trigger; opens the nested AI modal. Gated on
          *  an existing RCA since the pre-fill is derived from it. */}
         <div className="flex justify-end">
-          <button
-            type="button"
-            className="btn-ai"
+          <AIButton
             disabled={!observation.rootCause}
             title={
               observation.rootCause
@@ -537,8 +535,8 @@ function RaiseCAPAModal({
             }
             onClick={handleOpenAiPrefill}
           >
-            <Sparkles aria-hidden="true" /> AI Pre-fill
-          </button>
+            AI Pre-fill
+          </AIButton>
         </div>
 
         {/* Title */}
@@ -717,13 +715,9 @@ function RaiseCAPAModal({
               Cancel
             </Button>
             {!aiLoading && aiPrefill && (
-              <button
-                type="button"
-                className="btn-ai"
-                onClick={handleApplyAiPrefill}
-              >
-                <Sparkles aria-hidden="true" /> Save &amp; Apply
-              </button>
+              <AIButton onClick={handleApplyAiPrefill}>
+                Save &amp; Apply
+              </AIButton>
             )}
           </div>
         }
@@ -737,7 +731,8 @@ function RaiseCAPAModal({
               aria-live="polite"
             >
               <span
-                className="w-4 h-4 rounded-full border-2 border-[#8b4a8b] border-t-transparent animate-spin shrink-0"
+                className="w-4 h-4 rounded-full border-2 animate-spin shrink-0"
+                style={{ borderColor: "var(--ai-accent)", borderTopColor: "transparent" }}
                 aria-hidden="true"
               />
               Generating a pre-fill from the observation and RCA…
@@ -983,14 +978,12 @@ function AiRcaModal({
             Cancel
           </Button>
           {current && !loading && !error && (
-            <button
-              type="button"
-              className="btn-ai"
+            <AIButton
               onClick={handleSaveApply}
               disabled={pendingPill !== null}
             >
-              <Sparkles aria-hidden="true" /> Save &amp; Apply
-            </button>
+              Save &amp; Apply
+            </AIButton>
           )}
         </div>
       }
@@ -1004,7 +997,8 @@ function AiRcaModal({
             aria-live="polite"
           >
             <span
-              className="w-4 h-4 rounded-full border-2 border-[#8b4a8b] border-t-transparent animate-spin shrink-0"
+              className="w-4 h-4 rounded-full border-2 animate-spin shrink-0"
+              style={{ borderColor: "var(--ai-accent)", borderTopColor: "transparent" }}
               aria-hidden="true"
             />
             Analyzing observation and similar past findings…
@@ -1033,13 +1027,21 @@ function AiRcaModal({
                     className={clsx(
                       "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all",
                       active
-                        ? "border-[1.5px] border-[#a36500] bg-[#fef3e2]"
+                        ? "border-[1.5px]"
                         : "border border-(--bg-border) bg-transparent hover:bg-(--bg-hover)",
                     )}
+                    // AI-accent tokens: these pills select between AI suggestions,
+                    // so they must match the AI button they sit under (they were
+                    // amber #a36500 / #fef3e2 — the old .btn-ai gradient).
+                    style={
+                      active
+                        ? { borderColor: "var(--ai-border)", background: "var(--ai-muted)" }
+                        : undefined
+                    }
                   >
                     <span
                       aria-hidden="true"
-                      style={{ color: active ? "#a36500" : "var(--text-muted)" }}
+                      style={{ color: active ? "var(--ai-accent-strong)" : "var(--text-muted)" }}
                     >
                       {active ? "●" : "○"}
                     </span>
@@ -1204,13 +1206,19 @@ function AiRcaModal({
               </div>
             )}
 
-            {/* Similar findings */}
-            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-              Similar findings:{" "}
-              {current.supportingFindings
-                .map((f) => `${f.ref} (${Math.round(f.similarity * 100)}%)`)
-                .join(" · ")}
-            </p>
+            {/* Similar findings — rendered ONLY when the backend actually returns
+                them. No similarity index is wired today (the backend's
+                _similar_findings is a stub returning []), so this stays hidden
+                rather than printing a bare "Similar findings:" label that implies
+                a search ran and found nothing. */}
+            {current.supportingFindings.length > 0 && (
+              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                Similar findings:{" "}
+                {current.supportingFindings
+                  .map((f) => `${f.ref} (${Math.round(f.similarity * 100)}%)`)
+                  .join(" · ")}
+              </p>
+            )}
 
             {/* Non-dismissable disclaimer (stays inside the scrollable body) */}
             <p className="text-[10px] italic" style={{ color: "var(--text-muted)" }}>
@@ -1739,9 +1747,7 @@ export function InvestigationTab({
               </span>
             )}
             {!showRcaSummary && (
-              <button
-                type="button"
-                className="btn-ai"
+              <AIButton
                 disabled={!writable || !selectedObs.rcaMethod}
                 title={
                   selectedObs.rcaMethod
@@ -1750,8 +1756,8 @@ export function InvestigationTab({
                 }
                 onClick={() => setAiRcaModalOpen(selectedObs.id)}
               >
-                <Sparkles aria-hidden="true" /> AI Suggestion
-              </button>
+                AI Suggestion
+              </AIButton>
             )}
           </div>
         </div>

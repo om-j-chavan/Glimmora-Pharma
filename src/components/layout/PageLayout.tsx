@@ -5,6 +5,7 @@ import Link from "next/link";
 import clsx from "clsx";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { Button, type ButtonVariant } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { MotionDiv } from "@/components/motion/Motion";
 
 /**
@@ -27,8 +28,14 @@ export interface PageAction {
   onClick: () => void;
   /** "primary" = the single filled, rightmost action. Everything else is a
    *  secondary rendered to its left. Defaults to "secondary" so a page never
-   *  gets an accidental second primary. */
-  variant?: "primary" | "secondary" | "ghost" | "danger" | "danger-ghost";
+   *  gets an accidental second primary.
+   *
+   *  "ai" renders the shared <AIButton> instead of <Button>, so an AI entry
+   *  point in a page header is visually identical to one inside a panel. It
+   *  partitions as a secondary (an AI action is never the page's primary). */
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "danger-ghost" | "ai";
+  /** Ignored when variant is "ai" — AIButton owns the Sparkles icon so no
+   *  caller can give an AI action a non-AI glyph. */
   icon?: LucideIcon;
   disabled?: boolean;
   /** Hover tooltip — e.g. the reason an action is disabled. */
@@ -92,7 +99,19 @@ function ActionBar({ actions }: { actions: PageAction[] }) {
   if (ordered.length === 0) return null;
   return (
     <div className="flex items-center gap-2 flex-wrap justify-end">
-      {ordered.map((a, i) => (
+      {ordered.map((a, i) =>
+        a.variant === "ai" ? (
+          <AIButton
+            key={`${a.label}-${i}`}
+            variant="subtle"
+            size="sm"
+            onClick={a.onClick}
+            disabled={a.disabled}
+            title={a.title}
+          >
+            {a.label}
+          </AIButton>
+        ) : (
         <Button
           key={`${a.label}-${i}`}
           variant={asButtonVariant(a.variant)}
@@ -104,7 +123,8 @@ function ActionBar({ actions }: { actions: PageAction[] }) {
         >
           {a.label}
         </Button>
-      ))}
+        ),
+      )}
     </div>
   );
 }
@@ -192,11 +212,15 @@ export function TabSection({ description, action, children }: TabSectionProps) {
     <div>
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
         <p className="text-[12px] max-w-3xl" style={{ color: "var(--text-secondary)" }}>{description}</p>
-        {action && (
+        {action && (action.variant === "ai" ? (
+          <AIButton variant="subtle" size="sm" onClick={action.onClick} disabled={action.disabled} title={action.title}>
+            {action.label}
+          </AIButton>
+        ) : (
           <Button variant={asButtonVariant(action.variant ?? "primary")} size="sm" icon={action.icon} onClick={action.onClick} disabled={action.disabled} title={action.title}>
             {action.label}
           </Button>
-        )}
+        ))}
       </div>
       {children}
     </div>

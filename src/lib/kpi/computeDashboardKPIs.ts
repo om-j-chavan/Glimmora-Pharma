@@ -18,9 +18,6 @@ export interface DashboardKPIInput {
   findings: KPIFinding[];
   capas: KPICapa[];
   systems: KPISystem[];
-  /** total configured users + active count — the training-compliance proxy. */
-  totalUsers?: number;
-  activeUsers?: number;
 }
 
 export interface DashboardKPIs {
@@ -30,13 +27,17 @@ export interface DashboardKPIs {
   /** % of open CAPAs that are overdue, or null when there are none. */
   capaOverdueRate: number | null;
   csvHighRisk: number;
-  /** % active users, or null when no users — the training proxy. */
+  /**
+   * % of required training complete — null until `TrainingRecord` is wired into
+   * this KPI. Null so the card renders "—": a training figure must be evidenced
+   * by training records (21 CFR 211.25), never inferred from another signal.
+   */
   trainingCompliance: number | null;
 }
 
 /** The five Dashboard KPI-card values, all from tenant-wide record arrays. */
 export function computeDashboardKPIs({
-  findings, capas, systems, totalUsers = 0, activeUsers = 0,
+  findings, capas, systems,
 }: DashboardKPIInput): DashboardKPIs {
   const openCAPAs = capas.filter(isOpenCapa);
   const overdueCAPAs = capas.filter(isCapaOverdue);
@@ -46,7 +47,7 @@ export function computeDashboardKPIs({
     criticalCount: findings.filter(isCriticalOpen).length,
     capaOverdueRate: pct(overdueCAPAs.length, openCAPAs.length),
     csvHighRisk: systems.filter(isCsvHighRisk).length,
-    trainingCompliance: pct(activeUsers, totalUsers),
+    trainingCompliance: null,
   };
 }
 

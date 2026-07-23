@@ -12,8 +12,9 @@
  */
 
 import { useState, useMemo, useEffect, type CSSProperties, type ReactNode } from "react";
-import { Search, Sparkles, X, ArrowRight, FileText, Download, ListFilter, Bookmark } from "lucide-react";
+import { Search, Sparkles, X, FileText, Download, ListFilter, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiSearchSend, AiChatError, type SearchResultResponse } from "@/lib/aiChat";
 import { executeSearch, type SearchCondition, type SearchFilters } from "@/lib/aiSearch";
@@ -229,7 +230,7 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
         <div key={src.module} className="space-y-2">
           {multi && <p className="text-[11px] font-semibold" style={{ color: "var(--text-muted)" }}>{src.label}</p>}
           <p className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "var(--bg-surface)", color: "var(--text-secondary)" }}>
-            <span className="font-semibold" style={{ color: "var(--brand)" }}>AI </span>
+            <span className="font-semibold" style={{ color: "var(--ai-accent)" }}>AI </span>
             I’m not sure what you meant for {src.label}. Try naming a status, date, severity, or site.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -248,13 +249,13 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
     return (
       <div key={src.module} className="space-y-2">
         {/* Understood-as line + confidence + Edit filters */}
-        <div className="rounded-lg px-3 py-2 text-[12px] flex items-start gap-2 flex-wrap" style={{ background: "var(--brand-muted)", color: "var(--text-primary)" }}>
-          <span className="inline-flex items-center gap-1 font-semibold" style={{ color: "var(--brand)" }}>
+        <div className="rounded-lg px-3 py-2 text-[12px] flex items-start gap-2 flex-wrap" style={{ background: "var(--ai-muted)", color: "var(--text-primary)" }}>
+          <span className="inline-flex items-center gap-1 font-semibold" style={{ color: "var(--ai-accent)" }}>
             <Sparkles className="w-3 h-3" aria-hidden="true" /> {multi ? `${src.label} —` : "Understood as:"}
           </span>
           <span className="flex-1">{result.understood_as}</span>
           <span style={bandStyle(result.confidence_band)}>{result.confidence_band} · {Math.round(result.confidence * 100)}%</span>
-          <button type="button" onClick={() => setShowEditFor((m) => (m === src.module ? null : src.module))} className="underline cursor-pointer border-0 bg-transparent p-0" style={{ color: "var(--brand)" }}>Edit filters</button>
+          <button type="button" onClick={() => setShowEditFor((m) => (m === src.module ? null : src.module))} className="underline cursor-pointer border-0 bg-transparent p-0" style={{ color: "var(--ai-accent)" }}>Edit filters</button>
         </div>
 
         {/* Editable filter pills */}
@@ -294,9 +295,9 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
       {/* Title bar */}
       <div className="flex items-center justify-between px-4 py-2" style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--card-border)" }}>
         <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: "var(--card-text)" }}>
-          <Sparkles className="w-3.5 h-3.5" aria-hidden="true" style={{ color: "var(--brand)" }} /> {title}
+          <Sparkles className="w-3.5 h-3.5" aria-hidden="true" style={{ color: "var(--ai-accent)" }} /> {title}
         </span>
-        <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: "var(--brand-muted)", color: "var(--brand)" }}>
+        <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: "var(--ai-muted)", color: "var(--ai-accent)" }}>
           {hasResults ? `${totalCount} result${totalCount === 1 ? "" : "s"}` : "List"}
         </span>
       </div>
@@ -326,7 +327,10 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
               <button type="button" aria-label="Clear search" onClick={clearAll} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded border-0 cursor-pointer bg-transparent" style={{ color: "var(--text-muted)" }}><X className="w-3.5 h-3.5" aria-hidden="true" /></button>
             )}
           </div>
-          <Button type="button" variant="primary" size="md" icon={ArrowRight} aria-label="Run search" onClick={() => runSearch(query)} disabled={busy || !query.trim()} />
+          {/* The search itself is an AI call (NL → filter translation), so the
+              trigger wears the AI accent. Icon-only: the placeholder already
+              says "Ask in plain words…". */}
+          <AIButton iconOnly loading={busy} aria-label="Run search" onClick={() => runSearch(query)} disabled={!query.trim()} />
         </div>
 
         {/* Resting state — example chips + saved searches */}
@@ -341,7 +345,7 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Saved</span>
                 {savedSearches.map((s) => (
-                  <span key={s} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full" style={{ background: "var(--brand-muted)", color: "var(--brand)" }}>
+                  <span key={s} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full" style={{ background: "var(--ai-muted)", color: "var(--ai-accent)" }}>
                     <button type="button" onClick={() => { setQuery(s); void runSearch(s); }} className="border-0 bg-transparent cursor-pointer p-0" style={{ color: "inherit" }}><Bookmark className="w-3 h-3 inline mr-1" aria-hidden="true" />{s}</button>
                     <button type="button" aria-label={`Remove saved ${s}`} onClick={() => persistSaved(savedSearches.filter((x) => x !== s))} className="border-0 bg-transparent cursor-pointer p-0 opacity-60" style={{ color: "inherit" }}><X className="w-3 h-3" aria-hidden="true" /></button>
                   </span>

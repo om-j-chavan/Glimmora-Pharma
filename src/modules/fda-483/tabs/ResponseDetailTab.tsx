@@ -31,7 +31,6 @@ import {
   FileText,
   CheckCircle2,
   Bot,
-  Sparkles,
   Pencil,
   Save,
   ShieldCheck,
@@ -50,6 +49,7 @@ import { displayName } from "@/lib/identity-display";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -645,13 +645,7 @@ export function ResponseDetailTab({
                   Edit draft
                 </Button>
                 {showAiButton && (
-                  <button
-                    type="button"
-                    className="btn-ai"
-                    onClick={openAiModal}
-                  >
-                    <Sparkles aria-hidden="true" /> AI Draft
-                  </button>
+                  <AIButton onClick={openAiModal}>AI Draft</AIButton>
                 )}
               </div>
             )}
@@ -693,13 +687,7 @@ export function ResponseDetailTab({
                   Edit
                 </Button>
                 {showAiButton && (
-                  <button
-                    type="button"
-                    className="btn-ai"
-                    onClick={openAiModal}
-                  >
-                    <Sparkles aria-hidden="true" /> AI Draft
-                  </button>
+                  <AIButton onClick={openAiModal}>AI Draft</AIButton>
                 )}
               </div>
             )}
@@ -1059,13 +1047,9 @@ export function ResponseDetailTab({
               Cancel
             </Button>
             {!aiLoading && (
-              <button
-                type="button"
-                className="btn-ai"
-                onClick={handleSaveApplyAiDraft}
-              >
-                <Sparkles aria-hidden="true" /> Save &amp; Apply
-              </button>
+              <AIButton onClick={handleSaveApplyAiDraft}>
+                Save &amp; Apply
+              </AIButton>
             )}
           </div>
         }
@@ -1078,7 +1062,8 @@ export function ResponseDetailTab({
               aria-live="polite"
             >
               <div
-                className="w-8 h-8 rounded-full border-2 border-[#8b4a8b] border-t-transparent animate-spin"
+                className="w-8 h-8 rounded-full border-2 animate-spin"
+                style={{ borderColor: "var(--ai-accent)", borderTopColor: "transparent" }}
                 aria-hidden="true"
               />
               <p

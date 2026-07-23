@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
+    "db:seed:readiness": "npx tsx prisma/seed-readiness.ts",
     "db:studio": "npx prisma studio",
     "db:reset": "npx prisma migrate reset",
     "test:mailer": "tsx scripts/test-mailer.ts",

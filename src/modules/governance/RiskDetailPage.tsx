@@ -158,7 +158,6 @@ export function RiskDetailPage({ risk, docs, audit, owners, conversion }: RiskDe
   async function handleConvert(target: RiskConvertTarget, v: {
     requirement: string; purpose: string; title: string; description: string;
     type: string; category: string; fdaSeverity: string; immediateAction: string;
-    patientSafetyImpact: string; productQualityImpact: string; regulatoryImpact: string;
     area: string; severity: string; dueDate: string; copyDocuments: boolean;
   }) {
     const res =
@@ -172,9 +171,6 @@ export function RiskDetailPage({ risk, docs, audit, owners, conversion }: RiskDe
             title: v.title, description: v.description, type: v.type as never,
             category: v.category as never, severity: v.fdaSeverity as never, area: v.area,
             immediateAction: v.immediateAction,
-            patientSafetyImpact: v.patientSafetyImpact as never,
-            productQualityImpact: v.productQualityImpact as never,
-            regulatoryImpact: v.regulatoryImpact as never,
             dueDate: v.dueDate, copyDocuments: v.copyDocuments,
           })
         : await convertRiskToCapa(risk.id, {

@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { Sparkles } from "lucide-react";
 import { Popup } from "@/components/ui/Popup";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { useToast } from "@/components/ui/Toast";
 import { setEffectiveFrameworks } from "@/store/frameworks.slice";
 import {
@@ -96,17 +95,15 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
             </h2>
             <Badge variant="blue">{activeCount} of {total} active</Badge>
           </div>
-          <Button
-            variant="primary"
+          <AIButton
             size="sm"
-            icon={Sparkles}
             onClick={() => setAiOpen(true)}
             aria-haspopup="dialog"
             aria-expanded={aiOpen}
             title="Ask Regulatory AI about your frameworks, region, and the latest FDA/EMA guidance (Ctrl + Shift + R)"
           >
             Ask Regulatory AI
-          </Button>
+          </AIButton>
         </div>
         <p className="mt-1 text-[12px] text-(--text-secondary) max-w-2xl">
           Enabled frameworks appear as tags when raising a Gap and inform CSV/CSA and AGI suggestions.

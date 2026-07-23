@@ -127,9 +127,6 @@ const CreateDeviationSchema = z.object({
   severity: z.preprocess((v) => coerceSeverityCasing(v, "fda"), z.enum(FDA_SEVERITY)),
   area: z.string().min(1),
   immediateAction: z.string().min(5),
-  patientSafetyImpact: z.enum(["high", "medium", "low", "none"]),
-  productQualityImpact: z.enum(["high", "medium", "low", "none"]),
-  regulatoryImpact: z.enum(["high", "medium", "low", "none"]),
   // Stage 2 (deviation redesign) — `owner` is no longer collected at creation.
   // Triage priority instead; optional here, defaulted from severity via
   // severityToPriority when the caller omits it.
@@ -260,9 +257,6 @@ export async function createDeviation(
             severity: parsed.data.severity,
             area: parsed.data.area,
             immediateAction: parsed.data.immediateAction,
-            patientSafetyImpact: parsed.data.patientSafetyImpact,
-            productQualityImpact: parsed.data.productQualityImpact,
-            regulatoryImpact: parsed.data.regulatoryImpact,
             // Owner = creator. The reporter is recorded as the deviation owner
             // (the session identity, which equals their User.id for site users —
             // the same value ownerName() resolves and any owner-gate compares).

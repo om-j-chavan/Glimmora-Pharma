@@ -34,10 +34,10 @@ import { isOverdue } from "@/types/capa";
 import {
   computeDashboardKPIs, computeAreaScore, KPI_AREAS,
   severityTrend, isSeverityTrendEmpty, headlineReadinessLabel,
-  isDIException,
+  isDIException, isValidationDrift,
 } from "@/lib/kpi";
 import { displayUserName } from "@/lib/identity-display";
-import { regulatoryAlertSummary, driftAlertSummary } from "@/lib/ai";
+import { regulatoryAlertSummary } from "@/lib/ai";
 import { ActionPlanTable } from "./ActionPlanTable";
 import { SmartRecordSearch } from "@/components/search/SmartRecordSearch";
 import { buildCapaSource, buildDeviationSource, buildFindingSource } from "@/lib/searchSources";
@@ -217,13 +217,11 @@ export function DashboardPage({
   const visibleSystems = useMemo(() => systems.filter(matchesSystemFilters), [systems, matchesSystemFilters]);
 
   /* ── KPIs — all derived from filtered data ── */
-  const activeUsersCount = users.filter((u) => u.status === "Active").length;
   const kpis = useMemo(
     () => computeDashboardKPIs({
       findings: filteredFindings, capas: filteredCAPAs, systems: filteredSystems,
-      totalUsers: users.length, activeUsers: activeUsersCount,
     }),
-    [filteredFindings, filteredCAPAs, filteredSystems, users.length, activeUsersCount],
+    [filteredFindings, filteredCAPAs, filteredSystems],
   );
   const { openCAPAs, overdueCAPAs, criticalCount, capaOverdueRate, csvHighRisk, trainingCompliance } = kpis;
   // Content twin of `overdueCAPAs` — only the overdue CAPAs this viewer may see.
@@ -313,13 +311,15 @@ export function DashboardPage({
       if (reg.newRequirements > 0) insights.push({ id: "regulatory-new-requirements", type: "warning", text: `${reg.newRequirements} new FDA/EMA regulatory requirement${reg.newRequirements > 1 ? "s" : ""} flagged \u2014 review compliance alignment.`, action: "Review guidance", link: "/regulatory-intelligence" });
       else if (reg.total > 0) insights.push({ id: "regulatory-updates", type: "info", text: `${reg.total} FDA/EMA guidance update${reg.total > 1 ? "s" : ""} monitored this period.`, action: "Review guidance", link: "/regulatory-intelligence" });
     }
-    // Drift Detection agent \u2014 config/access/audit-trail drift on validated
-    // systems. Also external to tenant findings, so it surfaces on a fresh
-    // dashboard. Links to CSV/CSA where the detail panel lives.
+    // Drift Detection agent \u2014 validated-system drift. The rail renders
+    // synchronously, so this reports the drift the tenant's OWN system records
+    // actually evidence, via the canonical isValidationDrift predicate (overdue
+    // revalidation / Part 11 / Annex 11) \u2014 the same source as the Validation-drift
+    // KPI, so the two can never disagree. The full AI config/access/audit-trail
+    // scan is an async LLM call and runs on the CSV/CSA page, which this links to.
     if (agiSettings.agents.drift) {
-      const drift = driftAlertSummary();
-      if (drift.critical > 0) insights.push({ id: "drift-critical", type: "warning", text: `${drift.critical} critical system drift alert${drift.critical > 1 ? "s" : ""} detected${drift.auditTrail > 0 ? " (audit-trail coverage drop)" : ""}.`, action: "Review drift", link: "/csv-csa" });
-      else if (drift.total > 0) insights.push({ id: "drift-open", type: "info", text: `${drift.total} system drift alert${drift.total > 1 ? "s" : ""} open \u2014 configuration / access changes.`, action: "Review drift", link: "/csv-csa" });
+      const validationDrift = filteredSystems.filter(isValidationDrift).length;
+      if (validationDrift > 0) insights.push({ id: "drift-open", type: "warning", text: `${validationDrift} validated system${validationDrift > 1 ? "s" : ""} showing validation drift \u2014 overdue revalidation or Part 11 / Annex 11 non-compliance.`, action: "Review drift", link: "/csv-csa" });
     }
   }
   // Finding/CAPA-derived insights require the Redux slices to be loaded.
@@ -388,7 +388,7 @@ export function DashboardPage({
         <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter((f) => f.status !== "Closed").length} total open`} href="/governance?tab=kpis#kpi-repeat-observation" />
         <StatCard icon={Clock} color={capaOverdueRate === null ? "#64748b" : capaOverdueRate === 0 ? "#10b981" : capaOverdueRate <= 20 ? "#f59e0b" : "#ef4444"} label="CAPA overdue" value={capaOverdueRate === null ? "\u2014" : `${capaOverdueRate}%`} sub={openCAPAs.length === 0 ? "No open CAPAs" : `${overdueCAPAs.length} of ${openCAPAs.length} past due`} href="/governance?tab=kpis#kpi-capa-timeliness" />
         <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={filteredSystems.length === 0 ? "No systems registered" : "HIGH risk, not yet validated"} href="/governance?tab=kpis#kpi-validation-drift" />
-        <StatCard icon={GraduationCap} color={trainingCompliance === null ? "#64748b" : trainingCompliance >= 90 ? "#10b981" : trainingCompliance >= 70 ? "#f59e0b" : "#ef4444"} label="Training compliance" value={trainingCompliance === null ? "\u2014" : `${trainingCompliance}%`} sub={users.length === 0 ? "No users configured" : `${users.filter((u) => u.status === "Active").length} active users`} />
+        <StatCard icon={GraduationCap} color={trainingCompliance === null ? "#64748b" : trainingCompliance >= 90 ? "#10b981" : trainingCompliance >= 70 ? "#f59e0b" : "#ef4444"} label="Training compliance" value={trainingCompliance === null ? "\u2014" : `${trainingCompliance}%`} sub={trainingCompliance === null ? "Not yet tracked" : "of required training complete"} />
       </section>
 
       {/* Main grid */}

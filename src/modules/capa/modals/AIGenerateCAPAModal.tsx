@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, XCircle, UploadCloud, FileText, X, BellOff } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Modal } from "@/components/ui/Modal";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -414,15 +415,14 @@ export function AIGenerateCAPAModal({
             <Button variant="ghost" type="button" onClick={handleClose}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
+            <AIButton
               type="submit"
-              icon={Sparkles}
               loading={isSubmitting}
+              loadingLabel="Analyzing..."
               disabled={!storedAiToken}
             >
-              {!storedAiToken ? "Connecting to AI..." : isSubmitting ? "Analyzing..." : "Generate CAPA"}
-            </Button>
+              {!storedAiToken ? "Connecting to AI..." : "Generate CAPA"}
+            </AIButton>
           </div>
         </form>
       )}

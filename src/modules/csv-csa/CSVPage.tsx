@@ -3,7 +3,8 @@
 import { useState, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw, Monitor, ShieldAlert } from "lucide-react";
+import { Database, GitBranch, Plus, Info, Link2, Archive, RotateCcw, Monitor } from "lucide-react";
+import { AIButton } from "@/components/ai";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { NoSitesPopup, TabBar, DataTable, type Column } from "@/components/shared";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
@@ -376,12 +377,14 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
         description={`Validate computerized systems through the GxP validation lifecycle. \u00b7 ${systems.length === 0 ? "No systems registered yet" : `${systems.length} systems \u00b7 ${highRisk} high risk \u00b7 ${valOverdue} validation overdue`}`}
         actions={pageActions}
         headerRight={
-          // Drift Detection \u2014 same secondary/sm framing as the "Ask AI" buttons
-          // on Gap/Deviation/CAPA, but rendered as a real Button (not a
-          // PageAction) so the label can carry a count-pill badge. Icon stays
-          // ShieldAlert. Critical count lives in the modal, not here.
+          // Drift Detection \u2014 the shared <AIButton> (indigo + Sparkles), same as
+          // the "Ask AI" entry points on Gap/Deviation/CAPA. Rendered directly
+          // rather than as a PageAction so the label can carry a count-pill
+          // badge. Critical count lives in the modal, not here. (Was a plain
+          // secondary Button with a ShieldAlert icon \u2014 the only AI trigger in
+          // the app wearing a shield.)
           !showArchive && drift.agentActive ? (
-            <Button variant="secondary" size="sm" icon={ShieldAlert} onClick={() => setDriftOpen(true)} aria-label="Open Drift Detection">
+            <AIButton variant="subtle" size="sm" onClick={() => setDriftOpen(true)} aria-label="Open Drift Detection">
               <span className="inline-flex items-center gap-1.5">
                 Drift Detection
                 {drift.loading && drift.alerts.length === 0 ? (
@@ -390,7 +393,7 @@ export function CSVPage(props: CSVPageProps = { systems: [], deletedSystems: [],
                   <Badge variant="red">{drift.openCount}</Badge>
                 ) : null}
               </span>
-            </Button>
+            </AIButton>
           ) : undefined
         }
       >

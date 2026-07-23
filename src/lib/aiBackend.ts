@@ -405,6 +405,10 @@ export interface StageDocReviewResponse {
   scan_duration_seconds: number;
   rubric_version: string;
   findings: StageDocReviewFindingDTO[];
+  /** Non-null when the document yielded no reviewable text (scanned PDF,
+   *  unsupported type, parse error). `findings` is then empty and the scan did
+   *  NOT run — this is explicitly not a clean pass. */
+  note?: string | null;
   scanned_at: string;
 }
 

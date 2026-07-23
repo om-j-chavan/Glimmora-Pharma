@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles } from "lucide-react";
+import { AIButton, AIBadge } from "@/components/ai";
 import type { RCAMethod } from "@/store/capa.slice";
 import { AiDraftModal, type DraftMode, type DraftPayload } from "@/components/search/AiDraftModal";
 
@@ -89,18 +89,18 @@ export function RcaMethodFields({
   const canDraft = !!draftContext?.trim() && !disabled;
 
   const draftButton = canDraft ? (
-    <button
-      type="button"
-      onClick={() => setDraftOpen(true)}
-      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md border-0 cursor-pointer"
-      style={{ background: "var(--brand)", color: "#fff" }}
-    >
-      <Sparkles className="w-3 h-3" aria-hidden="true" /> AI Draft
-    </button>
+    <AIButton size="xs" onClick={() => setDraftOpen(true)}>
+      AI Draft
+    </AIButton>
   ) : null;
 
   const aiMarker = aiAssisted ? (
-    <p className="text-[11px] italic mt-1" style={{ color: "var(--text-muted)" }}>AI-assisted draft — edited by you</p>
+    <p className="inline-flex items-center gap-1.5 mt-1">
+      <AIBadge label="AI-assisted draft" />
+      <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>
+        edited by you
+      </span>
+    </p>
   ) : null;
 
   /** Render the method-aware draft modal that applies its payload on insert. */

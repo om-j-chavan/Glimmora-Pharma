@@ -18,7 +18,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  RefreshCw,
   Bot,
   AlertTriangle,
   CheckCircle2,
@@ -109,7 +108,7 @@ export function RegulatoryIntelligencePage() {
         title="Regulatory Intelligence"
         titleIcon={Landmark}
         description="FDA/EMA guidance monitoring and change alerts for your active frameworks."
-        actions={[{ label: loading ? "Scanning…" : "Scan for updates", variant: "secondary", icon: RefreshCw, onClick: scan, disabled: loading }]}
+        actions={[{ label: loading ? "Scanning…" : "Scan for updates", variant: "ai", onClick: scan, disabled: loading }]}
       >
         <div className="space-y-5">
 
@@ -119,7 +118,7 @@ export function RegulatoryIntelligencePage() {
         style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}
         role="note"
       >
-        <Bot className="w-4 h-4 mt-0.5 shrink-0 text-[#6366f1]" aria-hidden="true" />
+        <Bot className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
         <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
           AI-monitored guidance summaries. The agent flags changes and suggests
           alignment — it does <strong>not</strong> interpret requirements or make
@@ -224,7 +223,7 @@ export function RegulatoryIntelligencePage() {
                     className="mt-3 flex items-start gap-2 p-2.5 rounded-lg"
                     style={{ background: "var(--bg-elevated)" }}
                   >
-                    <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[#6366f1]" aria-hidden="true" />
+                    <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
                     <div>
                       <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>
                         Suggested alignment

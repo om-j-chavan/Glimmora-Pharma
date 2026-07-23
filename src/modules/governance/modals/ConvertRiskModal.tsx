@@ -14,7 +14,6 @@ import {
   CAPA_DOC_CARRYOVER_REASON,
   DEVIATION_AREAS,
   DEVIATION_CATEGORIES,
-  DEVIATION_IMPACTS,
   DEVIATION_TYPES,
   GAP_AREAS,
   RISK_CATEGORY_TO_DEVIATION_CATEGORY,
@@ -45,9 +44,6 @@ interface ConvertFormValues {
   category: string;
   fdaSeverity: string;
   immediateAction: string;
-  patientSafetyImpact: string;
-  productQualityImpact: string;
-  regulatoryImpact: string;
   // Gap + Deviation
   area: string;
   // Gap + CAPA (GENERIC taxonomy)
@@ -232,31 +228,6 @@ export function ConvertRiskModal({ open, onClose, risk, target, documentCount, o
                   {risk.mitigationPlan ? "Seeded from the risk's mitigation plan." : "The risk has no mitigation plan — state the containment."}
                 </p>
               </div>
-
-              {/* A Risk carries no impact assessment. Left blank ON PURPOSE so the
-                  converting QA Head states each one rather than accepting a default. */}
-              <div className="col-span-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>
-                  Impact assessment <span className="normal-case font-normal">· no risk-register analogue; assess each</span>
-                </p>
-                <div className="grid grid-cols-3 gap-3">
-                  {([
-                    ["patientSafetyImpact", "Patient safety *"],
-                    ["productQualityImpact", "Product quality *"],
-                    ["regulatoryImpact", "Regulatory *"],
-                  ] as const).map(([name, label]) => (
-                    <div key={name}>
-                      <label className={LABEL} style={{ color: "var(--text-muted)" }}>{label}</label>
-                      <Controller name={name} control={control} rules={{ required: "Required" }}
-                        render={({ field }) => (
-                          <Dropdown value={field.value} onChange={field.onChange} placeholder="Select…" width="w-full"
-                            options={DEVIATION_IMPACTS.map((i) => ({ value: i, label: titleCase(i) }))} />
-                        )} />
-                      {formState.errors[name] && <p role="alert" className={ERR}>{formState.errors[name]?.message}</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
             </>
           )}
 
@@ -320,10 +291,6 @@ function seedValues(risk: RiskListRow, target: RiskConvertTarget): ConvertFormVa
     category: RISK_CATEGORY_TO_DEVIATION_CATEGORY[risk.category] ?? "other",
     fdaSeverity: RISK_SEVERITY_TO_FDA[sev] ?? "Major",
     immediateAction: risk.mitigationPlan ?? "",
-    // Deliberately unset — the converter must assess each impact explicitly.
-    patientSafetyImpact: "",
-    productQualityImpact: "",
-    regulatoryImpact: "",
     area: "",
     severity: risk.severity,
     dueDate: seedDueDate(risk.targetDate, new Date()),

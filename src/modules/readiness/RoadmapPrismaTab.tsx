@@ -6,6 +6,10 @@ import type { Inspection, ReadinessAction } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
 import { markActionComplete } from "@/actions/inspections";
 import { Button } from "@/components/ui/Button";
+import { useErrorPopup } from "@/components/ui/ErrorPopup";
+import { Dropdown } from "@/components/ui/Dropdown";
+import { StatusBadge } from "@/components/shared";
+import { READINESS_STATUSES } from "@/constants/statusTaxonomy";
 
 /**
  * Roadmap tab — Prisma-backed.
@@ -39,14 +43,39 @@ function scoreColor(score: number): string {
   return "var(--success)";
 }
 
+type ActionFilter = "all" | "open" | "overdue" | "complete";
+const FILTER_OPTIONS = [
+  { value: "all", label: "All actions" },
+  { value: "open", label: "Open" },
+  { value: "overdue", label: "Overdue" },
+  { value: "complete", label: "Complete" },
+];
+
+function isActionOverdue(a: ReadinessAction): boolean {
+  return a.status !== "Complete" && a.dueDate !== null && new Date(a.dueDate) < new Date();
+}
+
 export function RoadmapPrismaTab({ inspection, isAdmin }: RoadmapPrismaTabProps) {
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  // User-facing error surfaced when the mark-complete action fails.
+  const { setError, errorPopup } = useErrorPopup();
+  const [filter, setFilter] = useState<ActionFilter>("all");
 
   const actions = inspection.actions;
   const total = actions.length;
   const completed = actions.filter((a) => a.status === "Complete").length;
   const score = total > 0 ? Math.round((completed / total) * 100) : 0;
   const progressColor = scoreColor(score);
+  const overdueCount = actions.filter(isActionOverdue).length;
+
+  // Readiness % above always reflects ALL actions; the filter only narrows the
+  // list below so the headline number never changes with a view toggle.
+  const visibleActions = actions.filter((a) => {
+    if (filter === "open") return a.status !== "Complete";
+    if (filter === "complete") return a.status === "Complete";
+    if (filter === "overdue") return isActionOverdue(a);
+    return true;
+  });
 
   async function handleMarkComplete(actionId: string) {
     setLoadingId(actionId);
@@ -54,14 +83,15 @@ export function RoadmapPrismaTab({ inspection, isAdmin }: RoadmapPrismaTabProps)
     setLoadingId(null);
     if (!result.success) {
       console.error("[roadmap] markActionComplete failed:", result.error);
+      setError(result.error ?? "Could not mark the action complete. Please try again.");
     }
     // revalidatePath("/readiness") in the action triggers re-fetch of the
     // server page; refreshed `actions` arrive on the next render.
   }
 
-  // Group actions by `bucket` (schema field — not `timeBucket`).
+  // Group the (filtered) actions by `bucket` (schema field — not `timeBucket`).
   const grouped: Record<string, ReadinessAction[]> = {};
-  for (const a of actions) {
+  for (const a of visibleActions) {
     const key = a.bucket ?? "1_week";
     (grouped[key] ??= []).push(a);
   }
@@ -96,6 +126,41 @@ export function RoadmapPrismaTab({ inspection, isAdmin }: RoadmapPrismaTabProps)
           </div>
         </div>
       </div>
+
+      {/* Filter toolbar */}
+      {total > 0 && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            <span>{visibleActions.length} of {total} shown</span>
+            {overdueCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilter(filter === "overdue" ? "all" : "overdue")}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium cursor-pointer border-none"
+                style={{ background: "var(--danger-bg)", color: "var(--danger)" }}
+              >
+                <AlertTriangle className="w-3 h-3" aria-hidden="true" /> {overdueCount} overdue
+              </button>
+            )}
+          </div>
+          <Dropdown
+            value={filter}
+            onChange={(v) => setFilter(v as ActionFilter)}
+            options={FILTER_OPTIONS}
+            width="w-44"
+            size="sm"
+          />
+        </div>
+      )}
+
+      {total > 0 && visibleActions.length === 0 && (
+        <div
+          className="text-center py-8 text-[12px] rounded-2xl border border-dashed"
+          style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)", color: "var(--text-secondary)" }}
+        >
+          No actions match this filter.
+        </div>
+      )}
 
       {/* Actions by bucket */}
       {BUCKET_ORDER.map((bucket) => {
@@ -133,6 +198,9 @@ export function RoadmapPrismaTab({ inspection, isAdmin }: RoadmapPrismaTabProps)
           No actions yet for this inspection.
         </div>
       )}
+
+      {/* Error feedback — canonical action-failure surface */}
+      {errorPopup}
     </div>
   );
 }
@@ -191,6 +259,7 @@ function ActionRow({
             {action.title}
           </p>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
+            <StatusBadge taxonomy={READINESS_STATUSES} status={isOverdue ? "Overdue" : action.status} />
             {action.priority === "Critical" && (
               <span className="text-[11px] font-medium" style={{ color: "var(--danger)" }}>
                 Critical
@@ -203,11 +272,6 @@ function ActionRow({
               >
                 <Clock className="w-3 h-3" aria-hidden="true" />
                 Due {dayjs(action.dueDate).format("DD MMM")}
-                {isOverdue && (
-                  <>
-                    <AlertTriangle className="w-3 h-3 ml-1" aria-hidden="true" /> Overdue
-                  </>
-                )}
               </span>
             )}
             {action.completedBy && (

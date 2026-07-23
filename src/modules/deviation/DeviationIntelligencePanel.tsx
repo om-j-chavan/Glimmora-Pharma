@@ -35,7 +35,6 @@ import {
   ChevronDown,
   RefreshCw,
   Layers,
-  Play,
   ShieldAlert,
 } from "lucide-react";
 import {
@@ -46,6 +45,7 @@ import {
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { AIButton, AIBadge } from "@/components/ai";
 
 /** Overall risk level surfaced from the analysis (Low / Medium / High). */
 type RiskLevel = "Low" | "Medium" | "High";
@@ -148,27 +148,16 @@ export function DeviationIntelligenceRunButton({
   const { available, hasRun, loading, run } = state;
   if (!available) return null;
 
-  const label = loading
-    ? "Analyzing deviation…"
-    : hasRun
-      ? "Re-run Deviation Intelligence AI"
-      : "Run Deviation Intelligence AI";
+  // aria-label stays on the run/re-run wording even while loading, so the
+  // accessible name (and the e2e selector) is stable across states.
+  const label = hasRun
+    ? "Re-run Deviation Intelligence AI"
+    : "Run Deviation Intelligence AI";
 
   return (
-    <Button
-      variant="primary"
-      icon={hasRun ? RefreshCw : Play}
-      onClick={run}
-      loading={loading}
-      disabled={loading}
-      aria-label={
-        hasRun
-          ? "Re-run Deviation Intelligence AI"
-          : "Run Deviation Intelligence AI"
-      }
-    >
+    <AIButton onClick={run} loading={loading} aria-label={label}>
       {label}
-    </Button>
+    </AIButton>
   );
 }
 
@@ -204,7 +193,7 @@ export function DeviationIntelligencePanel({
           aria-expanded={!collapsed}
           aria-controls="deviation-intel-body"
         >
-          <Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" />
+          <Bot className="w-4 h-4" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
           <span className="card-title">Deviation Intelligence AI</span>
           {hasRun && !loading && (
             <Badge variant={patternCount > 0 ? "amber" : "green"}>
@@ -213,6 +202,10 @@ export function DeviationIntelligencePanel({
                 : "no patterns"}
             </Badge>
           )}
+          {/* Provenance — the gateway silently falls back to the deterministic
+              mock when the backend errors, so without this the user cannot tell
+              AI output from demo data. */}
+          {hasRun && !loading && result && <AIBadge source={result.source} />}
           <ChevronDown
             className={`w-3.5 h-3.5 transition-transform ${collapsed ? "-rotate-90" : ""}`}
             style={{ color: "var(--text-muted)" }}
@@ -233,6 +226,30 @@ export function DeviationIntelligencePanel({
               deviations, approve investigations, or make risk decisions.
             </p>
           )}
+
+          {/* Partial-coverage disclosure. The backend caps how many deviations
+              enter one prompt; when it bites, saying "no patterns" without this
+              would imply a full-register scan that never happened. */}
+          {hasRun &&
+            result?.suppliedCount != null &&
+            result.suppliedCount > result.analyzedCount && (
+              <div
+                className="flex items-start gap-2 p-2.5 rounded-lg"
+                style={{ background: "var(--warning-bg)" }}
+                role="note"
+              >
+                <AlertTriangle
+                  className="w-3.5 h-3.5 mt-0.5 shrink-0"
+                  style={{ color: "var(--warning)" }}
+                  aria-hidden="true"
+                />
+                <p className="text-[11px]" style={{ color: "var(--warning)" }}>
+                  Partial coverage — analysed the {result.analyzedCount}{" "}
+                  highest-severity of {result.suppliedCount} deviations. Lower-severity
+                  deviations were not included in this run.
+                </p>
+              </div>
+            )}
 
           {/* Non-blocking error — never hides existing results, always retryable. */}
           {error && (
@@ -267,7 +284,8 @@ export function DeviationIntelligencePanel({
               aria-live="polite"
             >
               <div
-                className="w-7 h-7 rounded-full border-2 border-[#6366f1] border-t-transparent animate-spin"
+                className="w-7 h-7 rounded-full border-2 animate-spin"
+                style={{ borderColor: "var(--ai-accent)", borderTopColor: "transparent" }}
                 aria-hidden="true"
               />
               <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
@@ -286,14 +304,15 @@ export function DeviationIntelligencePanel({
                   style={{ background: "var(--bg-elevated)" }}
                 >
                   <ShieldAlert
-                    className="w-4 h-4 shrink-0 text-[#6366f1]"
+                    className="w-4 h-4 shrink-0"
+                    style={{ color: "var(--ai-accent)" }}
                     aria-hidden="true"
                   />
                   <span
                     className="text-[10px] uppercase tracking-wider font-semibold"
                     style={{ color: "var(--text-muted)" }}
                   >
-                    Predicted risk level
+                    Advisory risk flag
                   </span>
                   <Badge variant={RISK_BADGE[riskLevel]}>{riskLevel}</Badge>
                 </div>
@@ -333,8 +352,11 @@ export function DeviationIntelligencePanel({
                           <Badge variant="blue">{c.count} deviations</Badge>
                           {c.isHighFrequency && <Badge variant="red">High frequency</Badge>}
                         </div>
+                        {/* Derived from cluster SIZE, not model certainty — labelled
+                            "pattern strength" so it is never read as an AI
+                            confidence score (see DeviationCluster.confidence). */}
                         <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                          {c.confidence}% confidence
+                          {c.confidence}% pattern strength
                         </span>
                       </div>
 
@@ -364,7 +386,7 @@ export function DeviationIntelligencePanel({
 
                       {/* Suggested root cause */}
                       <div className="mt-2 flex items-start gap-2 p-2.5 rounded-lg" style={{ background: "var(--bg-elevated)" }}>
-                        <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0 text-[#6366f1]" aria-hidden="true" />
+                        <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
                         <div>
                           <p className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>
                             Suggested root cause
