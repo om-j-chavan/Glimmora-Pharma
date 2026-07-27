@@ -11,12 +11,11 @@ import { useToast } from "@/components/ui/Toast";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { getSeverityVariant } from "@/lib/badgeVariants";
 import { CategorizedDocUploader, type DocUploadEntry } from "@/components/shared/CategorizedDocUploader";
-import { TaskThread } from "./DeviationTaskPanel";
 import {
-  uploadFindingEvidence, removeFindingEvidence, saveFindingWorkNotes, submitFinding, postFindingMessage,
+  uploadFindingEvidence, removeFindingEvidence, saveFindingWorkNotes, submitFinding,
 } from "@/actions/findings";
 import {
-  attachDeviationTaskDocument, removeDeviationTaskDocument, submitDeviationTask, postDeviationTaskMessage,
+  attachDeviationTaskDocument, removeDeviationTaskDocument, submitDeviationTask,
 } from "@/actions/deviation-tasks";
 import { updateActionItem } from "@/actions/capas";
 import { addEvidenceFile, addEvidenceFileToCategory, removeEvidenceFile } from "@/actions/evidence";
@@ -36,12 +35,10 @@ type Result = { success: boolean; error?: string };
  */
 export function WorkItemModal({
   item,
-  currentUserId,
   onClose,
   onChanged,
 }: {
   item: WorkItem;
-  currentUserId?: string;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -50,15 +47,12 @@ export function WorkItemModal({
   const [notes, setNotes] = useState(item.notes);
   const [savingNotes, setSavingNotes] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [msgBody, setMsgBody] = useState("");
-  const [posting, setPosting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const canWork = item.canWork;
   // Deviation tasks have no standalone "save notes" server action — their notes
   // are carried on Submit. Findings + CAPA actions persist notes independently.
   const canSaveNotes = item.source !== "deviation";
-  const fmtDateTime = (iso: string) => dayjs.utc(iso).tz(org.timezone).format(`${org.dateFormat} HH:mm`);
 
   // ── EVIDENCE upload — same categorized flow for all sources; the server action
   //    differs by source (finding docs / deviation task docs / CAPA action evidence). ──
@@ -120,22 +114,6 @@ export function WorkItemModal({
     setSubmitting(false);
     if (!res.success) { setErr(res.error || "Submit failed."); toast.error(res.error || "Submit failed."); return; }
     toast.success("Submitted to QA for review."); onChanged(); onClose();
-  }
-
-  async function postMsg() {
-    if (msgBody.trim().length === 0) return;
-    // Phase 6 — the CAPA worklist thread is retired; this composer only renders
-    // for finding + deviation now (the Conversation block below is gated off for
-    // CAPA). The former CAPA branch called addCAPAComment with an actionItemId;
-    // that server branch is left in place but is now write-dead from the client.
-    if (item.source === "capa") return;
-    setPosting(true);
-    const res: Result = item.source === "finding"
-      ? await postFindingMessage(item.id, { body: msgBody.trim() })
-      : await postDeviationTaskMessage(item.id, { body: msgBody.trim() });
-    setPosting(false);
-    if (!res.success) { toast.error(res.error || "Failed to post message."); return; }
-    setMsgBody(""); onChanged();
   }
 
   const anyBusy = savingNotes || submitting;
@@ -266,23 +244,12 @@ export function WorkItemModal({
           )}
         </div>
 
-        {/* Conversation — flat QA ↔ worker thread. Phase 6: retired for CAPA
-            action items (the CAPA worklist thread is gone; concerns now live on
-            the CAPA detail's Concerns section). Finding + Deviation keep it — it's
-            their ONLY QA channel, and it writes to their own tables
-            (FindingMessage / DeviationTaskMessage), untouched by this change. */}
-        {item.source !== "capa" && (
-          <div className="pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
-            <TaskThread messages={item.messages} currentUserId={currentUserId} fmt={fmtDateTime} />
-            {item.statusLabel !== "Closed" && item.statusLabel !== "Done" && (
-              <div className="flex items-end gap-2 mt-2">
-                <textarea className="input text-[12px] w-full min-h-14" placeholder="Reply to QA…" value={msgBody} onChange={(e) => setMsgBody(e.target.value)} maxLength={2000} disabled={posting} />
-                <Button variant="secondary" size="sm" icon={Send} disabled={posting || msgBody.trim().length === 0} loading={posting} onClick={() => void postMsg()}>Send</Button>
-              </div>
-            )}
-          </div>
-        )}
+        {/* The QA↔worker conversation thread is retired for every source (it was
+            already gone for CAPA). What remains per direction: the worker's WORK
+            NOTES above reach QA on the source record (gap detail / deviation
+            detail / CAPA Assignments), and QA's rework ask reaches the worker via
+            the "Returned by QA" callout above. There is no longer an ad-hoc
+            worker→QA channel — a submitted note is the worker's only voice. */}
 
         {err && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{err}</p>}
       </div>

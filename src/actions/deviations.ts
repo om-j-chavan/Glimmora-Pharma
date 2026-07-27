@@ -424,6 +424,12 @@ export async function closeDeviation(
       severity: true,
       rootCause: true,
       linkedCAPAId: true,
+      // Lifecycle precondition (finding #2) + SoD (finding #1). status gates the
+      // close to a ready state; createdById / investigationCompletedById let the
+      // signer be compared against the reporter and the investigator.
+      status: true,
+      createdById: true,
+      investigationCompletedById: true,
     },
   });
   if (!existing) return { success: false, error: "Deviation not found" };
@@ -441,10 +447,51 @@ export async function closeDeviation(
   // compare, REUSABLES.md). No-op for deviations with no task.
   const activeTask = await prisma.deviationTask.findFirst({
     where: { deviationId: id, tenantId: session.user.tenantId, deletedAt: null, status: { notIn: ["closed", "cancelled"] } },
-    select: { id: true, assigneeId: true },
+    select: { id: true, assigneeId: true, status: true },
   });
   if (activeTask?.assigneeId && activeTask.assigneeId === actor.userId) {
     return { success: false, error: "Separation of duties: the task assignee cannot also sign its closure. A different QA Head must close it." };
+  }
+
+  // ── Lifecycle precondition (finding #2) ──────────────────────────────────
+  // A Part 11 signed close requires the WORK to be complete — enforced here, not
+  // by the client hiding the button (DeviationPage.tsx:659/942). Two paths,
+  // matching the two close triggers in the UI:
+  //   • task path — the assigned DeviationTask must be SUBMITTED for review.
+  //   • investigation path (no active task) — the deviation must be at
+  //     pending_qa_review, OR still capa_pending with its linked CAPA already
+  //     closed. The second case exists because the capa_pending →
+  //     pending_qa_review unblock in signAndCloseCAPA is best-effort POST-COMMIT
+  //     (capas/closure.ts:488-490), so a crash there can strand a ready deviation
+  //     in capa_pending; without this branch it would be un-closeable.
+  if (activeTask) {
+    if (activeTask.status !== "submitted") {
+      return { success: false, error: "This deviation's task hasn't been submitted for review yet — it can't be signed closed." };
+    }
+  } else if (existing.status !== "pending_qa_review") {
+    let recoverable = false;
+    if (existing.status === "capa_pending" && existing.linkedCAPAId) {
+      const linkedForClose = await prisma.cAPA.findFirst({
+        where: { id: existing.linkedCAPAId, tenantId: session.user.tenantId },
+        select: { status: true },
+      });
+      recoverable = linkedForClose?.status === "closed";
+    }
+    if (!recoverable) {
+      return { success: false, error: "This deviation isn't ready to close — its investigation must be complete and under QA review first." };
+    }
+  }
+
+  // ── SoD (finding #1) ─────────────────────────────────────────────────────
+  // The closer signs off the investigation, so they must be neither the reporter
+  // nor the investigator — mirroring guardCapaDecision. Compared on the
+  // authoritative User FK (actor.userId), the value these columns are STORED as
+  // (finding #3). The task-assignee check above covers the low-priority path.
+  if (existing.createdById && existing.createdById === actor.userId) {
+    return { success: false, error: "Separation of duties: the reporter of a deviation cannot sign its closure. A different QA Head must close it." };
+  }
+  if (existing.investigationCompletedById && existing.investigationCompletedById === actor.userId) {
+    return { success: false, error: "Separation of duties: the investigator cannot sign the closure of their own investigation. A different QA Head must close it." };
   }
 
   // SME Section 1, Stage 1 â€” CAPA Decision Gate.
@@ -664,6 +711,19 @@ export async function rejectDeviation(
   if (!parsed.success) {
     return { success: false, error: "Rejection reason must be at least 5 characters" };
   }
+  // Lifecycle precondition (finding #2) — reject is a QA disposition of a
+  // COMPLETED investigation (→ "additional investigation needed"), so it is only
+  // valid from pending_qa_review, matching the sole client trigger
+  // (DeviationPage.tsx:667). Checked BEFORE the signature so a doomed reject never
+  // prompts for a password. Server-enforced, not client-gated.
+  const existing = await prisma.deviation.findFirst({
+    where: { id, tenantId: session.user.tenantId },
+    select: { status: true },
+  });
+  if (!existing) return { success: false, error: "Deviation not found" };
+  if (existing.status !== "pending_qa_review") {
+    return { success: false, error: "A deviation can only be rejected while it is under QA review (pending QA review)." };
+  }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);
@@ -781,15 +841,18 @@ export async function saveInvestigationProgress(
   if (!canWriteQuality(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
-  // SoD — the reporter cannot perform the investigation.
-  if (existing.createdById && existing.createdById === session.user.id) {
-    return { success: false, error: "Investigation must be performed by someone other than the reporter." };
-  }
+  // Resolve the actor FK before the SoD check — createdById is STORED as
+  // actor.userId (createDeviation) and schema.prisma:872-876 names it the
+  // authoritative FK for SoD. Compare FK-to-FK, not FK-to-session-id (finding #3).
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  // SoD — the reporter cannot perform the investigation.
+  if (existing.createdById && existing.createdById === actor.userId) {
+    return { success: false, error: "Investigation must be performed by someone other than the reporter." };
   }
   try {
     const deviation = await prisma.deviation.update({
@@ -842,15 +905,17 @@ export async function completeInvestigation(
   if (!canWriteQuality(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
-  if (existing.createdById && existing.createdById === session.user.id) {
-    return { success: false, error: "Investigation must be performed by someone other than the reporter." };
-  }
   // Rung 3E — resolve actor to a real User FK; block super_admin authorship.
+  // Resolved before the SoD check so the reporter comparison is FK-to-FK, the
+  // way createdById is stored (finding #3).
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  if (existing.createdById && existing.createdById === actor.userId) {
+    return { success: false, error: "Investigation must be performed by someone other than the reporter." };
   }
   try {
     const deviation = await prisma.deviation.update({
@@ -946,6 +1011,10 @@ export async function startInvestigation(id: string): Promise<ActionResult> {
 async function guardCapaDecision(
   id: string,
   session: Awaited<ReturnType<typeof requireAuth>>,
+  // The authoritative User FK for SoD — the value createdById /
+  // investigationCompletedById are stored as. Passed in (resolved by the caller)
+  // so the comparison is FK-to-FK, not FK-to-session-id (finding #3).
+  actorUserId: string | null,
 ) {
   if (!isQARole(session.user.role)) {
     return { ok: false as const, error: "CAPA decision requires QA approval." };
@@ -966,10 +1035,10 @@ async function guardCapaDecision(
     return { ok: false as const, error: "Complete the investigation before deciding on a CAPA." };
   }
   // SoD — the decider cannot be the reporter or the investigator.
-  if (existing.createdById && existing.createdById === session.user.id) {
+  if (existing.createdById && existing.createdById === actorUserId) {
     return { ok: false as const, error: "The CAPA decision cannot be made by the reporter (segregation of duties)." };
   }
-  if (existing.investigationCompletedById && existing.investigationCompletedById === session.user.id) {
+  if (existing.investigationCompletedById && existing.investigationCompletedById === actorUserId) {
     return { ok: false as const, error: "The CAPA decision cannot be made by the investigator (segregation of duties)." };
   }
   return { ok: true as const, existing };
@@ -984,10 +1053,11 @@ export async function saveCAPADecision(
   if (!parsed.success) {
     return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
-  const guard = await guardCapaDecision(id, session);
-  if (!guard.ok) return { success: false, error: guard.error };
   // Rung 3E — resolve actor to a real User FK; block super_admin authorship.
+  // Resolved before the guard so its SoD compares the FK (finding #3).
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  const guard = await guardCapaDecision(id, session, actor.userId);
+  if (!guard.ok) return { success: false, error: guard.error };
   try {
     requireGxPAuthor(actor);
   } catch (e) {
@@ -1034,13 +1104,14 @@ export async function editCAPADecision(
   if (!parsed.success) {
     return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
-  const guard = await guardCapaDecision(id, session);
+  // Rung 3E — resolve actor to a real User FK; block super_admin authorship.
+  // Resolved before the guard so its SoD compares the FK (finding #3).
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  const guard = await guardCapaDecision(id, session, actor.userId);
   if (!guard.ok) return { success: false, error: guard.error };
   if (!guard.existing.capaDecisionMade) {
     return { success: false, error: "No existing CAPA decision to edit. Use Save Decision first." };
   }
-  // Rung 3E — resolve actor to a real User FK; block super_admin authorship.
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);
   } catch (e) {

@@ -40,10 +40,8 @@ function isOverdue(item: WorkItem): boolean {
 
 export function WorklistPage({
   worklist,
-  currentUserId,
 }: {
   worklist: Worklist;
-  currentUserId: string;
 }) {
   const router = useRouter();
   const { org } = useTenantConfig();
@@ -183,7 +181,6 @@ export function WorklistPage({
       {selected && (
         <WorkItemModal
           item={selected}
-          currentUserId={currentUserId}
           onClose={() => setSelectedKey(null)}
           onChanged={() => router.refresh()}
         />

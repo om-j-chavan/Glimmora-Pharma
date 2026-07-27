@@ -24,13 +24,28 @@ export function findingVisibilityWhere(session: AuthSession): Prisma.FindingWher
  * ADDITIONAL AND on top of tenant + deletedAt; default `{}` keeps existing
  * callers (dashboard/search) tenant-wide until their cross-cutting phase.
  * React cache() deduplicates within a single request.
+ *
+ * Each row carries `hasEvidenceDoc` — whether the finding has a retrievable
+ * uploaded document. Evidence-presence is a fact about the DOCUMENTS, and every
+ * consumer previously inferred it from `evidenceLink` being non-empty. That only
+ * worked because the upload path used to stamp the filename into evidenceLink;
+ * with that conflation removed, a link is just the author's reference and can be
+ * empty on a finding with plenty of evidence. Stamping the fact here means each
+ * reader (evidence scoring, the missing-evidence alert) asks the right question
+ * instead of re-deriving it from the wrong field.
  */
 export const getFindings = cache(async (tenantId: string, visibility: Prisma.FindingWhereInput = {}) => {
-  return prisma.finding.findMany({
-    where: { tenantId, deletedAt: null, ...visibility },
-    orderBy: { createdAt: "desc" },
-    include: { edits: { orderBy: { editedAt: "asc" } } },
-  });
+  const [rows, docFindingIds] = await Promise.all([
+    prisma.finding.findMany({
+      where: { tenantId, deletedAt: null, ...visibility },
+      orderBy: { createdAt: "desc" },
+      include: { edits: { orderBy: { editedAt: "asc" } } },
+    }),
+    // Same cache() scope as the page's own call — one query per request.
+    getFindingEvidenceDocIds(tenantId),
+  ]);
+  const withDocs = new Set(docFindingIds);
+  return rows.map((f) => ({ ...f, hasEvidenceDoc: withDocs.has(f.id) }));
 });
 
 export interface FindingAssignee { id: string; name: string; role: string }

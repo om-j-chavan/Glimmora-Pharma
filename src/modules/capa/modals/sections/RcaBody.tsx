@@ -2,16 +2,19 @@
 
 import { Badge } from "@/components/ui/Badge";
 import type { CAPA } from "@/store/capa.slice";
-import { RcaReviewSection } from "./RcaReviewSection";
 
 /**
  * RCA tab body. Read-only display of the root cause analysis text +
  * methodology badge. Editing happens via the detail modal's Edit button
- * (which opens EditCAPAModal). When a method is selected but the
- * free-text root cause hasn't been filled in yet, we render a
- * method-specific scaffold (5 Why questions, Fishbone categories, Fault
- * Tree prompts) so the tab is usable as a thinking aid rather than just
- * a blank placeholder.
+ * (which opens EditCAPAModal) — that is currently the ONLY writer of CAPA.rca.
+ * When a method is selected but the free-text root cause hasn't been filled in
+ * yet, we render a method-specific scaffold (5 Why questions, Fishbone
+ * categories, Fault Tree prompts) so the tab is usable as a thinking aid rather
+ * than just a blank placeholder.
+ *
+ * Renders the RCA CONTENT only. The QA review box (RcaReviewSection) is mounted
+ * by the caller — CAPADetailPageV2 puts it directly below this on the Review tab.
+ * It used to be rendered here as well, which showed it twice.
  */
 
 /** Method-specific scaffold prompts. Rendered when the rca text is empty. */
@@ -103,12 +106,15 @@ export function RcaBody({ capa }: { capa: CAPA }) {
         </div>
       ) : (
         <p className="text-[12px] italic" style={{ color: "var(--text-muted)" }}>
-          No analysis yet. The assigned person writes it from their Worklist task — then you review it here.
+          No analysis yet. Use Edit to record the root cause analysis — then it can be reviewed here.
         </p>
       )}
-      {/* SME Section 1, Stage 3 (FULL) — RCA QA review section. Renders
-          below the RCA content so reviewers can read first, then act. */}
-      <RcaReviewSection capa={capa} />
+      {/* RcaReviewSection is NOT rendered here any more. CAPADetailPageV2 mounts it
+          as a sibling right below <RcaBody> on the Review tab, so having it here too
+          rendered the QA review box TWICE. The sibling is the one kept: it is wired
+          to onReviewChange={() => router.refresh()}, which this copy never had — so
+          the duplicate was also the stale one, approving without refreshing the page
+          it sat on. */}
     </div>
   );
 }

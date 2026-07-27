@@ -36,6 +36,7 @@ import clsx from "clsx";
 import { Search, Save, CheckCircle2, Pencil, AlertTriangle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { Deviation, DeviationRCAMethod } from "@/store/deviation.slice";
 import {
@@ -265,7 +266,14 @@ export function InvestigationSection({
     setConfirmCancel(false);
   }, [deviation.id, deviation.rcaMethod, deviation.rcaData, deviation.investigationCompletedAt]);
 
-  const showForm = (!completed && (started || !!method)) || editing;
+  // The RCA form is now entered in a MODAL (Add/Edit RCA), opened explicitly.
+  const modalOpen = started || editing;
+  // Fix 5 — RCA becomes READ-ONLY once a CAPA has been raised from this
+  // deviation: the CAPA was authored from this root cause, so editing it
+  // retroactively would break traceability. The RCA DISPLAY stays visible; only
+  // the Edit affordance is gated. (Client mirror; a matching server-side gate in
+  // completeInvestigation is intentionally out of scope for this UI pass.)
+  const rcaEditable = canInvestigate && !deviation.linkedCAPAId;
 
   // Dirty check — compare the working buffers/method to the persisted
   // baseline so Cancel can skip the confirmation when nothing changed (Fix 1).
@@ -308,21 +316,37 @@ export function InvestigationSection({
     onChanged(complete ? "Investigation completed." : "Investigation progress saved.");
   }
 
-  /* ── STATE C — completed (and not editing) ── */
-  if (completed && !editing) {
-    return (
-      <div>
-        <SectionHeader
-          title="Investigation"
-          status="Completed"
-          action={
-            canInvestigate ? (
-              <Button variant="ghost" size="sm" icon={Pencil} onClick={() => { setEditing(true); setMethod(deviation.rcaMethod ?? null); }}>
-                Edit Investigation
-              </Button>
-            ) : undefined
-          }
-        />
+  /* ── Summary view (always visible) + RCA modal ── */
+  return (
+    <div>
+      <SectionHeader
+        title="Investigation"
+        status={completed ? "Completed" : undefined}
+        action={
+          completed
+            ? (canInvestigate ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={Pencil}
+                  disabled={!rcaEditable}
+                  title={!rcaEditable ? "RCA cannot be edited after a CAPA is linked" : undefined}
+                  onClick={() => { if (!rcaEditable) return; setEditing(true); setMethod(deviation.rcaMethod ?? null); }}
+                >
+                  Edit RCA
+                </Button>
+              ) : undefined)
+            : (!isReporter ? (
+                <Button variant="primary" size="sm" icon={Search} disabled={!canInvestigate} onClick={() => setStarted(true)}>
+                  Add RCA
+                </Button>
+              ) : undefined)
+        }
+      />
+
+      {/* Body — the saved RCA (read-only), the reporter SoD note, or an
+          "add RCA" prompt. The RCA FORM itself lives in the modal below. */}
+      {completed ? (
         <div className="p-3 rounded-lg border" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
           <div className="flex items-center gap-2 mb-2">
             <CheckCircle2 className="w-4 h-4 text-[#10b981]" aria-hidden="true" />
@@ -336,200 +360,171 @@ export function InvestigationSection({
           </div>
           <SavedDeviationRcaDisplay method={deviation.rcaMethod} rootCause={deviation.rootCause ?? ""} />
         </div>
-      </div>
-    );
-  }
-
-  /* ── STATE A — not started, and the user cannot investigate (reporter) ── */
-  if (!showForm && isReporter) {
-    return (
-      <div>
-        <SectionHeader title="Investigation" />
+      ) : isReporter ? (
         <div role="note" className="flex items-start gap-2 p-3 rounded-lg border" style={{ background: "var(--warning-bg)", borderColor: "var(--warning)" }}>
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--warning)" }} aria-hidden="true" />
           <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
             Investigation must be performed by someone other than the reporter. Reassign or have a colleague complete this step.
           </p>
         </div>
-      </div>
-    );
-  }
-
-  /* ── STATE A — not started, user can investigate ── */
-  if (!showForm) {
-    return (
-      <div>
-        <SectionHeader title="Investigation" />
-        <div className="p-3 rounded-lg border space-y-2" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
-          <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Pick an analysis method to begin.</p>
-          <Button variant="primary" size="sm" icon={Search} disabled={!canInvestigate} onClick={() => setStarted(true)}>
-            Start Investigation
-          </Button>
+      ) : (
+        <div className="p-3 rounded-lg border" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
+          <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            No root cause analysis recorded yet. Add the RCA to document the investigation.
+          </p>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  /* ── STATE B — in progress (method picker + per-method form) ── */
-  return (
-    <div>
-      {/* TODO: AI Suggestion button — see roadmap Tier 4 Item 10 */}
-      <SectionHeader
-        title="Investigation"
-        status="In progress"
-      />
-      <div className="space-y-3">
-        {/* Method picker */}
-        <div className="flex gap-2 flex-wrap">
-          {METHODS.map((m) => {
-            const active = method === m.value;
-            return (
-              <button
-                key={m.value}
-                type="button"
-                aria-pressed={active}
-                disabled={!canInvestigate}
-                onClick={() => setMethod(m.value)}
-                className={clsx("px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all", !canInvestigate && "opacity-50 cursor-not-allowed")}
-                style={
-                  active
-                    ? { background: "var(--brand)", color: "#fff", borderColor: "var(--brand)" }
-                    : { background: "transparent", borderColor: "var(--bg-border)", color: "var(--text-secondary)" }
-                }
-              >
-                {m.label}
-              </button>
-            );
-          })}
-        </div>
+      {/* RCA modal — method picker + per-method form (was rendered inline). Save
+          completes the investigation (persist(true) → completeInvestigation),
+          closes the modal, and refreshes via onChanged. */}
+      <Modal
+        open={modalOpen}
+        onClose={handleCancel}
+        title={editing ? "Edit RCA" : "Add RCA"}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" disabled={busy} onClick={handleCancel}>Cancel</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Save}
+              disabled={!canInvestigate || busy || !method || !canComplete(method, buffers)}
+              loading={busy}
+              onClick={() => persist(true)}
+            >
+              Save RCA
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {/* Discard-confirmation strip — only shown when there are unsaved
+              changes. No server action runs on Cancel/Discard. */}
+          {confirmCancel && (
+            <div
+              role="alertdialog"
+              className="flex items-center justify-between gap-2 p-2 rounded-lg border text-[11px]"
+              style={{ background: "var(--warning-bg)", borderColor: "var(--warning)", color: "var(--warning)" }}
+            >
+              <span>Discard unsaved changes? This cannot be undone.</span>
+              <span className="flex gap-2 shrink-0">
+                <Button variant="ghost" size="xs" onClick={() => setConfirmCancel(false)}>Keep editing</Button>
+                <Button variant="danger" size="xs" onClick={exitEditing}>Discard</Button>
+              </span>
+            </div>
+          )}
 
-        {!method && (
-          <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Pick an analysis method above to begin.</p>
-        )}
-
-        {/* 5 Why — Why 5 is emphasized as the root cause (tinted background +
-            brand border-left + bolder label), matching FDA 483's editing view. */}
-        {method === "5 Why" && (
-          <div className="space-y-2">
-            {[0, 1, 2, 3, 4].map((i) => {
-              const isRoot = i === 4;
+          {/* Method picker */}
+          <div className="flex gap-2 flex-wrap">
+            {METHODS.map((m) => {
+              const active = method === m.value;
               return (
-                <div key={i}>
-                  <label
-                    className={clsx("uppercase tracking-wider block mb-0.5", isRoot ? "text-[11px] font-bold" : "text-[10px] font-semibold")}
-                    style={{ color: isRoot ? "var(--text-primary)" : "var(--text-muted)" }}
-                  >
-                    {isRoot ? "Why 5 — Root cause" : `Why ${i + 1}${i === 0 ? " *" : ""}`}
-                  </label>
-                  <textarea
-                    rows={2}
-                    disabled={!canInvestigate}
-                    className="input w-full text-[12px] resize-none"
-                    style={isRoot ? { background: "var(--brand-muted)", borderLeft: "2px solid var(--brand)" } : undefined}
-                    value={buffers.whys[i] ?? ""}
-                    onChange={(e) => setBuffers((b) => { const whys = [...b.whys]; whys[i] = e.target.value; return { ...b, whys }; })}
-                    placeholder={i === 0 ? "Why did this happen?" : isRoot ? "Root cause" : `Deeper cause of Why ${i}`}
-                  />
-                </div>
+                <button
+                  key={m.value}
+                  type="button"
+                  aria-pressed={active}
+                  disabled={!canInvestigate}
+                  onClick={() => setMethod(m.value)}
+                  className={clsx("px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all", !canInvestigate && "opacity-50 cursor-not-allowed")}
+                  style={
+                    active
+                      ? { background: "var(--brand)", color: "#fff", borderColor: "var(--brand)" }
+                      : { background: "transparent", borderColor: "var(--bg-border)", color: "var(--text-secondary)" }
+                  }
+                >
+                  {m.label}
+                </button>
               );
             })}
           </div>
-        )}
 
-        {/* Fishbone */}
-        {method === "Fishbone" && (
-          <div className="space-y-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {FISHBONE_CATEGORIES.map((c) => (
-                <div key={c}>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider block mb-0.5" style={{ color: "var(--text-muted)" }}>{c}</label>
-                  <textarea
-                    rows={2}
-                    disabled={!canInvestigate}
-                    className="input w-full text-[12px] resize-none"
-                    value={buffers.cats[c] ?? ""}
-                    onChange={(e) => setBuffers((b) => ({ ...b, cats: { ...b.cats, [c]: e.target.value } }))}
-                    placeholder={`Contributing factors from ${c.toLowerCase()}…`}
-                  />
-                </div>
-              ))}
+          {!method && (
+            <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Pick an analysis method above to begin.</p>
+          )}
+
+          {/* 5 Why — Why 5 is emphasized as the root cause (tinted background +
+              brand border-left + bolder label), matching FDA 483's editing view. */}
+          {method === "5 Why" && (
+            <div className="space-y-2">
+              {[0, 1, 2, 3, 4].map((i) => {
+                const isRoot = i === 4;
+                return (
+                  <div key={i}>
+                    <label
+                      className={clsx("uppercase tracking-wider block mb-0.5", isRoot ? "text-[11px] font-bold" : "text-[10px] font-semibold")}
+                      style={{ color: isRoot ? "var(--text-primary)" : "var(--text-muted)" }}
+                    >
+                      {isRoot ? "Why 5 — Root cause" : `Why ${i + 1}${i === 0 ? " *" : ""}`}
+                    </label>
+                    <textarea
+                      rows={2}
+                      disabled={!canInvestigate}
+                      className="input w-full text-[12px] resize-none"
+                      style={isRoot ? { background: "var(--brand-muted)", borderLeft: "2px solid var(--brand)" } : undefined}
+                      value={buffers.whys[i] ?? ""}
+                      onChange={(e) => setBuffers((b) => { const whys = [...b.whys]; whys[i] = e.target.value; return { ...b, whys }; })}
+                      placeholder={i === 0 ? "Why did this happen?" : isRoot ? "Root cause" : `Deeper cause of Why ${i}`}
+                    />
+                  </div>
+                );
+              })}
             </div>
+          )}
+
+          {/* Fishbone */}
+          {method === "Fishbone" && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {FISHBONE_CATEGORIES.map((c) => (
+                  <div key={c}>
+                    <label className="text-[10px] font-semibold uppercase tracking-wider block mb-0.5" style={{ color: "var(--text-muted)" }}>{c}</label>
+                    <textarea
+                      rows={2}
+                      disabled={!canInvestigate}
+                      className="input w-full text-[12px] resize-none"
+                      value={buffers.cats[c] ?? ""}
+                      onChange={(e) => setBuffers((b) => ({ ...b, cats: { ...b.cats, [c]: e.target.value } }))}
+                      placeholder={`Contributing factors from ${c.toLowerCase()}…`}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider block mb-0.5" style={{ color: "var(--text-primary)" }}>Root cause summary *</label>
+                <textarea
+                  rows={2}
+                  disabled={!canInvestigate}
+                  className="input w-full text-[12px] resize-none"
+                  style={{ background: "var(--brand-muted)", borderLeft: "2px solid var(--brand)" }}
+                  value={buffers.fishRoot}
+                  onChange={(e) => setBuffers((b) => ({ ...b, fishRoot: e.target.value }))}
+                  placeholder="Summarize the primary root cause identified…"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Fault Tree / Barrier Analysis — the single freeform block IS the
+              root cause, so it always carries the emphasized treatment. */}
+          {(method === "Fault Tree" || method === "Barrier Analysis") && (
             <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider block mb-0.5" style={{ color: "var(--text-primary)" }}>Root cause summary *</label>
+              <label className="text-[11px] font-bold uppercase tracking-wider block mb-0.5" style={{ color: "var(--text-primary)" }}>
+                {methodLabel(method)} analysis — Root cause *
+              </label>
               <textarea
-                rows={2}
+                rows={6}
                 disabled={!canInvestigate}
                 className="input w-full text-[12px] resize-none"
                 style={{ background: "var(--brand-muted)", borderLeft: "2px solid var(--brand)" }}
-                value={buffers.fishRoot}
-                onChange={(e) => setBuffers((b) => ({ ...b, fishRoot: e.target.value }))}
-                placeholder="Summarize the primary root cause identified…"
+                value={buffers.freeform}
+                onChange={(e) => setBuffers((b) => ({ ...b, freeform: e.target.value }))}
+                placeholder={`Document your ${methodLabel(method).toLowerCase()} analysis here…`}
               />
             </div>
-          </div>
-        )}
-
-        {/* Fault Tree / Barrier Analysis — the single freeform block IS the
-            root cause, so it always carries the emphasized treatment. */}
-        {(method === "Fault Tree" || method === "Barrier Analysis") && (
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider block mb-0.5" style={{ color: "var(--text-primary)" }}>
-              {methodLabel(method)} analysis — Root cause *
-            </label>
-            <textarea
-              rows={6}
-              disabled={!canInvestigate}
-              className="input w-full text-[12px] resize-none"
-              style={{ background: "var(--brand-muted)", borderLeft: "2px solid var(--brand)" }}
-              value={buffers.freeform}
-              onChange={(e) => setBuffers((b) => ({ ...b, freeform: e.target.value }))}
-              placeholder={`Document your ${methodLabel(method).toLowerCase()} analysis here…`}
-            />
-          </div>
-        )}
-
-        {method && (
-          <div className="space-y-2">
-            {/* Discard-confirmation strip — only shown when there are unsaved
-                changes (pristine Cancel skips straight to exit). No server
-                action runs on Cancel/Discard. */}
-            {confirmCancel && (
-              <div
-                role="alertdialog"
-                className="flex items-center justify-between gap-2 p-2 rounded-lg border text-[11px]"
-                style={{ background: "var(--warning-bg)", borderColor: "var(--warning)", color: "var(--warning)" }}
-              >
-                <span>Discard unsaved changes? This cannot be undone.</span>
-                <span className="flex gap-2 shrink-0">
-                  <Button variant="ghost" size="xs" onClick={() => setConfirmCancel(false)}>Cancel</Button>
-                  <Button variant="danger" size="xs" onClick={exitEditing}>Discard</Button>
-                </span>
-              </div>
-            )}
-            <div className="flex gap-2">
-              {/* Cancel — leftmost, text-only (not filled). Exits edit mode
-                  without persisting; confirms first if there are unsaved edits. */}
-              <Button variant="ghost" size="sm" disabled={busy} onClick={handleCancel}>
-                Cancel
-              </Button>
-              {/* Req 4 — SAVING THE RCA completes the investigation step. The
-                  separate "Complete Investigation" action is removed; this single
-                  Save IS the completion (persist(true) → completeInvestigation).
-                  Gated on a filled root cause. */}
-              <Button
-                variant="primary"
-                size="sm"
-                icon={Save}
-                disabled={!canInvestigate || busy || !canComplete(method, buffers)}
-                loading={busy}
-                onClick={() => persist(true)}
-              >
-                Save RCA
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -601,7 +596,7 @@ export function CapaDecisionSection({
   if (showForm) {
     return (
       <div>
-        <SectionHeader title="CAPA Decision" status="Required" />
+        <SectionHeader title="CAPA Decision" />
         <div className="p-3 rounded-lg border space-y-3" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
           <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
             Based on the root cause analysis above, does this deviation require a corrective and preventive action (CAPA)?
@@ -646,7 +641,7 @@ export function CapaDecisionSection({
       : "CAPA decision needs a QA reviewer who is neither the reporter nor the investigator (segregation of duties).";
     return (
       <div>
-        <SectionHeader title="CAPA Decision" status="Required" />
+        <SectionHeader title="CAPA Decision" />
         <div role="note" className="flex items-start gap-2 p-3 rounded-lg border" style={{ background: "var(--warning-bg)", borderColor: "var(--warning)" }}>
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--warning)" }} aria-hidden="true" />
           <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{reasonMsg}</p>

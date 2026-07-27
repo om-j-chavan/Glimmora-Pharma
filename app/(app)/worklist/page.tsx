@@ -16,10 +16,7 @@ export default async function Page() {
 
   return (
     <ErrorBoundary moduleName="Worklist">
-      <WorklistPage
-        worklist={worklist}
-        currentUserId={session.user.id}
-      />
+      <WorklistPage worklist={worklist} />
     </ErrorBoundary>
   );
 }

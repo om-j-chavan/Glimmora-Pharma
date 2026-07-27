@@ -81,7 +81,10 @@ export function useNotificationEngine() {
 
   // Evidence
   useEffect(() => {
-    const missing = findings.filter((f) => f.severity === "Critical" && f.status !== "Closed" && !f.evidenceLink?.trim());
+    // "No evidence" means no uploaded document AND no author reference — asking
+    // evidenceLink alone would raise a false alarm on a critical finding that
+    // carries documents but no typed link (see Finding.hasEvidenceDoc).
+    const missing = findings.filter((f) => f.severity === "Critical" && f.status !== "Closed" && !f.evidenceLink?.trim() && !f.hasEvidenceDoc);
     if (missing.length > 0) {
       push(make("evidence-missing-critical", "evidence_missing", "Critical findings missing evidence", `${missing.length} critical finding${missing.length !== 1 ? "s" : ""} have no evidence linked.`, "/evidence"));
     }

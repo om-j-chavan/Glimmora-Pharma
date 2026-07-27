@@ -7,6 +7,7 @@ import type { Finding } from "@/store/findings.slice";
 import { formatReference } from "@/lib/reference";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { FINDING_EDIT_REASON_MIN } from "@/constants/capaValidation";
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.xlsx,.docx,.csv,.txt";
 const MAX_SIZE_MB = 10;
@@ -14,7 +15,11 @@ const MAX_SIZE_MB = 10;
 interface EvidenceLinkModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (findingId: string, evidenceLink: string) => void | Promise<{ ok: boolean; error?: string }>;
+  /** Saving the LINK is an edit to the finding (updateFinding), so it carries the
+   *  same mandatory reason-for-change as the detail's Edit form — Item 16 made it
+   *  required on the SERVER, and this is the second caller. Uploading a FILE is a
+   *  different action (uploadFindingEvidence) and needs no reason. */
+  onSave: (findingId: string, evidenceLink: string, reason: string) => void | Promise<{ ok: boolean; error?: string }>;
   onUpload: (findingId: string, file: File) => Promise<{ ok: boolean; error?: string }>;
   findingId: string;
   currentLink: string;
@@ -24,6 +29,7 @@ interface EvidenceLinkModalProps {
 export function EvidenceLinkModal({ isOpen, onClose, onSave, onUpload, findingId, currentLink, finding }: EvidenceLinkModalProps) {
   const [evidenceInput, setEvidenceInput] = useState(currentLink);
   const [file, setFile] = useState<File | null>(null);
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,6 +37,7 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, onUpload, findingId
     // Sync controlled state when the target finding changes.
     setEvidenceInput(currentLink);
     setFile(null);
+    setReason("");
     setError("");
   }, [currentLink, findingId]);
 
@@ -40,6 +47,7 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, onUpload, findingId
     onClose();
     setEvidenceInput("");
     setFile(null);
+    setReason("");
     setError("");
     setBusy(false);
   }
@@ -68,7 +76,7 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, onUpload, findingId
           return;
         }
       } else {
-        const res = await onSave(findingId, evidenceInput.trim());
+        const res = await onSave(findingId, evidenceInput.trim(), reason.trim());
         if (res && !res.ok) {
           setError(res.error || "Failed to save. Please try again.");
           return;
@@ -80,7 +88,11 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, onUpload, findingId
     }
   }
 
-  const canSubmit = !!file || evidenceInput.trim().length > 0;
+  // The file path uploads (no reason); the link path edits the finding, so it needs
+  // one. Mirrors the server floor rather than inventing a second number.
+  const canSubmit = file
+    ? true
+    : evidenceInput.trim().length > 0 && reason.trim().length >= FINDING_EDIT_REASON_MIN;
 
   return (
     <Modal open={isOpen} onClose={handleClose} title={currentLink ? "Update evidence document" : "Link evidence document"}>
@@ -122,6 +134,31 @@ export function EvidenceLinkModal({ isOpen, onClose, onSave, onUpload, findingId
           </div>
         )}
       </div>
+
+      {/* Item 16 — reason-for-change, required for the LINK save because that is an
+          edit to a GxP record (updateFinding). Hidden on the upload path: uploading
+          a document is uploadFindingEvidence, a different action with its own trail.
+          The alternative — a canned reason supplied by the code — would be the app
+          writing a human justification it did not have. */}
+      {!file && (
+        <div className="mt-4">
+          <label htmlFor="evidence-reason" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">
+            Reason for edit <span className="text-[#ef4444]">*</span>
+          </label>
+          <textarea
+            id="evidence-reason"
+            className="input text-[12px] w-full min-h-16"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            maxLength={2000}
+            placeholder="Why is this evidence reference being set or changed?"
+            aria-describedby="evidence-reason-hint"
+          />
+          <p id="evidence-reason-hint" className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+            Recorded in the finding&apos;s audit trail. At least {FINDING_EDIT_REASON_MIN} characters.
+          </p>
+        </div>
+      )}
 
       {error && <p role="alert" className="text-[11px] text-[#ef4444] mt-3 p-2 rounded-lg" style={{ background: "var(--danger-bg)" }}>{error}</p>}
 

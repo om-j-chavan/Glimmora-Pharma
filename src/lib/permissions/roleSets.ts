@@ -407,6 +407,75 @@ export function canEditFinding(role: string): boolean {
   return QA_AUTHORITY_ROLES.includes(role) && canAuthorGxP(role);
 }
 
+/**
+ * EDIT one specific gap finding (Item 16): QA authority edits anything; otherwise
+ * the actor must be the finding's RAISER (createdById), who gets a LIMITED editor —
+ * requirement/purpose/area/targetDate/evidenceLink/RCA, never severity/status/
+ * linkedCAPAId. The FIELD limit is enforced server-side in updateFinding; this
+ * answers only "may this person open the editor at all".
+ *
+ * Pure + id-keyed, so the client mirror and the `updateFinding` server gate call the
+ * SAME function — the shape canEditRisk / canEditManagementDecision already use.
+ * Role alone cannot answer this (raiser-ness is a property of the record), which is
+ * why `canEditFinding` above is not enough on its own.
+ *
+ * Fail-closed on a null actor id, exactly as canEditRisk does: an admin login has no
+ * User row (resolveUserFk → null) and findings that predate createdById have a null
+ * column, so a bare `===` would make every admin the "raiser" of every unattributed
+ * finding. A null createdById means the creator is UNKNOWN — nobody is its raiser.
+ */
+export function canEditFindingRecord(
+  role: string,
+  actorUserId: string | null | undefined,
+  finding: { createdById?: string | null },
+): boolean {
+  if (!canAuthorGxP(role)) return false; // platform bright line (requireGxPAuthor mirrors it)
+  if (QA_AUTHORITY_ROLES.includes(role)) return true;
+  if (role === "viewer") return false;
+  if (!actorUserId) return false; // fail-closed: never match a null column
+  return finding.createdById === actorUserId;
+}
+
+/**
+ * WRITE the root cause analysis on ONE finding. Deliberately NARROWER than
+ * canEditFindingRecord above: QA authority always; the RAISER only until the
+ * finding is ASSIGNED.
+ *
+ * Once QA assigns someone the analysis has been HANDED OFF — the assignee works
+ * against it and QA reviews it against their submission. A raiser rewriting the RCA
+ * underneath live work moves the thing being worked on after the handoff, which is
+ * why "raiser may author it" (Item 16) stops at exactly that moment rather than
+ * running for the record's whole life.
+ *
+ * `assignedAt` (Item 18) is the ONLY honest test for "has this been handed off".
+ * NOT status: a finding reaches In Progress via createCAPA (capas/lifecycle.ts) and
+ * via a status edit without anyone ever being assigned — it was wrong 6 of 7 times
+ * in this DB. NOT owner !== createdById: wrong both ways, and undefined where
+ * createdById is null.
+ *
+ * The CAPA-raise half is deliberately NOT here: a raised CAPA locks the WHOLE gap
+ * (findingLockedByCapa), which saveFindingRCA already enforces and the client
+ * mirrors via `gapLocked`. One lock, one place — folding it in would make this the
+ * second thing deciding it.
+ *
+ * Pure + id-keyed, so the client mirror and the saveFindingRCA server gate call the
+ * SAME function. The client used to carry an inline `(isQAHead || isRaiser)` that
+ * agreed with the server only by coincidence; adding a rule to one side of a
+ * coincidence is what left Item 16.1's raiser branch inert.
+ */
+export function canWriteFindingRCA(
+  role: string,
+  actorUserId: string | null | undefined,
+  finding: { createdById?: string | null; assignedAt?: string | Date | null },
+): boolean {
+  if (!canAuthorGxP(role)) return false;
+  if (QA_AUTHORITY_ROLES.includes(role)) return true;
+  if (role === "viewer") return false;
+  if (!actorUserId) return false; // fail-closed: never match a null column
+  if (finding.assignedAt) return false; // handed off — QA only from here
+  return finding.createdById === actorUserId;
+}
+
 /** CREATE gates per the responsibility map (origination of the record). */
 // Gap Assessment is DENYLIST-scoped: any functional/seat role OR qa_head may
 // originate a gap finding; only the read-only viewer and the two admin

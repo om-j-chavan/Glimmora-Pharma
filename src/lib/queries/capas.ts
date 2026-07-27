@@ -175,7 +175,15 @@ export const getCAPAFindingDocs = cache(async (findingId: string, tenantId: stri
  *  rather than assert them deletable; don't undo that). Carried-over "gap"
  *  conversions are excluded — they belong to the gap, shown via getCAPAFindingDocs.
  *  These files ARE evidence (each is filed under a GxP category); this query only
- *  groups them by origin for the Summary's documents card, it does not reclassify. */
+ *  groups them by origin for the Summary's documents card, it does not reclassify.
+ *
+ *  ALSO action-scoped files (actionItemId set) — a worker's worklist upload lands
+ *  here as "qa_added" too, because that field means "added after raise" and NOT
+ *  "added by QA" (see EvidenceFile.uploadSource in the schema). Grouping on
+ *  uploadSource alone therefore pulled every worker upload into the CAPA-level
+ *  documents card, which read as the file being MOVED there on submit. Whose work
+ *  a file belongs to is actionItemId's job: those files are the Assignments tab's
+ *  (getCAPAEvidenceByActionItem), so this card takes the unscoped ones only. */
 export interface CAPAAddedFile {
   id: string;
   fileName: string;
@@ -199,6 +207,49 @@ export interface CAPAEvidenceFileRef {
   uploadedBy: string;
   actionItemId: string | null;
 }
+
+/**
+ * The gap work notes carried onto this CAPA at raise (createCAPA writes ONE per
+ * linked finding, from Finding.completionNotes).
+ *
+ * Keyed on `carriedFromFindingId` — a stored marker, NOT a body prefix. The carry
+ * used to identify itself by starting the body with "(work notes from finding X)",
+ * so finding these meant string-matching prose and parsing the ref back out of it.
+ *
+ * These are NOT concerns and never were (isConcern: false), so DiscussionSection —
+ * which renders concern threads only (Phase 0A) — filters them out. That filter is
+ * right; the notes simply don't belong in a concern list. They belong on the
+ * person who wrote them, which is what the Assignments tab does with this.
+ */
+export interface CAPACarriedNote {
+  id: string;
+  /** The gap assignee who wrote it. Keys the note to a person's card. */
+  authorId: string;
+  authorName: string;
+  body: string;
+  findingRef: string;
+  createdAt: string;
+}
+
+export const getCAPACarriedNotes = cache(
+  async (capaId: string, tenantId: string): Promise<CAPACarriedNote[]> => {
+    const rows = await prisma.cAPAComment.findMany({
+      where: { capaId, tenantId, deletedAt: null, carriedFromFindingId: { not: null } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, authorId: true, authorName: true, body: true, carriedFromFindingRef: true, carriedFromFindingId: true, createdAt: true },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      authorId: r.authorId,
+      authorName: r.authorName,
+      body: r.body,
+      // Ref was denormalised at carry time; fall back to the id rather than render
+      // an empty label.
+      findingRef: r.carriedFromFindingRef ?? r.carriedFromFindingId ?? "the gap",
+      createdAt: r.createdAt.toISOString(),
+    }));
+  },
+);
 
 export const getCAPAEvidenceByActionItem = cache(
   async (capaId: string, tenantId: string): Promise<CAPAEvidenceFileRef[]> => {
@@ -230,6 +281,7 @@ export const getCAPAQaAddedFiles = cache(
       where: {
         deletedAt: null,
         evidenceItem: { capaId, capa: { tenantId } },
+        actionItemId: null,
         OR: [{ uploadSource: "qa_added" }, { uploadSource: null }],
       },
       orderBy: { createdAt: "desc" },

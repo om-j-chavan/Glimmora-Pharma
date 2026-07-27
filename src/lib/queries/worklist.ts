@@ -521,6 +521,10 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
       select: {
         id: true, fileName: true, originalFileName: true, fileType: true, fileExtension: true,
         fileSize: true, uploadedBy: true, uploadedAt: true, createdAt: true, category: true, linkedRecordId: true,
+        // The stable upload bucket, so the work item can split the worker's OWN
+        // uploads ("work") from the gap's creation documents ("create"). Without
+        // it every consumer sees `undefined` and mis-buckets EVERY gap doc.
+        uploadSource: true,
       },
     });
     for (const d of findingDocs) {
@@ -534,6 +538,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         uploadedBy: d.uploadedBy,
         uploadedAt: (d.uploadedAt ?? d.createdAt).toISOString(),
         category: d.category,
+        uploadSource: d.uploadSource,
       };
       const arr = findingDocsByFinding.get(d.linkedRecordId) ?? [];
       arr.push(row);

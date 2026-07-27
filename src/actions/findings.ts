@@ -21,7 +21,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { DEVIATION_QA_ROLES, GAP_CREATE_ROLES, QA_AUTHORITY_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { DEVIATION_QA_ROLES, GAP_CREATE_ROLES, QA_AUTHORITY_ROLES, isAssignedToTask, canEditFindingRecord, canWriteFindingRCA } from "@/lib/permissions/roleSets";
+import { FINDING_EDIT_REASON_MIN } from "@/constants/capaValidation";
+// Item 17 — the ONE close gate; the client renders the same blockers.
+import { findingCloseBlockers } from "@/lib/finding-close";
 import { findingVisibilityWhere, getFindingAuditTrail } from "@/lib/queries/findings";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import { notify } from "@/lib/notify";
@@ -67,7 +70,12 @@ const UpdateFindingSchema = z.object({
   area: z.string().min(1).optional(),
   severity: z.enum(["Critical", "High", "Medium", "Low"]).optional(),
   status: z.enum(["Open", "In Progress", "Closed"]).optional(),
-  owner: z.string().min(1).optional(),
+  // Item 18 — `owner` is deliberately NOT editable here. assignFinding is the ONLY
+  // door to changing it, so that every owner change carries its actor + timestamp
+  // (Finding.assignedAt/assignedById) and emits FINDING_ASSIGNED. This action
+  // accepted an owner change that emitted FINDING_UPDATED and no FINDING_ASSIGNED,
+  // which made "owner changed ⇒ assigned" a coincidence rather than an invariant.
+  // zod strips the key, so a stale client sending it is ignored, not rejected.
   targetDate: z.string().optional(),
   rootCause: z.string().optional(),
   // Gap RCA (Batch B) — structured method + JSON detail (rootCause = mirror).
@@ -75,9 +83,12 @@ const UpdateFindingSchema = z.object({
   rcaDetail: z.string().optional(),
   evidenceLink: z.string().optional(),
   linkedCAPAId: z.string().optional(),
-  // Free-text rationale recorded alongside the edit-history diff. Not a column
-  // on Finding — it lands in FindingEdit.reason.
-  reason: z.string().optional(),
+  // Item 16 — REQUIRED reason-for-change (ALCOA+). Not a column on Finding: it
+  // lands in FindingEdit.reason AND in the FINDING_UPDATED audit row, because the
+  // FindingEdit trail is PARTIAL (only updateFinding + assignFinding write it)
+  // while the AuditLog is the complete one an inspector reads. Required on the
+  // SERVER, not just the form — a reason the client can skip is not a reason.
+  reason: z.string().min(FINDING_EDIT_REASON_MIN, `Reason for edit must be at least ${FINDING_EDIT_REASON_MIN} characters`).max(2000),
 });
 
 // â”€â”€ Return types â”€â”€
@@ -251,10 +262,12 @@ export async function createFinding(input: z.input<typeof CreateFindingSchema>):
 
 // Human-readable labels + value formatting for the edit-history diff. Only
 // the fields a user can actually change through the detail form are diffed.
-const DIFF_FIELDS: { key: "requirement" | "purpose" | "owner" | "targetDate" | "evidenceLink" | "status" | "rcaMethod" | "rootCause"; label: string }[] = [
+// Owner is absent by design: updateFinding can no longer change it (Item 18), so
+// the entry could never fire. Owner changes are still trailed — assignFinding
+// writes its own FindingEdit with field "Owner" (:478-486).
+const DIFF_FIELDS: { key: "requirement" | "purpose" | "targetDate" | "evidenceLink" | "status" | "rcaMethod" | "rootCause"; label: string }[] = [
   { key: "requirement", label: "Requirement" },
   { key: "purpose", label: "Purpose" },
-  { key: "owner", label: "Owner" },
   { key: "targetDate", label: "Target date" },
   { key: "evidenceLink", label: "Evidence link" },
   { key: "status", label: "Status" },
@@ -286,10 +299,10 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  // Responsibility map — editing a finding is a QA ASSESSMENT judgment (QA_AUTHORITY_ROLES = qa_head).
-  if (!QA_AUTHORITY_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Only QA Head can edit a gap finding." };
-  }
+  // NOTE — the role gate moved BELOW the record read (Item 16): raiser-ness is a
+  // property of the finding, so it cannot be decided before reading it. Same shape
+  // as updateActionItem's author-vs-assigned-owner split (action-items.ts:349-377).
+  // requireGxPAuthor stays above: the platform-admin bright line is record-independent.
   try {
     // A soft-deleted finding is immutable — exclude it (mirrors every other
     // finding action; closeFinding now does the same).
@@ -297,6 +310,41 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
       where: { id, tenantId: session.user.tenantId, deletedAt: null },
     });
     if (!before) return { success: false, error: "Finding not found" };
+
+    // ── Item 16 — WHO may edit ────────────────────────────────────────────────
+    // QA authority = the full editor. The RAISER = a limited one: they may correct
+    // what they wrote, not re-judge the assessment.
+    //
+    // The rule lives in canEditFindingRecord (roleSets) so the client mirror and
+    // this gate are the SAME function — the shape canEditRisk already uses. It also
+    // carries the fail-closed null-actor guard: a bare `===` would make every admin
+    // (null userId) the "raiser" of every finding whose createdById is null.
+    const isQA = QA_AUTHORITY_ROLES.includes(session.user.role);
+    if (!canEditFindingRecord(session.user.role, actor.userId, before)) {
+      return { success: false, error: "Only QA Head or the person who raised this finding can edit it." };
+    }
+    if (!isQA) {
+      // Severity drives the CAPA-vs-assign disposition; status can close the finding
+      // outright (the Submitted guard below only blocks transitions OUT of
+      // Submitted); linkedCAPAId is the escalation link. All three are QA judgment,
+      // not authorship. Naming the field is the point — "your role does not permit
+      // this action" would leave the raiser guessing which of seven fields did it.
+      const QA_ONLY_LABELS: Record<string, string> = {
+        severity: "severity",
+        status: "status",
+        linkedCAPAId: "the linked CAPA",
+      };
+      const attempted = Object.keys(QA_ONLY_LABELS).filter(
+        (f) => (parsed.data as Record<string, unknown>)[f] !== undefined,
+      );
+      if (attempted.length > 0) {
+        return {
+          success: false,
+          error: `You raised this finding, so you can correct its details — but ${attempted.map((f) => QA_ONLY_LABELS[f]).join(" and ")} ${attempted.length === 1 ? "is" : "are"} a QA judgment. Ask your QA Head to change ${attempted.length === 1 ? "it" : "them"}.`,
+        };
+      }
+    }
+
     if (await findingLockedByCapa(before.linkedCAPAId, session.user.tenantId)) {
       return { success: false, error: GAP_LOCKED_MESSAGE };
     }
@@ -323,6 +371,16 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
       // Submitted→Closed (skipping independent review).
       if (before.status === "Submitted") {
         return { success: false, error: "A submitted finding is dispositioned through QA review (Accept or Send for rework), not by editing its status." };
+      }
+      // (c) Item 17 — RCA gate on the Edit-driven close. This is the quietest of the
+      // three gated paths: no review moment, no dedicated action, just a status
+      // dropdown. Gating it matters MORE here than elsewhere, not less — it is the
+      // path someone would reach for to get around the other two.
+      if (parsed.data.status === "Closed") {
+        const editCloseBlockers = findingCloseBlockers(before, actor.userId);
+        if (editCloseBlockers.length > 0) {
+          return { success: false, error: editCloseBlockers[0].message };
+        }
       }
     }
 
@@ -372,7 +430,18 @@ export async function updateFinding(id: string, input: z.input<typeof UpdateFind
           action: "FINDING_UPDATED",
           recordId: id,
           recordTitle: before.reference ?? undefined,
-          newValue: changes.length > 0 ? JSON.stringify(changes) : undefined,
+          // Item 16 — the reason rides HERE, not only on FindingEdit.reason. The
+          // FindingEdit trail is partial (update + assign only); the AuditLog is the
+          // complete one, and a reason-for-change recorded solely on the partial
+          // trail is invisible to anyone reading the record's actual history.
+          // `changes` may be empty (a reason-only save changes no field) — the row
+          // still carries the reason rather than an undefined newValue.
+          newValue: JSON.stringify({
+            reason: reason.trim(),
+            changedFields: changes.map((c) => c.field),
+            changes,
+            accessBasis: isQA ? "qaAuthority" : "raiser",
+          }),
         },
       });
 
@@ -457,12 +526,20 @@ export async function assignFinding(
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.finding.update({
         where: { id: findingId, tenantId: session.user.tenantId },
-        // Assigning a still-Open finding moves it into the work loop (In Progress) —
-        // the disposition uses this as the "assigned" signal to show the assignee
-        // read-only + hide the dropdown (mirrors a deviation gaining an activeTask).
-        // A finding already past Open (In Progress/Submitted/Rework) keeps its status
-        // on reassignment.
-        data: { owner: assignee.id, ...(finding.status === "Open" ? { status: "In Progress" } : {}) },
+        // Assigning a still-Open finding moves it into the work loop (In Progress).
+        // A finding already past Open (In Progress/Submitted/Rework) keeps its
+        // status on reassignment. NOTE: status is a CONSEQUENCE of assigning here,
+        // never the record of it — a finding also reaches In Progress via createCAPA
+        // (capas/lifecycle.ts:617) and via a status edit, having never been
+        // assigned. assignedAt below is the fact; status is not a proxy for it.
+        data: {
+          owner: assignee.id,
+          // Item 18 — the assignment EVENT: actor + timestamp, in the SAME write as
+          // the owner change, so an assignment can never land without them.
+          assignedAt: new Date(),
+          assignedById: actor.userId,
+          ...(finding.status === "Open" ? { status: "In Progress" } : {}),
+        },
       });
 
       // Append-only edit trail (same as updateFinding tracks an owner change) so
@@ -648,10 +725,20 @@ export async function closeFinding(id: string): Promise<ActionResult> {
     // deleted or already-closed finding could be "closed" again (a no-op audit).
     const existing = await prisma.finding.findFirst({
       where: { id, tenantId: session.user.tenantId, deletedAt: null },
-      select: { id: true, status: true, reference: true, linkedCAPAId: true },
+      select: { id: true, status: true, reference: true, linkedCAPAId: true, rootCause: true, rcaRecordedById: true },
     });
     if (!existing) return { success: false, error: "Finding not found" };
     if (existing.status === "Closed") return { success: false, error: "This finding is already closed." };
+
+    // Item 17 — RCA gate. Shared with reviewFinding + updateFinding's status→Closed
+    // and with the client, so all four say the same thing about the same refusal.
+    // This is the DIRECT close path: no review moment at all, which is exactly why
+    // the gate includes "the closer is not the RCA's author" and not merely "an RCA
+    // exists" — otherwise QA writes it and closes on it in one sitting.
+    const closeBlockers = findingCloseBlockers(existing, actor.userId);
+    if (closeBlockers.length > 0) {
+      return { success: false, error: closeBlockers[0].message };
+    }
 
     // Fix 3 — a gap escalated to a CAPA is closed BY its CAPA (signAndCloseCAPA
     // cascades the finding to "Closed" atomically). Block a direct finding-close
@@ -711,9 +798,15 @@ const EVIDENCE_ALLOWED_MIME = new Set([
 
 /**
  * Upload a document as evidence for a finding. Stores the bytes via the file
- * storage abstraction, records a Document row linked to the finding, and sets
- * the finding's evidenceLink to the stored file name so the Evidence Index
- * reflects it. Mirrors addEvidenceFile in actions/evidence.ts.
+ * storage abstraction and records a Document row linked to the finding.
+ * Mirrors addEvidenceFile in actions/evidence.ts.
+ *
+ * Does NOT touch Finding.evidenceLink. Evidence Link and Evidence Docs are two
+ * SEPARATE fields: evidenceLink is a free-text reference the author supplies
+ * (Add Finding modal / the detail's own field); the uploaded docs are Document
+ * rows. This upload used to stamp evidenceLink with the stored file name, which
+ * made an uploaded doc's FILENAME render as the finding's Evidence Link and let
+ * each new upload silently overwrite whatever reference the author had entered.
  */
 export async function uploadFindingEvidence(
   findingId: string,
@@ -784,6 +877,14 @@ export async function uploadFindingEvidence(
           version: "v1.0",
           status: "draft",
           uploadedBy: session.user.name,
+          // The AUTHORITATIVE uploader FK (null for admin actors with no User
+          // row); `uploadedBy` above is the denormalised name, for display only.
+          // This path was the sole Document writer that never set it — every
+          // sibling does (evidence.ts, documents.ts, risks.ts, systems.ts) — so
+          // gap evidence was the only module whose attribution couldn't survive
+          // a rename or a user deletion, despite the column being indexed
+          // (@@index([tenantId, uploadedById])). ALCOA+ Attributable.
+          uploadedById: actor.userId,
           description: `Evidence for ${finding.reference ?? findingId}`,
           linkedModule: "Gap Assessment",
           linkedRecordId: findingId,
@@ -802,10 +903,6 @@ export async function uploadFindingEvidence(
           originalFileName: file.name,
           fileExtension: sanitized.includes(".") ? sanitized.slice(sanitized.lastIndexOf(".") + 1).toLowerCase() : null,
         },
-      });
-      await tx.finding.update({
-        where: { id: findingId, tenantId: session.user.tenantId },
-        data: { evidenceLink: sanitized },
       });
       await tx.auditLog.create({
         data: {
@@ -849,10 +946,11 @@ export async function loadFindingDocuments(findingId: string): Promise<ActionRes
       deletedAt: null,
     },
     orderBy: { createdAt: "asc" },
-    // uploadedById lets the detail split origin: docs uploaded by the finding's
-    // OWNER (the worklist assignee/worker) = "Worklist Documents"; others = "Gap
-    // Evidence" (uploaded on the gap detail).
-    select: { id: true, fileName: true, category: true, uploadSource: true, uploadedBy: true, uploadedById: true, createdAt: true },
+    // Origin is split by the STABLE uploadSource stamped at upload, NOT by
+    // comparing an uploader against the finding's (mutable) owner — that older
+    // scheme is gone, and the uploadedById it selected for was never even
+    // written here, so the split it described could never have worked.
+    select: { id: true, fileName: true, category: true, uploadSource: true, uploadedBy: true, createdAt: true },
   });
   return {
     success: true,
@@ -862,7 +960,6 @@ export async function loadFindingDocuments(findingId: string): Promise<ActionRes
       category: d.category,
       uploadSource: d.uploadSource,
       uploadedBy: d.uploadedBy,
-      uploadedById: d.uploadedById,
       uploadedAt: d.createdAt.toISOString(),
     })),
   };
@@ -880,7 +977,7 @@ export async function removeFindingEvidence(
   const session = await requireAuth();
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, owner: true, status: true, evidenceLink: true, linkedCAPAId: true },
+    select: { id: true, owner: true, status: true, linkedCAPAId: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
   if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
@@ -904,34 +1001,22 @@ export async function removeFindingEvidence(
   if (!doc) return { success: false, error: "Document not found on this finding." };
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
-    // Soft-delete + (if needed) repoint the finding's evidenceLink + audit, all
-    // in ONE transaction. Previously removing the doc whose filename is stored in
-    // finding.evidenceLink left a DANGLING link: the finding still displayed it,
-    // getEvidenceStatus still scored it Complete/Partial, and the download route
-    // served the next-newest doc or 404'd. Now we repoint to the newest remaining
-    // Gap Assessment doc for this finding (or clear it), but ONLY when the link
-    // actually points at the removed file (a typed reference is left untouched).
+    // Soft-delete + audit in ONE transaction.
+    //
+    // This used to also REPOINT finding.evidenceLink at the next-newest doc (or
+    // clear it) when the link matched the removed file — a workaround for the
+    // upload conflation, which stamped filenames into evidenceLink and so made
+    // deleting a doc leave a dangling link. The upload no longer writes that
+    // field and the filenames it wrote are cleared (backfill-finding-
+    // evidencelink-conflation), so nothing links evidenceLink to a document's
+    // lifecycle: the two are independent, and a doc deletion has no business
+    // rewriting the author's reference. Evidence presence now comes from the
+    // documents themselves (Finding.hasEvidenceDoc), not from this field.
     await prisma.$transaction(async (tx) => {
       await tx.document.update({
         where: { id: documentId, tenantId: session.user.tenantId },
         data: { deletedAt: new Date(), deletedBy: session.user.name, deletionReason: "Removed from gap finding" },
       });
-
-      if (finding.evidenceLink && finding.evidenceLink === doc.fileName) {
-        const nextDoc = await tx.document.findFirst({
-          where: {
-            tenantId: session.user.tenantId,
-            linkedModule: "Gap Assessment", linkedRecordId: findingId,
-            deletedAt: null, id: { not: documentId },
-          },
-          orderBy: { createdAt: "desc" },
-          select: { fileName: true },
-        });
-        await tx.finding.update({
-          where: { id: findingId, tenantId: session.user.tenantId },
-          data: { evidenceLink: nextDoc?.fileName ?? null },
-        });
-      }
 
       await tx.auditLog.create({
         data: {
@@ -1019,6 +1104,153 @@ export async function saveFindingWorkNotes(
   }
 }
 
+/* ── RCA — its own narrow activity action ─────────────────────────────────────
+ *
+ * Joins the family (saveFindingWorkNotes above, submitFinding, assignFinding,
+ * reworkFinding): one action per real activity, each with its own rule. It does NOT
+ * route through updateFinding, the general field editor, for one reason — the REASON
+ * rule differs, and it differs for a principled reason rather than a convenience:
+ *
+ *   FIRST entry is AUTHORSHIP. The assessment is being performed, not altered.
+ *   ALCOA+ reason-for-change governs ALTERING previously recorded data; there is
+ *   nothing yet to explain a change to. This codebase already draws that exact line:
+ *   saveFindingWorkNotes and updateActionItem's completion notes take no reason
+ *   (authorship), while reworkFinding and deleteFinding require one (change/undo).
+ *
+ *   A SUBSEQUENT change IS an alteration, and needs one. Same floor as the editor
+ *   (FINDING_EDIT_REASON_MIN) — imported, never re-declared.
+ *
+ * Routing through updateFinding would have forced a reason on first entry, training
+ * everyone to type "adding RCA" — a mandatory-but-meaningless reason, which is the
+ * "optional reason isn't an audit trail" problem inverted. updateFinding's mandatory
+ * reason (Item 16.2) is UNTOUCHED: the RCA rule lives where RCA lives.
+ *
+ * Gate: canEditFindingRecord — the SAME pure function the client mirror calls. A
+ * second inline check is exactly what left Item 16.1's raiser branch inert.
+ */
+const SaveFindingRCASchema = z.object({
+  rcaMethod: z.enum(CAPA_RCA_METHODS),
+  // The readable mirror the register/export/detail render; rcaDetail is the JSON
+  // source. Both are serialized client-side by the shared rcaDetailToText, exactly
+  // as CAPA's edit modal does.
+  rootCause: z.string().min(1, "The analysis cannot be empty").max(4000),
+  rcaDetail: z.string().max(8000).optional(),
+  // Conditionally required — see below. Optional HERE because the schema cannot
+  // know whether an RCA already exists; that needs the record.
+  reason: z.string().max(2000).optional(),
+});
+
+export async function saveFindingRCA(
+  findingId: string,
+  input: z.input<typeof SaveFindingRCASchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  const parsed = SaveFindingRCASchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
+    // assignedAt drives the write gate below — the raiser's window closes when the
+    // finding is handed off.
+    select: { id: true, reference: true, status: true, createdById: true, assignedAt: true, rootCause: true, rcaMethod: true, linkedCAPAId: true },
+  });
+  if (!finding) return { success: false, error: "Finding not found" };
+  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
+    return { success: false, error: GAP_LOCKED_MESSAGE };
+  }
+  // A closed finding's assessment is a closed record (mirrors removeFindingEvidence).
+  if (finding.status === "Closed") {
+    return { success: false, error: "This finding is closed; its root cause analysis can no longer be changed." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  // canWriteFindingRCA, not canEditFindingRecord: the raiser may author the analysis
+  // only until the finding is ASSIGNED. After the handoff the assignee is working
+  // against it, so changing it is QA's call. The error names WHY, so a raiser who
+  // could write yesterday isn't left guessing what changed.
+  if (!canWriteFindingRCA(session.user.role, actor.userId, finding)) {
+    return {
+      success: false,
+      error: finding.assignedAt
+        ? "This finding is assigned, so only QA Head can change its root cause analysis."
+        : "Only QA Head or the person who raised this finding can record its root cause analysis.",
+    };
+  }
+
+  // "An RCA exists" is keyed on rootCause — the readable mirror is what the detail
+  // renders and what a closure gate would read, so it is the honest test for
+  // "has the assessment been performed?".
+  const isRevision = !!finding.rootCause?.trim();
+  if (isRevision && (parsed.data.reason ?? "").trim().length < FINDING_EDIT_REASON_MIN) {
+    return {
+      success: false,
+      error: `This finding already has a root cause analysis. Revising it needs a reason of at least ${FINDING_EDIT_REASON_MIN} characters.`,
+    };
+  }
+  const reason = isRevision ? parsed.data.reason!.trim() : null;
+
+  try {
+    // Mutation + audit in ONE transaction (ALCOA+).
+    await prisma.$transaction(async (tx) => {
+      await tx.finding.update({
+        where: { id: findingId, tenantId: session.user.tenantId },
+        data: {
+          rootCause: parsed.data.rootCause.trim(),
+          rcaMethod: parsed.data.rcaMethod,
+          rcaDetail: parsed.data.rcaDetail ?? null,
+          // Item 17 — the RCA's provenance, stamped in the SAME write as the
+          // analysis. The close gate compares the closer against this author
+          // (findingCloseBlockers), so it is stored, never re-derived from the
+          // audit trail: a control must not depend on an inference.
+          rcaRecordedAt: new Date(),
+          rcaRecordedById: actor.userId,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "Gap Assessment",
+          // TWO action codes, not one code + a flag. "The assessment was performed"
+          // and "the assessment was revised" are different events, and the trail is
+          // keyed by action everywhere: FINDING_HISTORY_LABEL maps action→label
+          // without parsing newValue, and a consumer asking "has an RCA ever been
+          // recorded?" is then a keyed count, not a JSON scan of every row. #17 is
+          // that consumer.
+          action: isRevision ? "FINDING_RCA_UPDATED" : "FINDING_RCA_RECORDED",
+          recordId: findingId,
+          recordTitle: finding.reference ?? undefined,
+          // The PRE-image only on a revision — on first entry there is no old value,
+          // and an empty string would imply the analysis was blanked rather than
+          // absent.
+          oldValue: isRevision ? finding.rootCause : null,
+          newValue: JSON.stringify({
+            rcaMethod: parsed.data.rcaMethod,
+            previousMethod: isRevision ? finding.rcaMethod : undefined,
+            // Present only on a revision — see the reason rule above.
+            ...(reason ? { reason } : {}),
+            accessBasis: QA_AUTHORITY_ROLES.includes(session.user.role) ? "qaAuthority" : "raiser",
+          }),
+        },
+      });
+    });
+    revalidatePath("/gap-assessment");
+    return { success: true, data: null };
+  } catch (err) {
+    console.error("[action] saveFindingRCA failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to save the root cause analysis") };
+  }
+}
+
 // ── Gap Step 4 — submit → QA review → rework loop (clones the deviation task) ──
 
 const SubmitFindingSchema = z.object({
@@ -1026,9 +1258,6 @@ const SubmitFindingSchema = z.object({
 });
 const ReworkFindingSchema = z.object({
   reason: z.string().min(5, "Rework reason is required (min 5 chars)"),
-});
-const FindingMessageSchema = z.object({
-  body: z.string().min(1, "Message cannot be empty").max(2000, "Message too long (2000 char max)"),
 });
 
 /** SUBMIT — the assignee (owner) submits the finding for QA review. */
@@ -1096,7 +1325,7 @@ export async function reviewFinding(findingId: string): Promise<ActionResult> {
   }
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, reference: true, owner: true, status: true, linkedCAPAId: true },
+    select: { id: true, reference: true, owner: true, status: true, linkedCAPAId: true, rootCause: true, rcaRecordedById: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
   if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
@@ -1108,6 +1337,13 @@ export async function reviewFinding(findingId: string): Promise<ActionResult> {
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   if (finding.owner && finding.owner === actor.userId) {
     return { success: false, error: "Separation of duties: you cannot review a finding assigned to you. A different QA Head must review it." };
+  }
+  // Item 17 — RCA gate. NOT redundant with the SoD above: that one is reviewer !=
+  // ASSIGNEE, which says nothing about who wrote the analysis. Accepting the work
+  // closes the finding, so the same rule the direct paths use applies here.
+  const reviewBlockers = findingCloseBlockers(finding, actor.userId);
+  if (reviewBlockers.length > 0) {
+    return { success: false, error: reviewBlockers[0].message };
   }
   try {
     // Mutation + audit in ONE transaction (ALCOA+); notify after (side-effect).
@@ -1230,57 +1466,19 @@ export async function reworkFinding(
   }
 }
 
-/** POST MESSAGE — the flat QA↔assignee conversation (append-only). QA OR the
- *  assignee (owner). Read-only once the finding is Closed. */
-export async function postFindingMessage(
-  findingId: string,
-  input: z.input<typeof FindingMessageSchema>,
-): Promise<ActionResult> {
-  const session = await requireAuth();
-  const parsed = FindingMessageSchema.safeParse(input);
-  if (!parsed.success) {
-    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
-  }
-  const finding = await prisma.finding.findFirst({
-    where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, owner: true, status: true, linkedCAPAId: true },
-  });
-  if (!finding) return { success: false, error: "Finding not found" };
-  if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
-    return { success: false, error: GAP_LOCKED_MESSAGE };
-  }
-  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
-  const isAssignee = isAssignedToTask(session, { ownerId: finding.owner });
-  if (!isQA && !isAssignee) {
-    return { success: false, error: "Only QA or the assigned user can post on this finding." };
-  }
-  if (finding.status === "Closed") {
-    return { success: false, error: "This finding is closed; the conversation is read-only." };
-  }
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    const created = await prisma.findingMessage.create({
-      data: {
-        tenantId: session.user.tenantId,
-        findingId,
-        authorId: actor.userId,
-        authorName: actor.displayName,
-        authorRole: actor.role,
-        body: parsed.data.body.trim(),
-      },
-    });
-    revalidatePath("/gap-assessment");
-    revalidatePath("/worklist");
-    return { success: true, data: created };
-  } catch (err) {
-    console.error("[action] postFindingMessage failed:", err);
-    return { success: false, error: sanitizeServerError(err, "Failed to post message") };
-  }
-}
+// postFindingMessage (the user-facing composer for the flat QA↔assignee
+// conversation) is gone with the thread UI that was its only caller. The
+// FindingMessage table and its rows are RETAINED (Part 11), and are still
+// written by reworkFinding above, which persists QA's rework reason directly.
 
 /** Read a finding's review payload (for the QA-side gap view, which doesn't get
- *  it from the worklist payload): the assignee's completion notes, QA's current
- *  rework ask, and the conversation. Tenant-scoped; messages oldest first. */
+ *  it from the worklist payload): the assignee's completion notes and QA's
+ *  current rework ask. Tenant-scoped.
+ *
+ *  No longer returns the FindingMessage thread: the gap detail retired that
+ *  display, and the card's "has this been reworked?" gate now reads the
+ *  FINDING_REWORK audit rows it already loads for History. The rows themselves
+ *  are retained (Part 11) — this only stops querying what nothing renders. */
 export async function loadFindingReview(findingId: string): Promise<ActionResult> {
   const session = await requireAuth();
   // Phase 3 — re-check PARENT visibility so a child (the review thread) of a
@@ -1291,21 +1489,12 @@ export async function loadFindingReview(findingId: string): Promise<ActionResult
     select: { id: true, status: true, completionNotes: true, reworkReason: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
-  const messages = await prisma.findingMessage.findMany({
-    where: { findingId, tenantId: session.user.tenantId },
-    orderBy: { createdAt: "asc" },
-    select: { id: true, authorId: true, authorName: true, authorRole: true, body: true, createdAt: true },
-  });
   return {
     success: true,
     data: {
       status: finding.status,
       completionNotes: finding.completionNotes,
       reworkReason: finding.reworkReason,
-      messages: messages.map((m) => ({
-        id: m.id, authorId: m.authorId, authorName: m.authorName, authorRole: m.authorRole,
-        body: m.body, createdAt: m.createdAt.toISOString(),
-      })),
     },
   };
 }

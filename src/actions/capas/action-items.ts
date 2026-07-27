@@ -100,8 +100,13 @@ const DeleteActionItemSchema = z.object({
  * so any downstream reader (legacy reports, the existing UI fallback)
  * still sees a consistent shape. Called inside the same tx as every
  * action-item write.
+ *
+ * EXPORTED for createCAPA's Item 19 assignment carry, which creates an action
+ * item inside its own transaction. Any writer of CAPAActionItem must call this
+ * in the same tx or correctiveActions silently drifts from the rows — the join
+ * lives here and nowhere else.
  */
-async function syncCorrectiveActions(
+export async function syncCorrectiveActions(
   tx: TxClient,
   capaId: string,
   tenantId: string,
@@ -345,13 +350,23 @@ export async function updateActionItem(
     parsed.data.dueDate === undefined;
   const targetIsCompleteOrSkipped =
     parsed.data.status === "complete" || parsed.data.status === "skipped";
+  // A notes-only save (the worklist "Save notes" button): completionNotes with
+  // no status and no structural field. Distinct from isStatusOnlyUpdate — it
+  // carries NO status, so it is not a transition at all.
+  const isNotesOnlyUpdate =
+    parsed.data.completionNotes !== undefined &&
+    parsed.data.status === undefined &&
+    parsed.data.description === undefined &&
+    parsed.data.owner === undefined &&
+    parsed.data.ownerId === undefined &&
+    parsed.data.dueDate === undefined;
 
   // Phase 3 — authorization: author-role OR assigned-owner path. The owner
   // path permits ONLY a status-only update to pending|in_progress|complete
-  // (+ completionNotes). Structural edits (description/owner/dueDate/
-  // delete) and the skipped/rework statuses stay author-only. requireGxPAuthor
-  // (platform-admin block, above) and the viewer hard-stop baked into
-  // isAssignedToTask both precede this check.
+  // (+ completionNotes), or a notes-only save. Structural edits (description/
+  // owner/dueDate/delete) and the skipped/rework statuses stay author-only.
+  // requireGxPAuthor (platform-admin block, above) and the viewer hard-stop
+  // baked into isAssignedToTask both precede this check.
   // Responsibility map - full edit/reassign of an action item is a QA authority
   // action (QA_AUTHORITY_ROLES). The assignee still makes status-only transitions
   // via the isAssignedOwner branch below.
@@ -366,7 +381,7 @@ export async function updateActionItem(
     if (!isAssignedOwner) {
       return { success: false, error: "Your role does not permit this action." };
     }
-    if (!ownerStatusOnly) {
+    if (!ownerStatusOnly && !isNotesOnlyUpdate) {
       return {
         success: false,
         error:
@@ -489,6 +504,13 @@ export async function updateActionItem(
     data.completedByUser = { disconnect: true };
     data.completedAt = null;
     data.completionNotes = null;
+  } else if (parsed.data.completionNotes !== undefined) {
+    // Notes-only save. Without this branch `data` stayed EMPTY on a
+    // completionNotes-only call — the update was a silent no-op that still
+    // returned success, so the worklist's "Save notes" reported saved and
+    // persisted nothing. Notes are carried WITHOUT touching status or
+    // completion attribution: saving a note is not a completion attestation.
+    data.completionNotes = parsed.data.completionNotes.trim() || null;
   }
 
   try {
@@ -508,6 +530,9 @@ export async function updateActionItem(
     if (ownerChanged) changedFields.push("owner");
     if (dueDateChanged) changedFields.push("dueDate");
     if (parsed.data.status !== undefined) changedFields.push("status");
+    // A notes-only save changes nothing else, so without this the audit row
+    // recorded an empty changedFields — a write with no trail of what moved.
+    if (isNotesOnlyUpdate) changedFields.push("completionNotes");
 
     await prisma.auditLog.create({
       data: {

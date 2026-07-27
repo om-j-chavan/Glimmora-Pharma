@@ -17,7 +17,7 @@ import { acceptWork, sendWorkBack, skipTask, reassignTask, nudgeActionItemOwner,
 import { DatePicker } from "@/components/ui/DatePicker";
 import { TASK_DESCRIPTION_MIN } from "@/constants/capaValidation";
 import type { CAPA, CAPAActionItem } from "@/store/capa.slice";
-import type { CAPAEvidenceFileRef } from "@/lib/queries/capas";
+import type { CAPAEvidenceFileRef, CAPACarriedNote } from "@/lib/queries/capas";
 import type { UserConfig } from "@/store/settings.slice";
 
 /**
@@ -32,8 +32,11 @@ const OVERDUE_BANNER_DAYS = 7;
 
 type Bucket = "not_started" | "in_progress" | "submitted" | "accepted" | "skipped";
 /** Single source for cards AND pills — they can't disagree. rework folds into
- *  "in progress" (it IS being worked again) with a Returned marker; the real
- *  awaiting-review state is `complete` (Submitted), so there is no "Under review". */
+ *  "in progress" (it IS being worked again) with a Returned marker.
+ *  Deliberately a PURE function of the item: whether the CAPA has been submitted
+ *  for review is not the item's business, so only the LABEL/VARIANT below learn
+ *  about CAPA status. Branching this function would fix the word and break the
+ *  cards-and-pills-agree guarantee. */
 function bucketOf(status: string): Bucket {
   if (status === "pending") return "not_started";
   if (status === "in_progress" || status === "rework") return "in_progress";
@@ -41,25 +44,67 @@ function bucketOf(status: string): Bucket {
   if (status === "accepted") return "accepted";
   return "skipped";
 }
-const BUCKET_LABEL: Record<Bucket, string> = { not_started: "Not started", in_progress: "In progress", submitted: "Submitted", accepted: "Accepted", skipped: "Skipped" };
+const BUCKET_LABEL: Record<Bucket, string> = { not_started: "Not started", in_progress: "In progress", submitted: "Done", accepted: "Accepted", skipped: "Skipped" };
 const BUCKET_VARIANT: Record<Bucket, BadgeVariant> = { not_started: "gray", in_progress: "amber", submitted: "green", accepted: "blue", skipped: "red" };
+/** The `submitted` bucket is the ONE label that depends on the CAPA's status,
+ *  because two different facts used to share the word "Submitted":
+ *    - an action item at `complete`  = the WORKER finished their task
+ *    - a CAPA at `pending_qa_review` = the whole CAPA was submitted for review
+ *  An item cannot be "Submitted" until the CAPA it belongs to has been. Until
+ *  then it is "Done" — finished, but not in front of QA, and acceptWork would
+ *  refuse it (action-items.ts :795-797). Cards and pills BOTH read this, so the
+ *  single-source invariant above still holds. */
+function bucketLabel(b: Bucket, underQAReview: boolean): string {
+  return b === "submitted" && underQAReview ? "Submitted" : BUCKET_LABEL[b];
+}
+/** Same split for colour. Pre-submit "Done" is green — finished, nothing owed.
+ *  Post-submit "Submitted" is AMBER: it is work QA now owes a decision on, and
+ *  green would read as "nothing needed" on the one tab built to surface it. */
+function bucketVariant(b: Bucket, underQAReview: boolean): BadgeVariant {
+  return b === "submitted" && underQAReview ? "amber" : BUCKET_VARIANT[b];
+}
 
 function daysOverdue(dueISO: string): number {
   return dayjs.utc().startOf("day").diff(dayjs.utc(dueISO).startOf("day"), "day");
 }
 const isOpenItem = (s: string) => s !== "accepted" && s !== "skipped";
+/** acceptWork / sendWorkBack BOTH require the CAPA to be under QA review
+ *  (action-items.ts :795-797, :891-893). Mirror that here so the buttons can't
+ *  offer an action the server will always refuse. Disabled, not hidden: the
+ *  `hasSubmitted` branch has no fallback controls, so hiding would leave a card
+ *  of finished work with nothing on it and no explanation. The decision zone
+ *  (with [Submit for review]) renders ABOVE the tabs on every tab, so the next
+ *  step is already on screen — point at it rather than send anyone hunting. */
+const REVIEW_GATE_HINT = "Not yet submitted for QA review — use Submit for review above, then accept or return each person's work.";
 
-export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
+export function AssignmentsTab({ capa, evidenceFiles, users, carrySkipped = null, carriedNotes = [], onChanged }: {
   capa: CAPA;
   evidenceFiles: CAPAEvidenceFileRef[];
   users: UserConfig[];
+  /** Item 19 — set when QA asked to carry the originating gap's assignee and the
+   *  server couldn't. Parsed from this CAPA's CAPA_ASSIGNMENT_CARRY_SKIPPED audit
+   *  row by the detail page; `reason` is the row's own text, since the skip has
+   *  four causes (severity, no assignment record, assignee gone, not an executor)
+   *  and only one is about roles. Null = no carry was attempted, or it succeeded. */
+  carrySkipped?: { assigneeName: string | null; reason: string } | null;
+  /** Gap work notes carried onto this CAPA at raise, keyed to their author.
+   *
+   *  A DIFFERENT thing from the "Work notes" block below, which reads
+   *  CAPAActionItem.completionNotes — the person's notes on their CAPA TASK. These
+   *  are what they wrote on the GAP before it was escalated. Two fields, two
+   *  meanings, one name; keeping them visibly separate is the point. */
+  carriedNotes?: CAPACarriedNote[];
   onChanged: () => void;
 }) {
   const toast = useToast();
   const { isQAHead } = usePermissions();
   const { org } = useTenantConfig();
   const dateFormat = org.dateFormat;
+  const timezone = org.timezone;
   const items = useMemo(() => capa.actionItems ?? [], [capa.actionItems]);
+  // The server's status guard, mirrored — the ONE gate for accept / send-back,
+  // and the ONE input that turns "Done" into "Submitted" in the labels above.
+  const underQAReview = capa.status === "pending_qa_review";
 
   // ONE source: files indexed by action item + the unattributed count both come
   // from `evidenceFiles`. The Evidence tab's "Not linked" bucket reads the same prop.
@@ -143,7 +188,10 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
 
   const cards: { key: Bucket | "total"; label: string; n: number }[] = [
     { key: "total", label: "Total assigned", n: counts.total },
-    { key: "submitted", label: "Submitted", n: counts.submitted },
+    // The COUNT is unchanged and stays real pre-submit — "how many people have
+    // finished" is exactly what tells the driver it's time to submit. Only the
+    // word above it was ever wrong.
+    { key: "submitted", label: bucketLabel("submitted", underQAReview), n: counts.submitted },
     { key: "not_started", label: "Not started", n: counts.not_started },
     { key: "in_progress", label: "In progress", n: counts.in_progress },
     { key: "accepted", label: "Accepted", n: counts.accepted },
@@ -195,7 +243,7 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
       )}
       {filter && (
         <button type="button" onClick={() => setFilter(null)} className="text-[11px] underline bg-transparent border-none cursor-pointer p-0 self-start" style={{ color: "var(--brand)" }}>
-          Clear filter ({BUCKET_LABEL[filter]})
+          Clear filter ({bucketLabel(filter, underQAReview)})
         </button>
       )}
 
@@ -205,6 +253,13 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
           const isOpenNow = open.has(p.key);
           const files = p.items.flatMap((it) => filesByItem.get(it.id) ?? []);
           const hasSubmitted = p.items.some((it) => it.status === "complete");
+          // Phase 2 acceptance attribution. acceptWork stamps ALL of one person's
+          // `complete` items in a single call, so the newest stamp IS this
+          // person's acceptance; a re-accepted rework round supersedes the older.
+          const acceptedItems = p.items.filter((it) => it.status === "accepted" && it.acceptedAt);
+          const lastAccepted = acceptedItems.length
+            ? acceptedItems.reduce((a, b) => (dayjs.utc(a.acceptedAt!).isAfter(dayjs.utc(b.acceptedAt!)) ? a : b))
+            : null;
           const worstOverdue = Math.max(0, ...p.items.filter((it) => isOpenItem(it.status)).map((it) => daysOverdue(it.dueDate)));
           const summaryBucket = bucketOf(p.items.find((it) => it.status === "complete")?.status ?? p.items[0]?.status ?? "pending");
           return (
@@ -216,9 +271,16 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
                   <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{p.name}</p>
                   <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
                     {p.items.length} task{p.items.length === 1 ? "" : "s"} · {files.length} file{files.length === 1 ? "" : "s"}
+                    {/* "your" is only true for the person who can actually act —
+                        everyone else is watching, not reviewing. */}
+                    {hasSubmitted && (underQAReview ? (
+                      <> · <span style={{ color: "var(--status-waiting)" }}>{isQAHead ? "awaiting your review" : "awaiting QA review"}</span></>
+                    ) : (
+                      <> · not yet submitted for review</>
+                    ))}
                   </p>
                 </div>
-                <Badge variant={BUCKET_VARIANT[summaryBucket]}>{BUCKET_LABEL[summaryBucket]}</Badge>
+                <Badge variant={bucketVariant(summaryBucket, underQAReview)}>{bucketLabel(summaryBucket, underQAReview)}</Badge>
                 {worstOverdue >= OVERDUE_BANNER_DAYS && <Badge variant="red">{worstOverdue}d overdue</Badge>}
               </button>
 
@@ -232,7 +294,7 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
                       {p.items.map((it) => (
                         <li key={it.id} className="text-[12px]">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant={BUCKET_VARIANT[bucketOf(it.status)]}>{BUCKET_LABEL[bucketOf(it.status)]}</Badge>
+                            <Badge variant={bucketVariant(bucketOf(it.status), underQAReview)}>{bucketLabel(bucketOf(it.status), underQAReview)}</Badge>
                             {it.status === "rework" && <Badge variant="red">Returned</Badge>}
                             <span style={{ color: "var(--text-primary)" }}>{it.description}</span>
                             <span className="text-[11px] ml-auto" style={{ color: "var(--text-muted)" }}>due {dayjs.utc(it.dueDate).format(dateFormat)}</span>
@@ -245,7 +307,29 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
                     </ul>
                   </div>
 
-                  {/* WORK NOTES (the worker's channel — no chat thread, Phase 0A) */}
+                  {/* ACCEPTED — who signed this person's work off, and when.
+                      Written by acceptWork (action-items.ts :825-828); mirrored in
+                      the CAPA_WORK_ACCEPTED audit row. Was written to the DB but
+                      dropped at the mapper, so it never reached the product.
+                      displayUserName never leaks an unresolved cuid. */}
+                  {lastAccepted && (
+                    <div>
+                      <p className="text-[11px] flex items-center gap-1" style={{ color: "var(--text-secondary)" }}>
+                        <Check className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--success)" }} aria-hidden="true" />
+                        Accepted by {displayUserName(lastAccepted.acceptedById ?? lastAccepted.acceptedBy, users)}
+                        <span aria-hidden="true">·</span>
+                        <time dateTime={lastAccepted.acceptedAt!} title={dayjs.utc(lastAccepted.acceptedAt!).tz(timezone).format(`${dateFormat} HH:mm`)}>
+                          {dayjs.utc(lastAccepted.acceptedAt!).fromNow()}
+                        </time>
+                      </p>
+                      {lastAccepted.acceptanceNotes && (
+                        <p className="text-[11px] italic mt-0.5" style={{ color: "var(--text-muted)" }}>&ldquo;{lastAccepted.acceptanceNotes}&rdquo;</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* WORK NOTES (the worker's channel — no chat thread, Phase 0A).
+                      CAPAActionItem.completionNotes — their notes on the CAPA TASK. */}
                   {p.items.some((it) => it.completionNotes) && (
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Work notes</p>
@@ -254,6 +338,25 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
                       ))}
                     </div>
                   )}
+
+                  {/* CARRIED GAP NOTES — what this person wrote on the GAP before it
+                      was escalated. createCAPA carries them as a CAPAComment, which
+                      IS the durable record; this only READS it. They are not concerns,
+                      so DiscussionSection (concerns-only, Phase 0A) filters them out —
+                      correctly, but that left them written and visible nowhere.
+
+                      Deliberately NOT written into CAPAActionItem.completionNotes: that
+                      would claim the person completed a CAPA task they may not have
+                      started, and the next updateActionItem would overwrite it. Separate
+                      block, separate label — the gap's notes are not the task's notes. */}
+                  {carriedNotes.filter((n) => n.authorId === p.ownerId).map((n) => (
+                    <div key={n.id}>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>
+                        Work notes carried from {n.findingRef}
+                      </p>
+                      <p className="text-[12px] whitespace-pre-wrap mb-1" style={{ color: "var(--text-secondary)" }}>&ldquo;{n.body}&rdquo;</p>
+                    </div>
+                  ))}
 
                   {/* EVIDENCE — THEIR files only */}
                   <div>
@@ -283,8 +386,11 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
                     <div className="flex gap-2 flex-wrap pt-1">
                       {hasSubmitted ? (
                         <>
-                          <Button variant="danger" size="sm" icon={RotateCcw} disabled={busy} onClick={() => { setSendBack({ ownerId: p.ownerId ?? "", name: p.name }); setReason(""); }}>Send this work back</Button>
-                          <Button variant="primary" size="sm" icon={Check} disabled={busy} onClick={() => p.ownerId && void run(() => acceptWork(capa.id, { ownerId: p.ownerId! }), `Accepted ${p.name}'s work.`)}>Accept this work</Button>
+                          <Button variant="danger" size="sm" icon={RotateCcw} disabled={busy || !underQAReview} title={underQAReview ? undefined : REVIEW_GATE_HINT} onClick={() => { setSendBack({ ownerId: p.ownerId ?? "", name: p.name }); setReason(""); }}>Send this work back</Button>
+                          <Button variant="primary" size="sm" icon={Check} disabled={busy || !underQAReview} title={underQAReview ? undefined : REVIEW_GATE_HINT} onClick={() => p.ownerId && void run(() => acceptWork(capa.id, { ownerId: p.ownerId! }), `Accepted ${p.name}'s work.`)}>Accept this work</Button>
+                          {!underQAReview && (
+                            <p className="text-[11px] basis-full m-0" style={{ color: "var(--text-muted)" }}>{REVIEW_GATE_HINT}</p>
+                          )}
                         </>
                       ) : (
                         p.items.filter((it) => isOpenItem(it.status)).map((it) => (
@@ -304,6 +410,19 @@ export function AssignmentsTab({ capa, evidenceFiles, users, onChanged }: {
         })}
         {visiblePeople.length === 0 && (
           <p className="text-[12px] italic" style={{ color: "var(--text-muted)" }}>No people match this filter.</p>
+        )}
+        {/* Item 19 — nobody is assigned AND a carry was attempted and skipped.
+            Without this, an empty Assignments tab looks identical whether the gap
+            had an assignee or not, and QA assigns someone fresh never knowing the
+            gap's own assignee was meant to continue. Shown only while the tab is
+            genuinely empty: once anyone is assigned, the skip is stale news. */}
+        {people.length === 0 && carrySkipped && (
+          <div className="rounded-lg border p-2.5 flex items-start gap-2" style={{ background: "var(--warning-bg, var(--bg-surface))", borderColor: "var(--warning, var(--bg-border))" }}>
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "var(--warning, var(--text-muted))" }} aria-hidden="true" />
+            <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>
+              The originating gap&apos;s assignee{carrySkipped.assigneeName ? <> (<strong>{carrySkipped.assigneeName}</strong>)</> : null} couldn&apos;t be carried — {carrySkipped.reason}.
+            </p>
+          </div>
         )}
       </div>
 

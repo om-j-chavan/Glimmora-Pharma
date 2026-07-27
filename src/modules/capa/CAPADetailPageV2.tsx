@@ -45,7 +45,7 @@ import { StatusPill, CAPA_STATUS_TOKEN } from "./lib/statusTokens";
 import { STATUS_LABEL, isOverdue as isOverdueHelper } from "@/types/capa";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
 import type { CAPA } from "@/store/capa.slice";
-import type { CAPAReadiness } from "@/lib/capa-readiness";
+import { DONE_ACTION_STATUSES, type CAPAReadiness } from "@/lib/capa-readiness";
 import {
   submitForReview as submitForReviewServer,
   rejectCAPA as rejectCAPAServer,
@@ -71,7 +71,7 @@ import { FlowExplainer } from "./components/FlowExplainer";
 import { SignCloseModal } from "./modals/SignCloseModal";
 import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
 import { getNextStep, type DetailSubTab } from "./modals/helpers/getNextStep";
-import type { CapaAuditEntry, CAPAOriginDoc, CAPAAddedFile, CAPAEvidenceFileRef } from "@/lib/queries/capas";
+import type { CapaAuditEntry, CAPAOriginDoc, CAPAAddedFile, CAPAEvidenceFileRef, CAPACarriedNote } from "@/lib/queries/capas";
 import type { FindingAuditEntry } from "@/lib/queries/findings";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -144,9 +144,11 @@ export interface CAPADetailPageV2Props {
   findingAudit?: FindingAuditEntry[];
   qaAddedFiles?: CAPAAddedFile[];
   evidenceFiles?: CAPAEvidenceFileRef[];
+  /** Gap work notes carried at raise, keyed to their author's card in Assignments. */
+  carriedNotes?: CAPACarriedNote[];
 }
 
-export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, originDocs = [], findingDocs = [], findingAudit = [], qaAddedFiles = [], evidenceFiles = [] }: CAPADetailPageV2Props) {
+export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, originDocs = [], findingDocs = [], findingAudit = [], qaAddedFiles = [], evidenceFiles = [], carriedNotes = [] }: CAPADetailPageV2Props) {
   const router = useRouter();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
   const capaCan = usePermissions("capa", { capaRisk: capa.risk });
@@ -157,6 +159,25 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
   const dateFormat = org.dateFormat;
   const isDark = useAppSelector((s) => s.theme.mode === "dark");
   const currentUser = useAppSelector((s) => s.auth.user);
+
+  // Item 19 — a carry QA ASKED FOR that the server couldn't make (createCAPA
+  // writes CAPA_ASSIGNMENT_CARRY_SKIPPED with the reason, keyed to this CAPA).
+  // The audit row is the record; nobody opens an audit trail to discover that
+  // something DIDN'T happen, so it's surfaced in the Assignments tab — the one
+  // place, and moment, where not knowing changes what QA does next (they'd
+  // assign someone fresh, unaware the gap's assignee was meant to continue).
+  // The reason is taken from the row: the skip has four distinct causes and only
+  // one of them is about roles.
+  const carrySkipped = useMemo(() => {
+    const row = auditTrail.find((e) => e.action === "CAPA_ASSIGNMENT_CARRY_SKIPPED");
+    if (!row?.newValue) return null;
+    try {
+      const v = JSON.parse(row.newValue) as { intendedAssigneeName?: string | null; reason?: string };
+      return v.reason ? { assigneeName: v.intendedAssigneeName ?? null, reason: v.reason } : null;
+    } catch {
+      return null;
+    }
+  }, [auditTrail]);
 
   // Land on Review for the QA-decision state; Summary otherwise (spec).
   const [activeTab, setActiveTab] = useState<V2Tab>(capa.status === "pending_qa_review" ? "review" : "summary");
@@ -191,9 +212,17 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
   function openAudit() { setAuditModalOpen(true); }
 
   const actionItems = useMemo(() => capa.actionItems ?? [], [capa.actionItems]);
-  const doneActions = actionItems.filter((a) => a.status === "complete" || a.status === "skipped").length;
+  // Pre-submit readout — derived from the SAME set getCAPAReadiness gates on
+  // (capa-readiness.ts), never a re-listing of it. The inline
+  // `complete || skipped` this replaced silently dropped "accepted", so a
+  // QA-rejected CAPA bounced back to in_progress (rejectCAPA keeps accepted
+  // items) rendered "Actions 1/2" while readiness.allMet was true and Submit
+  // was live — the readout contradicting the gate it reports on.
+  const doneActions = actionItems.filter((a) => DONE_ACTION_STATUSES.has(a.status)).length;
   // Phase 4 — QA-review readout: "accepted" (or skipped) is what closure requires
   // (Phase 2 acceptWork). Matches the server's all-accepted gate in closure.ts.
+  // NOT DONE_ACTION_STATUSES: closure is strictly narrower than submit — a plain
+  // `complete` item is ready to SUBMIT but still needs QA acceptance to CLOSE.
   const acceptedActions = actionItems.filter((a) => a.status === "accepted" || a.status === "skipped").length;
   const reworkCount = actionItems.filter((a) => a.status === "rework" || a.reworkReason).length;
   const reference = capa.reference ?? `CAPA-LEGACY-${capa.id.slice(0, 8)}`;
@@ -213,6 +242,24 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
   // gate is re-implemented, just the same concern count the server reads.
   const [unresolvedConcerns, setUnresolvedConcerns] = useState<number | null>(null);
   const approvalsSatisfied = unresolvedConcerns === 0;
+  // The SERVER's closure gates, mirrored (closure.ts :231-269 all-accepted,
+  // :277-285 concerns), derived from the SAME acceptedActions the readout below
+  // prints — so the readout can never say "ready" while the server says no. An
+  // empty action list closes fine (closure.ts :228): 0 === 0. acceptedActions
+  // counts "skipped" too, matching the server's accepted|skipped filter.
+  const allActionsAccepted = acceptedActions === actionItems.length;
+  // ONE derivation drives the gate AND the words. A reason that exists means
+  // blocked; null means closable. Sign & Close is DISABLED (not hidden) with the
+  // reason attached: a vanishing button is a mystery, a disabled one teaches.
+  const closureBlockReason =
+    unresolvedConcerns === null
+      ? "Checking closure readiness…"
+      : !allActionsAccepted
+        ? `Accept or skip every person's work first — ${actionItems.length - acceptedActions} still unaccepted.`
+        : unresolvedConcerns > 0
+          ? `Resolve all concerns first (${unresolvedConcerns} open).`
+          : null;
+  const closureReady = closureBlockReason === null;
   useEffect(() => {
     if (capa.status !== "pending_qa_review" && capa.status !== "pending_verification") {
       setUnresolvedConcerns(null);
@@ -401,8 +448,9 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
             {isQAHead && (
               <Button variant="danger" size="sm" icon={AlertTriangle} onClick={() => setRejectOpen(true)}>Reject &rarr; rework</Button>
             )}
-            {canSign && canCloseCapa && approvalsSatisfied && (
-              <Button variant="primary" size="sm" icon={ShieldCheck} onClick={() => { setSignError(null); setSignOpen(true); }}>Sign &amp; Close</Button>
+            {canSign && canCloseCapa && (
+              <Button variant="primary" size="sm" icon={ShieldCheck} disabled={!closureReady} title={closureBlockReason ?? undefined}
+                onClick={() => { setSignError(null); setSignOpen(true); }}>Sign &amp; Close</Button>
             )}
           </div>
         </div>
@@ -418,11 +466,20 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
             <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" /> Decision — approved, ready for sign &amp; close
           </p>
           <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            Assignments: {acceptedActions}/{actionItems.length} accepted
+            <span aria-hidden="true"> · </span>
             Concerns: {unresolvedConcerns ?? 0} open
           </p>
+          {/* This legacy branch prints no assignments readout of its own, so the
+              gate's reason MUST render here — otherwise the disabled button below
+              is unexplained. */}
+          {closureBlockReason && (
+            <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>{closureBlockReason}</p>
+          )}
           <div className="flex gap-2 mt-2">
-            {canSign && canCloseCapa && approvalsSatisfied && (
-              <Button variant="primary" size="sm" icon={ShieldCheck} onClick={() => { setSignError(null); setSignOpen(true); }}>Sign &amp; Close</Button>
+            {canSign && canCloseCapa && (
+              <Button variant="primary" size="sm" icon={ShieldCheck} disabled={!closureReady} title={closureBlockReason ?? undefined}
+                onClick={() => { setSignError(null); setSignOpen(true); }}>Sign &amp; Close</Button>
             )}
           </div>
         </div>
@@ -616,7 +673,7 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
             per-person work-review surface (accept/send-back/skip/reassign, all
             already server-side in Phase 2) lands here in Phase 5. ── */}
         {activeTab === "assignments" && (
-          <AssignmentsTab capa={capa} evidenceFiles={evidenceFiles} users={complianceUsers} onChanged={() => router.refresh()} />
+          <AssignmentsTab capa={capa} evidenceFiles={evidenceFiles} users={complianceUsers} carrySkipped={carrySkipped} carriedNotes={carriedNotes} onChanged={() => router.refresh()} />
         )}
 
         {/* ── EVIDENCE ── */}
