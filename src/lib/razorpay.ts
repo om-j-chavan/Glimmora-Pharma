@@ -227,8 +227,19 @@ export function getPublicKey(): string {
   return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? requireEnv("RAZORPAY_KEY_ID");
 }
 
-// The instance is deliberately NOT exported: exporting it hands callers a value that
-// can only exist once the keys do, which is how construction escaped into module
-// scope in the first place. All five importers (signup/create-order,
-// signup/verify-payment, subscriptions/renew, subscriptions/verify-renewal,
-// webhooks/razorpay) use the functions above; none used the instance.
+/**
+ * Check if Razorpay is configured (origin).
+ */
+export function isConfigured(): boolean {
+  return !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
+}
+
+// Lazy instance accessor (origin) — SAFE: getRazorpay() constructs on first ACCESS,
+// never at module load, so this doesn't reintroduce the build-time construction the
+// lazy singleton removed. All current importers use the functions above; kept for
+// any caller that wants the raw instance.
+export const razorpay = {
+  get instance() {
+    return getRazorpay();
+  },
+};

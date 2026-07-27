@@ -16,9 +16,6 @@ export const addSchema = z.object({
   siteId: z.string().optional(),
   area: z.string().min(1, "Area required"),
   immediateAction: z.string().min(5, "Immediate action required"),
-  patientSafetyImpact: z.enum(["high", "medium", "low", "none"]),
-  productQualityImpact: z.enum(["high", "medium", "low", "none"]),
-  regulatoryImpact: z.enum(["high", "medium", "low", "none"]),
   // Stage 2 (deviation redesign) — `owner` removed from creation; QA-set triage
   // priority instead (pre-filled from severity in the UI, overridable).
   priority: z.enum(["Low", "Medium", "High"]),

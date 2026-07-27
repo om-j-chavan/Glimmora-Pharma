@@ -123,6 +123,20 @@ export const READINESS_STATUSES: Record<string, StatusDef> = {
  * same time. NOT fixed this phase.
  */
 
+/* ── TRAINING & AWARENESS — Simulation statuses ── */
+
+export const SIMULATION_STATUSES: Record<string, StatusDef> = {
+  Scheduled: { value: "Scheduled", label: "Scheduled", color: "#1D4ED8", bg: "#EFF6FF", description: "Practice run booked, not yet conducted", nextActions: ["Conduct the drill", "Score & complete"] },
+  Completed: { value: "Completed", label: "Completed", color: "#0F6E56", bg: "#E8F5F1", description: "Simulation run and scored", nextActions: [] },
+};
+
+/* ── TRAINING & AWARENESS — Training-record statuses ── */
+
+export const TRAINING_RECORD_STATUSES: Record<string, StatusDef> = {
+  pending: { value: "pending", label: "Pending", color: "#4B5563", bg: "#F3F4F6", description: "Competency not yet recorded for this module", nextActions: ["Complete the training"] },
+  completed: { value: "completed", label: "Completed", color: "#0F6E56", bg: "#E8F5F1", description: "Competency recorded for this module", nextActions: [] },
+};
+
 /* ── Helper: look up any status ── */
 
 export function getStatusDef(taxonomy: Record<string, StatusDef>, status: string): StatusDef {
@@ -139,4 +153,6 @@ export const ALL_TAXONOMIES: { module: string; statuses: Record<string, StatusDe
   { module: "CSV/CSA Validation", statuses: VALIDATION_STATUSES },
   { module: "Deviation Management", statuses: DEVIATION_STATUSES },
   { module: "Training & Awareness", statuses: READINESS_STATUSES },
+  { module: "Training & Awareness — Simulations", statuses: SIMULATION_STATUSES },
+  { module: "Training & Awareness — Training Records", statuses: TRAINING_RECORD_STATUSES },
 ];

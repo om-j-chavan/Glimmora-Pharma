@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
+    "db:seed:readiness": "npx tsx prisma/seed-readiness.ts",
     "db:studio": "npx prisma studio",
     "db:reset": "npx prisma migrate reset",
     "test:mailer": "tsx scripts/test-mailer.ts",
@@ -50,23 +51,23 @@
     "react-redux": "^9.2.0",
     "recharts": "^3.8.0",
     "tailwindcss": "^4.2.1",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@tailwindcss/postcss": "^4.2.1",
+    "typescript": "~5.9.3",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.59.1",
-    "@tailwindcss/postcss": "^4.2.1",
     "@types/bcryptjs": "^3.0.0",
-    "@types/node": "^24.12.0",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
     "concurrently": "^9.2.1",
     "dotenv": "^17.4.2",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.4.0",
     "tsx": "^4.21.0",
-    "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.1"
   }
 }

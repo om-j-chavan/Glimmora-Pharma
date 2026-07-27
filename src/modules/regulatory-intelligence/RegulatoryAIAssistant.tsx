@@ -30,6 +30,7 @@ import {
   UserRound,
   Layers,
 } from "lucide-react";
+import { AIButton } from "@/components/ai";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
@@ -208,7 +209,7 @@ export function RegulatoryAIAssistant({
         .reg-ai-detail { animation: reg-ai-msg-in 0.3s ease both; }
         .reg-ai-caret {
           display: inline-block; width: 2px; height: 1em; margin-left: 1px;
-          background: var(--brand); vertical-align: text-bottom;
+          background: var(--ai-accent); vertical-align: text-bottom;
           animation: reg-ai-caret 0.9s step-end infinite;
         }
         .reg-ai-dot {
@@ -271,7 +272,7 @@ export function RegulatoryAIAssistant({
             <span
               aria-hidden="true"
               className="inline-flex items-center justify-center rounded-lg shrink-0"
-              style={{ width: 32, height: 32, background: "var(--brand)", color: "#fff" }}
+              style={{ width: 32, height: 32, background: "var(--ai-accent)", color: "#fff" }}
             >
               <Sparkles className="w-4 h-4" />
             </span>
@@ -337,7 +338,7 @@ export function RegulatoryAIAssistant({
                 className="flex items-start gap-2.5 rounded-2xl p-3"
                 style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
               >
-                <Sparkles className="w-4 h-4 mt-0.5 shrink-0 text-[#6366f1]" aria-hidden="true" />
+                <Sparkles className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
                 <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
                   Ask about the regulations behind your frameworks — audit trails,
                   e-signatures, validation stages, data integrity, or what guidance
@@ -375,7 +376,7 @@ export function RegulatoryAIAssistant({
                   right-aligned user bubble as usual. */}
               {qa.auto ? (
                 <div className="flex items-center gap-1.5 reg-ai-msg">
-                  <Sparkles className="w-3.5 h-3.5 shrink-0 text-[#6366f1]" aria-hidden="true" />
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
                   <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>
                     Regulatory briefing
                   </span>
@@ -384,7 +385,7 @@ export function RegulatoryAIAssistant({
                 <div className="flex justify-end reg-ai-msg">
                   <div
                     className="max-w-[85%] rounded-2xl rounded-br-sm px-3.5 py-2 text-[12px]"
-                    style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "1px solid var(--brand-border)" }}
+                    style={{ background: "var(--ai-muted)", color: "var(--ai-accent)", border: "1px solid var(--ai-border)" }}
                   >
                     {qa.question}
                   </div>
@@ -464,16 +465,15 @@ export function RegulatoryAIAssistant({
             disabled={uiState === "loading"}
             aria-label="Ask a regulatory question"
           />
-          <button
-            type="button"
+          <AIButton
+            iconOnly
+            icon={Send}
+            size="md"
             aria-label="Send question"
             onClick={() => ask(input)}
             disabled={uiState === "loading" || !input.trim()}
-            className="p-2.5 rounded-lg transition-colors border-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ background: "var(--brand)", color: "#fff" }}
-          >
-            <Send className="w-4 h-4" aria-hidden="true" />
-          </button>
+            className="w-9 h-9"
+          />
         </div>
         </section>
       </div>
@@ -489,7 +489,7 @@ function AiAvatar() {
     <span
       aria-hidden="true"
       className="shrink-0 inline-flex items-center justify-center rounded-lg mt-0.5"
-      style={{ width: 26, height: 26, background: "var(--brand)", color: "#fff" }}
+      style={{ width: 26, height: 26, background: "var(--ai-accent)", color: "#fff" }}
     >
       <Sparkles className="w-3.5 h-3.5" />
     </span>
@@ -589,7 +589,7 @@ function AssistantBubble({
             <ul className="space-y-1.5">
               {answer.bullets.map((b, i) => (
                 <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: "var(--text-secondary)" }}>
-                  <span className="mt-1.5 w-1 h-1 rounded-full shrink-0" style={{ background: "var(--brand)" }} aria-hidden="true" />
+                  <span className="mt-1.5 w-1 h-1 rounded-full shrink-0" style={{ background: "var(--ai-accent)" }} aria-hidden="true" />
                   <span>{b}</span>
                 </li>
               ))}
@@ -605,9 +605,9 @@ function AssistantBubble({
               <ul className="space-y-1">
                 {answer.sources.map((s) => (
                   <li key={s.ref} className="flex items-start gap-1.5 text-[11px]">
-                    <FileText className="w-3 h-3 shrink-0 mt-0.5" style={{ color: "var(--brand)" }} aria-hidden="true" />
+                    <FileText className="w-3 h-3 shrink-0 mt-0.5" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
                     <span style={{ color: "var(--text-secondary)" }}>
-                      <span className="font-mono" style={{ color: "var(--brand)" }}>{s.ref}</span> — {s.label}
+                      <span className="font-mono" style={{ color: "var(--ai-accent)" }}>{s.ref}</span> — {s.label}
                     </span>
                   </li>
                 ))}
@@ -645,7 +645,7 @@ function ContextChip({
       style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}
       title={`${label}: ${value}`}
     >
-      <Icon className="w-3 h-3 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
+      <Icon className="w-3 h-3 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
       <span style={{ color: "var(--text-muted)" }}>{label}:</span>
       <span className="font-medium truncate max-w-[120px]" style={{ color: "var(--text-primary)" }}>
         {value}

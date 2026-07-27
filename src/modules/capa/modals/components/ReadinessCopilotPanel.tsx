@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sparkles, ArrowRight, RefreshCw } from "lucide-react";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { AIButton, AIBadge } from "@/components/ai";
 import {
   getReadinessGuidance,
   type ReadinessGuidanceResult,
@@ -122,22 +121,18 @@ export function ReadinessCopilotPanel({
   return (
     <aside
       className="rounded-lg border p-3"
-      style={{ background: "var(--info-bg)", borderColor: "var(--brand-border)" }}
+      style={{ background: "var(--ai-muted)", borderColor: "var(--ai-border)" }}
       aria-label="AI readiness copilot"
     >
       <div className="flex items-center justify-between mb-1">
         <p
           className="text-[12px] font-semibold flex items-center gap-1.5"
-          style={{ color: "var(--brand)" }}
+          style={{ color: "var(--ai-accent-strong)" }}
         >
           <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
           Get this ready (AI)
         </p>
-        {guidance && (
-          <Badge variant={guidance.source === "backend" ? "green" : "gray"}>
-            {guidance.source === "backend" ? "AI" : "Demo data"}
-          </Badge>
-        )}
+        {guidance && <AIBadge source={guidance.source} />}
       </div>
 
       {!guidance && !loading && (
@@ -149,14 +144,9 @@ export function ReadinessCopilotPanel({
             Get a plain-language explanation of what&apos;s left and how to fix
             each item. Advisory only — it never submits or approves.
           </p>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={Sparkles}
-            onClick={() => void generate()}
-          >
+          <AIButton variant="subtle" size="sm" onClick={() => void generate()}>
             Help me get this ready
-          </Button>
+          </AIButton>
         </>
       )}
 
@@ -230,7 +220,7 @@ export function ReadinessCopilotPanel({
                       type="button"
                       onClick={() => onChangeTab(tab)}
                       className="text-[11px] mt-1 underline border-none bg-transparent cursor-pointer inline-flex items-center gap-1 p-0"
-                      style={{ color: "var(--brand)" }}
+                      style={{ color: "var(--ai-accent-strong)" }}
                     >
                       Go to {TAB_LABEL[tab]} tab
                       <ArrowRight className="w-3 h-3" aria-hidden="true" />

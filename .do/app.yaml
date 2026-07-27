@@ -9,13 +9,21 @@ jobs:
       branch: devAI
       deploy_on_push: true
     source_dir: /
-    build_command: npm ci && npx prisma generate
+    build_command: NODE_OPTIONS="--max-old-space-size=1024" npm ci && npx prisma generate
+    # DO NOT use `prisma db push` here: this Neon DB is shared with the FastAPI
+    # backend (SQLAlchemy owns snake_case tables `tenants`, `users`, …). db push
+    # reconciles the WHOLE database to schema.prisma and would DROP those backend
+    # tables. Only `migrate deploy` (which touches just the migrations' own
+    # statements) is safe. The migrations lineage must be valid PostgreSQL.
     run_command: npx prisma migrate deploy
-    instance_size_slug: basic-xxs
+    instance_size_slug: basic-xs
     envs:
       - key: DATABASE_URL
         scope: RUN_AND_BUILD_TIME
         type: SECRET
+      - key: NPM_CONFIG_PRODUCTION
+        scope: BUILD_TIME
+        value: "false"
 
 services:
   # ── FastAPI AI backend ────────────────────────────────────────────────────
@@ -26,7 +34,7 @@ services:
     source_dir: /backend
     environment_slug: python
     build_command: pip install -r requirements.txt
-    run_command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+    run_command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --log-level info
     http_port: 8080
     instance_size_slug: basic-xs
     instance_count: 1
@@ -36,8 +44,10 @@ services:
       - path: /api/v1
     health_check:
       http_path: /health
-      initial_delay_seconds: 10
+      initial_delay_seconds: 30
       period_seconds: 30
+      timeout_seconds: 10
+      failure_threshold: 5
     envs:
       - key: DATABASE_URL
         scope: RUN_AND_BUILD_TIME
@@ -54,6 +64,9 @@ services:
       - key: ALLOWED_ORIGINS
         scope: RUN_AND_BUILD_TIME
         value: ${APP_URL}
+      - key: TAVILY_API_KEY
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
 
   # ── Next.js frontend ──────────────────────────────────────────────────────
   - name: web
@@ -61,10 +74,10 @@ services:
       branch: devAI
       deploy_on_push: true
     source_dir: /
-    build_command: npm ci && npx prisma generate && npm run build
+    build_command: npm ci && npx prisma generate && NODE_OPTIONS="--max-old-space-size=2048" npm run build
     run_command: npm start
     http_port: 3000
-    instance_size_slug: basic-xs
+    instance_size_slug: basic-s
     instance_count: 1
     routes:
       - path: /
@@ -102,6 +115,18 @@ services:
       - key: BACKEND_URL
         scope: RUN_AND_BUILD_TIME
         value: ${api.PRIVATE_URL}
+
+      # ── Build optimization ─────────────────────────────────────────────
+      # Prevent npm from pruning devDependencies during buildpack phase
+      # TypeScript and build tools are needed during custom build_command
+      - key: NPM_CONFIG_PRODUCTION
+        scope: BUILD_TIME
+        value: "false"
+
+      # Disable Turbopack for production builds (experimental, memory-heavy)
+      - key: TURBOPACK
+        scope: BUILD_TIME
+        value: "0"
 
       # ── File storage (DO Spaces) ───────────────────────────────────────
       - key: FILE_STORAGE_BACKEND

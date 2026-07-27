@@ -1243,7 +1243,7 @@ export function GapRegisterTab({
             {!isEditing && selectedFinding.agiSummary && agiMode !== "manual" && agiCapa && (
               <div className="agi-panel" role="status" aria-live="polite">
                 <div className="flex items-center gap-2 mb-2">
-                  <Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" />
+                  <Bot className="w-4 h-4" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
                   <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>AGI Risk Analysis</span>
                 </div>
                 <p className="text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{selectedFinding.agiSummary}</p>

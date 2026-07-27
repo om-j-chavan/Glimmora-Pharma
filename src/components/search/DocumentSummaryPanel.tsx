@@ -17,6 +17,7 @@
 import { useState, type CSSProperties } from "react";
 import { Sparkles, Copy, Check, ThumbsUp, ThumbsDown, AlertTriangle, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Modal } from "@/components/ui/Modal";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiSummarizeSend, AiChatError, type SummaryResponse } from "@/lib/aiChat";
@@ -96,7 +97,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
   }
 
   const toggleBtn = (active: boolean): CSSProperties =>
-    active ? { background: "var(--brand)", color: "#fff" } : { background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" };
+    active ? { background: "var(--ai-accent)", color: "#fff" } : { background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" };
 
   const close = () => setOpen(false);
 
@@ -107,9 +108,9 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
   // Short/Detailed, Copy + feedback.
   return (
     <>
-      <Button type="button" variant="primary" size="sm" icon={Sparkles} onClick={() => run(length, lens)} className={className}>
+      <AIButton size="sm" onClick={() => run(length, lens)} className={className}>
         {buttonLabel}
-      </Button>
+      </AIButton>
 
       <Modal
         open={open}
@@ -118,7 +119,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
         header={
           <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-(--bg-border)">
             <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold min-w-0 truncate" style={{ color: "var(--text-primary)" }}>
-              <Sparkles className="w-4 h-4 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" /> <span className="truncate">AI Summary{title ? ` — ${title}` : ""}</span>
+              <Sparkles className="w-4 h-4 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" /> <span className="truncate">AI Summary{title ? ` — ${title}` : ""}</span>
             </span>
             <div className="flex items-center gap-2 shrink-0">
               {/* Summary-view (lens) selector — re-frames the summary for a different
@@ -141,7 +142,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
                   <div className="absolute right-0 mt-1 z-20 rounded-lg py-1 text-[12px] min-w-[210px]" style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", boxShadow: "0 8px 24px rgba(0,0,0,0.18)" }}>
                     <p className="px-3 py-1.5 text-[10px] uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>Re-frame summary for…</p>
                     {(Object.keys(LENS_LABEL) as Lens[]).map((l) => (
-                      <button key={l} type="button" onClick={() => pickLens(l)} className="w-full text-left px-3 py-2 cursor-pointer border-0 bg-transparent" style={{ color: l === lens ? "var(--brand)" : "var(--text-primary)" }}>
+                      <button key={l} type="button" onClick={() => pickLens(l)} className="w-full text-left px-3 py-2 cursor-pointer border-0 bg-transparent" style={{ color: l === lens ? "var(--ai-accent)" : "var(--text-primary)" }}>
                         {LENS_LABEL[l]}
                       </button>
                     ))}
@@ -167,7 +168,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
 
           {!busy && result?.status === "skipped" && (
             <p className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "var(--bg-surface)", color: "var(--text-secondary)" }}>
-              <span className="font-semibold" style={{ color: "var(--brand)" }}>AI </span>{result.reason}
+              <span className="font-semibold" style={{ color: "var(--ai-accent)" }}>AI </span>{result.reason}
             </p>
           )}
 
@@ -180,7 +181,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
               <ul className="space-y-1.5">
                 {result.bullets.map((b, i) => (
                   <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: "var(--text-primary)" }}>
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--brand)" }} aria-hidden="true" />
+                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--ai-accent)" }} aria-hidden="true" />
                     <span>{b}</span>
                   </li>
                 ))}
@@ -203,7 +204,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
                 <Button type="button" variant="secondary" size="xs" icon={copied ? Check : Copy} onClick={copyAll}>
                   {copied ? "Copied" : "Copy"}
                 </Button>
-                <button type="button" aria-label="Helpful" onClick={() => setVote("up")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "up" ? "var(--brand)" : "var(--text-muted)" }}>
+                <button type="button" aria-label="Helpful" onClick={() => setVote("up")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "up" ? "var(--ai-accent)" : "var(--text-muted)" }}>
                   <ThumbsUp className="w-3 h-3" aria-hidden="true" />
                 </button>
                 <button type="button" aria-label="Not helpful" onClick={() => setVote("down")} className="p-1.5 rounded-md border cursor-pointer" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)", color: vote === "down" ? "var(--danger)" : "var(--text-muted)" }}>

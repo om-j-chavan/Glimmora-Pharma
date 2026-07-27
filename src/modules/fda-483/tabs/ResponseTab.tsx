@@ -6,7 +6,6 @@ import {
   TrendingUp,
   CheckCircle2,
   Bot,
-  Sparkles,
   Pencil,
   Save,
   ShieldCheck,
@@ -20,6 +19,7 @@ import { displayName } from "@/lib/identity-display";
 import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { daysUntil, getEffectiveEventStatus, FDA483_AUDIT_MODULE } from "../_shared";
@@ -54,7 +54,7 @@ export interface ResponseTabProps {
   onCancelEdit: () => void;
   onSaveDraft: () => void;
   onUseAGIDraft: () => void;
-  onGenerateAGIDraft: () => void;
+  onGenerateAGIDraft: () => Promise<string | null>;
   onSignSubmit: () => void;
 }
 
@@ -340,15 +340,17 @@ export function ResponseTab({
                 Edit Draft
               </Button>
               {agiMode !== "manual" && agiAgent && (
-                <Button variant="ghost" size="sm" icon={Bot} onClick={() => {
+                <AIButton size="sm" onClick={async () => {
                   setAgiModalOpen(true);
                   if (!liveEvent.agiDraft) {
                     setAgiLoading(true);
-                    setTimeout(() => { onGenerateAGIDraft(); setAgiLoading(false); }, 2000);
+                    // Tie the spinner to the REAL AI call completing (was a fake 2s timer).
+                    await onGenerateAGIDraft();
+                    setAgiLoading(false);
                   }
                 }}>
                   AGI Draft
-                </Button>
+                </AIButton>
               )}
             </div>
           )}
@@ -474,7 +476,7 @@ export function ResponseTab({
                   setAgiModalOpen(false);
                   setEditModalOpen(true);
                 }}>Edit this draft</Button>
-                <Button variant="primary" size="sm" icon={Sparkles} onClick={() => { onUseAGIDraft(); setAgiModalOpen(false); }}>Use this draft</Button>
+                <AIButton size="sm" onClick={() => { onUseAGIDraft(); setAgiModalOpen(false); }}>Use this draft</AIButton>
               </div>
             </>
           ) : (

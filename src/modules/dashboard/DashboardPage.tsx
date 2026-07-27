@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
@@ -32,8 +32,13 @@ import { Drawer } from "@/components/ui/Drawer";
 import { StatCard, CardSection } from "@/components/shared";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { isOverdue } from "@/types/capa";
+import {
+  computeDashboardKPIs, computeAreaScore, KPI_AREAS,
+  severityTrend, isSeverityTrendEmpty, headlineReadinessLabel,
+  isDIException, isValidationDrift,
+} from "@/lib/kpi";
 import { displayUserName } from "@/lib/identity-display";
-import { regulatoryAlertSummary, driftAlertSummary } from "@/lib/ai";
+import { regulatoryAlertSummary } from "@/lib/ai";
 import { ActionPlanTable } from "./ActionPlanTable";
 import { SmartRecordSearch } from "@/components/search/SmartRecordSearch";
 import { buildCapaSource, buildDeviationSource, buildFindingSource } from "@/lib/searchSources";
@@ -134,9 +139,18 @@ export function DashboardPage({
   // whichever array it runs over, then narrowed by the same tenant/site rule
   // useTenantData applies to the store.
   const sitePredicate = useTenantSitePredicate();
-  const allFindings = (serverAllFindings ?? []).map(adaptFinding).filter(sitePredicate);
-  const allCAPAs = (serverAllCAPAs ?? []).map(mapCAPAFromPrisma).filter(sitePredicate);
-  const allSystems = (serverAllSystems ?? []).map(adaptPrismaSystem).filter(sitePredicate);
+  const allFindings = useMemo(
+    () => (serverAllFindings ?? []).map(adaptFinding).filter(sitePredicate),
+    [serverAllFindings, sitePredicate],
+  );
+  const allCAPAs = useMemo(
+    () => (serverAllCAPAs ?? []).map(mapCAPAFromPrisma).filter(sitePredicate),
+    [serverAllCAPAs, sitePredicate],
+  );
+  const allSystems = useMemo(
+    () => (serverAllSystems ?? []).map(adaptPrismaSystem).filter(sitePredicate),
+    [serverAllSystems, sitePredicate],
+  );
   const { org, sites, users } = useTenantConfig();
   const agiSettings = useAppSelector((s) => s.settings.agi);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
@@ -167,70 +181,73 @@ export function DashboardPage({
     { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
   ];
 
-  const cutoff = timeFilter === "all" ? null : dayjs().subtract(parseInt(timeFilter), "day");
+  const cutoff = useMemo(
+    () => (timeFilter === "all" ? null : dayjs().subtract(parseInt(timeFilter), "day")),
+    [timeFilter],
+  );
 
   /* ── Filter predicates — ONE definition each, applied to both the tenant-wide
      aggregate arrays and the visibility-scoped content arrays, so the site /
-     severity / time dropdowns act identically on counts and on rows. ── */
-  const matchesFindingFilters = (f: { siteId?: string | null; severity: string; createdAt?: string | null }) => {
-    if (siteFilter && f.siteId !== siteFilter) return false;
-    if (sevFilter && f.severity !== sevFilter) return false;
-    if (cutoff && f.createdAt && dayjs.utc(f.createdAt).isBefore(cutoff)) return false;
-    return true;
-  };
-  const matchesCAPAFilters = (c: { siteId?: string | null; createdAt?: string | null }) => {
-    if (siteFilter && c.siteId !== siteFilter) return false;
-    if (cutoff && c.createdAt && dayjs.utc(c.createdAt).isBefore(cutoff)) return false;
-    return true;
-  };
-  const matchesSystemFilters = (s: { siteId?: string | null }) => !siteFilter || s.siteId === siteFilter;
+     severity / time dropdowns act identically on counts and on rows.
+     Memoised (Phase 7) so the derived arrays below can memoise on them. ── */
+  const matchesFindingFilters = useCallback(
+    (f: { siteId?: string | null; severity: string; createdAt?: string | null }) => {
+      if (siteFilter && f.siteId !== siteFilter) return false;
+      if (sevFilter && f.severity !== sevFilter) return false;
+      if (cutoff && f.createdAt && dayjs.utc(f.createdAt).isBefore(cutoff)) return false;
+      return true;
+    },
+    [siteFilter, sevFilter, cutoff],
+  );
+  const matchesCAPAFilters = useCallback(
+    (c: { siteId?: string | null; createdAt?: string | null }) => {
+      if (siteFilter && c.siteId !== siteFilter) return false;
+      if (cutoff && c.createdAt && dayjs.utc(c.createdAt).isBefore(cutoff)) return false;
+      return true;
+    },
+    [siteFilter, cutoff],
+  );
+  const matchesSystemFilters = useCallback(
+    (s: { siteId?: string | null }) => !siteFilter || s.siteId === siteFilter,
+    [siteFilter],
+  );
 
   /* ── Aggregate inputs — TENANT-WIDE (decision #5). Feed the KPI cards, the
      trend chart, the heatmap and the AGI insight counts. ── */
-  const filteredFindings = allFindings.filter(matchesFindingFilters);
-  const filteredCAPAs = allCAPAs.filter(matchesCAPAFilters);
-  const filteredSystems = allSystems.filter(matchesSystemFilters);
+  const filteredFindings = useMemo(() => allFindings.filter(matchesFindingFilters), [allFindings, matchesFindingFilters]);
+  const filteredCAPAs = useMemo(() => allCAPAs.filter(matchesCAPAFilters), [allCAPAs, matchesCAPAFilters]);
+  const filteredSystems = useMemo(() => allSystems.filter(matchesSystemFilters), [allSystems, matchesSystemFilters]);
 
   /* ── Content inputs — VISIBILITY-SCOPED. Feed the 90-day action plan, which
      renders requirement text / CAPA descriptions / system names and links to
      each record. Never used for a count. ── */
-  const visibleFindings = findings.filter(matchesFindingFilters);
-  const visibleCAPAs = capas.filter(matchesCAPAFilters);
-  const visibleSystems = systems.filter(matchesSystemFilters);
+  const visibleFindings = useMemo(() => findings.filter(matchesFindingFilters), [findings, matchesFindingFilters]);
+  const visibleCAPAs = useMemo(() => capas.filter(matchesCAPAFilters), [capas, matchesCAPAFilters]);
+  const visibleSystems = useMemo(() => systems.filter(matchesSystemFilters), [systems, matchesSystemFilters]);
 
   /* ── KPIs — all derived from filtered data ── */
-  const openCAPAs = filteredCAPAs.filter((c) => c.status !== "closed");
-  const overdueCAPAs = filteredCAPAs.filter(isOverdue);
+  const kpis = useMemo(
+    () => computeDashboardKPIs({
+      findings: filteredFindings, capas: filteredCAPAs, systems: filteredSystems,
+    }),
+    [filteredFindings, filteredCAPAs, filteredSystems],
+  );
+  const { openCAPAs, overdueCAPAs, criticalCount, capaOverdueRate, csvHighRisk, trainingCompliance } = kpis;
   // Content twin of `overdueCAPAs` — only the overdue CAPAs this viewer may see.
   const visibleOverdueCAPAs = visibleCAPAs.filter(isOverdue);
-  const criticalCount = filteredFindings.filter((f) => f.severity === "Critical" && f.status !== "Closed").length;
-  const capaOverdueRate = openCAPAs.length === 0 ? null : Math.round((overdueCAPAs.length / openCAPAs.length) * 100);
-  // CSV high risk = HIGH risk systems that are not yet validated (consistent with heatmap + action plan)
-  const csvHighRisk = filteredSystems.filter((s) => s.riskLevel === "HIGH" && s.validationStatus !== "Validated").length;
-  const trainingCompliance = users.length === 0 ? null : Math.round((users.filter((u) => u.status === "Active").length / users.length) * 100);
 
   // Prefer server-computed score (Prisma actions completion %); fall back to
   // the legacy Redux card-based score for backward-compat during migration.
   const reduxReadinessScore = useAppSelector((s) => s.readiness.score);
   const readinessScore = readinessScoreProp ?? reduxReadinessScore;
-
-  function getReadinessLabel(score: number | null, overdueCapaCount: number): { label: string; color: string } {
-    if (score === null) return { label: "Log findings to calculate", color: "#64748b" };
-    if (overdueCapaCount >= 2) return { label: "Not ready", color: "#ef4444" };
-    if (overdueCapaCount >= 1) return { label: "Needs attention", color: "#f59e0b" };
-    if (score >= 95) return { label: "Inspection ready \u2713", color: "#10b981" };
-    if (score >= 80) return { label: "Nearing ready", color: "#f59e0b" };
-    if (score >= 60) return { label: "Needs attention", color: "#f59e0b" };
-    return { label: "Not ready", color: "#ef4444" };
-  }
-  const rl = getReadinessLabel(readinessScore, overdueCAPAs.length);
+  const rl = headlineReadinessLabel(readinessScore, overdueCAPAs.length);
 
   /* ── Chart data — uses filtered findings so site/severity/date filters apply ── */
-  const trendData = (() => { const m = []; for (let i = 5; i >= 0; i--) { const mo = dayjs().subtract(i, "month"); const mf = filteredFindings.filter((f) => f.createdAt && dayjs.utc(f.createdAt).format("MMM YYYY") === mo.format("MMM YYYY")); m.push({ month: mo.format("MMM"), Critical: mf.filter((f) => f.severity === "Critical").length, High: mf.filter((f) => f.severity === "High").length, Medium: mf.filter((f) => f.severity === "Medium").length, Low: mf.filter((f) => f.severity === "Low").length }); } return m; })();
-  const trendEmpty = trendData.every((d) => d.Critical + d.High + d.Medium + d.Low === 0);
+  const trendData = useMemo(() => severityTrend(filteredFindings), [filteredFindings]);
+  const trendEmpty = isSeverityTrendEmpty(trendData);
 
   /* ── Heatmap — factors in findings, CAPAs, and systems ── */
-  const AREAS = ["Manufacturing", "QC Lab", "Warehouse", "Utilities", "QMS", "CSV/IT"];
+  const AREAS = KPI_AREAS;
   // Area a CAPA belongs to: its linked Finding's area, or — for an unlinked
   // CAPA (no findingId, e.g. sourced from a Deviation or 483) — a source-based
   // fallback, the SAME mapping the Action Plan uses below. Without this, a site
@@ -239,35 +256,17 @@ export function DashboardPage({
   // carries its own siteId); only the area is inferred.
   // Aggregate helper — resolves against the tenant-wide findings so a CAPA's
   // area is stable regardless of who is looking (the heatmap is a count surface).
-  function capaArea(c: typeof allCAPAs[number]): string {
-    const lf = allFindings.find((f) => f.id === c.findingId);
-    return lf ? lf.area : c.source === "483" ? "Regulatory" : c.source === "Deviation" ? "Manufacturing" : "QMS";
-  }
-  function getAreaScore(area: string, siteId?: string) {
-    const af = filteredFindings.filter((f) => f.area === area && (!siteId || f.siteId === siteId) && f.status !== "Closed");
-    const cr = af.filter((f) => f.severity === "Critical").length;
-    const mj = af.filter((f) => f.severity === "High").length;
-    // Overdue CAPAs in this area+site — attributed by linked Finding's area,
-    // or the source-based fallback for unlinked CAPAs (see capaArea).
-    const areaCapaOverdue = overdueCAPAs.filter((c) => {
-      if (siteId && c.siteId !== siteId) return false;
-      return capaArea(c) === area;
-    }).length;
-    // High-risk systems in this site (for CSV/IT area)
-    const sysRisk = area === "CSV/IT" ? filteredSystems.filter((s) => (!siteId || s.siteId === siteId) && (s.riskLevel === "HIGH" && s.validationStatus !== "Validated")).length : 0;
-    // "Has data" = something has actually been logged for this area+site.
-    // Without this, an untouched site shows as 100% green everywhere, which
-    // reads as "fully compliant" when it really means "never assessed".
-    const totalFindingsForArea = allFindings.filter((f) => f.area === area && (!siteId || f.siteId === siteId)).length;
-    const totalCapasForArea = allCAPAs.filter((c) => {
-      if (siteId && c.siteId !== siteId) return false;
-      return capaArea(c) === area;
-    }).length;
-    const totalSystemsForArea = area === "CSV/IT" ? allSystems.filter((s) => !siteId || s.siteId === siteId).length : 0;
-    const hasData = totalFindingsForArea + totalCapasForArea + totalSystemsForArea > 0;
-    const score = Math.max(0, 100 - cr * 30 - mj * 15 - areaCapaOverdue * 20 - sysRisk * 25);
-    return { score, open: af.length, critical: cr, hasData };
-  }
+  // Per-area readiness via the shared KPI library — the SAME calculateReadiness
+  // model Governance uses for whole-site readiness. Scored over the filter-
+  // narrowed tenant-wide arrays so the site / severity / time dropdowns apply
+  // consistently to both the score and the "has data" state.
+  const getAreaScore = useCallback(
+    (area: string, siteId?: string) =>
+      computeAreaScore(area, siteId, {
+        findings: filteredFindings, capas: filteredCAPAs, systems: filteredSystems,
+      }),
+    [filteredFindings, filteredCAPAs, filteredSystems],
+  );
   const displayedSites = siteFilter ? visibleSites.filter((s) => s.id === siteFilter) : visibleSites;
 
   /* ── Action plan — record CONTENT, so every row is drawn from a visibility-
@@ -303,7 +302,7 @@ export function DashboardPage({
   // Gap-detection source values — also feed AGI Insights below. Computed once
   // (ungated, so the Gap Detection panel works even in AGI manual mode) and
   // shared with AGI Insights so the two panels can never drift.
-  const diOpen = filteredCAPAs.filter((c) => c.diGate && c.status !== "closed").length;
+  const diOpen = filteredCAPAs.filter(isDIException).length;
   const overdueVal = filteredSystems.filter((s) => s.validationStatus === "Overdue").length;
   const reviewOverdue = filteredSystems.filter((s) => s.nextReview && dayjs.utc(s.nextReview).isBefore(dayjs())).length;
   const pending = filteredCAPAs.filter((c) => c.status === "pending_qa_review").length;
@@ -321,13 +320,15 @@ export function DashboardPage({
       if (reg.newRequirements > 0) insights.push({ id: "regulatory-new-requirements", type: "warning", text: `${reg.newRequirements} new FDA/EMA regulatory requirement${reg.newRequirements > 1 ? "s" : ""} flagged \u2014 review compliance alignment.`, action: "Review guidance", link: "/regulatory-intelligence" });
       else if (reg.total > 0) insights.push({ id: "regulatory-updates", type: "info", text: `${reg.total} FDA/EMA guidance update${reg.total > 1 ? "s" : ""} monitored this period.`, action: "Review guidance", link: "/regulatory-intelligence" });
     }
-    // Drift Detection agent \u2014 config/access/audit-trail drift on validated
-    // systems. Also external to tenant findings, so it surfaces on a fresh
-    // dashboard. Links to CSV/CSA where the detail panel lives.
+    // Drift Detection agent \u2014 validated-system drift. The rail renders
+    // synchronously, so this reports the drift the tenant's OWN system records
+    // actually evidence, via the canonical isValidationDrift predicate (overdue
+    // revalidation / Part 11 / Annex 11) \u2014 the same source as the Validation-drift
+    // KPI, so the two can never disagree. The full AI config/access/audit-trail
+    // scan is an async LLM call and runs on the CSV/CSA page, which this links to.
     if (agiSettings.agents.drift) {
-      const drift = driftAlertSummary();
-      if (drift.critical > 0) insights.push({ id: "drift-critical", type: "warning", text: `${drift.critical} critical system drift alert${drift.critical > 1 ? "s" : ""} detected${drift.auditTrail > 0 ? " (audit-trail coverage drop)" : ""}.`, action: "Review drift", link: "/csv-csa" });
-      else if (drift.total > 0) insights.push({ id: "drift-open", type: "info", text: `${drift.total} system drift alert${drift.total > 1 ? "s" : ""} open \u2014 configuration / access changes.`, action: "Review drift", link: "/csv-csa" });
+      const validationDrift = filteredSystems.filter(isValidationDrift).length;
+      if (validationDrift > 0) insights.push({ id: "drift-open", type: "warning", text: `${validationDrift} validated system${validationDrift > 1 ? "s" : ""} showing validation drift \u2014 overdue revalidation or Part 11 / Annex 11 non-compliance.`, action: "Review drift", link: "/csv-csa" });
     }
   }
   // Finding/CAPA-derived insights require the Redux slices to be loaded.
@@ -369,11 +370,14 @@ export function DashboardPage({
 
       {/* KPI cards */}
       <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-        <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={`${readinessScore}%`} sub={rl.label} />
-        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter((f) => f.status !== "Closed").length} total open`} />
-        <StatCard icon={Clock} color={capaOverdueRate === null ? "#64748b" : capaOverdueRate === 0 ? "#10b981" : capaOverdueRate <= 20 ? "#f59e0b" : "#ef4444"} label="CAPA overdue" value={capaOverdueRate === null ? "\u2014" : `${capaOverdueRate}%`} sub={openCAPAs.length === 0 ? "No open CAPAs" : `${overdueCAPAs.length} of ${openCAPAs.length} past due`} />
-        <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={filteredSystems.length === 0 ? "No systems registered" : "HIGH risk, not yet validated"} />
-        <StatCard icon={GraduationCap} color={trainingCompliance === null ? "#64748b" : trainingCompliance >= 90 ? "#10b981" : trainingCompliance >= 70 ? "#f59e0b" : "#ef4444"} label="Training compliance" value={trainingCompliance === null ? "\u2014" : `${trainingCompliance}%`} sub={users.length === 0 ? "No users configured" : `${users.filter((u) => u.status === "Active").length} active users`} />
+        {/* Deep links (Phase 8): each KPI jumps to its Governance scorecard
+            section \u2014 readiness \u2192 site readiness, criticals \u2192 repeat-observation
+            risk, CAPA overdue \u2192 CAPA timeliness, CSV \u2192 validation drift. */}
+        <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={`${readinessScore}%`} sub={rl.label} href="/governance?tab=kpis#kpi-site-readiness" />
+        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter((f) => f.status !== "Closed").length} total open`} href="/governance?tab=kpis#kpi-repeat-observation" />
+        <StatCard icon={Clock} color={capaOverdueRate === null ? "#64748b" : capaOverdueRate === 0 ? "#10b981" : capaOverdueRate <= 20 ? "#f59e0b" : "#ef4444"} label="CAPA overdue" value={capaOverdueRate === null ? "\u2014" : `${capaOverdueRate}%`} sub={openCAPAs.length === 0 ? "No open CAPAs" : `${overdueCAPAs.length} of ${openCAPAs.length} past due`} href="/governance?tab=kpis#kpi-capa-timeliness" />
+        <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={filteredSystems.length === 0 ? "No systems registered" : "HIGH risk, not yet validated"} href="/governance?tab=kpis#kpi-validation-drift" />
+        <StatCard icon={GraduationCap} color={trainingCompliance === null ? "#64748b" : trainingCompliance >= 90 ? "#10b981" : trainingCompliance >= 70 ? "#f59e0b" : "#ef4444"} label="Training compliance" value={trainingCompliance === null ? "\u2014" : `${trainingCompliance}%`} sub={trainingCompliance === null ? "Not yet tracked" : "of required training complete"} />
       </section>
 
       {/* Main grid */}
@@ -402,13 +406,13 @@ export function DashboardPage({
                     <tbody>{AREAS.map((area) => (
                       <tr key={area}><td className="py-1 pr-3 font-medium whitespace-nowrap" style={{ color: "var(--text-secondary)" }}>{area}</td>
                         {displayedSites.map((site) => {
-                          const { score, open, critical, hasData } = getAreaScore(area, site.id);
+                          const { open, critical, hasData, color, percentage } = getAreaScore(area, site.id);
                           if (!hasData) {
                             const neutral = "#64748b";
                             return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nNot assessed yet \u2014 no findings, CAPAs or systems logged for this area.`} onClick={() => router.push("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: neutral + "1a", color: neutral, border: `1px dashed ${neutral}55` }} aria-label={`${area} ${site.name}: not assessed yet`}>{"\u2014"}</button></td>;
                           }
-                          const bg = score >= 80 ? "#10b981" : score >= 60 ? "#f59e0b" : "#ef4444";
-                          return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nScore: ${score}%\nOpen: ${open}\nCritical: ${critical}`} onClick={() => router.push("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: bg + "22", color: bg, border: `1px solid ${bg}44` }} aria-label={`${area} ${site.name}: ${score}%`}>{open === 0 ? "\u2713" : `${score}%`}</button></td>;
+                          const bg = color;
+                          return <td key={site.id} className="py-1 px-1 text-center"><button type="button" title={`${area} \u2014 ${site.name}\nScore: ${percentage}\nOpen: ${open}\nCritical: ${critical}`} onClick={() => router.push("/gap-assessment")} className="w-full py-2 px-1 rounded-lg text-[10px] font-bold border-none cursor-pointer transition-opacity hover:opacity-80" style={{ background: bg + "22", color: bg, border: `1px solid ${bg}44` }} aria-label={`${area} ${site.name}: ${percentage}`}>{open === 0 ? "\u2713" : percentage}</button></td>;
                         })}
                       </tr>
                     ))}</tbody>

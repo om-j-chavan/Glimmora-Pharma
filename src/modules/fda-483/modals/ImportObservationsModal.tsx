@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Toast";
@@ -245,15 +246,14 @@ export function ImportObservationsModal({
               <Button variant="ghost" onClick={handleClose} disabled={submitting}>
                 Cancel
               </Button>
-              <Button
-                variant="primary"
-                icon={Sparkles}
+              <AIButton
                 onClick={handleConfirm}
                 disabled={includedCount === 0 || submitting}
                 loading={submitting}
+                loadingLabel="Adding…"
               >
                 Confirm &amp; Add {includedCount} observation{includedCount === 1 ? "" : "s"}
-              </Button>
+              </AIButton>
             </div>
           </div>
         ) : undefined

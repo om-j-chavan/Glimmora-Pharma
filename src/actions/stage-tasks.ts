@@ -36,8 +36,6 @@ const CSV_MODULE = "CSV/CSA";
 // Stage statuses where rework delegation makes sense — i.e. the stage is being
 // (re)worked, not under review / approved / skipped / never started.
 const REWORKABLE_STAGE_STATUSES = ["in_progress", "draft", "rejected"];
-// Task statuses that still need attention (open in the Worklist).
-export const STAGE_TASK_OPEN_STATUSES = ["pending", "in_progress", "submitted", "rework"];
 
 /** Reject a "YYYY-MM-DD" due date that's in the past (floored at yesterday to
  *  absorb client/server timezone skew). Mirrors deviation-tasks.notPastDate. */

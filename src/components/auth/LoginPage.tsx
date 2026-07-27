@@ -7,7 +7,6 @@ import { z } from "zod";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
-  Shield,
   Mail,
   Lock,
   LogIn,
@@ -28,7 +27,7 @@ import { useToast } from "@/components/ui/Toast";
 import { PillWithBubbles } from "@/components/animations/PillWithBubbles";
 
 // Password resets are handled manually by the Glimmora-Pharma support team
-// (no self-service reset on this 21 CFR Part 11 platform).
+// (no self-service reset on this regulated GxP platform).
 // TODO: replace placeholder support contact details with the real values.
 const SUPPORT_EMAIL = "support@glimmora-pharma.com"; // TODO: placeholder
 const SUPPORT_PHONE_DISPLAY = "+1 (555) 014-2273"; // TODO: placeholder
@@ -315,13 +314,11 @@ export function LoginPage() {
             Replaces the former faint logo-mark watermark. */}
         <PillWithBubbles />
 
-        {/* Region-neutral badge: no US-only framing (Part 11 is FDA, Annex 11 is
-            EU, GxP is global). Not `uppercase` — the strings are cased on purpose
-            ("GxP", not "GXP"). */}
-        <div className="relative z-[2] flex items-center gap-2.5 text-white/70">
-          <Shield className="w-3.5 h-3.5" aria-hidden="true" />
-          <span className="text-[11px] font-medium tracking-wide">GxP · Part 11 · Annex 11</span>
-        </div>
+        {/* The standards badge that used to sit here (GxP · Annex 11) was
+            removed. The empty top slot is preserved as a spacer so the brand
+            panel's `justify-between` column keeps the heading and copyright in
+            their original vertical positions (no layout shift). */}
+        <div aria-hidden="true" className="h-4" />
 
         <div className="relative z-[2] max-w-md">
           <h2
@@ -519,12 +516,9 @@ export function LoginPage() {
               shown a non-working auth option; re-add here when SSO is wired. */}
         </form>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between mt-7 pt-5 border-t border-(--bg-border)" style={{ display: loadingTenant ? "none" : undefined }}>
-          <div className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--text-muted)" }}>
-            <Shield className="w-3 h-3" aria-hidden="true" />
-            21 CFR Part 11 compliant
-          </div>
+        {/* Footer — the "21 CFR Part 11 compliant" badge was intentionally
+            removed until the platform is officially validated for 21 CFR Part 11. */}
+        <div className="flex items-center justify-end mt-7 pt-5 border-t border-(--bg-border)" style={{ display: loadingTenant ? "none" : undefined }}>
           <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Privacy · Terms</span>
         </div>
 
@@ -592,7 +586,7 @@ export function LoginPage() {
       </div>
 
       {/* Forgot-password → contact support. Resets are handled manually by the
-          support team (no self-service reset on this Part 11 platform). The
+          support team (no self-service reset on this regulated GxP platform). The
           Modal handles backdrop/Esc dismissal, the Close (X) button,
           aria-labelledby via `title`, and focus-return to the trigger. */}
       <Modal

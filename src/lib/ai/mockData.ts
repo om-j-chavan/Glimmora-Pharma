@@ -45,11 +45,20 @@ interface RcaFactors {
   management: string;
 }
 
+/* NOTE: PoolEntry deliberately carries NO supportingFindings.
+ *
+ * These pools used to ship 21 invented CAPA references with invented similarity
+ * scores ("CAPA-CHN-2025-027", 84%) formatted exactly like real ones. The real
+ * backend returns supportingFindings: [] (rca_suggestions_router._similar_findings
+ * is an unwired stub), so whenever the gateway fell back to this mock an
+ * investigator was shown fabricated historical precedent for a GxP root cause —
+ * references they could cite into a regulated record. Mock and backend now agree:
+ * no similarity search exists, so no findings are claimed.
+ */
 interface PoolEntry {
   rootCause: string;
   factors: RcaFactors;
   confidence: number;
-  supportingFindings: { ref: string; similarity: number }[];
 }
 
 interface RcaPool {
@@ -85,10 +94,6 @@ const POOL_DOCUMENTATION: RcaPool = {
         management: "Tier-1 review treated the SOP as authoritative and did not question it.",
       },
       confidence: 78,
-      supportingFindings: [
-        { ref: "CAPA-CHN-2025-027", similarity: 0.84 },
-        { ref: "CAPA-BLR-2024-103", similarity: 0.71 },
-      ],
     },
     {
       rootCause:
@@ -105,7 +110,6 @@ const POOL_DOCUMENTATION: RcaPool = {
         management: "Supervisors did not reconcile the training matrix after the revision.",
       },
       confidence: 66,
-      supportingFindings: [{ ref: "CAPA-CHN-2024-112", similarity: 0.69 }],
     },
     {
       rootCause:
@@ -122,7 +126,6 @@ const POOL_DOCUMENTATION: RcaPool = {
         management: "Supervisory checks did not verify the timing of entries.",
       },
       confidence: 54,
-      supportingFindings: [{ ref: "CAPA-BLR-2023-061", similarity: 0.58 }],
     },
   ],
 };
@@ -156,10 +159,6 @@ const POOL_EQUIPMENT: RcaPool = {
         management: "Engineering review did not flag the overdue requalification.",
       },
       confidence: 81,
-      supportingFindings: [
-        { ref: "CAPA-CHN-2025-044", similarity: 0.86 },
-        { ref: "CAPA-CHN-2024-077", similarity: 0.72 },
-      ],
     },
     {
       rootCause:
@@ -176,7 +175,6 @@ const POOL_EQUIPMENT: RcaPool = {
         management: "Calibration program ownership did not include method input.",
       },
       confidence: 69,
-      supportingFindings: [{ ref: "CAPA-BLR-2024-031", similarity: 0.74 }],
     },
     {
       rootCause:
@@ -193,7 +191,6 @@ const POOL_EQUIPMENT: RcaPool = {
         management: "Maintenance planning did not review PM adequacy.",
       },
       confidence: 52,
-      supportingFindings: [{ ref: "CAPA-CHN-2023-090", similarity: 0.61 }],
     },
   ],
 };
@@ -224,10 +221,6 @@ const POOL_TRAINING: RcaPool = {
         management: "The training matrix was not reviewed against the revision.",
       },
       confidence: 77,
-      supportingFindings: [
-        { ref: "CAPA-CHN-2025-019", similarity: 0.82 },
-        { ref: "CAPA-BLR-2024-058", similarity: 0.7 },
-      ],
     },
     {
       rootCause:
@@ -244,7 +237,6 @@ const POOL_TRAINING: RcaPool = {
         management: "Supervisors did not require re-verification before the rare task.",
       },
       confidence: 63,
-      supportingFindings: [{ ref: "CAPA-CHN-2024-101", similarity: 0.67 }],
     },
     {
       rootCause:
@@ -261,7 +253,6 @@ const POOL_TRAINING: RcaPool = {
         management: "Supervisory sign-off was treated as a formality.",
       },
       confidence: 49,
-      supportingFindings: [{ ref: "CAPA-BLR-2023-077", similarity: 0.55 }],
     },
   ],
 };
@@ -293,10 +284,6 @@ const POOL_ENVIRONMENTAL: RcaPool = {
         management: "Periodic limit review was overdue.",
       },
       confidence: 79,
-      supportingFindings: [
-        { ref: "CAPA-CHN-2025-033", similarity: 0.85 },
-        { ref: "CAPA-CHN-2024-066", similarity: 0.73 },
-      ],
     },
     {
       rootCause:
@@ -313,7 +300,6 @@ const POOL_ENVIRONMENTAL: RcaPool = {
         management: "QA did not reassess the monitoring plan.",
       },
       confidence: 64,
-      supportingFindings: [{ ref: "CAPA-BLR-2024-040", similarity: 0.68 }],
     },
     {
       rootCause:
@@ -330,7 +316,6 @@ const POOL_ENVIRONMENTAL: RcaPool = {
         management: "Engineering review did not surface the overdue status.",
       },
       confidence: 51,
-      supportingFindings: [{ ref: "CAPA-CHN-2023-052", similarity: 0.59 }],
     },
   ],
 };
@@ -365,10 +350,6 @@ const POOL_DATA_INTEGRITY: RcaPool = {
         management: "Periodic review of system controls was not performed.",
       },
       confidence: 83,
-      supportingFindings: [
-        { ref: "CAPA-CHN-2025-027", similarity: 0.88 },
-        { ref: "CAPA-BLR-2024-115", similarity: 0.75 },
-      ],
     },
     {
       rootCause:
@@ -385,7 +366,6 @@ const POOL_DATA_INTEGRITY: RcaPool = {
         management: "QA did not mandate an audit-trail review frequency.",
       },
       confidence: 70,
-      supportingFindings: [{ ref: "CAPA-CHN-2024-088", similarity: 0.72 }],
     },
     {
       rootCause:
@@ -402,7 +382,6 @@ const POOL_DATA_INTEGRITY: RcaPool = {
         management: "Access approvals did not require SoD confirmation.",
       },
       confidence: 55,
-      supportingFindings: [{ ref: "CAPA-BLR-2023-099", similarity: 0.6 }],
     },
   ],
 };
@@ -434,10 +413,6 @@ const POOL_CONTAMINATION: RcaPool = {
         management: "Validation review did not keep pace with the product mix.",
       },
       confidence: 80,
-      supportingFindings: [
-        { ref: "CAPA-CHN-2025-051", similarity: 0.87 },
-        { ref: "CAPA-CHN-2024-070", similarity: 0.74 },
-      ],
     },
     {
       rootCause:
@@ -454,7 +429,6 @@ const POOL_CONTAMINATION: RcaPool = {
         management: "Aseptic-behavior monitoring was infrequent.",
       },
       confidence: 67,
-      supportingFindings: [{ ref: "CAPA-BLR-2024-045", similarity: 0.69 }],
     },
     {
       rootCause:
@@ -471,7 +445,6 @@ const POOL_CONTAMINATION: RcaPool = {
         management: "Classification review did not consider dynamic load.",
       },
       confidence: 53,
-      supportingFindings: [{ ref: "CAPA-CHN-2023-063", similarity: 0.57 }],
     },
   ],
 };
@@ -495,7 +468,6 @@ const POOL_GENERIC: RcaPool = {
         management: "Review did not challenge control completeness.",
       },
       confidence: 60,
-      supportingFindings: [{ ref: "CAPA-CHN-2024-100", similarity: 0.66 }],
     },
     {
       rootCause:
@@ -512,7 +484,6 @@ const POOL_GENERIC: RcaPool = {
         management: "Supervisors did not reinforce the requirement.",
       },
       confidence: 52,
-      supportingFindings: [{ ref: "CAPA-BLR-2024-072", similarity: 0.61 }],
     },
     {
       rootCause:
@@ -529,7 +500,6 @@ const POOL_GENERIC: RcaPool = {
         management: "Review did not require independent verification.",
       },
       confidence: 45,
-      supportingFindings: [{ ref: "CAPA-CHN-2023-085", similarity: 0.54 }],
     },
   ],
 };
@@ -580,7 +550,9 @@ function shape5Why(
     ],
     rootCause: entry.rootCause,
     confidence: entry.confidence,
-    supportingFindings: entry.supportingFindings,
+    // Always empty — matches the real backend, which has no similarity index.
+    // Never fabricate CAPA references here (see the PoolEntry note above).
+    supportingFindings: [],
   };
 }
 
@@ -597,7 +569,9 @@ function shapeFishbone(entry: PoolEntry): FishboneSuggestion {
     },
     rootCause: entry.rootCause,
     confidence: entry.confidence,
-    supportingFindings: entry.supportingFindings,
+    // Always empty — matches the real backend, which has no similarity index.
+    // Never fabricate CAPA references here (see the PoolEntry note above).
+    supportingFindings: [],
   };
 }
 
@@ -609,7 +583,9 @@ function shapeFreeform(
     method,
     rootCause: entry.rootCause,
     confidence: entry.confidence,
-    supportingFindings: entry.supportingFindings,
+    // Always empty — matches the real backend, which has no similarity index.
+    // Never fabricate CAPA references here (see the PoolEntry note above).
+    supportingFindings: [],
   };
 }
 
@@ -691,9 +667,15 @@ export function mockResponseDraft(event: ResponseDraftEvent): {
     })
     .join("\n\n");
 
+  // The responding company is the TENANT, never the vendor. A blank name yields
+  // a visible placeholder the author must fill — mirrors the backend's
+  // COMPANY_PLACEHOLDER. (This file previously hardcoded the demo seed tenant
+  // "Pharma Glimmora International" into every tenant's letter.)
+  const company = event.companyName?.trim() || "[Company Name]";
+
   const draft =
     `Dear [FDA District Office],\n\n` +
-    `Pharma Glimmora International received Form FDA-483 issued at the ` +
+    `${company} received Form FDA-483 issued at the ` +
     `conclusion of the inspection of our ${event.site} facility on ` +
     `${event.inspectionDate}. We appreciate the opportunity to respond to ` +
     `the observations cited in the form.\n\n` +
@@ -707,7 +689,7 @@ export function mockResponseDraft(event: ResponseDraftEvent): {
     `clarification, please contact our Quality Assurance Head.\n\n` +
     `Sincerely,\n\n` +
     `[Signatory name and title will be added at signature time]\n\n` +
-    `Pharma Glimmora International`;
+    `${company}`;
 
   return { draft, characterCount: draft.length };
 }

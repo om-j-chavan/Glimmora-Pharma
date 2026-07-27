@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useAppSelector } from "./useAppSelector";
 import { useTenantConfig } from "./useTenantConfig";
 import type { Finding } from "@/store/findings.slice";
@@ -34,13 +34,20 @@ export function useTenantSitePredicate() {
   const tenantId = useAppSelector((s) => s.auth.currentTenant);
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { sites: accessibleSites } = useTenantConfig();
-  const accessibleSiteIds = accessibleSites.map((s) => s.id);
-  return (r: { tenantId?: string | null; siteId?: string | null }) => {
-    if (r.tenantId && r.tenantId !== tenantId) return false;
-    if (r.siteId && !accessibleSiteIds.includes(r.siteId)) return false;
-    if (selectedSiteId && r.siteId !== selectedSiteId) return false;
-    return true;
-  };
+  // Stable key for the accessible-site set so the predicate identity only
+  // changes when the actual ids change (not on every render). This lets KPI
+  // consumers memoise their derived arrays on the predicate (Phase 7).
+  const accessibleSiteKey = accessibleSites.map((s) => s.id).join(",");
+  return useCallback(
+    (r: { tenantId?: string | null; siteId?: string | null }) => {
+      const accessibleSiteIds = accessibleSiteKey ? accessibleSiteKey.split(",") : [];
+      if (r.tenantId && r.tenantId !== tenantId) return false;
+      if (r.siteId && !accessibleSiteIds.includes(r.siteId)) return false;
+      if (selectedSiteId && r.siteId !== selectedSiteId) return false;
+      return true;
+    },
+    [tenantId, selectedSiteId, accessibleSiteKey],
+  );
 }
 
 export function useTenantData() {

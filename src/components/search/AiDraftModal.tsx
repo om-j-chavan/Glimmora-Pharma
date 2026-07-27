@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { Sparkles, RotateCcw, AlertTriangle } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiDraftSend, AiChatError, type DraftKind, type DraftResponse } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -109,7 +110,7 @@ export function AiDraftModal({ open, onClose, context, mode = "text", recordId =
     Object.values(buckets).some((v) => v.trim());
 
   const toggleStyle = (active: boolean) =>
-    active ? { background: "var(--brand)", color: "#fff" } : { background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" };
+    active ? { background: "var(--ai-accent)", color: "#fff" } : { background: "var(--bg-surface)", color: "var(--text-secondary)", border: "1px solid var(--bg-border)" };
 
   const inputCls = "input text-[12px] w-full";
 
@@ -121,7 +122,11 @@ export function AiDraftModal({ open, onClose, context, mode = "text", recordId =
       className="max-w-2xl"
       footer={
         <div className="flex items-center justify-between gap-2 w-full">
-          <Button variant="secondary" size="sm" icon={RotateCcw} disabled={busy} onClick={() => generate(tone)}>Regenerate</Button>
+          {/* Regenerate keeps RotateCcw — the glyph carries the meaning here and
+              the AI context is already established by the modal. Insert is a
+              plain primary: committing text to the form is a normal action, not
+              an AI one, so it must not wear the AI accent. */}
+          <AIButton variant="subtle" size="sm" icon={RotateCcw} loading={busy} loadingLabel="Drafting…" onClick={() => generate(tone)}>Regenerate</AIButton>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
             <Button variant="primary" size="sm" disabled={busy || !hasContent} onClick={handleInsert}>Insert into form</Button>
@@ -130,7 +135,7 @@ export function AiDraftModal({ open, onClose, context, mode = "text", recordId =
       }
     >
       <div className="space-y-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wide inline-flex items-center gap-1.5" style={{ color: "var(--brand)" }}>
+        <p className="text-[11px] font-semibold uppercase tracking-wide inline-flex items-center gap-1.5" style={{ color: "var(--ai-accent)" }}>
           <Sparkles className="w-3.5 h-3.5" aria-hidden="true" /> Suggested draft (editable)
         </p>
 

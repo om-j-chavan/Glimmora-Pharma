@@ -2,7 +2,8 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Upload, X, Sparkles, Bot, Trash2 } from "lucide-react";
+import { Plus, Upload, X, Bot, Trash2 } from "lucide-react";
+import { AIButton, AIBadge } from "@/components/ai";
 import { classifyFinding, type FindingTriageResult } from "@/lib/ai";
 import type { FindingSeverity } from "@/store/findings.slice";
 import type { DocType } from "@/store/evidence.slice";
@@ -312,28 +313,31 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
               width, under the classification row. */}
           {aiEnabled && (
             <div className="col-span-2">
-              <Button
-                type="button"
-                variant="secondary"
+              <AIButton
+                variant="subtle"
                 size="sm"
-                icon={Sparkles}
                 loading={triageLoading}
                 onClick={runTriage}
                 disabled={(watchRequirement ?? "").trim().length < 10}
               >
-                {triageLoading ? "Analysing…" : "Suggest classification (AI)"}
-              </Button>
+                Suggest classification (AI)
+              </AIButton>
               {triageError && <p role="alert" className="text-[11px] text-(--danger) mt-1.5">{triageError}</p>}
 
               {triage && (
                 <div className="agi-panel mt-2.5" role="status" aria-live="polite">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2">
-                      <Bot className="w-4 h-4 text-[#6366f1]" aria-hidden="true" />
+                      <Bot className="w-4 h-4" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
                       <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>AGI Triage</span>
                     </div>
-                    <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                      {triage.confidence}% confidence · {triage.source === "backend" ? "live" : "demo"}
+                    {/* Was a bare "live"/"demo" word — vocabulary no other AI
+                        surface used. Now the shared provenance badge. */}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                        {triage.confidence}% confidence
+                      </span>
+                      <AIBadge source={triage.source} />
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 mb-2">

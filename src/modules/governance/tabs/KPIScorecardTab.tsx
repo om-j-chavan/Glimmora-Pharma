@@ -11,31 +11,20 @@ import { chartDefaults } from "@/lib/chartColors";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
+import { readinessStatus, type SiteKPI } from "@/lib/kpi";
 
-export interface SiteKPI {
-  siteId: string;
-  siteName: string;
-  riskLevel: "HIGH" | "MEDIUM" | "LOW";
-  readinessScore: number;
-  openFindings: number;
-  criticalFindings: number;
-  openCAPAs: number;
-  overdueCAPAs: number;
-  activeFDA483: number;
-  systemsValidated: number;
-  systemsTotal: number;
-  diExceptions: number;
-  openDeviations: number;
-  inspectionReadiness: number;
-  nextInspection?: string;
-  nextInspectionDate?: string;
-  capaTimeliness: number;
-  auditTrailCoverage: number;
-}
+export type { SiteKPI };
 
 interface Site {
   id: string;
   name: string;
+}
+
+/** One rendered trend line per site (id → line, name → legend, color). */
+export interface SiteTrendSeries {
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface SiteReadiness {
@@ -68,7 +57,10 @@ export interface KPIScorecardTabProps {
   currentMonth: string;
   onNavigateSettings: () => void;
   siteKPIs?: SiteKPI[];
-  siteTrend?: { month: string; chennai: number; mumbai: number; bangalore: number; hyderabad: number }[];
+  /** Dynamic per-site readiness rows: { month, [siteId]: score }. */
+  siteTrend?: Array<Record<string, number | string>>;
+  /** One entry per site → drives the dynamic <Line> set + legend. */
+  siteTrendSeries?: SiteTrendSeries[];
 }
 
 export function KPIScorecardTab({
@@ -76,27 +68,27 @@ export function KPIScorecardTab({
   overdueCommitments, repeatObservationRisk, diExceptions, auditTrailCoverage,
   csvDrift, systemsCount, capaTrend, capaTrendEmpty, valBreakdown, diByArea,
   siteReadiness, sites, isDark, currentMonth, onNavigateSettings,
-  siteKPIs = [], siteTrend = [],
+  siteKPIs = [], siteTrend = [], siteTrendSeries = [],
 }: KPIScorecardTabProps) {
   void useState; // site filter reserved for future use
   return (
     <>
       {/* Scorecard header */}
       <div className={clsx("flex items-center justify-between p-5 rounded-2xl mb-6 border flex-wrap gap-4", isDark ? "bg-[#0a1f38] border-[#1e3a5a]" : "bg-[#f8fafc] border-[#e2e8f0]")}>
-        <div><p className="text-[11px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>Overall readiness score</p><p className="text-[36px] font-bold leading-none mt-1" style={{ color: noData ? "var(--text-muted)" : readinessScore >= 80 ? "#10b981" : readinessScore >= 60 ? "#f59e0b" : "#ef4444" }}>{noData ? "\u2014" : `${readinessScore}%`}</p><p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}>{companyName || "Your organisation"} &middot; {currentMonth}</p></div>
+        <div><p className="text-[11px] uppercase tracking-wider font-semibold" style={{ color: "var(--text-muted)" }}>Overall readiness score</p><p className="text-[36px] font-bold leading-none mt-1" style={{ color: noData ? "var(--text-muted)" : readinessStatus(readinessScore).color }}>{noData ? "\u2014" : `${readinessScore}%`}</p><p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}>{companyName || "Your organisation"} &middot; {currentMonth}</p></div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[12px]">{([["CAPA timeliness", closedCAPAsCount === 0 ? "\u2014" : `${capaTimeliness}%`], ["Audit trail", systemsCount === 0 ? "\u2014" : `${auditTrailCoverage}%`], ["DI exceptions", String(diExceptions)], ["CSV drift", String(csvDrift)]] as const).map(([l, v]) => (<div key={l} className="flex items-center gap-2"><span style={{ color: "var(--text-muted)" }}>{l}:</span><span className="font-semibold" style={{ color: "var(--text-primary)" }}>{v}</span></div>))}</div>
       </div>
 
       {/* KPI grid */}
       <section aria-label="Key performance indicators" className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         {[
-          { icon: Clock, color: closedCAPAsCount === 0 ? "#64748b" : capaTimeliness >= 90 ? "#10b981" : capaTimeliness >= 70 ? "#f59e0b" : "#ef4444", label: "CAPA timeliness", value: closedCAPAsCount === 0 ? "\u2014" : `${capaTimeliness}%`, sub: `${closedCAPAsCount} CAPAs closed` },
-          { icon: AlertTriangle, color: overdueCommitments > 0 ? "#ef4444" : "#10b981", label: "Overdue commitments", value: String(overdueCommitments), sub: "483/WL commitments past due" },
-          { icon: RotateCw, color: repeatObservationRisk > 0 ? "#f59e0b" : "#10b981", label: "Repeat observation risk", value: String(repeatObservationRisk), sub: "Open 483 observations" },
-          { icon: ShieldAlert, color: diExceptions > 0 ? "#ef4444" : "#10b981", label: "DI exceptions", value: String(diExceptions), sub: "Open DI gate CAPAs" },
-          { icon: Shield, color: systemsCount === 0 ? "#64748b" : auditTrailCoverage >= 80 ? "#10b981" : auditTrailCoverage >= 60 ? "#f59e0b" : "#ef4444", label: "Audit trail coverage", value: systemsCount === 0 ? "\u2014" : `${auditTrailCoverage}%`, sub: "Part 11 compliant systems" },
-          { icon: Activity, color: csvDrift > 0 ? "#f59e0b" : "#10b981", label: "Validation drift", value: String(csvDrift), sub: "Overdue or non-compliant" },
-        ].map((kpi) => (<div key={kpi.label} className="stat-card" role="region" aria-label={kpi.label}><div className="flex items-center gap-2 mb-2"><kpi.icon className="w-5 h-5" style={{ color: kpi.color }} aria-hidden="true" /><span className="stat-label mb-0">{kpi.label}</span></div><div className="stat-value" style={{ color: kpi.color }}>{kpi.value}</div><div className="stat-sub">{kpi.sub}</div></div>))}
+          { id: "kpi-capa-timeliness", icon: Clock, color: closedCAPAsCount === 0 ? "#64748b" : capaTimeliness >= 90 ? "#10b981" : capaTimeliness >= 70 ? "#f59e0b" : "#ef4444", label: "CAPA timeliness", value: closedCAPAsCount === 0 ? "\u2014" : `${capaTimeliness}%`, sub: `${closedCAPAsCount} CAPAs closed` },
+          { id: "kpi-overdue-commitments", icon: AlertTriangle, color: overdueCommitments > 0 ? "#ef4444" : "#10b981", label: "Overdue commitments", value: String(overdueCommitments), sub: "483/WL commitments past due" },
+          { id: "kpi-repeat-observation", icon: RotateCw, color: repeatObservationRisk > 0 ? "#f59e0b" : "#10b981", label: "Repeat observation risk", value: String(repeatObservationRisk), sub: "Open 483 observations" },
+          { id: "kpi-di-exceptions", icon: ShieldAlert, color: diExceptions > 0 ? "#ef4444" : "#10b981", label: "DI exceptions", value: String(diExceptions), sub: "Open DI gate CAPAs" },
+          { id: "kpi-audit-trail", icon: Shield, color: systemsCount === 0 ? "#64748b" : auditTrailCoverage >= 80 ? "#10b981" : auditTrailCoverage >= 60 ? "#f59e0b" : "#ef4444", label: "Audit trail coverage", value: systemsCount === 0 ? "\u2014" : `${auditTrailCoverage}%`, sub: "Part 11 compliant systems" },
+          { id: "kpi-validation-drift", icon: Activity, color: csvDrift > 0 ? "#f59e0b" : "#10b981", label: "Validation drift", value: String(csvDrift), sub: "Overdue or non-compliant" },
+        ].map((kpi) => (<div key={kpi.label} id={kpi.id} className="stat-card scroll-mt-24" role="region" aria-label={kpi.label}><div className="flex items-center gap-2 mb-2"><kpi.icon className="w-5 h-5" style={{ color: kpi.color }} aria-hidden="true" /><span className="stat-label mb-0">{kpi.label}</span></div><div className="stat-value" style={{ color: kpi.color }}>{kpi.value}</div><div className="stat-sub">{kpi.sub}</div></div>))}
       </section>
 
       {/* Charts */}
@@ -121,9 +113,9 @@ export function KPIScorecardTab({
       </div></div>
 
       {/* Site heatmap */}
-      <div className="card"><div className="card-header"><div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" /><span className="card-title">Site readiness heatmap</span></div></div><div className="card-body">
+      <div id="kpi-site-readiness" className="card scroll-mt-24"><div className="card-header"><div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-[#0ea5e9]" aria-hidden="true" /><span className="card-title">Site readiness heatmap</span></div></div><div className="card-body">
         {sites.length === 0 ? <div className="flex flex-col items-center py-10"><MapPin className="w-8 h-8 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px] mb-2" style={{ color: "var(--text-muted)" }}>No sites configured</p><Button variant="ghost" size="sm" onClick={onNavigateSettings}>Go to Settings</Button></div> : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{siteReadiness.map((sr) => { const col = sr.score >= 80 ? "#10b981" : sr.score >= 60 ? "#f59e0b" : "#ef4444"; return (<div key={sr.site.id} className="rounded-2xl p-4 border" style={{ background: col + (isDark ? "12" : "0A"), borderColor: col + "40" }}><div className="flex items-center justify-between mb-2"><div><p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{sr.site.name}</p></div><p className="text-[22px] font-bold" style={{ color: col }}>{sr.score}%</p></div><div className={clsx("h-1.5 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}><div className="h-full rounded-full" style={{ width: `${sr.score}%`, background: col }} /></div><div className="flex items-center gap-3 mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}><span>{sr.findingsCount} findings</span><span>{sr.capasCount} CAPAs</span></div></div>); })}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{siteReadiness.map((sr) => { const col = readinessStatus(sr.score).color; return (<div key={sr.site.id} className="rounded-2xl p-4 border" style={{ background: col + (isDark ? "12" : "0A"), borderColor: col + "40" }}><div className="flex items-center justify-between mb-2"><div><p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>{sr.site.name}</p></div><p className="text-[22px] font-bold" style={{ color: col }}>{sr.score}%</p></div><div className={clsx("h-1.5 rounded-full", isDark ? "bg-[#1e3a5a]" : "bg-[#e2e8f0]")}><div className="h-full rounded-full" style={{ width: `${sr.score}%`, background: col }} /></div><div className="flex items-center gap-3 mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}><span>{sr.findingsCount} findings</span><span>{sr.capasCount} CAPAs</span></div></div>); })}</div>
         )}
       </div></div>
 
@@ -198,7 +190,7 @@ export function KPIScorecardTab({
             </div>
             <div className="card-body space-y-2">
               {[...siteKPIs].sort((a, b) => b.readinessScore - a.readinessScore).map((s, i) => {
-                const col = s.readinessScore >= 80 ? "#10b981" : s.readinessScore >= 60 ? "#f59e0b" : "#ef4444";
+                const col = readinessStatus(s.readinessScore).color;
                 return (
                   <div key={s.siteId} className="flex items-center gap-3">
                     <span className="text-[14px] font-bold w-6 text-right" style={{ color: col }}>{i + 1}.</span>
@@ -218,8 +210,9 @@ export function KPIScorecardTab({
             </div>
           </div>
 
-          {/* Site trend chart */}
-          {siteTrend.length > 0 && (
+          {/* Site trend chart — one line per REAL tenant site (Phase 5: no
+              hardcoded site names; renders for any number of sites). */}
+          {siteTrend.length > 0 && siteTrendSeries.length > 0 && (
             <div className="card mt-4">
               <div className="card-header">
                 <div className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-[#6366f1]" aria-hidden="true" /><span className="card-title">Readiness trend by site</span></div>
@@ -232,10 +225,9 @@ export function KPIScorecardTab({
                     <YAxis {...chartDefaults.yAxis} domain={[0, 100]} />
                     <Tooltip {...chartDefaults.tooltip} />
                     <Legend iconType="circle" iconSize={8} />
-                    <Line type="monotone" dataKey="chennai" name="Chennai" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
-                    <Line type="monotone" dataKey="mumbai" name="Mumbai" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
-                    <Line type="monotone" dataKey="bangalore" name="Bangalore" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-                    <Line type="monotone" dataKey="hyderabad" name="Hyderabad" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} />
+                    {siteTrendSeries.map((s) => (
+                      <Line key={s.id} type="monotone" dataKey={s.id} name={s.name} stroke={s.color} strokeWidth={2} dot={{ r: 3 }} />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
               </div>

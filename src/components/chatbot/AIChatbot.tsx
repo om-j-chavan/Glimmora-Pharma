@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Bot, Send, Mic, Square, X, Volume2, RefreshCw, Trash2, Settings, Edit3, FileText, Ticket, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 // Type-only import — the actual classes extend AudioWorkletNode (a
 // browser-only global) and crash at module-evaluation time on the SSR
 // server. We dynamically import() the runtime inside startRecording so
@@ -187,6 +188,21 @@ export function AIChatbot() {
       window.clearTimeout(t);
     };
   }, [open, voiceState]);
+
+  // Additive, backward-compatible: any part of the app can open the assistant
+  // (optionally with a prefilled question) via
+  //   window.dispatchEvent(new CustomEvent("glimmora:assistant", { detail: { prompt } }))
+  // Nothing changes when the event never fires. See src/lib/assistant.ts.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const prompt = (e as CustomEvent<{ prompt?: string }>).detail?.prompt;
+      setOpen(true);
+      if (prompt) setInput(prompt);
+      window.setTimeout(() => inputRef.current?.focus(), 80);
+    };
+    window.addEventListener("glimmora:assistant", onOpen as EventListener);
+    return () => window.removeEventListener("glimmora:assistant", onOpen as EventListener);
+  }, []);
 
   /* ── Chat ────────────────────────────────────────────────────── */
 
@@ -740,11 +756,14 @@ export function AIChatbot() {
           width: BUBBLE_SIZE,
           height: BUBBLE_SIZE,
           borderRadius: "50%",
-          background: "var(--brand)",
-          color: "#fff",
+          // AI accent, not --brand: --brand is user-selectable per tenant, so
+          // the assistant used to turn emerald/crimson/amber and stop matching
+          // the other AI surfaces.
+          background: "var(--ai-accent)",
+          color: "var(--ai-on-accent)",
           border: "none",
           cursor: "pointer",
-          boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+          boxShadow: "0 6px 20px var(--ai-glow)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -826,9 +845,9 @@ export function AIChatbot() {
                 aria-live="polite"
                 className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded mr-0.5"
                 style={{
-                  background: busy ? "var(--warning-bg)" : "var(--brand-muted)",
-                  color: busy ? "#b45309" : "var(--brand)",
-                  border: `1px solid ${busy ? "var(--warning)" : "var(--brand-border)"}`,
+                  background: busy ? "var(--warning-bg)" : "var(--ai-muted)",
+                  color: busy ? "#b45309" : "var(--ai-accent)",
+                  border: `1px solid ${busy ? "var(--warning)" : "var(--ai-border)"}`,
                 }}
               >
                 {busy ? "WORKING" : "READY"}
@@ -839,7 +858,7 @@ export function AIChatbot() {
                 aria-expanded={showSettings}
                 onClick={() => setShowSettings((v) => !v)}
                 className="p-1 rounded transition-colors bg-transparent border-0 cursor-pointer"
-                style={{ color: showSettings ? "var(--brand)" : "var(--text-muted)" }}
+                style={{ color: showSettings ? "var(--ai-accent)" : "var(--text-muted)" }}
               >
                 <Settings className="w-3.5 h-3.5" aria-hidden="true" />
               </button>
@@ -875,7 +894,7 @@ export function AIChatbot() {
                 style={{ color: "var(--text-secondary)" }}
               >
                 <span>Noise suppression</span>
-                <span className="font-mono tabular-nums" style={{ color: "var(--brand)" }}>
+                <span className="font-mono tabular-nums" style={{ color: "var(--ai-accent)" }}>
                   {suppressionLevel}%
                 </span>
               </label>
@@ -891,7 +910,7 @@ export function AIChatbot() {
                 aria-valuemax={100}
                 aria-valuenow={suppressionLevel}
                 className="w-full"
-                style={{ accentColor: "var(--brand)" }}
+                style={{ accentColor: "var(--ai-accent)" }}
               />
               <div
                 className="flex items-center justify-between text-[10px] mt-1"
@@ -919,7 +938,7 @@ export function AIChatbot() {
                   <span
                     aria-hidden="true"
                     className="shrink-0 inline-flex items-center justify-center text-[9px] font-bold rounded-md mt-0.5"
-                    style={{ width: 22, height: 22, background: "var(--brand)", color: "#fff" }}
+                    style={{ width: 22, height: 22, background: "var(--ai-accent)", color: "#fff" }}
                   >
                     AI
                   </span>
@@ -974,9 +993,9 @@ export function AIChatbot() {
                     alignSelf: m.role === "user" ? "flex-end" : "flex-start",
                     marginLeft: m.role === "user" ? "auto" : 0,
                     marginRight: m.role === "user" ? 0 : "auto",
-                    background: m.role === "user" ? "var(--brand-muted)" : "var(--bg-elevated)",
-                    color: m.role === "user" ? "var(--brand)" : "var(--text-primary)",
-                    border: m.role === "user" ? "1px solid var(--brand-border)" : "1px solid var(--bg-border)",
+                    background: m.role === "user" ? "var(--ai-muted)" : "var(--bg-elevated)",
+                    color: m.role === "user" ? "var(--ai-accent)" : "var(--text-primary)",
+                    border: m.role === "user" ? "1px solid var(--ai-border)" : "1px solid var(--bg-border)",
                     whiteSpace: "pre-wrap",
                   }}
                 >
@@ -993,7 +1012,7 @@ export function AIChatbot() {
                         width: 22,
                         height: 22,
                         background: "transparent",
-                        color: speaking ? "var(--brand)" : "var(--text-muted)",
+                        color: speaking ? "var(--ai-accent)" : "var(--text-muted)",
                       }}
                     >
                       <Volume2
@@ -1035,14 +1054,14 @@ export function AIChatbot() {
                                 <FileText
                                   className="w-3 h-3 shrink-0 mt-0.5"
                                   aria-hidden="true"
-                                  style={{ color: "var(--brand)" }}
+                                  style={{ color: "var(--ai-accent)" }}
                                 />
                                 {s.url ? (
                                   <a
                                     href={s.url}
                                     target="_blank"
                                     rel="noreferrer"
-                                    style={{ color: "var(--brand)", textDecoration: "underline" }}
+                                    style={{ color: "var(--ai-accent)", textDecoration: "underline" }}
                                   >
                                     {s.id}{s.section ? ` ${s.section}` : ""}
                                   </a>
@@ -1137,14 +1156,14 @@ export function AIChatbot() {
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
                   disabled={busy}
                 />
-                <Button
-                  type="button"
-                  variant="primary"
+                <AIButton
                   size="md"
+                  iconOnly
                   icon={Send}
                   aria-label="Send"
                   onClick={handleSend}
                   disabled={busy || !input.trim()}
+                  className="w-9 h-9"
                 />
               </>
             )}
@@ -1324,7 +1343,7 @@ function VoiceMeter({ level }: { level: number }) {
               display: "inline-block",
               width: 2,
               height: `${Math.round(h * 24) + 4}px`,
-              background: "var(--brand)",
+              background: "var(--ai-accent)",
               borderRadius: 1,
               transition: "height 90ms linear",
               opacity: 0.75 + h * 0.25,

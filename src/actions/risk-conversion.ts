@@ -64,7 +64,6 @@ import { createCAPA } from "@/actions/capas";
 import { RISK_SEVERITIES, RISK_SOURCE_MODULE } from "@/constants/risk";
 import {
   DEVIATION_CATEGORIES,
-  DEVIATION_IMPACTS,
   DEVIATION_TYPES,
   RISK_CONVERT_TARGET_LABEL,
   RISK_TO_CAPA_SOURCE,
@@ -489,7 +488,6 @@ export async function convertRiskToGap(
  *                                                 rounding UP: Medium→Major)
  *   area                 ← form.area             (REQUIRED; no Risk analogue)
  *   immediateAction      ← form.immediateAction  (seeded from risk.mitigationPlan; ≥5)
- *   patient/product/reg  ← form.*Impact          (REQUIRED; no Risk analogue — explicit)
  *   dueDate              ← form.dueDate          (risk.targetDate if future, else today+30)
  *   siteId               ← risk.siteId
  *   owner                ← STAMPED by createDeviation as the converting user.
@@ -503,9 +501,6 @@ const ConvertToDeviationSchema = z.object({
   severity: z.enum(["Critical", "Major", "Minor"]),
   area: z.string().min(1, "Area is required"),
   immediateAction: z.string().trim().min(5, "Immediate action must be at least 5 characters"),
-  patientSafetyImpact: z.enum(DEVIATION_IMPACTS),
-  productQualityImpact: z.enum(DEVIATION_IMPACTS),
-  regulatoryImpact: z.enum(DEVIATION_IMPACTS),
   dueDate: z.string().min(1, "Due date is required"),
   copyDocuments: z.boolean().optional(),
 });
@@ -529,9 +524,6 @@ export async function convertRiskToDeviation(
       severity: d.severity,
       area: d.area,
       immediateAction: d.immediateAction,
-      patientSafetyImpact: d.patientSafetyImpact,
-      productQualityImpact: d.productQualityImpact,
-      regulatoryImpact: d.regulatoryImpact,
       dueDate: d.dueDate,
       siteId: risk.siteId ?? undefined,
     }),

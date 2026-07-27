@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, X, Info, Wrench, Eye, EyeOff, Sparkles,
+  ClipboardList, X, Info, Wrench, Eye, EyeOff,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { DocList } from "@/components/shared/DocList";
@@ -285,7 +285,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     // "changing an uncontrolled input to be controlled" warning). The enum
     // dropdowns keep their seeded defaults; category stays unset (its placeholder
     // shows for "" all the same, and "" isn't a valid enum value).
-    defaultValues: { title: "", description: "", type: "unplanned", severity: "Major", siteId: "", area: "", immediateAction: "", priority: "Medium", patientSafetyImpact: "medium", productQualityImpact: "medium", regulatoryImpact: "medium", dueDate: "", batchesAffected: "" },
+    defaultValues: { title: "", description: "", type: "unplanned", severity: "Major", siteId: "", area: "", immediateAction: "", priority: "Medium", dueDate: "", batchesAffected: "" },
   });
 
   function severityToRisk(s: DeviationSeverity): "Critical" | "High" | "Medium" | "Low" {
@@ -317,9 +317,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
         severity: data.severity,
         area: data.area,
         immediateAction: data.immediateAction,
-        patientSafetyImpact: data.patientSafetyImpact,
-        productQualityImpact: data.productQualityImpact,
-        regulatoryImpact: data.regulatoryImpact,
         priority: data.priority,
         dueDate: dayjs(data.dueDate).utc().toISOString(),
         // BUG FIX — was `allSites[0]?.id` (always the FIRST site), so a Chennai
@@ -535,7 +532,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // intelligence run button aren't PageActions (they're custom widgets), so
   // they go in headerRight, left of the primary.
   const pageActions: PageAction[] = [
-    { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+    { label: "Ask AI", variant: "ai", onClick: () => setAskAiOpen(true) },
   ];
   if (devCan.canCreate) {
     pageActions.push({ label: "Report Deviation", variant: "primary", icon: Plus, onClick: () => setAddOpen(true) });
@@ -698,7 +695,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                     `Title: ${selected.title}`,
                     `Description: ${selected.description}`,
                     `Category: ${selected.category}; Type: ${selected.type}; Area: ${selected.area}`,
-                    `Impact - Patient safety: ${selected.patientSafetyImpact}; Product quality: ${selected.productQualityImpact}; Regulatory: ${selected.regulatoryImpact}`,
                     selected.immediateAction ? `Immediate action: ${selected.immediateAction}` : "",
                     selected.rootCause ? `Root cause: ${selected.rootCause}` : "",
                   ].filter(Boolean).join("\n\n")}
@@ -723,24 +719,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               {/* "Detected by" removed — it duplicated Owner (owner = creator). Owner
                   stays in the body row; "Detected date" kept (distinct timestamp). */}
               <div><p style={{ color: "var(--text-muted)" }}>Detected date</p><p className="font-medium" style={{ color: "var(--text-primary)" }}>{dayjs.utc(selected.detectedDate).tz(timezone).format(dateFormat)}</p></div>
-            </div>
-
-            {/* Impact — single inline row (smaller label above), fields separated
-                by a middle dot and allowed to wrap on narrow viewports. Empty/
-                unset levels are skipped. */}
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Impact assessment</p>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                {([["Patient safety", selected.patientSafetyImpact], ["Product quality", selected.productQualityImpact], ["Regulatory", selected.regulatoryImpact]] as const)
-                  .filter(([, level]) => !!level)
-                  .map(([label, level], i, arr) => (
-                    <span key={label} className="inline-flex items-center gap-1.5">
-                      <span style={{ color: "var(--text-secondary)" }}>{label}:</span>
-                      <Badge variant={level === "high" ? "red" : level === "medium" ? "amber" : level === "low" ? "green" : "gray"}>{level.charAt(0).toUpperCase() + level.slice(1)}</Badge>
-                      {i < arr.length - 1 && <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>·</span>}
-                    </span>
-                  ))}
-              </div>
             </div>
 
             {/* Immediate action */}
@@ -1016,14 +994,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Immediate action *</p>
             <Controller name="immediateAction" control={control} render={({ field }) => <textarea {...field} rows={2} className="input w-full resize-none" style={errors.immediateAction ? { borderColor: "#ef4444" } : undefined} placeholder="What was done immediately after detection?" />} />
             {errors.immediateAction && <p className="text-[11px] text-[#ef4444] mt-1">{errors.immediateAction.message}</p>}
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Impact assessment</p>
-            <div className="grid grid-cols-3 gap-3">
-              {(["patientSafetyImpact", "productQualityImpact", "regulatoryImpact"] as const).map((key) => (
-                <div key={key}><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>{key === "patientSafetyImpact" ? "Patient safety" : key === "productQualityImpact" ? "Product quality" : "Regulatory"} *</p><Controller name={key} control={control} render={({ field }) => <Dropdown options={[{ value: "high", label: "High" }, { value: "medium", label: "Medium" }, { value: "low", label: "Low" }, { value: "none", label: "None" }]} value={field.value} onChange={field.onChange} width="w-full" className={errors[key] ? "ring-1 ring-[#ef4444] rounded-lg" : undefined} />} />{errors[key] && <p className="text-[11px] text-[#ef4444] mt-1">{errors[key]?.message}</p>}</div>
-              ))}
-            </div>
           </div>
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Scheduling</p>

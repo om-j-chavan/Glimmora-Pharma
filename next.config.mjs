@@ -17,6 +17,17 @@ const nextConfig = {
 
   compress: true,
 
+  // Generate stable build ID to prevent Server Action mismatch
+  generateBuildId: async () => {
+    // Use git commit hash if available, otherwise timestamp
+    const { execSync } = await import("child_process");
+    try {
+      return execSync("git rev-parse HEAD").toString().trim();
+    } catch {
+      return `build-${Date.now()}`;
+    }
+  },
+
   experimental: {
     // Optimize large package imports (tree-shake)
     optimizePackageImports: [
@@ -56,6 +67,13 @@ const nextConfig = {
         source: "/static/:path*",
         headers: [
           { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+      {
+        // Prevent caching of pages with Server Actions
+        source: "/(app)/:path*",
+        headers: [
+          { key: "Cache-Control", value: "no-store, must-revalidate" },
         ],
       },
     ];

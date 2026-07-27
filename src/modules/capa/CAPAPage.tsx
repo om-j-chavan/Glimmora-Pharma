@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   ClipboardCheck, GitBranch, BarChart3, Plus, Search,
-  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, ClipboardList, Sparkles,
+  AlertTriangle, CheckCircle2, TrendingUp, Wrench, Shield, MessageSquare, RotateCcw, ClipboardList,
 } from "lucide-react";
 import type { CAPA as PrismaCAPA } from "@prisma/client";
 import dayjs from "@/lib/dayjs";
@@ -313,7 +313,7 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
         className="capa-shell"
         description={`Track corrective and preventive actions from initiation through effectiveness. \u00b7 ${capas.length === 0 ? "No CAPAs raised yet" : `${capas.length} CAPAs \u00b7 ${openCAPAs.length} open \u00b7 ${overdueCAPAs.length} overdue`}`}
         actions={[
-          { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+          { label: "Ask AI", variant: "ai", onClick: () => setAskAiOpen(true) },
           ...(canCreateCAPAs ? [{ label: "New CAPA", variant: "primary" as const, icon: Plus, onClick: () => setAddOpen(true) }] : []),
         ]}
         headerRight={

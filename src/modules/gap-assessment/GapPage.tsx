@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BarChart3, ClipboardCheck, ClipboardList, FolderOpen, Plus, Sparkles } from "lucide-react";
+import { BarChart3, ClipboardCheck, ClipboardList, FolderOpen, Plus } from "lucide-react";
 import type { Finding as PrismaFinding, CAPA as PrismaCAPA } from "@prisma/client";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
@@ -543,7 +543,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   // ActionBar renders secondaries left of the primary, so Ask AI sits to the
   // left of Report Gap (Support-pattern header).
   const headerActions: PageAction[] = [
-    { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+    { label: "Ask AI", variant: "ai", onClick: () => setAskAiOpen(true) },
   ];
   if (gapCan.canCreate) {
     headerActions.push({

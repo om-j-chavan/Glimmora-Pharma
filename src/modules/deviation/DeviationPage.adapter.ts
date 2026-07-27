@@ -1,5 +1,5 @@
 import type { Deviation as PrismaDeviation } from "@prisma/client";
-import type { Deviation, DeviationStatus, DeviationSeverity, ImpactLevel } from "@/store/deviation.slice";
+import type { Deviation, DeviationStatus, DeviationSeverity } from "@/store/deviation.slice";
 import type { LinkedDocument, DocFileType, DocStatus } from "@/components/shared/DocumentUpload";
 import type { WorklistDoc } from "@/lib/queries/worklist";
 
@@ -130,9 +130,6 @@ export function adaptDeviation(p: PrismaDeviationWithCapa): Deviation {
     capaDecisionReason: p.capaDecisionReason ?? undefined,
     capaDecisionAt: p.capaDecisionAt ? p.capaDecisionAt.toISOString() : undefined,
     capaDecisionById: p.capaDecisionById ?? undefined,
-    patientSafetyImpact: (p.patientSafetyImpact ?? "none") as ImpactLevel,
-    productQualityImpact: (p.productQualityImpact ?? "none") as ImpactLevel,
-    regulatoryImpact: (p.regulatoryImpact ?? "none") as ImpactLevel,
     batchesAffected: p.batchesAffected
       ? p.batchesAffected.split(",").map((b) => b.trim()).filter(Boolean)
       : undefined,

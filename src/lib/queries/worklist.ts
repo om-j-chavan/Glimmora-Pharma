@@ -121,9 +121,6 @@ export interface WorklistDeviationTask {
     detectedBy: string;
     detectedDate: string | null;
     immediateAction: string;
-    patientSafetyImpact: string | null;
-    productQualityImpact: string | null;
-    regulatoryImpact: string | null;
   };
   deviationDocs: WorklistDoc[];   // parent deviation docs — read-only
   taskDocs: WorklistDoc[];        // worker's own task docs — removable
@@ -229,7 +226,7 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
         deviation: { select: {
           id: true, reference: true, title: true, description: true, severity: true,
           priority: true, area: true, siteId: true, detectedBy: true, detectedDate: true,
-          immediateAction: true, patientSafetyImpact: true, productQualityImpact: true, regulatoryImpact: true,
+          immediateAction: true,
           status: true, closureNotes: true, closedDate: true,
         } },
         // Stage 5 — flat append-only QA↔worker conversation (oldest first).
@@ -479,9 +476,6 @@ export const getWorklist = cache(async (userId: string, tenantId: string): Promi
       detectedBy: t.deviation.detectedBy,
       detectedDate: t.deviation.detectedDate ? t.deviation.detectedDate.toISOString() : null,
       immediateAction: t.deviation.immediateAction ?? "",
-      patientSafetyImpact: t.deviation.patientSafetyImpact,
-      productQualityImpact: t.deviation.productQualityImpact,
-      regulatoryImpact: t.deviation.regulatoryImpact,
     },
     deviationDocs: devDocsByDev.get(t.deviationId) ?? [],
     taskDocs: taskDocsByTask.get(t.id) ?? [],

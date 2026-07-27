@@ -14,7 +14,6 @@ export type DeviationSeverity = "critical" | "major" | "minor" | "Critical" | "M
 // "capa_pending" (Stage 1, deviation redesign): a CAPA was raised for a high/med
 // deviation; it stays OPEN + linked until the CAPA closes, then QA sign-closes.
 export type DeviationStatus = "open" | "under_investigation" | "pending_qa_review" | "capa_pending" | "closed" | "rejected";
-export type ImpactLevel = "high" | "medium" | "low" | "none";
 // Phase 1.5 — unified to canonical spaced values via the shared constant.
 export type DeviationRCAMethod = InvestigationRCAMethod;
 
@@ -92,9 +91,6 @@ export interface Deviation {
   capaDecisionReason?: string;
   capaDecisionAt?: string;
   capaDecisionById?: string;
-  patientSafetyImpact: ImpactLevel;
-  productQualityImpact: ImpactLevel;
-  regulatoryImpact: ImpactLevel;
   batchesAffected?: string[];
   linkedCAPAId?: string;
   /** Human-readable reference of the linked CAPA (resolved from the

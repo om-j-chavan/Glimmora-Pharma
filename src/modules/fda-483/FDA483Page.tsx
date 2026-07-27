@@ -476,7 +476,7 @@ export function FDA483Page({
   }, [serverCAPAs, dispatch]);
   const { capas } = useTenantData();
   const events = useMemo(() => prismaEvents.map(adaptEvent), [prismaEvents]);
-  const { org, sites, users } = useTenantConfig();
+  const { org, sites, users, tenantName } = useTenantConfig();
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -1100,6 +1100,10 @@ export function FDA483Page({
                       reference: liveEvent.referenceNumber,
                       agency: liveEvent.agency,
                       site: siteName,
+                      // The letter is signed by THIS tenant — same source the
+                      // Topbar renders. Blank falls back to a visible
+                      // "[Company Name]" placeholder, never a guessed company.
+                      companyName: org.companyName || tenantName || undefined,
                       inspectionDate: dayjs
                         .utc(liveEvent.inspectionDate)
                         .format(dateFormat),

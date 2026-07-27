@@ -10,7 +10,7 @@ import {
   Map, Shield, BookOpen, GraduationCap, Users, GitBranch, Database, Monitor, Flame,
   FileText, ClipboardList, CheckCircle2, Clock, AlertTriangle, Plus,
   ChevronRight, ChevronUp, UserCheck, X, ChevronDown, Calendar,
-  Link2 as LinkIcon,
+  Link2 as LinkIcon, LayoutDashboard, Activity,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type {
@@ -37,16 +37,23 @@ import {
 } from "@/store/readiness.slice";
 import { createInspection as createInspectionAction, completeInspection as completeInspectionAction } from "@/actions/inspections";
 import { auditLog } from "@/lib/audit";
+import { openAssistant } from "@/lib/assistant";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
+import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
 import { TabBar, StatCard, CardSection, DataTable, type Column } from "@/components/shared";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { RoadmapPrismaTab } from "./RoadmapPrismaTab";
 import { TrainingPrismaTab } from "./tabs/TrainingPrismaTab";
 import { PlaybooksPrismaTab } from "./tabs/PlaybooksPrismaTab";
+import { OverviewTab } from "./tabs/OverviewTab";
+import { ActivityTab } from "./tabs/ActivityTab";
+import { ResourcesDrawer } from "./ResourcesDrawer";
 
 /* ── Constants ── */
 
@@ -55,10 +62,10 @@ const BUCKETS: ReadinessBucket[] = ["Immediate", "31-60 days", "61-90 days"];
 const BUCKET_COLORS: Record<string, string> = { Immediate: "#ef4444", "31-60 days": "#f59e0b", "61-90 days": "#10b981" };
 const LANE_ICONS: Record<ReadinessLane, LucideIcon> = { People: Users, Process: GitBranch, Data: Database, Systems: Monitor, Documentation: FileText };
 const TABS = [
-  { id: "training", label: "Training & Simulations", Icon: GraduationCap },
-  { id: "playbooks", label: "Playbooks", Icon: BookOpen },
-  { id: "governance", label: "Governance", Icon: Shield },
-  { id: "roadmap", label: "Roadmap", Icon: Map },
+  { id: "overview", label: "Overview", Icon: LayoutDashboard },
+  { id: "tasks", label: "Tasks", Icon: ClipboardList },
+  { id: "training", label: "Training", Icon: GraduationCap },
+  { id: "activity", label: "Activity", Icon: Activity },
 ];
 type TabId = (typeof TABS)[number]["id"];
 
@@ -158,7 +165,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   // training still live in Redux — they have no Prisma model yet, so this is
   // a partial migration. After the prisma side is added, those Redux reads
   // should be replaced with props the same way `inspections` was.
-  const { cards, training, score: readinessScore, complete: completeCount, total: totalCards, activeInspectionId } = useAppSelector((s) => s.readiness);
+  const { cards, training, activeInspectionId } = useAppSelector((s) => s.readiness);
   const inspections = useMemo(() => prismaInspections.map(adaptInspection), [prismaInspections]);
   const { users, tenantId, allSites } = useTenantConfig();
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
@@ -172,6 +179,14 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   const activeInspection = tenantInspections.find((i) => i.id === activeInspectionId) ?? null;
   const activeInspections = tenantInspections.filter((i) => i.status !== "completed" && i.status !== "cancelled");
   const completedInspections = tenantInspections.filter((i) => i.status === "completed");
+
+  // Readiness figures derive from the SELECTED inspection's real ReadinessActions
+  // (Prisma, via adaptInspection), not the legacy Redux store — one source of
+  // truth that always matches the Roadmap tab. 0 when nothing is selected; the
+  // header hides the chip in that case rather than showing a misleading 0%.
+  const readinessScore = activeInspection?.readinessScore ?? 0;
+  const completeCount = activeInspection?.completedActions ?? 0;
+  const totalCards = activeInspection?.totalActions ?? 0;
 
   // Selected Prisma inspection (with relations) for the Roadmap tab and
   // the Complete modal — the adapted Inspection above loses the `actions`
@@ -201,7 +216,8 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   const roleLabel = (r: string) => ROLE_LABELS[r] ?? r;
   const simEligibleUsers = users.filter((u) => !["super_admin", "customer_admin", "viewer"].includes(u.role));
 
-  const [activeTab, setActiveTab] = useState<TabId>("training");
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [resourcesOpen, setResourcesOpen] = useState(false);
   // selectedPlaybook value is unused — only the setter resets it on tab change.
   const [, setSelectedPlaybook] = useState<Playbook | null>(null);
   const [addCardOpen, setAddCardOpen] = useState(false);
@@ -260,7 +276,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   }
 
   async function handleCreateInspection() {
-    if (!inspTitle.trim() || !inspSite || !inspLead) return;
+    if (!inspTitle.trim() || !inspSite || !inspLead || !inspDate) return;
     const site = allSites.find((s) => s.id === inspSite);
 
     const result = await createInspectionAction({
@@ -453,14 +469,17 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         titleIcon={Flame}
         title="Inspection Readiness Program"
         contentPadding={true}
-        description={`Prepare for inspections through readiness assessments and gap closure. \u00b7 ${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready`}
+        description={`Prepare for inspections through readiness assessments and gap closure.${activeInspection ? ` \u00b7 ${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready` : ""}`}
         actions={role !== "viewer" ? [{ label: "Add action", variant: "primary", icon: Plus, onClick: () => setAddCardOpen(true) }] : []}
         headerRight={
-          /* The readiness-score chip is a display widget, not a PageAction. */
-          <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-2xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
-            <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span>
-            <span className="text-[20px] font-bold" style={{ color: rsCol }}>{`${readinessScore}%`}</span>
-          </div>
+          /* The readiness-score chip is a display widget, not a PageAction.
+             Shown only when an inspection is selected \u2014 no misleading 0%. */
+          activeInspection ? (
+            <div className={clsx("flex items-center gap-2 px-4 py-2 rounded-2xl border", "bg-(--bg-elevated) border-(--bg-border)")}>
+              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>Readiness</span>
+              <span className="text-[20px] font-bold" style={{ color: rsCol }}>{`${readinessScore}%`}</span>
+            </div>
+          ) : null
         }
       >
         {/* Content below the header is unchanged; the space-y-5 that used to sit
@@ -482,7 +501,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
             ...(completedInspections.length > 0
               ? completedInspections.map((i) => ({
                   value: i.id,
-                  label: `\u2713 ${i.title} \u2014 ${i.siteName} (100%)`,
+                  label: `\u2713 ${i.title} \u2014 ${i.siteName} (${i.readinessScore}%)`,
                 }))
               : []),
           ]}
@@ -494,28 +513,55 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
             {activeInspection.expectedDate && <span>· Expected {dayjs.utc(activeInspection.expectedDate).tz(timezone).format("DD MMM YYYY")}</span>}
           </div>
         )}
+        <Button variant="secondary" size="sm" icon={BookOpen} onClick={() => setResourcesOpen(true)} className="ml-auto">
+          Resources
+        </Button>
+        <AIButton
+          variant="subtle"
+          size="sm"
+          onClick={() => openAssistant(activeInspection
+            ? `Help me prepare for my ${activeInspection.agency} inspection "${activeInspection.title}". What should I focus on to get inspection-ready?`
+            : "How do I prepare for a regulatory inspection?")}
+        >
+          Ask AI
+        </AIButton>
         {activeInspection && isAdmin && activeInspection.status !== "completed" && (
           <Button
             variant="secondary"
             size="sm"
             icon={CheckCircle2}
             onClick={() => setCompleteOpen(true)}
-            className="ml-auto"
           >
             Complete Inspection
           </Button>
         )}
         {(canScheduleSimulation) && (
-          <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateInspOpen(true)} className={activeInspection && isAdmin ? "" : "ml-auto"}>New Inspection</Button>
+          <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateInspOpen(true)}>New Inspection</Button>
         )}
       </div>
 
       {/* Tabs */}
       <TabBar tabs={TABS} activeTab={activeTab} onChange={(id) => { setActiveTab(id as TabId); setSelectedPlaybook(null); }} ariaLabel="Readiness sections" />
 
-      {/* ═══ TAB 1 — ROADMAP ═══ */}
-      {activeTab === "roadmap" && (
-        <section aria-label="Readiness roadmap">
+      {/* ═══ OVERVIEW ═══ */}
+      {activeTab === "overview" && (
+        selectedPrismaInspection ? (
+          <OverviewTab inspection={selectedPrismaInspection} isAdmin={isAdmin} onNavigate={(t) => setActiveTab(t as TabId)} />
+        ) : (
+          <div
+            className="text-center py-10 rounded-2xl border"
+            style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
+          >
+            <LayoutDashboard className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+            <p className="text-[14px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No inspection selected</p>
+            <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Select or create an inspection to see its overview.</p>
+          </div>
+        )
+      )}
+
+      {/* ═══ TASKS ═══ */}
+      {activeTab === "tasks" && (
+        <section aria-label="Readiness tasks">
           {selectedPrismaInspection ? (
             <RoadmapPrismaTab inspection={selectedPrismaInspection} isAdmin={isAdmin} />
           ) : (
@@ -693,8 +739,10 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         </section>
       )}
 
-      {/* ═══ TAB 2 — GOVERNANCE ═══ */}
-      {activeTab === "governance" && (
+      {/* Governance operating-model moved to the Resources drawer (Phase 3).
+          This block is disabled; physical removal is a follow-up cleanup. */}
+      {/* eslint-disable-next-line no-constant-binary-expression */}
+      {false && (
         <section aria-label="Governance model" className="flex flex-col gap-3">
           {/* ─── SECTION 1 — War room model ─── */}
           <CollapsibleSection id="war-room" icon={AlertTriangle} iconColor="#f59e0b" title="War room model" isOpen={openSections.has("war-room")} onToggle={() => toggleSection("war-room")}>
@@ -815,15 +863,20 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         </section>
       )}
 
-      {/* ═══ TAB 3 — PLAYBOOKS ═══ */}
-      {activeTab === "playbooks" && (
+      {/* Playbooks moved to the Resources drawer (Phase 3). Disabled block. */}
+      {/* eslint-disable-next-line no-constant-binary-expression */}
+      {false && (
         <PlaybooksPrismaTab playbooks={playbooks} isAdmin={isAdmin} />
       )}
 
-      {/* ═══ TAB 4 — TRAINING ═══ */}
+      {/* ═══ TRAINING ═══ */}
       {activeTab === "training" && (
         selectedPrismaInspection ? (
-          <TrainingPrismaTab inspection={selectedPrismaInspection} isAdmin={isAdmin} />
+          <TrainingPrismaTab
+            inspection={selectedPrismaInspection}
+            isAdmin={isAdmin}
+            teamMembers={simEligibleUsers.map((u) => ({ id: u.id, name: u.name, role: roleLabel(u.role) }))}
+          />
         ) : (
           <div
             className="text-center py-10 rounded-2xl border"
@@ -836,6 +889,22 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
             <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
               Select or create an inspection to view its training program.
             </p>
+          </div>
+        )
+      )}
+
+      {/* ═══ ACTIVITY ═══ */}
+      {activeTab === "activity" && (
+        selectedPrismaInspection ? (
+          <ActivityTab inspection={selectedPrismaInspection} />
+        ) : (
+          <div
+            className="text-center py-10 rounded-2xl border"
+            style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}
+          >
+            <Activity className="w-10 h-10 mx-auto mb-3" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+            <p className="text-[14px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>No inspection selected</p>
+            <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Select or create an inspection to see its activity.</p>
           </div>
         )
       )}
@@ -1038,22 +1107,22 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
       {/* ═══ CREATE INSPECTION MODAL ═══ */}
       <Modal open={createInspOpen} onClose={() => setCreateInspOpen(false)} title="Create New Inspection">
         <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
-          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Inspection title *</p><input className="input w-full" value={inspTitle} onChange={(e) => setInspTitle(e.target.value)} placeholder="FDA GMP Inspection Q2 2026" /></div>
+          <Input id="insp-title" label="Inspection title" required value={inspTitle} onChange={(e) => setInspTitle(e.target.value)} placeholder="FDA GMP Inspection Q2 2026" />
           <div className="grid grid-cols-2 gap-3">
             <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Agency *</p><Dropdown value={inspAgency} onChange={(v) => setInspAgency(v as InspectionAgency)} options={["FDA", "EMA", "MHRA", "WHO", "Internal"].map((a) => ({ value: a, label: a }))} width="w-full" /></div>
             <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Type *</p><Dropdown value={inspType} onChange={(v) => setInspType(v as InspectionType)} options={[{ value: "announced", label: "Announced" }, { value: "unannounced", label: "Unannounced" }, { value: "follow_up", label: "Follow-up" }, { value: "pre_approval", label: "Pre-approval" }]} width="w-full" /></div>
           </div>
           <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Site *</p><Dropdown value={inspSite} onChange={setInspSite} options={allSites.map((s) => ({ value: s.id, label: s.name }))} width="w-full" placeholder="Select site..." /></div>
-          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Expected date (optional)</p><input type="date" className="input w-full" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /></div>
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Expected date <span style={{ color: "var(--danger)" }}>*</span></p><input type="date" className="input w-full" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /><p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>Anchors the readiness countdown.</p></div>
           <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Inspection lead *</p><Dropdown value={inspLead} onChange={setInspLead} options={users.filter((u) => u.role === "qa_head" || u.role === "customer_admin").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} width="w-full" placeholder="Select lead..." /></div>
-          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Notes (optional)</p><textarea rows={2} className="input w-full resize-none" value={inspNotes} onChange={(e) => setInspNotes(e.target.value)} placeholder="Context or background..." /></div>
+          <Textarea id="insp-notes" label="Notes" rows={2} value={inspNotes} onChange={(e) => setInspNotes(e.target.value)} placeholder="Context or background..." />
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
             <Button variant="secondary" onClick={() => setCreateInspOpen(false)}>Cancel</Button>
-            <Button variant="primary" icon={Plus} disabled={!inspTitle.trim() || !inspSite || !inspLead} onClick={handleCreateInspection}>Create Inspection</Button>
+            <Button variant="primary" icon={Plus} disabled={!inspTitle.trim() || !inspSite || !inspLead || !inspDate} onClick={handleCreateInspection}>Create Inspection</Button>
           </div>
         </div>
       </Modal>
-      <Popup isOpen={inspCreatedPopup} variant="success" title="Inspection created" description={`${inspTitle || "Inspection"} created. Readiness: 0%`} onDismiss={() => setInspCreatedPopup(false)} />
+      <Popup isOpen={inspCreatedPopup} variant="success" title="Inspection created" description={`${inspTitle || "Inspection"} created with its readiness plan. Open it to start preparing.`} onDismiss={() => setInspCreatedPopup(false)} />
 
       {/* ═══ COMPLETE INSPECTION MODAL ═══ */}
       <Modal open={completeOpen} onClose={resetCompleteForm} title="Complete Inspection">
@@ -1134,6 +1203,9 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         description="The inspection has been archived. Audit trail updated."
         onDismiss={() => setCompletedPopup(false)}
       />
+
+      {/* Resources drawer — Playbooks library + inspection operating-model reference */}
+      <ResourcesDrawer open={resourcesOpen} onClose={() => setResourcesOpen(false)} playbooks={playbooks} isAdmin={isAdmin} />
         </div>
       </PageLayout>
   );

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, RefreshCw, Plus, Trash2, AlertTriangle, CheckCircle2, Send, Sparkles, RotateCcw, Copy, Check } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { Button } from "@/components/ui/Button";
+import { AIButton } from "@/components/ai";
 import { Modal } from "@/components/ui/Modal";
 import { DataTable, type Column } from "@/components/shared";
 import {
@@ -368,15 +369,14 @@ export function AiCapaPage({ capaId }: Props) {
             </div>
           )}
           <div className="flex items-center gap-2 mt-3 flex-wrap">
-            <Button
-              variant="primary"
-              icon={Sparkles}
+            <AIButton
               loading={registering}
+              loadingLabel="Registering…"
               disabled={!localCapa || !customerId}
               onClick={registerWithAiBackend}
             >
               Register with AI backend
-            </Button>
+            </AIButton>
             <Button variant="secondary" onClick={() => router.push("/capa")}>Back to CAPA Tracker</Button>
             <Button variant="ghost" onClick={() => router.push("/ai-capa")}>View all AI CAPAs</Button>
           </div>

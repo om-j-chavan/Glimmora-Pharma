@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { useAppSelector } from "@/hooks/useAppSelector";
+import { AIButton, AIBadge } from "@/components/ai";
 import { getApprovalBrief, type ApprovalBriefResult } from "@/lib/ai";
 import type { CAPA } from "@/store/capa.slice";
 
@@ -112,11 +111,7 @@ export function ApprovalBriefPanel({
           <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
           AI approval brief
         </h3>
-        {brief && (
-          <Badge variant={brief.source === "backend" ? "green" : "gray"}>
-            {brief.source === "backend" ? "AI" : "Demo data"}
-          </Badge>
-        )}
+        {brief && <AIBadge source={brief.source} />}
       </div>
 
       <p className="text-[11px] mb-2" style={{ color: "var(--text-secondary)" }}>
@@ -125,14 +120,9 @@ export function ApprovalBriefPanel({
       </p>
 
       {!brief && !loading && (
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={Sparkles}
-          onClick={() => void generate()}
-        >
+        <AIButton variant="subtle" size="sm" onClick={() => void generate()}>
           Generate AI brief
-        </Button>
+        </AIButton>
       )}
 
       {loading && (

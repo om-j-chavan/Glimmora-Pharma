@@ -141,12 +141,18 @@ issue you can now fix at the source.
 The **Deviation Management** page. KPIs: **Total 5 · Open 1 · Under investigation 3 ·
 Overdue 4**. The **Deviation Intelligence** panel shows **"2 patterns"** with a note
 *"AI-clustered patterns across 5 deviations. Suggestions are advisory…"*:
-- **Recurring deviations in Manufacturing** — 2 deviations, 74% confidence; chips *2 major,
+- **Recurring deviations in Manufacturing** — 2 deviations, 74% pattern strength; chips *2 major,
   EM Excursion, Out Of Specification*; **Suggested root cause** about out-of-specification
   controls; cluster members `DEV-CHN-2026-001`, `DEV-CHN-2026-002`.
-- **Recurring deviations in QC Lab** — 2 deviations, 74% confidence; chips *1 major, 1 minor,
+- **Recurring deviations in QC Lab** — 2 deviations, 74% pattern strength; chips *1 major, 1 minor,
   Documentation, Qualification Overdue*; **Suggested root cause** about
   qualification/calibration scheduling; members `DEV-CHN-2026-003`, `DEV-CHN-2026-004`.
+
+> **Pattern strength is not an AI confidence score.** It is derived from cluster size
+> alone (`min(95, 50 + count × 12)`), so 2 members always reads 74%. The **Advisory
+> risk flag** (High/Medium/Low) is likewise a deterministic rule over the cluster's
+> severity mix — not a model prediction. The **AI / Demo data** badge in the panel
+> header tells you whether the run reached the real backend or fell back to demo data.
 
 ### ❌ What the AI cannot do
 - Close deviations
