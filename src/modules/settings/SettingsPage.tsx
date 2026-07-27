@@ -28,16 +28,18 @@ type TabId = (typeof ALL_TABS)[number]["id"];
 
 export function SettingsPage() {
   const [active, setActive] = useState<TabId>("org");
-  const { canManageSettings, isQAHead, role } = usePermissions();
+  const { canManageSettings, role } = usePermissions();
   const readOnly = !canManageSettings;
   // Tab-level view gating. Both the tab bar and the panels below map over
   // visibleTabs, so excluding a tab here removes the tab button AND its rendered
   // panel (the data never reaches a denied role's DOM).
-  //  - Permissions: qa_head excluded (existing behaviour).
+  //  - Permissions: hidden from the tab strip for everyone. The tab entry,
+  //    import, and rendered panel are intentionally PRESERVED (not deleted) so it
+  //    is a one-line re-enable; only its visibility in `visibleTabs` is removed.
   //  - Subscription: plan / user-site limits / billing term / retention is
   //    admin-tier info → customer_admin / super_admin only.
   const visibleTabs = ALL_TABS.filter((t) => {
-    if (t.id === "permissions" && isQAHead) return false;
+    if (t.id === "permissions") return false;
     if (t.id === "subscription" && !canManageSettings) return false;
     return true;
   });

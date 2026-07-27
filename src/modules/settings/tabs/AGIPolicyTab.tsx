@@ -1,15 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { updateAGI, toggleAgent } from "@/store/settings.slice";
 import type { AGISettings } from "@/store/settings.slice";
-import { Settings, Zap, Save, ChevronDown, ShieldCheck } from "lucide-react";
-import { Popup } from "@/components/ui/Popup";
-import { Button } from "@/components/ui/Button";
+import { Settings, Zap, ChevronDown, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Toggle } from "@/components/ui/Toggle";
 
@@ -71,7 +69,12 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
   const router = useRouter();
   const activeAgentCount = Object.values(agi.agents).filter(Boolean).length;
   const computedMode = computeMode(agi.agents);
-  const [saved, setSaved] = useState(false);
+  // Auto-save the derived operating mode whenever the agent toggles change it.
+  // Confidence + agent toggles already persist inline (onChange), so agi.mode
+  // stays in sync without a manual Save button.
+  useEffect(() => {
+    if (!readOnly) dispatch(updateAGI({ mode: computedMode }));
+  }, [computedMode, readOnly, dispatch]);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
@@ -253,27 +256,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
         </fieldset>
       </div>
 
-      {/* Save policy button */}
-      {!readOnly && (
-        <div className="flex justify-end">
-          <Button icon={Save} onClick={() => {
-            dispatch(updateAGI({ mode: computedMode }));
-            setSaved(true);
-          }}>
-            Save policy
-          </Button>
-        </div>
-      )}
       </div>
-
-      {/* Popups */}
-      <Popup
-        isOpen={saved}
-        variant="success"
-        title="AGI policy saved"
-        description="Mode, confidence threshold, and agent settings applied."
-        onDismiss={() => setSaved(false)}
-      />
     </section>
   );
 }

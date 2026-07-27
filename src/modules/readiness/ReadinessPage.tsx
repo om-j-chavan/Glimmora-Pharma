@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import clsx from "clsx";
 import {
-  Map, Shield, BookOpen, GraduationCap, Users, GitBranch, Database, Monitor,
+  Map, Shield, BookOpen, GraduationCap, Users, GitBranch, Database, Monitor, Flame,
   FileText, ClipboardList, CheckCircle2, Clock, AlertTriangle, Plus,
   ChevronRight, ChevronUp, UserCheck, X, ChevronDown, Calendar,
   Link2 as LinkIcon,
@@ -450,6 +450,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
 
   return (
       <PageLayout
+        titleIcon={Flame}
         title="Inspection Readiness Program"
         contentPadding={true}
         description={`Prepare for inspections through readiness assessments and gap closure. \u00b7 ${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready`}

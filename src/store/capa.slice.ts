@@ -159,6 +159,13 @@ export interface CAPAActionItem {
   completedById?: string | null;
   completedAt?: string | null;
   completionNotes?: string | null;
+  // Phase 2 — per-person QA acceptance (written by acceptWork). The QA reviewer
+  // who accepted; the worker is the item's own owner/ownerId. NOT a Part 11
+  // signature — a review step; only closure is signed.
+  acceptedBy?: string | null;
+  acceptedById?: string | null;
+  acceptedAt?: string | null;
+  acceptanceNotes?: string | null;
   // Phase 4 — targeted-reject rework metadata (kept as history even after the
   // item is re-completed).
   reworkReason?: string | null;

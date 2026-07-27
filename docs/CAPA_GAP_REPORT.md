@@ -138,7 +138,7 @@ Insert-only. `notes`, `statusAtTime`, `createdBy`, `createdAt`. ALCOA+ Original-
 | Investigation report sign-off | §3.6 | **No field** |
 | Structured action items (own row, owner, due, status, EC criteria) | §4.1-4.6 | **No model** — actions are free-text in `CAPA.correctiveActions` |
 | **Effectiveness Criteria locked at Stage 4** | §4.6 | **No field, no immutability** |
-| Action-to-cause alignment flag (cosmetic CAPA) | §4.7 | **No field** |
+| Action-to-cause alignment flag (cosmetic CAPA) | §4.7 | **BUILT (manual)** — `alignmentStatus` + different-reviewer override SoD; hard-blocks `submitForReview` via readiness. AI-104 auto-detection still absent. |
 | Change Control entity + bidirectional link | §4.8, §6.4 | **No model** |
 | Tiered approval routing | §5.2 | **No model** — single QA gate |
 | Reviewer comment thread + adjudication | §5.3 | **No model** |
@@ -267,7 +267,7 @@ Legend: **[DONE]** matches spec · **[PARTIAL]** implemented but missing fields/
 | 4.4 Action Owner & Timeline Assignment | **DRIFT** | [prisma/schema.prisma:145,146](../prisma/schema.prisma) | One `owner` and one `dueDate` for the entire CAPA — not per action. |
 | 4.5 Resource Estimation | **MISSING** | — | No personnel/capital/time fields. |
 | 4.6 **Effectiveness Criteria Definition (LOCKED)** | **MISSING** | — | **No EC criteria field at all.** `effectivenessCheck: Boolean` is just a yes/no. Spec mandates measurable, time-bound criteria locked at this stage and **not modifiable post-implementation** — currently nothing prevents post-closure edits. **HIGH RISK.** |
-| 4.7 Action-to-Cause Alignment Check (AI-104) | **MISSING** | — | No cosmetic-CAPA detection. AI-104 absent. |
+| 4.7 Action-to-Cause Alignment Check (AI-104) | **PARTIAL** | src/lib/capa-alignment.ts, src/actions/capas/alignment.ts | Manual reviewer version BUILT (aligned/cosmetic/needs_review + different-reviewer override; hard-blocks submitForReview via readiness). AI-104 auto-detection (compare actions vs RCA) still unbuilt. |
 | 4.8 Change Control Linkage | **MISSING** | — | No `ChangeControl` model. No CAPA↔CC link. Grep `ChangeControl\|change_control\|ECO` → **0 functional hits.** |
 
 ### Stage 5 — Approval & Authorization

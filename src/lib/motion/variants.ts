@@ -33,6 +33,16 @@ export const scaleFade: Variants = {
   visible: { opacity: 1, scale: 1, transition: { duration: DURATION.moderate, ease: EASE.out } },
 };
 
+/** Modal-specific — the SAME subtle scale-fade as `scaleFade`, but at `fast`
+ *  (0.2s) instead of `moderate` (0.45s) so modal open feels snappier and less
+ *  stuttery. Opacity + scale only (no layout shift), ease `out` for the snappy
+ *  decelerate. Separate from `scaleFade` so drawers/popovers keep the slower
+ *  `moderate` tempo — the token is untouched. */
+export const scaleFadeFast: Variants = {
+  hidden: { opacity: 0, scale: 0.96 },
+  visible: { opacity: 1, scale: 1, transition: { duration: DURATION.fast, ease: EASE.out } },
+};
+
 /** Drawers and side panels — slide in from the right. */
 export const slideRight: Variants = {
   hidden: { opacity: 0, x: 24 },
@@ -70,7 +80,7 @@ export const staggerContainerReduced: Variants = {
  * preference (from usePrefersReducedMotion) and get back the right Variants. */
 
 /** Named entrance variants selectable by the <Motion*> primitives. */
-export const ENTRANCE_VARIANTS = { fadeUp, fade, scaleFade, slideRight } as const;
+export const ENTRANCE_VARIANTS = { fadeUp, fade, scaleFade, scaleFadeFast, slideRight } as const;
 export type EntranceVariantName = keyof typeof ENTRANCE_VARIANTS;
 
 /** Entrance variant for a name, collapsed to opacity-only under reduced motion. */

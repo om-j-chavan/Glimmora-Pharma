@@ -141,7 +141,10 @@ function makeUserSchema(mode: "add" | "edit") {
 
 type UserFormValues = z.infer<ReturnType<typeof makeUserSchema>>;
 
-const ROLE_OPTIONS_ALL = ROLE_ORDER.map((v) => ({ value: v, label: roleLabel(v) }));
+// customer_admin is intentionally excluded from the role PICKER (UI hide only).
+// The server-side gates are unchanged and still accept customer_admin, and any
+// existing customer_admin users remain visible in the list below.
+const ROLE_OPTIONS_ALL = ROLE_ORDER.filter((v) => v !== "customer_admin").map((v) => ({ value: v, label: roleLabel(v) }));
 const ROLE_OPTIONS_CUSTOMER_ADMIN = ROLE_ORDER.filter((v) =>
   TENANT_ROLES_FOR_CUSTOMER_ADMIN.includes(v),
 ).map((v) => ({ value: v, label: roleLabel(v) }));
@@ -803,11 +806,8 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             id="users-heading"
             className="text-[15px] font-semibold text-(--text-primary)"
           >
-            Users
+            Users ({userCount}/{userLimit})
           </h2>
-          <span className="ml-2 text-[11px] bg-(--brand-muted) text-(--brand) px-2 py-0.5 rounded-full font-semibold">
-            {visibleUsers.length}
-          </span>
         </div>
         {!readOnly && (
           <Button
@@ -967,17 +967,6 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           </p>
         </div>
       )}
-
-      {/* Usage bar */}
-      {/* <PlanLimitUsageBar
-        icon={Users}
-        label="Team members"
-        count={userCount}
-        limit={userLimit}
-        plan={tenantPlan}
-        atLimit={atPlanLimit}
-        nearLimit={nearPlanLimit}
-      /> */}
 
       {/* Table card */}
       <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden">

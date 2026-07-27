@@ -11,7 +11,7 @@ import {
   Mail,
   Lock,
   LogIn,
-  ChevronDown,
+  KeyRound,
   Eye,
   EyeOff,
   AlertCircle,
@@ -536,19 +536,27 @@ export function LoginPage() {
         <div className="mt-4" style={{ display: loadingTenant ? "none" : undefined }}>
           <button
             type="button"
-            onClick={() => setShowCreds((v) => !v)}
+            onClick={() => setShowCreds(true)}
             suppressHydrationWarning
             className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-[11px] font-medium border transition-all duration-150 bg-transparent border-(--bg-border) text-(--text-secondary) hover:text-(--text-primary) hover:border-(--brand)"
           >
-            <ChevronDown
-              className={clsx("w-3.5 h-3.5 transition-transform", showCreds && "rotate-180")}
-              strokeWidth={2}
-            />
-            {showCreds ? "Hide" : "Show"} dev credentials
+            <KeyRound className="w-3.5 h-3.5" strokeWidth={2} aria-hidden="true" />
+            Developer Credentials
           </button>
 
-          {showCreds && (
-            <div className="mt-2 rounded-2xl overflow-hidden border border-(--bg-border) bg-(--bg-surface)">
+          <Modal
+            open={showCreds}
+            onClose={() => setShowCreds(false)}
+            title="Developer Credentials"
+            footer={
+              <div className="flex justify-end">
+                <Button variant="secondary" onClick={() => setShowCreds(false)}>
+                  Close
+                </Button>
+              </div>
+            }
+          >
+            <div className="rounded-2xl overflow-hidden border border-(--bg-border) bg-(--bg-surface)">
               <table className="w-full border-collapse text-[11px]">
                 <thead>
                   <tr className="border-b border-(--bg-border)">
@@ -577,7 +585,7 @@ export function LoginPage() {
                 Click any row to auto-fill
               </div>
             </div>
-          )}
+          </Modal>
         </div>
         )}
         </div>

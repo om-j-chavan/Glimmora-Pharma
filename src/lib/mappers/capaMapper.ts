@@ -72,6 +72,12 @@ type PrismaCAPA = {
     completedById: string | null;
     completedAt: Date | null;
     completionNotes: string | null;
+    // Phase 2 — per-person QA acceptance (written by acceptWork). NOT a Part 11
+    // signature; attribution also lives in the CAPA_WORK_ACCEPTED audit row.
+    acceptedBy: string | null;
+    acceptedById: string | null;
+    acceptedAt: Date | null;
+    acceptanceNotes: string | null;
     reworkReason: string | null;
     reworkRequestedById: string | null;
     reworkRequestedAt: Date | null;
@@ -222,6 +228,10 @@ export function mapCAPAFromPrisma(row: PrismaCAPA): CAPA {
           completedById: a.completedById,
           completedAt: a.completedAt ? a.completedAt.toISOString() : null,
           completionNotes: a.completionNotes,
+          acceptedBy: a.acceptedBy,
+          acceptedById: a.acceptedById,
+          acceptedAt: a.acceptedAt ? a.acceptedAt.toISOString() : null,
+          acceptanceNotes: a.acceptanceNotes,
           reworkReason: a.reworkReason,
           reworkRequestedById: a.reworkRequestedById,
           reworkRequestedAt: a.reworkRequestedAt ? a.reworkRequestedAt.toISOString() : null,

@@ -68,7 +68,7 @@ export function Modal({ open, onClose, title, header, children, footer, classNam
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={persistent ? undefined : onClose}>
       <MotionDiv variant="fade" aria-hidden className="absolute inset-0 bg-black/50" />
       <MotionDiv
-        variant="scaleFade"
+        variant="scaleFadeFast"
         ref={panelRef}
         tabIndex={-1}
         role="dialog"

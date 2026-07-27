@@ -279,7 +279,11 @@ export function DatePicker({
         )}
       >
         <span className={selected ? "text-(--text-primary)" : "text-(--text-muted)"}>
-          {selected ? selected.format("MMM D, YYYY") : placeholder}
+          {/* DD/MM/YYYY is the app-wide date format (the tenant default in
+              useTenantConfig, and what every read surface renders). This trigger
+              was the lone "MMM D, YYYY" outlier across all DatePicker usages.
+              Display only — value in/out stays "YYYY-MM-DD" (see selectDay). */}
+          {selected ? selected.format("DD/MM/YYYY") : placeholder}
         </span>
         <Calendar className="w-3.5 h-3.5 shrink-0 text-(--text-muted)" aria-hidden="true" />
       </button>

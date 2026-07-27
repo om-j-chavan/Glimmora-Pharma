@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CreditCard, Users, MapPin, Archive, Info, ShieldCheck } from "lucide-react";
+import { CreditCard, Users, MapPin, Info, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { PlanLimitUsageBar } from "@/components/shared";
@@ -30,11 +30,9 @@ export function SubscriptionTab() {
     plan,
     usedAccounts,
     maxUsers,
-    accountsRemaining,
     isAtAccountLimit,
     usedSites,
     maxSites,
-    sitesRemaining,
     isAtSiteLimit,
     daysRemaining,
   } = useTenantConfig();
@@ -91,53 +89,41 @@ export function SubscriptionTab() {
 
   return (
     <div className="w-full space-y-5">
-      {/* 1. Plan summary */}
+      {/* 1. Plan details — single horizontal row that stacks below `sm`.
+          Cost / interval is intentionally omitted: PlanConfig carries no
+          price/billing field, and the spec says not to render a placeholder. */}
       <Card
         header={
-          <>
-            <div className="flex items-center gap-2">
-              <CreditCard className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" />
-              <span className="card-title">Plan</span>
-            </div>
-            <Badge variant={status.variant}>{status.text}</Badge>
-          </>
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" />
+            <span className="card-title">Plan</span>
+          </div>
         }
       >
-        <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-3">
-          <div>
-            <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Tier</p>
-            <p className="text-[14px] font-semibold" style={{ color: "var(--text-primary)" }}>{label}</p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Term</p>
-            <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
-              {dayjs.utc(plan.startDate).format("DD MMM YYYY")} &ndash; {dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}
-            </p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Duration</p>
-            <p className="text-[13px] font-medium" style={{ color: "var(--text-primary)" }}>
-              {plan.durationMonths} month{plan.durationMonths === 1 ? "" : "s"}
-            </p>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>
-              {state === "expired" ? "Expired" : "Expires"}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
+          {/* Plan name */}
+          <p className="text-[18px] font-bold" style={{ color: "var(--text-primary)" }}>{label}</p>
+          {/* Plan type */}
+          <Badge variant="blue">{plan.tier}</Badge>
+          {/* Renewal date (pushed right on wide screens) */}
+          <div className="sm:ml-auto text-left sm:text-right">
+            <p className="text-[11px] uppercase tracking-wider mb-0.5" style={{ color: "var(--text-muted)" }}>
+              {state === "expired" ? "Expired" : "Renews"}
             </p>
             <p className="text-[13px] font-medium" style={{ color: state === "expired" ? "var(--danger)" : "var(--text-primary)" }}>
-              {state === "expired"
-                ? `on ${dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}`
-                : daysRemaining !== null
-                  ? `in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}`
-                  : "—"}
+              {dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}
+              {state !== "expired" && daysRemaining !== null ? ` · in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}` : ""}
             </p>
           </div>
+          {/* Status pill */}
+          <Badge variant={status.variant}>{status.text}</Badge>
         </div>
       </Card>
 
-      {/* Capacity — explicit Total / Current / Remaining for users and sites
-          (item 3), read-only. Numbers come from useTenantConfig (the same source
-          the meters below use), so they always agree with the usage bars. */}
+      {/* Capacity — consolidated. Quota resources (Users, Sites) show used/limit
+          + a progress bar via the shared PlanLimitUsageBar; Retention and Expiry
+          are value-only rows (no bar). Storage is intentionally omitted — the
+          data model tracks no storage quota (do not add a placeholder). */}
       <Card
         header={
           <div className="flex items-center gap-2">
@@ -146,40 +132,25 @@ export function SubscriptionTab() {
           </div>
         }
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {[
-            { icon: Users, label: "Users", total: maxUsers, current: usedAccounts, remaining: accountsRemaining, atLimit: isAtAccountLimit },
-            { icon: MapPin, label: "Sites", total: maxSites, current: usedSites, remaining: sitesRemaining, atLimit: isAtSiteLimit },
-          ].map((row) => (
-            <div key={row.label} className="rounded-lg p-3" style={{ background: "var(--bg-surface)", border: "1px solid var(--bg-border)" }}>
-              <div className="flex items-center gap-1.5 mb-2">
-                <row.icon className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>{row.label}</p>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <p className="text-[16px] font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{row.total}</p>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Total</p>
-                </div>
-                <div>
-                  <p className="text-[16px] font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>{row.current}</p>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Current</p>
-                </div>
-                <div>
-                  <p className="text-[16px] font-bold tabular-nums" style={{ color: row.atLimit ? "var(--danger)" : "var(--success)" }}>{row.remaining}</p>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Remaining</p>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="space-y-4">
+          <PlanLimitUsageBar icon={Users} label="Users" count={usedAccounts} limit={maxUsers} plan={label} atLimit={isAtAccountLimit} nearLimit={userNear} />
+          <PlanLimitUsageBar icon={MapPin} label="Sites" count={usedSites} limit={maxSites} plan={label} atLimit={isAtSiteLimit} nearLimit={siteNear} />
+          {/* Retention — value only (fixed per tier, no quota bar) */}
+          <div className="flex items-center justify-between pt-3 border-t border-(--bg-border)">
+            <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Retention</span>
+            <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+              {plan.minRetentionYears} year{plan.minRetentionYears === 1 ? "" : "s"}
+            </span>
+          </div>
+          {/* Expiry — value only */}
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>Expiry</span>
+            <span className="text-[13px]" style={{ color: state === "expired" ? "var(--danger)" : "var(--text-secondary)" }}>
+              {dayjs.utc(plan.expiryDate).format("DD MMM YYYY")}
+            </span>
+          </div>
         </div>
       </Card>
-
-      {/* 2. Usage vs caps — the "why am I blocked" answer, made visible */}
-      <div className="space-y-3">
-        <PlanLimitUsageBar icon={Users} label="Users" count={usedAccounts} limit={maxUsers} plan={label} atLimit={isAtAccountLimit} nearLimit={userNear} />
-        <PlanLimitUsageBar icon={MapPin} label="Sites" count={usedSites} limit={maxSites} plan={label} atLimit={isAtSiteLimit} nearLimit={siteNear} />
-      </div>
 
       {/* Per-role limits — READ-ONLY (item 3). LIMIT / USED / REMAINING from the
           resolver (getMyRoleMatrix). No edit controls; caps are SA-managed. Shown
@@ -223,22 +194,6 @@ export function SubscriptionTab() {
         </div>
       )}
 
-      {/* 3. Retention — read-only / informational */}
-      <Card
-        header={
-          <div className="flex items-center gap-2">
-            <Archive className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" />
-            <span className="card-title">Retention</span>
-          </div>
-        }
-      >
-        <p className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-          Minimum retention: <strong>{plan.minRetentionYears} year{plan.minRetentionYears === 1 ? "" : "s"}</strong>
-        </p>
-        <p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>
-          Records and audit history are retained for at least this period under your plan. Retention is fixed for your tier and managed by the platform administrator.
-        </p>
-      </Card>
     </div>
   );
 }
