@@ -11,7 +11,6 @@ import {
   Globe,
   LogOut,
   Menu,
-  Bell,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -21,6 +20,8 @@ import { loadRegions } from "@/actions/regions";
 import { logout as nextAuthLogout, fetchCurrentUser } from "@/lib/authClient";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { ColorThemePicker } from "@/components/ui/ColorThemePicker";
+import { NotificationBell } from "@/components/layout/NotificationBell";
+import { NotificationCountProvider } from "@/components/notifications/NotificationCountProvider";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { logoutMessage } from "@/lib/labels/logout";
 import { useToast } from "@/components/ui/Toast";
@@ -315,15 +316,13 @@ export function AdminShell({ children }: { children?: React.ReactNode }) {
             <div className="hidden md:block"><ColorThemePicker /></div>
             <ThemeToggle />
 
-            {/* Notifications */}
-            <button
-              type="button"
-              aria-label="Notifications"
-              className="relative inline-flex items-center justify-center w-9 h-9 rounded-lg cursor-pointer transition-all"
-              style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)", color: "var(--text-secondary)" }}
-            >
-              <Bell size={15} aria-hidden="true" />
-            </button>
+            {/* Notifications — a real, live bell (NTF-004). Platform-scoped rows
+                (e.g. ticket escalations, NTF-003) are addressed to the SA's own
+                id, which the bell reads. Its own count provider so the badge
+                polls here too. */}
+            <NotificationCountProvider>
+              <NotificationBell />
+            </NotificationCountProvider>
 
             {/* User */}
             <div className="flex items-center gap-2">

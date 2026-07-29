@@ -479,6 +479,9 @@ export async function addTicketMessage(
           linkPath: `/support/${ticket.id}`,
           entityType: "Ticket",
           entityId: ticket.id,
+          source: "user",
+          // Successive replies are meaningful — never collapse them.
+          dedupe: false,
         });
       } else {
         // Requester replied → notify the CURRENT HANDLER TIER (gap fix): the CA
@@ -495,6 +498,9 @@ export async function addTicketMessage(
           linkPath: `/support/${ticket.id}`,
           entityType: "Ticket",
           entityId: ticket.id,
+          source: "user" as const,
+          // Successive replies are meaningful — never collapse them.
+          dedupe: false,
         })));
       }
     }
@@ -654,7 +660,13 @@ export async function escalateTicket(
         .filter((sa) => sa.id !== session.user.id)
         .map((sa) =>
           notify({
-            tenantId: ticket.tenantId,
+            // NTF-003 fix: store under the RECIPIENT super_admin's own scope, not
+            // the customer's tenant. For a tenant-level login id === tenantId, and
+            // the bell/page read with `tenantId = session.user.tenantId (= sa.id)`,
+            // so writing ticket.tenantId here made escalations permanently
+            // invisible to the platform admin. Tenant isolation is preserved:
+            // only that SA can read a row scoped to their own id.
+            tenantId: sa.id,
             recipientUserId: sa.id,
             actorUserId: session.user.id,
             type: "TICKET_ESCALATED",

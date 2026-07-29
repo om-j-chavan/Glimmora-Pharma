@@ -9,6 +9,7 @@ import { usePlanLimits } from "@/hooks/usePlanLimits";
 import { NoSitesPopup, TabBar, PlanLimitPopup, StatusGuide } from "@/components/shared";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { FINDING_STATUSES } from "@/constants/statusTaxonomy";
+import { isOpenFinding } from "@/lib/kpi";
 import dayjs from "@/lib/dayjs";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -235,16 +236,36 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   [findings, siteFilter, areaFilter, frameworkFilter, severityFilter, statusFilter]);
 
   /* ── Computed ── */
+  // "Open" here is the OUTSTANDING aggregate (every status except Closed) —
+  // the canonical predicate from the shared KPI library, not a re-typed inline
+  // copy. It is deliberately NOT the individual "Open" status: In Progress /
+  // Submitted / Rework findings are outstanding too. Anything rendering this
+  // number must label it as an aggregate (see statusBreakdown below).
   const criticalCount = baseFindings.filter((f) => f.severity === "Critical").length;
   const highCount = baseFindings.filter((f) => f.severity === "High").length;
   const lowCount = baseFindings.filter((f) => f.severity === "Low").length;
-  const openCount = baseFindings.filter((f) => f.status !== "Closed").length;
+  const openCount = baseFindings.filter(isOpenFinding).length;
   const closedCount = baseFindings.filter((f) => f.status === "Closed").length;
-  const overdueCount = baseFindings.filter((f) => f.status !== "Closed" && dayjs.utc(f.targetDate).isBefore(dayjs())).length;
+  const overdueCount = baseFindings.filter((f) => isOpenFinding(f) && dayjs.utc(f.targetDate).isBefore(dayjs())).length;
+
+  // Per-status counts over the SAME filtered set the tiles use, in taxonomy
+  // order. Lets the Summary tile name the real statuses in view instead of
+  // collapsing five statuses onto the single word "open".
+  const statusBreakdown = useMemo(
+    () =>
+      Object.keys(FINDING_STATUSES)
+        .map((status) => ({
+          status,
+          label: FINDING_STATUSES[status].label,
+          count: baseFindings.filter((f) => f.status === status).length,
+        }))
+        .filter((s) => s.count > 0),
+    [baseFindings],
+  );
 
   const topDrivers = useMemo(() => {
     const map: Record<string, { count: number; critical: number; high: number }> = {};
-    baseFindings.filter((f) => f.status !== "Closed").forEach((f) => {
+    baseFindings.filter(isOpenFinding).forEach((f) => {
       if (!map[f.area]) map[f.area] = { count: 0, critical: 0, high: 0 };
       map[f.area].count++;
       if (f.severity === "Critical") map[f.area].critical++;
@@ -521,6 +542,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
           findingsTotal={findings.length} baseCount={baseFindings.length}
           criticalCount={criticalCount} highCount={highCount} lowCount={lowCount}
           openCount={openCount} closedCount={closedCount} overdueCount={overdueCount}
+          statusFilter={statusFilter} statusBreakdown={statusBreakdown}
           topDrivers={topDrivers} severityData={severityData} renderFilters={renderFilters}
           lastClosedFinding={(() => {
             const closed = baseFindings.filter((f) => f.status === "Closed");

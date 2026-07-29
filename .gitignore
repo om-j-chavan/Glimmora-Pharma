@@ -51,6 +51,9 @@ oapi.tmp.json
 prisma/dev.db
 prisma/dev.db-journal
 prisma/dev.db.backup-*
+# Derived local-dev schema (sqlite provider) written by scripts/generate-dev-client.mjs.
+# Never commit — prisma/schema.prisma is the single committed source of truth.
+prisma/schema.dev-sqlite.prisma
 *.db
 *.db-journal
 

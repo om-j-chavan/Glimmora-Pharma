@@ -135,8 +135,8 @@ export function useTenantData() {
   // The roadmap / fda483 / agiDrift slices were deleted in the server-first
   // migration. /csv-csa, /fda-483, etc. each fetch their own Prisma data
   // server-side now. We return empty arrays here typed as the real entity
-  // types so consumers (Dashboard, Governance, AGI, Evidence,
-  // useNotificationEngine) type-check correctly even though the data is empty.
+  // types so consumers (Dashboard, Governance, AGI, Evidence) type-check
+  // correctly even though the data is empty.
   // Wiring those consumers to server-fetched props is a separate (deferred)
   // project — until then their UIs render zero values. (systems is the
   // exception: it has a slice again and is seeded above.)

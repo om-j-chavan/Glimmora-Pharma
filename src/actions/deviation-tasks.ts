@@ -239,7 +239,7 @@ export async function submitDeviationTask(
       tenantId: session.user.tenantId,
       recipientUserId: task.createdById,
       actorUserId: actor.userId,
-      type: "ACTION_ASSIGNED",
+      type: "REVIEW_REQUESTED",
       title: `Deviation task submitted for review (${task.deviation.reference ?? task.deviation.id.slice(0, 8)})`,
       body: parsed.data.completionNotes.slice(0, 200),
       linkPath: "/deviation",

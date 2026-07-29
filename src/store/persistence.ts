@@ -7,7 +7,11 @@ const VERSION_KEY = "glimmora-version";
 // v46: framework enablement removed from the settings slice (Phase 1, Item 4) —
 // forces existing clients to drop any cached settings.frameworks so no stale
 // per-browser framework toggle can survive (the cross-tenant leak fix).
-const CURRENT_VERSION = "46";
+// v47: the dead client notification engine + its persisted slice were removed
+// (Notification Center consolidation). Bumping evicts the orphaned
+// `notifications` blob — which held finding IDs + requirement text — from every
+// existing browser (audit finding NTF-015).
+const CURRENT_VERSION = "47";
 
 /**
  * Slices to persist to localStorage.
@@ -22,7 +26,6 @@ const PERSIST_SLICES = [
   "settings",
   "theme",
   "permissions",
-  "notifications",
 ] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
