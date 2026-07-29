@@ -1,11 +1,10 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
   FileText,
-  Link2,
+  History,
   Pencil,
   X,
 } from "lucide-react";
@@ -18,6 +17,7 @@ import { roleLabel } from "@/lib/labels/roles";
 import type { CAPA } from "@/store/capa.slice";
 import type { UserConfig } from "@/store/settings.slice";
 import type { CAPAOriginDoc } from "@/lib/queries/capas";
+import type { FindingAuditEntry } from "@/lib/queries/findings";
 import { DocList } from "@/components/shared/DocList";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -30,6 +30,16 @@ const SOURCE_LABEL: Record<string, string> = {
   "Change Control": "Change Control",
 };
 const sourceLabel = (s: string) => SOURCE_LABEL[s] ?? s;
+
+// Stage 3 — humanize a finding AuditLog action for the read-only "Gap history"
+// list (mirrors CapaAuditTrailBar.humanizeAction, stripping the finding_ prefix).
+function humanizeFindingAction(action: string): string {
+  return action
+    .toLowerCase()
+    .replace(/^finding_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 // Phase B — the Overview "Before submitting" checklist box was removed; the
 // banner's expandable checklist is now the only checklist on the page.
 // CHANGE CONTROL HIDDEN — user-facing surface disconnected. Module
@@ -54,23 +64,28 @@ interface OverviewBodyProps {
   originDocs?: CAPAOriginDoc[];
   /** Item 1 — read-only gap-finding doc references (when raised from a finding). */
   findingDocs?: CAPAOriginDoc[];
+  /** Stage 3 — the linked gap's COMPLETE audit trail (read-only), surfaced in the
+   *  "Raised from finding" block so its in-progress history survives the handoff.
+   *  From AuditLog; rendered read-only — writes no audit rows. */
+  findingAudit?: FindingAuditEntry[];
 }
 
 export function OverviewBody({
   capa,
   isDark,
   // CAPA-module batch #4 — `users` consumed again to resolve gap-owner +
-  // driver name+role. timezone/dateFormat still unused here.
+  // driver name+role. timezone/dateFormat now feed the Stage-3 Gap history rows.
   users,
+  timezone,
+  dateFormat,
   showMigrationNotice,
   onDismissNotice,
-  onNavigateGap,
   onEditOpen,
   editAllowed,
   originDocs = [],
   findingDocs = [],
+  findingAudit = [],
 }: OverviewBodyProps) {
-  const router = useRouter();
   const baseVariant = getSeverityVariant(capa.risk, "generic");
 
   // Display the stored risk verbatim. Previously Medium collapsed to the
@@ -136,49 +151,23 @@ export function OverviewBody({
         )}
       </div>
 
-      <section aria-labelledby="rbc-heading" className="capa-card">
-        <h3 id="rbc-heading" className="capa-section-title block mb-3">Risk-based classification</h3>
-        {/* Phase F — 3-up grid (stacks to 1 col on mobile); each cell = label
-            + colored risk pill from the existing severity taxonomy. */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {[
-            { label: "Patient safety risk", variant: baseVariant, text: riskLevel },
-            { label: "Product quality impact", variant: baseVariant, text: riskLevel },
-            { label: "Regulatory exposure", variant: (capa.diGate ? "red" : baseVariant) as "red" | "amber" | "green", text: capa.diGate ? "High" : riskLevel },
-          ].map((row) => (
-            <div key={row.label} className="rounded-lg border p-2.5" style={{ borderColor: "var(--card-border, var(--bg-border))", background: "var(--bg-elevated)" }}>
-              <p className="text-[11px] mb-1.5" style={{ color: "var(--text-muted)" }}>{row.label}</p>
-              <Badge variant={row.variant}>{row.text}</Badge>
-            </div>
-          ))}
-        </div>
-      </section>
+      {/* Phase 4 — risk classification as ONE inline row (was three full-width
+          cards saying "High" three times). Regulatory exposure reflects the DI
+          gate flag, same as before. */}
+      <div className="capa-card flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12px]">
+        <span className="capa-section-title">Risk classification</span>
+        <span style={{ color: "var(--text-secondary)" }}>Patient safety <strong style={{ color: "var(--text-primary)" }}>({riskLevel})</strong></span>
+        <span style={{ color: "var(--text-secondary)" }}>Product quality <strong style={{ color: "var(--text-primary)" }}>({riskLevel})</strong></span>
+        <span style={{ color: "var(--text-secondary)" }}>Regulatory exposure <strong style={{ color: capa.diGate ? "var(--danger)" : "var(--text-primary)" }}>({capa.diGate ? "High" : riskLevel})</strong></span>
+      </div>
 
-      {/* Batch 3a #1 — Source / linked record / Created / risk as ONE tidy row.
-          The "View" link only renders when the source has a linkable record;
-          external/manual sources show no link (valid). */}
+      {/* Phase 4 — the standalone "Source · <finding> · View" fact was removed:
+          the Reference-documents card (detail page) and the "Raised from finding
+          / deviation" cards below already carry the source + link. Two cards, one
+          fact. Created + risk stay (not duplicated). */}
       <div className="capa-card flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px]">
         <span style={{ color: "var(--text-muted)" }}>Source</span>
         <Badge variant="gray">{sourceLabel(capa.source)}</Badge>
-        {capa.findingId && (
-          <>
-            <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>·</span>
-            <span className="font-mono text-[11px]" style={{ color: "var(--text-secondary)" }}>{capa.finding?.reference ?? capa.findingId}</span>
-            <button type="button" onClick={() => onNavigateGap(capa.findingId!)} className="inline-flex items-center gap-0.5 hover:underline bg-transparent border-none cursor-pointer p-0" style={{ color: "var(--brand)" }}>
-              <Link2 className="w-3.5 h-3.5" aria-hidden="true" />View →
-            </button>
-          </>
-        )}
-        {!capa.findingId && capa.deviation && (
-          <>
-            <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>·</span>
-            <span className="font-mono text-[11px]" style={{ color: "var(--text-secondary)" }}>{capa.deviation.reference ?? "Deviation"}</span>
-            <Badge variant={getSeverityVariant(capa.deviation.severity, "fda")}>{normalizeSeverityForDisplay(capa.deviation.severity, "fda") ?? capa.deviation.severity}</Badge>
-            <button type="button" onClick={() => router.push("/deviation")} className="inline-flex items-center gap-0.5 hover:underline bg-transparent border-none cursor-pointer p-0" style={{ color: "var(--brand)" }}>
-              <Link2 className="w-3.5 h-3.5" aria-hidden="true" />View →
-            </button>
-          </>
-        )}
         {capa.createdAt && (
           <>
             <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>·</span>
@@ -215,21 +204,49 @@ export function OverviewBody({
           finding's uploaded docs, read-only (download via /api/documents/[id]);
           NOT copied into evidence categories and not attachable here — they live
           on the originating finding. Mirrors the deviation block above. */}
-      {capa.finding && findingDocs.length > 0 && (
+      {capa.finding && (findingDocs.length > 0 || findingAudit.length > 0) && (
         <div className="capa-card">
           <p className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
-            Raised from finding {capa.finding.reference ?? "—"} — {findingDocs.length} linked document{findingDocs.length === 1 ? "" : "s"}
+            Raised from finding {capa.finding.reference ?? "—"}
+            {findingDocs.length > 0 && <> — {findingDocs.length} linked document{findingDocs.length === 1 ? "" : "s"}</>}
           </p>
-          <p className="text-[11px] mt-0.5 mb-2" style={{ color: "var(--text-muted)" }}>Read-only references to the originating finding (not copied into evidence).</p>
-          <DocList
-            docs={findingDocs.map((d) => ({
-              id: d.id,
-              fileName: d.fileName,
-              downloadHref: `/api/documents/${d.id}`,
-              uploadedBy: d.uploadedBy,
-              badge: { label: "Gap", tone: "gray" },
-            }))}
-          />
+          {findingDocs.length > 0 && (
+            <>
+              <p className="text-[11px] mt-0.5 mb-2" style={{ color: "var(--text-muted)" }}>Read-only references to the originating finding (not copied into evidence).</p>
+              <DocList
+                docs={findingDocs.map((d) => ({
+                  id: d.id,
+                  fileName: d.fileName,
+                  downloadHref: `/api/documents/${d.id}`,
+                  uploadedBy: d.uploadedBy,
+                  badge: { label: "Gap", tone: "gray" },
+                }))}
+              />
+            </>
+          )}
+          {/* Stage 3 — the gap's COMPLETE history (read-only mirror of
+              CapaAuditTrailBar), so the in-progress work done on the gap before
+              the handoff stays visible from the CAPA. Sourced from AuditLog;
+              renders nothing new — writes zero audit rows. */}
+          {findingAudit.length > 0 && (
+            <details className="mt-2 rounded-lg border" style={{ borderColor: "var(--bg-border)", background: "var(--bg-elevated)" }}>
+              <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5" style={{ color: "var(--text-muted)" }}>
+                <History className="w-3.5 h-3.5" aria-hidden="true" />
+                Gap history ({findingAudit.length})
+              </summary>
+              <div className="px-3 pb-2 max-h-64 overflow-y-auto">
+                <ul className="list-none p-0 m-0">
+                  {findingAudit.map((e) => (
+                    <li key={e.id} className="flex items-baseline gap-2 py-1 text-[11px]" style={{ borderTop: "1px solid var(--bg-border)" }}>
+                      <span className="font-mono shrink-0" style={{ color: "var(--text-muted)" }}>{dayjs.utc(e.createdAt).tz(timezone).format(`${dateFormat} HH:mm`)}</span>
+                      <span className="font-medium" style={{ color: "var(--text-primary)" }}>{humanizeFindingAction(e.action)}</span>
+                      <span style={{ color: "var(--text-secondary)" }}>— {e.userName} ({e.userRole ? roleLabel(e.userRole) : "system"})</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </details>
+          )}
         </div>
       )}
 

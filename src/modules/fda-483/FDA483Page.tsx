@@ -16,6 +16,7 @@ import {
   ArrowRightCircle,
   Gavel,
   CheckCircle2,
+  Building2,
 } from "lucide-react";
 import type {
   FDA483Event as PrismaFDA483Event,
@@ -700,6 +701,7 @@ export function FDA483Page({
            so the header reads [Status Guide] [+ Register Event]. The list-level
            deadline alert is now the header's content child (below the divider). */
         <PageLayout
+          titleIcon={Building2}
           title="Inspections & Regulatory"
           description="Track FDA 483 inspection events, observations, commitments, and formal responses across the trailing 12 months."
           headerRight={<StatusGuide module="FDA 483 Events" statuses={FDA483_EVENT_STATUSES} />}

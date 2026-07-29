@@ -66,7 +66,7 @@ export async function setCAPAAlignmentStatus(
   if (!canReviewAlignment(session.user.role)) {
     return {
       success: false,
-      error: "Only QA Head, Customer Admin, or Super Admin can set alignment status",
+      error: "Only QA Head can set alignment status",
     };
   }
   const parsed = AlignmentStatusSchema.safeParse(input);
@@ -164,7 +164,7 @@ export async function overrideCAPAAlignmentFlag(
   if (!canReviewAlignment(session.user.role)) {
     return {
       success: false,
-      error: "Only QA Head, Customer Admin, or Super Admin can override an alignment flag",
+      error: "Only QA Head can override an alignment flag",
     };
   }
   const parsed = AlignmentOverrideSchema.safeParse(input);
@@ -274,7 +274,7 @@ export async function clearCAPAAlignmentReview(
   if (!canReviewAlignment(session.user.role)) {
     return {
       success: false,
-      error: "Only QA Head, Customer Admin, or Super Admin can clear an alignment review",
+      error: "Only QA Head can clear an alignment review",
     };
   }
 

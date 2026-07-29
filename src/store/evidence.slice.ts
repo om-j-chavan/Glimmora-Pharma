@@ -54,9 +54,13 @@ export interface EvidencePack {
 interface EvidenceState {
   documents: EvidenceDocument[];
   packs: EvidencePack[];
+  /** Evidence library bulk-selection — ids shared across the Grid and Table
+   *  views so a selection made in one view is reflected in the other. Stored as
+   *  a plain string[] (serialisable) rather than a Set. */
+  selectedIds: string[];
 }
 
-const initialState: EvidenceState = { documents: [], packs: [] };
+const initialState: EvidenceState = { documents: [], packs: [], selectedIds: [] };
 
 const evidenceSlice = createSlice({
   name: "evidence",
@@ -82,8 +86,22 @@ const evidenceSlice = createSlice({
     removePack(state, { payload }: PayloadAction<string>) {
       state.packs = state.packs.filter((p) => p.id !== payload);
     },
+    toggleEvidenceSelection(state, { payload }: PayloadAction<string>) {
+      state.selectedIds = state.selectedIds.includes(payload)
+        ? state.selectedIds.filter((id) => id !== payload)
+        : [...state.selectedIds, payload];
+    },
+    setEvidenceSelection(state, { payload }: PayloadAction<string[]>) {
+      state.selectedIds = payload;
+    },
+    clearEvidenceSelection(state) {
+      state.selectedIds = [];
+    },
   },
 });
 
-export const { addDocument, updateDocument, removeDocument, addPack, updatePack, removePack } = evidenceSlice.actions;
+export const {
+  addDocument, updateDocument, removeDocument, addPack, updatePack, removePack,
+  toggleEvidenceSelection, setEvidenceSelection, clearEvidenceSelection,
+} = evidenceSlice.actions;
 export default evidenceSlice.reducer;

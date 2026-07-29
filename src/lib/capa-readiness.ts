@@ -74,7 +74,14 @@ const RESOLVED_EVIDENCE_STATUSES: ReadonlySet<string> = new Set([
   "COMPLETE",
   "NOT_APPLICABLE",
 ]);
-const DONE_ACTION_STATUSES: ReadonlySet<string> = new Set(["complete", "skipped"]);
+// "accepted" (Phase 2) is QA-reviewed-complete — definitionally done, so it
+// counts toward the submit-readiness "all actions done" condition alongside
+// complete/skipped (matters if a CAPA carrying accepted items is bounced via
+// rejectCAPA and re-submitted).
+// EXPORTED so the UI readouts that REPORT this condition derive from the same
+// set the gate enforces. Re-listing these statuses inline is how a readout ends
+// up saying "Actions 1/2" while Submit is live — one fact, two lists.
+export const DONE_ACTION_STATUSES: ReadonlySet<string> = new Set(["complete", "accepted", "skipped"]);
 
 export function getCAPAReadiness(
   capa: ReadinessCAPAInput,
@@ -137,18 +144,21 @@ export function getCAPAReadiness(
         : `${doneActions} of ${totalActions} actions complete`,
   });
 
-  // e. all 7 evidence categories resolved (COMPLETE or NOT_APPLICABLE).
+  // e. at least ONE evidence category answered (COMPLETE or NOT_APPLICABLE).
+  //    A cleaning-validation gap needn't answer Supplier Data; the all-7
+  //    requirement is dropped. The 7 categories remain as options
+  //    (EVIDENCE_CATEGORY_COUNT still drives the "X of 7" display elsewhere).
   const resolved = evidenceItems.filter((e) =>
     RESOLVED_EVIDENCE_STATUSES.has(e.status),
   ).length;
-  const evidenceMet = resolved >= EVIDENCE_CATEGORY_COUNT;
+  const evidenceMet = resolved >= 1;
   conditions.push({
     key: "evidence",
-    label: "All evidence categories resolved",
+    label: "At least one evidence category answered",
     met: evidenceMet,
     detail: evidenceMet
       ? undefined
-      : `${resolved} of ${EVIDENCE_CATEGORY_COUNT} categories complete or N/A`,
+      : "Answer at least one evidence category (complete or mark N/A)",
   });
 
   // f. at least one effectiveness criterion defined.

@@ -1,12 +1,26 @@
 import { GovernancePage } from "@/modules/governance/GovernancePage";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
+import { requireRoleOrDeny } from "@/lib/authz";
+import { GOVERNANCE_VIEW_ROLES } from "@/lib/permissions/roleSets";
 import { getOverallReadiness, getFindings, getCAPAs, getSystems, getFDA483Events } from "@/lib/queries";
 import { getRisks, getRiskOwners } from "@/lib/queries/risks";
 import { getManagementDecisions, getDecisionParticipants } from "@/lib/queries/managementDecisions";
 
+// Governance & KPIs is restricted to qa_head + customer_admin (super_admin is
+// platform-only). Enforced here at the ROUTE (server) level — before any data
+// fetch — so an unauthorized role is redirected with no flash of content.
+const ALLOWED_ROLES = new Set<string>(GOVERNANCE_VIEW_ROLES);
+
 export default async function Page() {
   const session = await requireAuth();
+  // ROUTE-level authz gate (HEAD) — before any data fetch, so an unauthorized
+  // role is redirected with no flash of content.
+  await requireRoleOrDeny(session, ALLOWED_ROLES, {
+    module: "governance",
+    redirectTo: "/",
+    extra: { path: "/governance" },
+  });
   // Risks + decisions apply their visibility where-clause IN THE QUERY, so the
   // client only ever receives rows this user may see.
   //

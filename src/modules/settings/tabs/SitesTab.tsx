@@ -12,7 +12,6 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useTenantData } from "@/hooks/useTenantData";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
 import {
-  PlanLimitUsageBar,
   PlanLimitPopup,
   EmptyState,
   DataTable,
@@ -146,13 +145,12 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
   const toast = useToast();
   const { allSitesIncludingInactive: sites, tenantId } = useTenantConfig();
   useTenantData();
-  const { isAtLimit, isNearLimit, getCount, getLimit, tenantPlan } =
+  const { isAtLimit, getCount, getLimit, tenantPlan } =
     usePlanLimits();
 
   const siteCount = getCount("sites");
   const siteLimit = getLimit("sites");
   const atLimit = isAtLimit("sites");
-  const nearLimit = isNearLimit("sites");
 
   const [addModal, setAddModal] = useState(false);
   const [planLimitOpen, setPlanLimitOpen] = useState(false);
@@ -300,11 +298,8 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
             id="sites-heading"
             className="text-[15px] font-semibold text-(--text-primary)"
           >
-            Sites
+            Sites ({siteCount}/{siteLimit})
           </h2>
-          <span className="ml-2 text-[11px] bg-(--brand-muted) text-(--brand) px-2 py-0.5 rounded-full font-semibold">
-            {sites.length}
-          </span>
         </div>
         {!readOnly && (
           <Button
@@ -348,17 +343,6 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
           </button>
         </div>
       )}
-
-      {/* Usage bar */}
-      <PlanLimitUsageBar
-        icon={MapPin}
-        label="Sites"
-        count={siteCount}
-        limit={siteLimit}
-        plan={tenantPlan ?? ""}
-        atLimit={atLimit}
-        nearLimit={nearLimit}
-      />
 
       {/* Table card */}
       <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl overflow-hidden">

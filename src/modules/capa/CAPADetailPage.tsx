@@ -28,10 +28,8 @@ import {
   signAndCloseCAPA as signAndCloseCAPAServer,
   updateCAPA as updateCAPAServer,
   startCAPAProgress as startCAPAProgressServer,
-  loadApprovalsForCAPA,
 } from "@/actions/capas";
 import { loadCommentsForCAPA } from "@/actions/capa-comments";
-import { evaluateApprovalProgress, type ApprovalTier } from "@/lib/capa-approvals";
 import { OverviewBody } from "./modals/sections/OverviewBody";
 import { RcaBody } from "./modals/sections/RcaBody";
 // Phase B — sections relocated out of the old ActionsPanel into their zones:
@@ -40,7 +38,6 @@ import { RcaBody } from "./modals/sections/RcaBody";
 import { ActionItemsSection } from "./tabs/sections/ActionItemsSection";
 import { AlignmentReviewSection } from "./tabs/sections/AlignmentReviewSection";
 import { DiscussionSection } from "./tabs/sections/DiscussionSection";
-import { ApprovalsSection } from "./tabs/sections/ApprovalsSection";
 import { EffectivenessSection } from "./tabs/sections/EffectivenessSection";
 import { EvidenceCollectionPanel } from "./tabs/EvidenceCollectionPanel";
 import { EffectivenessCriteriaPanel } from "./tabs/EffectivenessCriteriaPanel";
@@ -52,6 +49,7 @@ import { SignCloseModal } from "./modals/SignCloseModal";
 import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
 import { getNextStep, type DetailSubTab } from "./modals/helpers/getNextStep";
 import type { CapaAuditEntry, CAPAOriginDoc } from "@/lib/queries/capas";
+import type { FindingAuditEntry } from "@/lib/queries/findings";
 
 const SOURCE_LABEL: Record<string, string> = {
   "483": "FDA 483 Observation", "Gap Assessment": "Gap Assessment Finding", Deviation: "Deviation Report",
@@ -70,9 +68,12 @@ export interface CAPADetailPageProps {
   originDocs?: CAPAOriginDoc[];
   /** Item 1 — read-only gap-finding doc references when raised from a finding. */
   findingDocs?: CAPAOriginDoc[];
+  /** Stage 3 — the linked gap's complete audit trail (read-only), for the
+   *  "Raised from finding" block's collapsed "Gap history". */
+  findingAudit?: FindingAuditEntry[];
 }
 
-export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail, originDocs = [], findingDocs = [] }: CAPADetailPageProps) {
+export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, auditTrail, originDocs = [], findingDocs = [], findingAudit = [] }: CAPADetailPageProps) {
   const router = useRouter();
   const { canSign, canCloseCapa, isViewOnly } = useRole();
   const capaCan = usePermissions("capa", { capaRisk: capa.risk });
@@ -100,6 +101,10 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
   // Phase B — bumps when the Discussion thread mutates so ApprovalsSection's
   // close-gate re-evaluates against fresh comment state (was owned by ActionsPanel).
   const [discussionVersion, setDiscussionVersion] = useState(0);
+  // Evidence tab badge — seeded from the server prop (correct on first render,
+  // no flash of 0), then kept live from EvidenceCollectionPanel's onCountsChange
+  // so uploads / mark-complete / N/A / reject refresh the badge without a reload.
+  const [evidenceCounts, setEvidenceCounts] = useState(evidence);
   const [flowOpen, setFlowOpen] = useState(false);
 
   // Phase B — banner Approve/Verify CTAs anchor-scroll to their relocated
@@ -137,6 +142,9 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
   // unresolved-concern comments. The server still enforces; this only stops a
   // premature click. Re-runs when the discussion thread changes (a new/cleared
   // concern flips the gate).
+  // Phase 4 — Sign & Close unblocks on ZERO unresolved concerns (the
+  // approver-count gate was retired with approveCAPA; the server enforces the
+  // same, closure.ts). Client mirror reads the concern count directly.
   const [approvalsSatisfied, setApprovalsSatisfied] = useState(false);
   useEffect(() => {
     if (capa.status !== "pending_qa_review" && capa.status !== "pending_verification") {
@@ -145,22 +153,14 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
     }
     let cancelled = false;
     void (async () => {
-      const [aRes, cRes] = await Promise.all([
-        loadApprovalsForCAPA(capa.id),
-        loadCommentsForCAPA(capa.id),
-      ]);
+      const cRes = await loadCommentsForCAPA(capa.id);
       if (cancelled) return;
-      const approvals = aRes.success ? (aRes.data as { approverRole: string; approverId: string }[]) : [];
       const comments = cRes.success ? (cRes.data as { isConcern: boolean; resolvedAt: Date | null; deletedAt: Date | null }[]) : [];
-      const progress = evaluateApprovalProgress(
-        capa.risk as ApprovalTier,
-        approvals.map((a) => ({ approverRole: a.approverRole, approverId: a.approverId })),
-        comments.map((c) => ({ isConcern: c.isConcern, resolvedAt: c.resolvedAt, deletedAt: c.deletedAt })),
-      );
-      setApprovalsSatisfied(progress.satisfied);
+      const unresolved = comments.filter((c) => c.isConcern && !c.resolvedAt && !c.deletedAt).length;
+      setApprovalsSatisfied(unresolved === 0);
     })();
     return () => { cancelled = true; };
-  }, [capa.id, capa.status, capa.risk, discussionVersion]);
+  }, [capa.id, capa.status, discussionVersion]);
 
   // People pills — distinct contributors (driver + action owners).
   const contributors = useMemo(() => {
@@ -207,10 +207,10 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
     setOkMsg("Returned for rework."); router.refresh();
   }
 
-  async function handleSignClose(data: { meaning: string; password: string; effectivenessConfirmed: boolean }) {
+  async function handleSignClose(data: { meaning: string; password: string; effectivenessConfirmed: boolean; closingNotes: string }) {
     clearFilter();
     setSignBusy(true); setSignError(null);
-    const res = await signAndCloseCAPAServer(capa.id, { password: data.password, signatureMeaning: data.meaning, effectivenessConfirmed: data.effectivenessConfirmed });
+    const res = await signAndCloseCAPAServer(capa.id, { password: data.password, signatureMeaning: data.meaning, effectivenessConfirmed: data.effectivenessConfirmed, closingNotes: data.closingNotes });
     setSignBusy(false);
     if (!res.success) { setSignError(res.error || "Sign & close failed."); return; }
     setSignOpen(false); setOkMsg("CAPA signed and closed."); router.refresh();
@@ -397,7 +397,7 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
     { id: "overview", label: "Overview", badge: null },
     { id: "rca", label: "RCA", badge: rcaState },
     { id: "actions", label: "Actions", badge: filterActive ? `${personActionCount} of ${liveActions.length}` : (liveActions.length ? `${doneActions}/${actionItems.length}` : null) },
-    { id: "evidence", label: "Evidence", badge: `${evidence.resolved}/${evidence.total}` },
+    { id: "evidence", label: "Evidence", badge: `${evidenceCounts.resolved}/${evidenceCounts.total}` },
     { id: "criteria", label: "Criteria", badge: criteriaCount ? String(criteriaCount) : null },
   ];
 
@@ -520,14 +520,12 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
           <OverviewBody capa={capa} isDark={isDark} users={users} timezone={timezone} dateFormat={dateFormat}
             showMigrationNotice={false} onDismissNotice={() => undefined}
             onNavigateGap={(fid) => router.push(`/gap-assessment?openFindingId=${encodeURIComponent(fid)}`)}
-            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} originDocs={originDocs} findingDocs={findingDocs} />
+            onEditOpen={() => setEditOpen(true)} editAllowed={editAllowed} originDocs={originDocs} findingDocs={findingDocs} findingAudit={findingAudit} />
           {/* Phase D — wrap the relocated (protected) sections in a card; internals untouched. */}
           <section id="capa-discussion" className="capa-card"><DiscussionSection capa={capa} onCommentsChange={() => setDiscussionVersion((v) => v + 1)} /></section>
-          {/* Verification retired — Approvals stands alone (full width). Anchor
-              id kept so the banner CTA still scrolls here; component unchanged. */}
-          <section className="capa-card">
-            <div id="capa-approvals" className="min-w-0"><ApprovalsSection capa={capa} discussionVersion={discussionVersion} /></div>
-          </section>
+          {/* Phase 4 — Approvals/Verification retired. Concerns (DiscussionSection)
+              are the only Review-tab closure blocker now; Sign & Close reads the
+              concern count directly (approvalsSatisfied effect above). */}
         </div>
       )}
       {activeTab === "rca" && (filterActive ? noneOfTheirs : <div className="capa-card"><RcaBody capa={capa} /></div>)}
@@ -539,7 +537,7 @@ export function CAPADetailPage({ capa, readiness, evidence, criteriaCount, audit
         </div>
       )}
       {activeTab === "evidence" && (filterActive ? noneOfTheirs : (
-        <div className="capa-card"><EvidenceCollectionPanel capaId={capa.id} readOnly={isViewOnly || capa.status === "closed"} capaStatus={capa.status} canRejectEvidence={isQAHead} /></div>
+        <div className="capa-card"><EvidenceCollectionPanel capaId={capa.id} readOnly={isViewOnly || capa.status === "closed"} capaStatus={capa.status} canRejectEvidence={isQAHead} onCountsChange={(c) => setEvidenceCounts({ resolved: c.resolved, total: c.total })} /></div>
       ))}
       {/* Criteria — criteria list + the 90-day Effectiveness Review beneath. */}
       {activeTab === "criteria" && (filterActive ? noneOfTheirs : (

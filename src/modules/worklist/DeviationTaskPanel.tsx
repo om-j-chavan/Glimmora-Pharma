@@ -8,15 +8,13 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { CategorizedDocUploader, type DocUploadEntry } from "@/components/shared/CategorizedDocUploader";
 import { useToast } from "@/components/ui/Toast";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { displayUserName } from "@/lib/identity-display";
 import { roleLabel as fmtRole } from "@/lib/labels/roles";
-import { DEVIATION_QA_ROLES } from "@/lib/permissions/roleSets";
 import { DocList, type DocItemView } from "@/components/shared/DocList";
 import {
   startDeviationTask, submitDeviationTask, attachDeviationTaskDocument,
-  postDeviationTaskMessage, removeDeviationTaskDocument,
+  removeDeviationTaskDocument,
 } from "@/actions/deviation-tasks";
 import { EVIDENCE_CATEGORIES, EVIDENCE_CATEGORY_LABEL, type EvidenceCategory } from "@/lib/queries/evidence";
 import type { WorklistDeviationTask, WorklistDoc } from "@/lib/queries/worklist";
@@ -93,12 +91,9 @@ export function DeviationTaskPanel({
 }) {
   const toast = useToast();
   const { org, users, allSites } = useTenantConfig();
-  const currentUser = useAppSelector((s) => s.auth.user);
   const [busy, setBusy] = useState(false);
   const [submitOpen, setSubmitOpen] = useState(false); // the "Send to QA" confirm modal
   const [notes, setNotes] = useState("");
-  const [msgBody, setMsgBody] = useState("");
-  const [posting, setPosting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const canWork = task.status === "pending" || task.status === "in_progress" || task.status === "rework";
@@ -152,15 +147,6 @@ export function DeviationTaskPanel({
     setBusy(false);
     if (!res.success) { setErr(res.error || "Submit failed."); toast.error(res.error || "Submit failed."); return; }
     toast.success("Response sent to QA for review."); setSubmitOpen(false); onChanged(); onClose();
-  }
-
-  async function postMsg() {
-    if (msgBody.trim().length === 0) return;
-    setPosting(true);
-    const res = await postDeviationTaskMessage(task.id, { body: msgBody.trim() });
-    setPosting(false);
-    if (!res.success) { toast.error(res.error || "Failed to post message."); return; }
-    setMsgBody(""); onChanged();
   }
 
   return (
@@ -232,15 +218,7 @@ export function DeviationTaskPanel({
             <CategorizedDocUploader docs={task.taskDocs} readOnly emptyText="No documents uploaded yet — add them when you send your response." />
           </div>
 
-          {/* Conversation — flat QA↔worker thread */}
-          <div className="pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
-            <TaskThread messages={task.messages} currentUserId={currentUser?.id} fmt={(iso) => dayjs.utc(iso).tz(org.timezone).format(`${org.dateFormat} HH:mm`)} />
-            <div className="flex items-end gap-2 mt-2">
-              <textarea className="input text-[12px] w-full min-h-14" placeholder="Reply to QA…" value={msgBody} onChange={(e) => setMsgBody(e.target.value)} maxLength={2000} disabled={posting} />
-              <Button variant="secondary" size="sm" icon={Send} disabled={posting || msgBody.trim().length === 0} loading={posting} onClick={() => void postMsg()}>Send</Button>
-            </div>
-          </div>
+          {/* The QA↔worker conversation thread is retired here too. */}
 
           {err && !submitOpen && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{err}</p>}
         </div>
@@ -284,36 +262,9 @@ export function DeviationTaskPanel({
   );
 }
 
-/* ── Shared sub-component (also used by the QA-side panel) ── */
-
-export function TaskThread({
-  messages,
-  currentUserId,
-  fmt,
-}: {
-  messages: WorklistDeviationTask["messages"];
-  currentUserId?: string;
-  fmt: (iso: string) => string;
-}) {
-  if (messages.length === 0) {
-    return <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No messages yet.</p>;
-  }
-  return (
-    <div className="space-y-2">
-      {messages.map((m) => {
-        const isQA = DEVIATION_QA_ROLES.includes(m.authorRole);
-        const isMine = !!currentUserId && m.authorId === currentUserId;
-        return (
-          <div key={m.id} className="rounded-lg p-2" style={{ background: isMine ? "var(--brand-muted)" : "var(--bg-surface)", border: "1px solid var(--bg-border)" }}>
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <span className="text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>{m.authorName}</span>
-              <Badge variant={isQA ? "purple" : "gray"}>{isQA ? "QA" : (roleLabel(m.authorRole) || "Worker")}</Badge>
-              <span className="text-[10px] ml-auto" style={{ color: "var(--text-muted)" }}>{fmt(m.createdAt)}</span>
-            </div>
-            <p className="text-[12px] whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>{m.body}</p>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+/* The shared <TaskThread> rendered the flat QA↔worker conversation on the
+ * worklist, gap detail and deviation detail. All three surfaces retired it, so
+ * the component is gone. The FindingMessage / DeviationTaskMessage tables and
+ * their rows are UNTOUCHED (Part 11 retention) and are still written — see
+ * reworkFinding (findings.ts) and reworkDeviationTask (deviation-tasks.ts),
+ * which persist QA's rework reason as a message. This removal is display-only. */

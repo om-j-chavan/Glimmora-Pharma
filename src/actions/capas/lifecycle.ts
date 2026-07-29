@@ -5,8 +5,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
-import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, CAPA_CREATE_ROLES, DEVIATION_QA_ROLES, isAssignedToTask } from "@/lib/permissions/roleSets";
+import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, CAPA_CREATE_ROLES, DEVIATION_QA_ROLES, isAssignedToTask, canExecuteCAPA } from "@/lib/permissions/roleSets";
+import { syncCorrectiveActions } from "./action-items";
 import { getCAPAReadiness } from "@/lib/capa-readiness";
+import { RISK_DUE_DATE_OFFSET_DAYS } from "@/lib/capa-approvals";
+import { CAPA_TITLE_MIN, CAPA_TITLE_MAX, CAPA_DESCRIPTION_MIN, REJECT_REASON_MIN, DI_CLEARANCE_MIN } from "@/constants/capaValidation";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
@@ -33,8 +36,8 @@ import { notify, notifyMany } from "@/lib/notify";
 
 const CreateCAPASchema = z.object({
   // Phase A — short human title (flows into create via ...rest).
-  title: z.string().min(1, "Title is required").max(120, "Title must be 120 characters or fewer"),
-  description: z.string().min(10, "Description must be at least 10 characters"),
+  title: z.string().min(CAPA_TITLE_MIN, `Title must be at least ${CAPA_TITLE_MIN} characters`).max(CAPA_TITLE_MAX, `Title must be ${CAPA_TITLE_MAX} characters or fewer`),
+  description: z.string().min(CAPA_DESCRIPTION_MIN, `Description must be at least ${CAPA_DESCRIPTION_MIN} characters`),
   source: z.enum([
     "Gap Assessment",
     "Deviation",
@@ -47,7 +50,9 @@ const CreateCAPASchema = z.object({
   ]),
   risk: z.enum(["Critical", "High", "Medium", "Low"]),
   owner: z.string().optional(),
-  dueDate: z.string().min(1, "Due date is required"),
+  // Phase 3 — optional; createCAPA defaults it by risk (RISK_DUE_DATE_OFFSET_DAYS)
+  // when omitted, so a blank field can't produce a 90-day Critical CAPA.
+  dueDate: z.string().min(1).optional(),
   siteId: z.string().optional(),
   linkedFindingId: z.string().optional(),
   linkedDeviationId: z.string().optional(),
@@ -68,14 +73,20 @@ const CreateCAPASchema = z.object({
   diGateStatus: z.enum(["open", "cleared", "pending"]).optional(),
   diGateReviewedBy: z.string().optional(),
   diGateNotes: z.string().optional(),
+  // Item 19 — QA's answer to the "carry the gap assignee's work?" dialog.
+  // ADVISORY ONLY: it means "QA agreed", never "this is allowed". The server
+  // re-derives severity / assignedAt / executor from its OWN read of the finding
+  // and skips the carry if any of them fails, so a forged `true` cannot conjure
+  // an action item. Destructured out of `...rest` below — it is not a CAPA column.
+  carryAssignment: z.boolean().optional(),
 });
 
 const UpdateCAPASchema = z.object({
   // Phase A — editable short title (written via ...parsed.data spread).
   // Required + trimmed: a blank/whitespace title is rejected server-side with
   // a clear message (the Edit form marks it required; enforce it here too).
-  title: z.string().trim().min(1, "Title is required").max(120, "Title must be 120 characters or fewer"),
-  description: z.string().min(10).optional(),
+  title: z.string().trim().min(CAPA_TITLE_MIN, `Title must be at least ${CAPA_TITLE_MIN} characters`).max(CAPA_TITLE_MAX, `Title must be ${CAPA_TITLE_MAX} characters or fewer`),
+  description: z.string().min(CAPA_DESCRIPTION_MIN, `Description must be at least ${CAPA_DESCRIPTION_MIN} characters`).optional(),
   source: z.string().optional(),
   risk: z.enum(["Critical", "High", "Medium", "Low"]).optional(),
   owner: z.string().optional(),
@@ -106,11 +117,13 @@ const UpdateCAPASchema = z.object({
 });
 
 const ClearDIGateSchema = z.object({
-  notes: z.string().optional(),
+  // Phase 6 — required: clearing a DI gate is a Part 11 attestation; "what did
+  // you verify?" answered with nothing is a control that represents nothing.
+  notes: z.string().min(DI_CLEARANCE_MIN, `Record what was verified (at least ${DI_CLEARANCE_MIN} characters)`).max(2000),
 });
 
 const RejectSchema = z.object({
-  reason: z.string().min(5, "Rejection reason must be at least 5 characters"),
+  reason: z.string().min(REJECT_REASON_MIN, `Rejection reason must be at least ${REJECT_REASON_MIN} characters`),
   // Phase 4 — targeted reject. Optional list of action-item ids to bounce back
   // for rework; each gets status "rework" + the reason recorded. Omitting it
   // bounces the whole CAPA to in_progress without flagging specific items.
@@ -270,6 +283,8 @@ async function convertCategorizedDocsToEvidence(
             uploadedBy: doc.uploadedBy,
             uploadedById: null,
             actionItemId: null,
+            // Phase 3 — carried from the originating finding/deviation (read-only).
+            uploadSource: "gap",
           },
         });
 
@@ -377,6 +392,20 @@ function buildFindingCarryDescription(f: {
   return parts.join("").slice(0, 4000);
 }
 
+/** Item 19 — the CARRIED ACTION ITEM's text. Sibling to buildFindingCarryDescription
+ *  above: that one builds the CAPA's description, this one the task's. Kept adjacent
+ *  so the two carry-builders are read together and neither is mistaken for the other.
+ *
+ *  Capped at 2000 to match AddActionItemSchema.description (action-items.ts:74).
+ *  Finding.requirement has a min but NO max (findings.ts:42), so the uncapped version
+ *  this replaces could mint a task longer than any human could create through the
+ *  validated path — the same class of bug as writing the row without its checks. */
+function buildFindingCarryTaskDescription(f: {
+  id: string; reference: string | null; requirement: string;
+}): string {
+  return `Continue work from gap ${f.reference ?? f.id}: ${f.requirement}`.slice(0, 2000);
+}
+
 export async function createCAPA(
   input: z.input<typeof CreateCAPASchema>,
 ): Promise<ActionResult> {
@@ -388,29 +417,60 @@ export async function createCAPA(
   if (!CAPA_CREATE_ROLES.includes(session.user.role)) {
     return { success: false, error: "Only QA Head can create a CAPA." };
   }
-  const parsed = CreateCAPASchema.safeParse(input);
+  // Authorization strictly before any data read: resolve the actor FK and confirm
+  // GxP-author authority UP FRONT, so no source record is read for a caller who
+  // isn't allowed to author. (Hoisted above the source reads below; the invariant
+  // is "authz before data access", independent of who's currently in the role set.)
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  // Seam fix — on a LINKED raise, createCAPA REPLACES the description with a
+  // contextual one built from the source record (buildFinding/DeviationCarryDescription).
+  // Validate the value that actually gets STORED, not the client's throwaway input:
+  // read the source + build the effective description UP FRONT, then validate that.
+  // These are the SAME reads the tx used to do (relocated + reused inside the tx),
+  // not extra — and they now run once instead of per reference-conflict retry.
+  const rawFindingId = typeof input.linkedFindingId === "string" && input.linkedFindingId ? input.linkedFindingId : null;
+  const rawDeviationId = typeof input.linkedDeviationId === "string" && input.linkedDeviationId ? input.linkedDeviationId : null;
+  // Deviation-sourced raise is QA-gated — kept above the deviation read so
+  // authority still precedes any deviation access.
+  if (rawDeviationId && !DEVIATION_QA_ROLES.includes(session.user.role)) {
+    return { success: false, error: "Only QA Head can raise a CAPA from a deviation." };
+  }
+  const sourceFinding = rawFindingId
+    ? await prisma.finding.findFirst({
+        where: { id: rawFindingId, tenantId: session.user.tenantId },
+        // Item 19 adds assignedAt / targetDate / severity — the three facts the
+        // assignment carry is decided on, read here with the rest so the tx has
+        // them without a second query.
+        select: { id: true, reference: true, requirement: true, framework: true, owner: true, createdById: true, rootCause: true, completionNotes: true, assignedAt: true, targetDate: true, severity: true },
+      })
+    : null;
+  const sourceDev = rawDeviationId
+    ? await prisma.deviation.findFirst({
+        where: { id: rawDeviationId, tenantId: session.user.tenantId },
+        select: { id: true, reference: true, title: true, description: true, severity: true, area: true, rootCause: true, immediateAction: true },
+      })
+    : null;
+  // The description that will be STORED: enriched on a linked raise; the client's
+  // own text on a manual create (which IS what gets stored there).
+  const effectiveDescription = sourceDev
+    ? buildDeviationCarryDescription(sourceDev)
+    : sourceFinding
+      ? buildFindingCarryDescription(sourceFinding)
+      : input.description;
+
+  const parsed = CreateCAPASchema.safeParse({ ...input, description: effectiveDescription });
   if (!parsed.success) {
     return {
       success: false,
       error: "Validation failed",
       fieldErrors: parsed.error.flatten().fieldErrors,
     };
-  }
-
-  // Part A access-control fix — raising a CAPA FROM a deviation is a QA
-  // authority action (mirrors the deviation close/reject gate). Non-QA authors
-  // may still create standalone CAPAs; only the deviation-sourced raise is
-  // QA-gated. The deviation UI hides Raise CAPA for non-QA in lockstep.
-  if (parsed.data.linkedDeviationId && !DEVIATION_QA_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Only QA Head can raise a CAPA from a deviation." };
-  }
-
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-
-  try {
-    requireGxPAuthor(actor);
-  } catch (e) {
-    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
   // Site-field rule (shared): super_admin / customer_admin pick a site
@@ -425,17 +485,27 @@ export async function createCAPA(
       linkedFindingId,
       linkedDeviationId,
       diGateRequired,
-      dueDate,
+      dueDate: dueDateInput,
+      // Item 19 — pulled out of `...rest`: a request flag, not a CAPA column.
+      carryAssignment,
       ...rest
     } = parsed.data;
 
-    // Step 3 — ONE assigned worker in CAPA.ownerId (the "driver" concept is
-    // gone). Manual CAPA: the QA-picked owner. Deviation-raised: the deviation
-    // WORKER (activeTask.assigneeId) when an active task existed, else the
-    // raising QA. The worker-vs-QA branch needs activeTask, which is read inside
-    // the tx — so the final ownerId/ownerName are computed there (below). This
-    // resolves only the manual-owner input (a User read; safe before the tx).
-    const ownerIdInput = await resolveOwnerUserId(session.user.tenantId, rest.owner);
+    // Phase 3 — default the due date by risk when the caller omits it (blank
+    // fields are how a Critical CAPA silently gets a 90-day runway). Explicit
+    // dates always win. Offset map is keyed by ApprovalTier (rest.risk).
+    const dueDate =
+      dueDateInput ??
+      (() => {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() + RISK_DUE_DATE_OFFSET_DAYS[rest.risk]);
+        return d.toISOString();
+      })();
+
+    // Phase 7 — the CAPA owner is always its QA creator (see the ownerId/
+    // ownerName computation inside the tx). The manual "Assigned to" input was
+    // removed from the modal, so rest.owner no longer feeds ownership; there is
+    // nothing to resolve here anymore.
 
     // Race-safe sequence allocation. Two server actions creating CAPAs at
     // the same instant can both read count=N inside their respective
@@ -456,16 +526,10 @@ export async function createCAPA(
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         capa = await prisma.$transaction(async (tx): Promise<CapaTxResult> => {
-          // Deviation→CAPA carryover — read the originating deviation + its active
-          // worker task UP FRONT (server-authoritative; not trusting client copies)
-          // so we can carry the root-cause text, build a contextual description,
-          // and seed an action item from the in-flight task.
-          const sourceDev = linkedDeviationId
-            ? await tx.deviation.findFirst({
-                where: { id: linkedDeviationId, tenantId: session.user.tenantId },
-                select: { id: true, reference: true, title: true, description: true, severity: true, area: true, rootCause: true, immediateAction: true },
-              })
-            : null;
+          // sourceDev + sourceFinding were read before the tx (needed to build the
+          // validated description) and are reused here via closure. Only the
+          // deviation's active worker task is read in-tx — it feeds the in-tx cancel
+          // + the result, and isn't needed before validation.
           const activeTask = linkedDeviationId
             ? await tx.deviationTask.findFirst({
                 where: { deviationId: linkedDeviationId, tenantId: session.user.tenantId, deletedAt: null, status: { in: ["pending", "in_progress", "submitted", "rework"] } },
@@ -475,23 +539,17 @@ export async function createCAPA(
                 select: { id: true, assignee: true, assigneeId: true },
               })
             : null;
-          // Step 5 — read the originating finding UP FRONT (mirrors sourceDev) so
-          // we can carry its owner, root-cause text, and a contextual description.
-          const sourceFinding = linkedFindingId
-            ? await tx.finding.findFirst({
-                where: { id: linkedFindingId, tenantId: session.user.tenantId },
-                select: { id: true, reference: true, requirement: true, framework: true, owner: true, rootCause: true },
-              })
-            : null;
-          // A CAPA raised FROM a finding or deviation is created UNASSIGNED
-          // (driver null): remediation is tracked on the CAPA, and QA assigns the
-          // work later via addActionItem (which lands in the assignee's Worklist).
-          // Only a MANUAL create (no linked record) carries the QA-picked owner.
-          // This matches the "created Unassigned" spec and keeps the raise out of
-          // everyone's Worklist (no CAPA-by-ownerId Worklist source exists).
-          const isRaisedFromLinkedRecord = Boolean(linkedFindingId) || Boolean(linkedDeviationId);
-          const ownerId = isRaisedFromLinkedRecord ? null : ownerIdInput;
-          const ownerName = isRaisedFromLinkedRecord ? "" : (rest.owner ?? "");
+          // Phase 7 — the CAPA owner is its QA creator (ownerId === createdById
+          // === actor.userId): QA raises it and oversees it; the actual
+          // remediation work is assigned per action item (addActionItem → the
+          // assignee's Worklist), never by dropping the whole CAPA into someone's
+          // queue. The modal's manual "Assigned to" field was removed for exactly
+          // this reason, so "CAPA owner: you" is now the truth for manual AND gap
+          // raises. Deviation-raised is the ONE exception: it stays UNASSIGNED
+          // (null) because the deviation is parked in capa_pending until the CAPA
+          // closes, and QA assigns the CAPA's work manually (addActionItem).
+          const ownerId = linkedDeviationId ? null : actor.userId;
+          const ownerName = linkedDeviationId ? "" : session.user.name;
 
           // SME Section 1 (last rung) â€” site-scoped reference prefix.
           // Format is now "CAPA-{siteCode}-{year}-{NNN}". Site code is
@@ -546,10 +604,12 @@ export async function createCAPA(
               // Deviation→CAPA carryover (req 2): carry the deviation's root-cause
               // TEXT into rca + a contextual description. Structured RCA method/
               // detail are NOT copied (deviation rcaData JSON ≠ CAPA rcaDetail).
+              // description was resolved + validated up front (flows in via ...rest);
+              // here we only carry the source's root-cause text into rca.
               ...(sourceDev
-                ? { rca: sourceDev.rootCause ?? rest.rca ?? null, description: buildDeviationCarryDescription(sourceDev) }
+                ? { rca: sourceDev.rootCause ?? rest.rca ?? null }
                 : sourceFinding
-                  ? { rca: sourceFinding.rootCause ?? rest.rca ?? null, description: buildFindingCarryDescription(sourceFinding) }
+                  ? { rca: sourceFinding.rootCause ?? rest.rca ?? null }
                   : {}),
               reference,
               tenantId: session.user.tenantId,
@@ -582,6 +642,194 @@ export async function createCAPA(
               // (findings.ts) — was "in_progress" (snake), which rendered raw.
               data: { status: "In Progress", linkedCAPAId: created.id },
             });
+            // Phase 7 — stamp the escalation on the FINDING's own audit trail
+            // (module "Gap Assessment", recordId = findingId), INSIDE this tx so
+            // it commits with the finding.update or not at all. Without this the
+            // finding→CAPA link leaves no trace on the gap, and the gap-detail
+            // History (sourced from AuditLog) silently omits the single most
+            // important event in the record's story: it became a CAPA.
+            await tx.auditLog.create({
+              data: {
+                tenantId: session.user.tenantId,
+                userId: actor.userId,
+                userName: actor.displayName,
+                userRole: actor.role,
+                module: "Gap Assessment",
+                action: "FINDING_ESCALATED_TO_CAPA",
+                recordId: linkedFindingId,
+                recordTitle: sourceFinding?.reference ?? linkedFindingId.slice(0, 8),
+                newValue: JSON.stringify({ capaReference: created.reference }),
+              },
+            });
+          }
+          // #4 — Gap→CAPA handoff carryover (ATOMIC with the raise).
+          if (linkedFindingId && sourceFinding) {
+            // ── Item 19 — ASSIGNMENT CARRY ────────────────────────────────────
+            // A Low gap that was genuinely ASSIGNED carries its assignee's work
+            // into the CAPA as one action item, but ONLY when QA says so.
+            //
+            // The test is assignedAt != null and NOTHING else. Two earlier designs
+            // guessed — always-carry (owner !== the raiser, i.e. everyone) and
+            // never-carry — because "is this gap assigned?" had no truthful answer:
+            // `owner` meant creator OR assignee. Item 18 made assignedAt that
+            // answer. status is NOT a proxy (6 of 7 In-Progress findings here were
+            // never assigned — createCAPA below and status edits both get there),
+            // and owner !== createdById is wrong both ways. A null assignedAt means
+            // UNKNOWN, never "assigned": it must not carry.
+            //
+            // carryAssignment is QA's ANSWER, not an authorisation — everything it
+            // permits is re-derived here from this tx's own read.
+            // EVERY carryAssignment:true resolves to either a carry or an AUDITED
+            // skip — assignedAt/owner are conditions inside the chain below, not
+            // part of this guard. Guarding on them here would let a request whose
+            // finding has no assignment record fall through silently: no item, no
+            // row, nothing for the Assignments tab to report. Silence is what we're
+            // removing, so the only silent path left is "QA never asked".
+            if (carryAssignment) {
+              const assignee = sourceFinding.owner
+                ? await tx.user.findFirst({
+                    where: { id: sourceFinding.owner, tenantId: session.user.tenantId },
+                    // `role` is the field design 1 never selected — which is how it
+                    // created action items owned by non-executors that addActionItem
+                    // would have refused.
+                    select: { id: true, name: true, role: true },
+                  })
+                : null;
+              // Every rule addActionItem enforces, enforced here too. Writing
+              // cAPAActionItem directly means these do NOT come for free: the
+              // previous carryover skipped all of them by going around the
+              // validated path. Order mirrors addActionItem's own checks.
+              const skipReason =
+                sourceFinding.severity !== "Low"
+                  ? `finding severity is ${sourceFinding.severity}, not Low`
+                  : !sourceFinding.assignedAt
+                    ? "the gap has no assignment record — its owner is the raiser, not an assignee"
+                    : !assignee
+                      ? "the gap's assignee no longer exists in this tenant"
+                      : !canExecuteCAPA(assignee.role)
+                        ? `the gap's assignee has role ${assignee.role}, which cannot own CAPA action items`
+                        : null;
+
+              if (skipReason || !assignee) {
+                // The raise NEVER fails for a carry it can't make. Audited so the
+                // absence has a reason on the record instead of QA inferring one
+                // from an empty Assignments tab.
+                await tx.auditLog.create({
+                  data: {
+                    tenantId: session.user.tenantId,
+                    userId: actor.userId,
+                    userName: actor.displayName,
+                    userRole: actor.role,
+                    module: "CAPA",
+                    action: "CAPA_ASSIGNMENT_CARRY_SKIPPED",
+                    recordId: created.id,
+                    recordTitle: (created.reference ?? created.id).slice(0, 80),
+                    newValue: JSON.stringify({
+                      findingId: linkedFindingId,
+                      findingRef: sourceFinding.reference,
+                      intendedAssigneeId: sourceFinding.owner,
+                      // Denormalised at the event, like userName beside userId on
+                      // every audit row: the surface that reports this skip must not
+                      // have to resolve a name through a live user list that filters
+                      // by role/active — the reason we record facts at the moment
+                      // they happen instead of re-deriving them later. Null only
+                      // when the user is genuinely gone.
+                      intendedAssigneeName: assignee?.name ?? null,
+                      reason: skipReason ?? "the gap's assignee no longer exists in this tenant",
+                    }),
+                  },
+                });
+              } else {
+                // Due date: honour the gap's target ONLY where addActionItem would
+                // accept it — not past, not after the CAPA's own due date (a task
+                // due after its CAPA means the CAPA cannot close on time,
+                // action-items.ts:187). Otherwise fall back to the CAPA due date.
+                // "targetDate ?? capaDue" would have minted items the validated
+                // path rejects.
+                const capaDue = new Date(dueDate);
+                const todayUTC = new Date();
+                todayUTC.setUTCHours(0, 0, 0, 0);
+                const target = sourceFinding.targetDate;
+                const taskDue = target && target >= todayUTC && target <= capaDue ? target : capaDue;
+
+                const carried = await tx.cAPAActionItem.create({
+                  data: {
+                    tenantId: session.user.tenantId,
+                    capaId: created.id,
+                    sequence: 1,
+                    description: buildFindingCarryTaskDescription(sourceFinding),
+                    owner: assignee.name,
+                    ownerId: assignee.id,
+                    dueDate: taskDue,
+                    status: "pending",
+                    createdBy: session.user.name,
+                    createdById: session.user.id,
+                  },
+                });
+                // The denormalised blob is rebuilt by the ONE function that owns
+                // that join (exported from action-items.ts). Inlining it here would
+                // be the same two-places-one-fact bug this item exists to remove;
+                // skipping it entirely is what left correctiveActions empty on
+                // CAPAs raised by the previous carryover.
+                await syncCorrectiveActions(tx, created.id, session.user.tenantId);
+                await tx.auditLog.create({
+                  data: {
+                    tenantId: session.user.tenantId,
+                    userId: actor.userId,
+                    userName: actor.displayName,
+                    userRole: actor.role,
+                    module: "CAPA",
+                    action: "CAPA_ASSIGNMENT_CARRIED",
+                    recordId: created.id,
+                    recordTitle: (created.reference ?? created.id).slice(0, 80),
+                    newValue: JSON.stringify({
+                      findingId: linkedFindingId,
+                      findingRef: sourceFinding.reference,
+                      actionItemId: carried.id,
+                      ownerId: assignee.id,
+                      // Non-null here: a null assignedAt is a skipReason above.
+                      assignedAt: sourceFinding.assignedAt?.toISOString() ?? null,
+                      dueDate: taskDue.toISOString(),
+                      dueDateSource: taskDue === target ? "gap targetDate" : "CAPA due date (gap target out of range)",
+                    }),
+                  },
+                });
+              }
+            }
+
+            // The gap's work DATA carries regardless of the assignment decision:
+            // notes → comment below, categorized docs → evidence, rootCause → rca.
+            // #4 — carry the gap's work notes → ONE comment (mirrors the
+            // FindingMessage→CAPAComment copy). completionNotes has no stored
+            // author/timestamp, so attribute to the finding owner + now.
+            const notes = sourceFinding.completionNotes?.trim();
+            if (notes) {
+              const notesAuthorId = sourceFinding.owner ?? "";
+              const notesAuthor = notesAuthorId
+                ? await tx.user.findFirst({ where: { id: notesAuthorId, tenantId: session.user.tenantId }, select: { name: true, role: true } })
+                : null;
+              await tx.cAPAComment.create({
+                data: {
+                  tenantId: session.user.tenantId,
+                  capaId: created.id,
+                  parentId: null,
+                  actionItemId: null,
+                  // The note's OWN text. The "(work notes from finding X)" prefix this
+                  // replaces was doing two jobs it was bad at: marking the row as
+                  // carried, and carrying the finding ref for a label to parse back
+                  // out. Both are columns now, so the body is just what the worker
+                  // wrote — which is also what a reader of the Discussion record
+                  // should see.
+                  body: notes,
+                  isConcern: false,
+                  carriedFromFindingId: sourceFinding.id,
+                  carriedFromFindingRef: sourceFinding.reference ?? sourceFinding.id,
+                  authorId: notesAuthorId,
+                  authorName: notesAuthor?.name ?? "Gap assignee",
+                  authorRole: notesAuthor?.role ?? "",
+                },
+              });
+            }
           }
           if (linkedDeviationId) {
             await tx.deviation.update({
@@ -648,6 +896,11 @@ export async function createCAPA(
     revalidatePath("/capa");
     revalidatePath("/gap-assessment");
     revalidatePath("/deviation");
+    // A raise mutates the worker's worklist: a gap→CAPA raise drops the
+    // now-locked gap (linkedCAPAId != null filter) and nothing replaces it until
+    // QA assigns. Revalidate so the worklist reflects the drop immediately
+    // instead of waiting for the router cache to expire.
+    revalidatePath("/worklist");
 
     // Deviation→CAPA carryover (req 4 + 5): the deviation's docs and the worker
     // task's docs are NOT copied into evidence categories — they stay Documents
@@ -845,24 +1098,22 @@ export async function updateCAPA(
         rcaMethod: true,
         rcaApproved: true,
         ownerId: true,
+        // Phase 3 — source lock: a gap-raised CAPA's source IS that gap.
+        findingId: true,
+        source: true,
       },
     });
     if (!before) return { success: false, error: "CAPA not found" };
 
-    // SME Section 1, Stage 3 (partial) — RCA field-lock.
-    // Once a CAPA enters QA review (and through closure/rejection), the
-    // rca and rcaMethod fields become the regulatory record. Editing them
-    // mid-review undermines the review's integrity, so block edits once the
-    // status is locked. Strict: even re-posting the same value is a write
-    // attempt; `!== undefined` (not falsy) so clearing to "" is blocked too.
-    if (
-      (parsed.data.rca !== undefined || parsed.data.rcaMethod !== undefined || parsed.data.rcaDetail !== undefined) &&
-      LOCKED_CAPA_STATUSES.has(before.status)
-    ) {
-      const attemptedFields = [
-        parsed.data.rca !== undefined ? "rca" : null,
-        parsed.data.rcaMethod !== undefined ? "rcaMethod" : null,
-      ].filter((v): v is string => v !== null);
+    // Phase 1 — post-submit read-only lock. Once a CAPA leaves investigation it
+    // is a frozen regulatory record under QA review; NO field edits (title,
+    // risk, owner, due date, RCA, DI detail) are allowed until return-for-rework
+    // reopens it. Mirrors findingLockedByCapa (findings.ts:95-99, :300-302).
+    // updateCAPA never accepts `status` (see the note above this function), so
+    // this can't collide with the reopen path — that goes through reopenCAPA.
+    // This blanket guard subsumes the former RCA-only field-lock (RCA is a
+    // subset of "all fields").
+    if (LOCKED_CAPA_STATUSES.has(before.status)) {
       try {
         await prisma.auditLog.create({
           data: {
@@ -871,21 +1122,53 @@ export async function updateCAPA(
             userName: actor.displayName,
             userRole: actor.role,
             module: "CAPA",
-            action: "CAPA_UPDATE_BLOCKED_RCA_LOCKED",
+            action: "CAPA_UPDATE_BLOCKED_LOCKED",
+            recordId: id,
+            recordTitle: (before.reference ?? id).slice(0, 80),
+            newValue: JSON.stringify({ currentStatus: before.status }),
+          },
+        });
+      } catch (err) {
+        console.error("[action] failed to write CAPA_UPDATE_BLOCKED_LOCKED audit:", err);
+      }
+      return {
+        success: false,
+        error: "This CAPA is under QA review and locked. Return it for rework to make changes.",
+      };
+    }
+
+    // Phase 3 — source lock. When a CAPA was raised from a gap (findingId set),
+    // its source IS that gap and must not be rewritten (e.g. to "Complaint") —
+    // letting someone change it is how a record lies about its origin.
+    if (
+      before.findingId &&
+      parsed.data.source !== undefined &&
+      parsed.data.source !== before.source
+    ) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: "CAPA",
+            action: "CAPA_UPDATE_BLOCKED_SOURCE_LOCKED",
             recordId: id,
             recordTitle: (before.reference ?? id).slice(0, 80),
             newValue: JSON.stringify({
-              currentStatus: before.status,
-              attemptedFields,
+              attempted: parsed.data.source,
+              locked: before.source,
+              findingId: before.findingId,
             }),
           },
         });
       } catch (err) {
-        console.error("[action] failed to write CAPA_UPDATE_BLOCKED_RCA_LOCKED audit:", err);
+        console.error("[action] failed to write CAPA_UPDATE_BLOCKED_SOURCE_LOCKED audit:", err);
       }
       return {
         success: false,
-        error: "Root cause analysis is locked once the CAPA enters QA review.",
+        error: `Source is locked — this CAPA was raised from a gap finding. It stays "${before.source}".`,
       };
     }
 

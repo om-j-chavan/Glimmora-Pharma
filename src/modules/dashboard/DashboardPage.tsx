@@ -7,7 +7,7 @@ import {
   ShieldCheck, AlertTriangle, Clock, Database, GraduationCap, TrendingUp,
   Grid3x3, Calendar, Bot, Activity, Info,
   CheckCircle2, Search, ClipboardCheck, FileWarning, BarChart3, ClipboardList,
-  MapPin, LayoutDashboard,
+  MapPin, LayoutDashboard, Sparkles,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import dayjs from "@/lib/dayjs";
@@ -28,8 +28,9 @@ import { adaptPrismaSystem } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
-import { StatCard, CardSection, SetupChecklist } from "@/components/shared";
-import { PageLayout } from "@/components/layout/PageLayout";
+import { Drawer } from "@/components/ui/Drawer";
+import { StatCard, CardSection } from "@/components/shared";
+import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { isOverdue } from "@/types/capa";
 import {
   computeDashboardKPIs, computeAreaScore, KPI_AREAS,
@@ -171,6 +172,14 @@ export function DashboardPage({
   const [siteFilter, setSiteFilter] = useState("");
   const [timeFilter, setTimeFilter] = useState("30");
   const [sevFilter, setSevFilter] = useState("");
+  // "Ask AI" slide-out — the cross-module Global Search (was a card atop the
+  // main content) now lives in a Drawer opened from the header. Mirrors Gap
+  // Assessment / Deviation Management.
+  const [askAiOpen, setAskAiOpen] = useState(false);
+
+  const headerActions: PageAction[] = [
+    { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
+  ];
 
   const cutoff = useMemo(
     () => (timeFilter === "all" ? null : dayjs().subtract(parseInt(timeFilter), "day")),
@@ -347,6 +356,7 @@ export function DashboardPage({
         title="Dashboard"
         titleIcon={LayoutDashboard}
         description="Compliance KPIs, risk signals, and your 90-day action plan across every site."
+        actions={headerActions}
         headerRight={
           <div className="flex items-center gap-2 flex-wrap">
             <Dropdown value={timeFilter} onChange={setTimeFilter} width="w-36" options={[{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "60", label: "Last 60 days" }, { value: "90", label: "Last 90 days" }, { value: "all", label: "All time" }]} />
@@ -357,27 +367,6 @@ export function DashboardPage({
         }
       >
         <div className="space-y-5">
-
-      {/* Setup checklist */}
-      <SetupChecklist />
-
-      {/* Feature 2 — Plain-English Record Search (cross-module).
-          Phase 6: search executes CLIENT-SIDE over the records handed to it
-          (the server only translates the sentence into a filter spec), so the
-          sources ARE the scope. Each is built from the visibility-scoped Redux
-          array — a record the viewer can't open on its module page can never be
-          matched here. The CAPA source is omitted entirely for non-CAPA-module
-          roles rather than handed an empty array, so the module chip doesn't
-          advertise a scope they have no access to. */}
-      <SmartRecordSearch
-        title="Search"
-        defaultScope="all"
-        sources={[
-          ...(canViewCAPAs ? [buildCapaSource(capas, sites, (id) => router.push(`/capa/${id}`))] : []),
-          buildDeviationSource(deviations, sites, () => router.push("/deviation")),
-          buildFindingSource(findings, sites, () => router.push("/gap-assessment")),
-        ]}
-      />
 
       {/* KPI cards */}
       <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
@@ -514,6 +503,24 @@ export function DashboardPage({
         </div>
       </div>
         </div>
+
+        {/* Ask AI — the cross-module Global Search, moved out of the main content
+            into a slide-out Drawer (mirrors Gap Assessment / Deviation). Selecting
+            a result navigates as before, then closes the drawer. Search executes
+            CLIENT-SIDE over the visibility-scoped Redux arrays, so a record the
+            viewer can't open on its module page can never be matched here; the
+            CAPA source is omitted for non-CAPA-module roles. */}
+        <Drawer open={askAiOpen} onClose={() => setAskAiOpen(false)} title="Ask AI · Record Search" width="lg">
+          <SmartRecordSearch
+            title="Search"
+            defaultScope="all"
+            sources={[
+              ...(canViewCAPAs ? [buildCapaSource(capas, sites, (id) => { router.push(`/capa/${id}`); setAskAiOpen(false); })] : []),
+              buildDeviationSource(deviations, sites, () => { router.push("/deviation"); setAskAiOpen(false); }),
+              buildFindingSource(findings, sites, () => { router.push("/gap-assessment"); setAskAiOpen(false); }),
+            ]}
+          />
+        </Drawer>
       </PageLayout>
   );
 }

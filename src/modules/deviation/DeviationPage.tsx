@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import clsx from "clsx";
 import {
   AlertTriangle, AlertOctagon, Plus, Search, ChevronRight, Clock, CheckCircle2,
-  ClipboardList, X, Info, Wrench, Send, Eye, EyeOff,
+  ClipboardList, X, Info, Wrench, Eye, EyeOff,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { DocList } from "@/components/shared/DocList";
@@ -30,8 +30,8 @@ import {
   attachDeviationDocument,
 } from "@/actions/deviations";
 import { createCAPA as createCAPAAction } from "@/actions/capas";
-import { assignDeviationTask, reworkDeviationTask, postDeviationTaskMessage } from "@/actions/deviation-tasks";
-import { TaskThread, GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
+import { assignDeviationTask, reworkDeviationTask } from "@/actions/deviation-tasks";
+import { GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
 import { deleteDocument } from "@/actions/documents";
 import { RaisedFromRiskBanner } from "@/components/shared/RaisedFromRiskBanner";
 import { displayUserName, displaySiteName } from "@/lib/identity-display";
@@ -115,30 +115,14 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   // The low-priority TASK assignee's actions are NOT here — they live in the
   // worklist (DeviationTaskPanel), gated server-side by isAssignedToTask.
   const devCan = usePermissions("deviation");
-  const [docBusy, setDocBusy] = useState(false);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
-
-  // Attach evidence via the shared document pipeline (persists server-side, so
-  // it survives router.refresh()/reload). Tenant + role are enforced in the
-  // server action; this just submits the file and refreshes. Errors surface via
-  // the module's existing error popup.
-  async function handleAttachDoc(deviationId: string, file: File) {
-    setDocBusy(true);
-    const fd = new FormData();
-    fd.set("fileName", file.name);
-    fd.set("file", file);
-    const res = await attachDeviationDocument(deviationId, fd);
-    setDocBusy(false);
-    if (!res.success) { setErrorMsg(res.error || "Failed to attach document."); setErrorPopup(true); return; }
-    router.refresh();
-  }
 
   // Soft-delete via the shared deleteDocument action (tenant-scoped server-side;
   // can't remove a document off another tenant's deviation).
   async function handleDeleteDoc(docId: string) {
-    setDocBusy(true); setDeletingDocId(docId);
+    setDeletingDocId(docId);
     const res = await deleteDocument(docId);
-    setDocBusy(false); setDeletingDocId(null);
+    setDeletingDocId(null);
     if (!res.success) { setErrorMsg(res.error || "Failed to delete document."); setErrorPopup(true); return; }
     router.refresh();
   }
@@ -250,6 +234,11 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [rejectError, setRejectError] = useState<string | null>(null);
   const [showClosePw, setShowClosePw] = useState(false);
   const [showRejectPw, setShowRejectPw] = useState(false);
+  // Busy flag for the footer "Start Investigation" action — disables the button
+  // during the async round-trip so it can't be double-clicked or read as stale
+  // before router.refresh() re-seeds the deviation and re-gates the button off
+  // `status === "open"`.
+  const [startingInv, setStartingInv] = useState(false);
   // Stage 4 (deviation redesign) — low-priority "Assign task" modal state.
   // Raise-CAPA confirm/preview modal (req 1).
   const [raiseConfirmOpen, setRaiseConfirmOpen] = useState(false);
@@ -269,8 +258,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [reworkTaskError, setReworkTaskError] = useState<string | null>(null);
   const [reworkTaskBusy, setReworkTaskBusy] = useState(false);
   // Stage 5 — QA's compose box for the flat task conversation.
-  const [taskMsgBody, setTaskMsgBody] = useState("");
-  const [taskMsgPosting, setTaskMsgPosting] = useState(false);
   const [successPopup, setSuccessPopup] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   // Failure surface — paired with successPopup above. Server actions
@@ -481,18 +468,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     router.refresh();
   }
 
-  // Stage 5 — QA posts to the flat task conversation (the worker posts from the
-  // worklist panel). Server gates to DEVIATION_QA_ROLES || isAssignedToTask.
-  async function handlePostTaskMessage() {
-    if (!selected?.activeTask || taskMsgBody.trim().length === 0) return;
-    setTaskMsgPosting(true);
-    const result = await postDeviationTaskMessage(selected.activeTask.id, { body: taskMsgBody.trim() });
-    setTaskMsgPosting(false);
-    if (!result.success) { setErrorMsg(result.error || "Failed to post message."); setErrorPopup(true); return; }
-    setTaskMsgBody("");
-    router.refresh();
-  }
-
   async function handleClose() {
     if (!selected || !user) return;
     setCloseBusy(true);
@@ -539,12 +514,17 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
 
   async function handleStartInvestigation() {
     if (!selected) return;
+    setStartingInv(true);
     const result = await startInvestigationAction(selected.id);
     if (!result.success) {
+      setStartingInv(false);
       setErrorMsg(result.error || "Failed to start investigation. Please try again.");
       setErrorPopup(true);
       return;
     }
+    // Keep the busy flag ON: router.refresh() re-seeds Redux, the status flips to
+    // under_investigation, and the footer button (gated on status === "open")
+    // unmounts — so there's no stale "Start Investigation" to reset.
     router.refresh();
   }
 
@@ -677,7 +657,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               (selected.status === "pending_qa_review" && isQAHead && !selected.activeTask)) ? (
               <div className="flex justify-end gap-2">
                 {selected.status === "open" && isQAHead && (
-                  <Button variant="primary" size="sm" icon={Search} onClick={handleStartInvestigation}>Start Investigation</Button>
+                  <Button variant="primary" size="sm" icon={Search} loading={startingInv} disabled={startingInv} onClick={handleStartInvestigation}>Start Investigation</Button>
                 )}
                 {selected.status === "pending_qa_review" && isQAHead && !selected.activeTask && (
                   <>
@@ -812,13 +792,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                     onRemove={canManageDocs ? (id) => void handleDeleteDoc(id) : undefined}
                     busyId={deletingDocId}
                   />
-                  {canManageDocs && (
-                    <label className="inline-flex items-center gap-1.5 text-[12px] cursor-pointer underline" style={{ color: "var(--brand)" }}>
-                      <Plus className="w-3.5 h-3.5" aria-hidden="true" /> {docBusy ? "Uploading…" : "Attach document"}
-                      <input type="file" className="hidden" disabled={docBusy} accept=".pdf,.png,.jpg,.jpeg,.xlsx,.docx,.csv,.txt"
-                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAttachDoc(selected.id, f); e.target.value = ""; }} />
-                    </label>
-                  )}
                 </div>
               );
             })()}
@@ -913,6 +886,23 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                 {selected.activeTask.completionNotes && (
                   <p className="text-[11px] mt-1" style={{ color: "var(--text-secondary)" }}><span className="font-medium">Completion notes:</span> {selected.activeTask.completionNotes}</p>
                 )}
+                {/* QA's current rework ask. reworkDeviationTask ALSO wrote this
+                    into the task conversation, which used to be the only place it
+                    rendered here; with that thread retired this is the deviation
+                    side's render site, mirroring the worker's worklist banner.
+                    NOTE: this is the CURRENT ask only — reworkReason is a single
+                    overwritten column, so earlier rounds are not shown (they are
+                    retained in DeviationTaskMessage + the DEVIATION_TASK_REWORK
+                    audit rows, neither of which has a display surface). */}
+                {selected.activeTask.status === "rework" && selected.activeTask.reworkReason && (
+                  <div className="mt-2 rounded-lg border p-2.5 flex items-start gap-2" style={{ background: "var(--danger-bg)", borderColor: "var(--danger)" }}>
+                    <Wrench className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "var(--danger)" }} aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--danger)" }}>Returned for rework</p>
+                      <p className="text-[11px] mt-0.5 whitespace-pre-wrap" style={{ color: "var(--text-primary)" }}>{selected.activeTask.reworkReason}</p>
+                    </div>
+                  </div>
+                )}
                 {/* The worker's uploaded task documents (grouped by GxP category) —
                     now surfaced to QA (previously only a count was loaded). */}
                 {selected.activeTask.taskDocs.length > 0 && (
@@ -938,19 +928,6 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
                     )}
                   </div>
                 )}
-                {/* Stage 5 — flat QA↔worker conversation (same thread the worker
-                    sees in the worklist). QA composes here; rework feedback also
-                    lands here automatically via reworkDeviationTask. */}
-                <div className="mt-3 pt-2 border-t" style={{ borderColor: "var(--bg-border)" }}>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>Conversation</p>
-                  <TaskThread messages={selected.activeTask.messages} currentUserId={user?.id} fmt={(iso) => dayjs.utc(iso).tz(timezone).format(`${dateFormat} HH:mm`)} />
-                  {isQAHead && (
-                    <div className="flex items-end gap-2 mt-2">
-                      <textarea className="input text-[12px] w-full min-h-14" placeholder="Message the assignee…" value={taskMsgBody} onChange={(e) => setTaskMsgBody(e.target.value)} maxLength={2000} disabled={taskMsgPosting} />
-                      <Button variant="secondary" size="sm" icon={Send} disabled={taskMsgPosting || taskMsgBody.trim().length === 0} loading={taskMsgPosting} onClick={handlePostTaskMessage}>Send</Button>
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 

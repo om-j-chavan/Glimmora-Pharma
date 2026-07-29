@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
-import { BarChart3, ShieldAlert, Download, BarChart2, Gauge, Gavel, Archive } from "lucide-react";
+import { BarChart3, ShieldAlert, Download, BarChart2, Gavel, Archive } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { escapeHtml } from "@/lib/escapeHtml";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -401,7 +401,7 @@ export function GovernancePage({
   return (
       <PageLayout
         title="Governance & KPIs"
-        titleIcon={Gauge}
+        titleIcon={BarChart3}
         contentPadding={true}
         description={`Monitor compliance governance, risks, and key performance indicators. · ${visibleSites.length} sites · ${capas.length} CAPAs · ${findings.length} findings · ${serverRisks.length} risks (${openRisks} active) · ${serverDecisions.length} management decisions`}
         headerRight={

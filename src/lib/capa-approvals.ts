@@ -55,6 +55,20 @@ export const APPROVAL_REQUIREMENTS: Record<ApprovalTier, ApprovalRequirement[]> 
 };
 
 /**
+ * Phase 3 — default CAPA due-date offset (days from creation) by risk tier.
+ * Keyed by the SAME ApprovalTier as APPROVAL_REQUIREMENTS so risk values are
+ * never re-listed. Applied server-side in createCAPA when the caller omits
+ * dueDate: a Critical CAPA is due fast; Low gets the longest runway. The user
+ * can still override with an explicit date.
+ */
+export const RISK_DUE_DATE_OFFSET_DAYS: Record<ApprovalTier, number> = {
+  Critical: 7,
+  High: 30,
+  Medium: 60,
+  Low: 90,
+};
+
+/**
  * Result of evaluateApprovalProgress.
  *
  * `satisfied: true` means the CAPA can be closed via signAndCloseCAPA —

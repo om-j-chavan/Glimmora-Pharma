@@ -174,7 +174,9 @@ export function CategorizedDocUploader({
             <div className="flex gap-2">
               <Button variant="ghost" size="sm" onClick={resetAdd} disabled={uploading}>Cancel</Button>
               <Button variant="primary" size="sm" icon={UploadCloud} onClick={() => void doUpload()} disabled={uploading || !allHaveCategory} loading={uploading}>
-                Upload{entries.length ? ` ${entries.length}` : ""}
+                {/* The modal opens with zero entries (openAdd resets), so the
+                    count must never render "Upload 0 Documents". */}
+                {entries.length > 1 ? `Upload ${entries.length} Documents` : "Upload Document"}
               </Button>
             </div>
           </div>

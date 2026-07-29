@@ -6,11 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import { notify } from "@/lib/notify";
 import { CAPA_CLOSE_ROLES } from "@/lib/permissions/roleSets";
+import { CLOSING_NOTES_MIN } from "@/constants/capaValidation";
 import { lockCAPAArtifacts } from "@/lib/evidence-lock";
-import {
-  evaluateApprovalProgress,
-  type ApprovalTier,
-} from "@/lib/capa-approvals";
+// Phase 4 — the approver-count gate (evaluateApprovalProgress) is retired with
+// approveCAPA; closure now checks unresolved concerns directly (see below).
 // CHANGE CONTROL HIDDEN — 6.4 dependency gate bypassed inside
 // signAndCloseCAPA. `evaluateCCDependencies` stays imported because
 // `loadCAPACCDeps` (the read-only helper exported from this file) still
@@ -40,6 +39,12 @@ const SignCloseCAPASchema = z.object({
   // sign time (the SignClose modal's "Effectiveness check confirmed" toggle).
   // Recorded in the closure-signature audit row so the toggle is not decorative.
   effectivenessConfirmed: z.boolean().optional(),
+  // Phase 1 — required closure rationale. Persisted on CAPA.closingNotes and
+  // bound into the closure signature's contentHash.
+  closingNotes: z
+    .string()
+    .min(CLOSING_NOTES_MIN, `Closing notes must be at least ${CLOSING_NOTES_MIN} characters`)
+    .max(4000, "Closing notes must be 4000 characters or fewer"),
   ccBlockOverride: z
     .object({ reason: z.string().min(20) })
     .optional(),
@@ -102,9 +107,49 @@ export async function signAndCloseCAPA(
       description: true,
       status: true,
       ownerId: true,
+      createdBy: true,
+      createdById: true,
     },
   });
   if (!existing) return { success: false, error: "CAPA not found" };
+
+  // Part 11 §11.10(d) separation of duties — the CAPA's creator cannot sign its
+  // closure. Prefer the authoritative createdById FK; fall back to display-name
+  // comparison only for legacy rows whose createdById is null. Mirrors
+  // approveCAPA (approvals.ts:146-175) and reviewRCA (rca-review.ts:131-160)
+  // verbatim. This makes the closure signature carry independence DIRECTLY —
+  // not transitively via the approval gate — so it survives the future removal
+  // of approveCAPA.
+  const isSelfClose = existing.createdById
+    ? existing.createdById === session.user.id
+    : Boolean(existing.createdBy) && existing.createdBy === session.user.name;
+  if (isSelfClose) {
+    try {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: "CAPA",
+          action: "CAPA_CLOSE_BLOCKED_SELF_CLOSE",
+          recordId: id,
+          recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+          newValue: JSON.stringify({
+            attemptedBy: session.user.id,
+            capaCreator: existing.createdBy,
+            comparedBy: existing.createdById ? "userId" : "displayName",
+          }),
+        },
+      });
+    } catch (err) {
+      console.error("[action] failed to write CAPA_CLOSE_BLOCKED_SELF_CLOSE audit:", err);
+    }
+    return {
+      success: false,
+      error: "You cannot sign & close a CAPA you created. Separation of duties requires a different signer.",
+    };
+  }
 
   // Verification step retired. Closure no longer requires an independent
   // verification: a CAPA is closeable directly from pending_qa_review once
@@ -143,17 +188,7 @@ export async function signAndCloseCAPA(
   // SME Section 1, Stage 4 (FULL) — also fetch the structured action
   // items for the incomplete-actions gate AND for binding into the
   // closure SignedRecord's contentHash.
-  const [approvals, comments, actionItems] = await Promise.all([
-    prisma.cAPAApproval.findMany({
-      // revokedAt: null filters out approvals that were soft-revoked —
-      // those slots are open again and don't count toward the gate.
-      where: {
-        capaId: id,
-        tenantId: session.user.tenantId,
-        revokedAt: null,
-      },
-      select: { approverRole: true, approverId: true },
-    }),
+  const [comments, actionItems] = await Promise.all([
     prisma.cAPAComment.findMany({
       where: { capaId: id, tenantId: session.user.tenantId },
       select: { isConcern: true, resolvedAt: true, deletedAt: true },
@@ -166,6 +201,7 @@ export async function signAndCloseCAPA(
         sequence: true,
         description: true,
         status: true,
+        owner: true,
         completedById: true,
         completedAt: true,
       },
@@ -185,16 +221,23 @@ export async function signAndCloseCAPA(
     //   },
     // }),
   ]);
-  // SME Section 1, Stage 4 (FULL) — incomplete-actions gate. Every
-  // structured action item must be in a terminal state (complete or
-  // skipped) before the CAPA can close. "pending" or "in_progress"
-  // items indicate unfinished commitments — closure would be premature.
-  // Empty action list is acceptable (legacy CAPAs created before the
-  // action-items migration may have none).
-  const incompleteActions = actionItems.filter(
-    (a) => a.status !== "complete" && a.status !== "skipped",
+  // Phase 2 — all-accepted gate. Every structured action item must be QA
+  // ACCEPTED (or skipped) before the CAPA can close. "complete" means the
+  // worker finished; "accepted" means QA reviewed and accepted it. Closing over
+  // complete-but-unreviewed work defeats the per-person review (acceptWork).
+  // Empty action list is acceptable (legacy CAPAs may have none). The audit
+  // action code is kept (CAPA_CLOSE_BLOCKED_INCOMPLETE_ACTIONS) to avoid
+  // analytics churn; its payload now names WHOSE work is unaccepted.
+  const unacceptedActions = actionItems.filter(
+    (a) => a.status !== "accepted" && a.status !== "skipped",
   );
-  if (incompleteActions.length > 0) {
+  if (unacceptedActions.length > 0) {
+    const unacceptedByOwner = Array.from(
+      unacceptedActions.reduce(
+        (m, a) => m.set(a.owner, (m.get(a.owner) ?? 0) + 1),
+        new Map<string, number>(),
+      ),
+    ).map(([owner, n]) => ({ owner, count: n }));
     try {
       await prisma.auditLog.create({
         data: {
@@ -207,45 +250,37 @@ export async function signAndCloseCAPA(
           recordId: id,
           recordTitle: existing.description.slice(0, 80),
           newValue: JSON.stringify({
-            incompleteItemIds: incompleteActions.map((a) => a.id),
-            incompleteCount: incompleteActions.length,
+            unacceptedItemIds: unacceptedActions.map((a) => a.id),
+            unacceptedCount: unacceptedActions.length,
+            unacceptedByOwner,
           }),
         },
       });
     } catch (err) {
       console.error("[action] failed to write CAPA_CLOSE_BLOCKED_INCOMPLETE_ACTIONS audit:", err);
     }
-    const itemList = incompleteActions
-      .slice(0, 5)
-      .map((a) => `#${a.sequence}: ${a.description.slice(0, 40)}`)
+    const byOwnerText = unacceptedByOwner
+      .map(({ owner, count }) => `${owner} (${count} item${count === 1 ? "" : "s"})`)
       .join("; ");
     return {
       success: false,
-      error: `Cannot close CAPA — ${incompleteActions.length} action item${incompleteActions.length === 1 ? "" : "s"} still pending or in progress. Complete or skip each item before closing. ${itemList}${incompleteActions.length > 5 ? "; …" : ""}`,
+      error: `Cannot close CAPA — work still needs QA acceptance: ${byOwnerText}. Accept or skip each person's items before closing.`,
     };
   }
 
-  const progress = evaluateApprovalProgress(
-    existing.risk as ApprovalTier,
-    approvals,
-    comments,
-  );
-  if (!progress.satisfied) {
-    if (progress.reason === "UNRESOLVED_CONCERNS") {
-      return {
-        success: false,
-        error: `Approval blocked: ${progress.unresolvedConcerns} unresolved concern${progress.unresolvedConcerns === 1 ? "" : "s"} must be resolved first.`,
-      };
-    }
-    const missingDesc = progress.missing
-      .map(
-        (r) =>
-          `${r.count} more ${r.role.replace("_", " ")} approval${r.count === 1 ? "" : "s"}`,
-      )
-      .join("; ");
+  // Phase 4 — the per-approver count gate is retired with approveCAPA.
+  // Independence now comes from creator≠closer (above) + RCA-review SoD
+  // (pre-submit). The unresolved-concerns gate STAYS — it is the load-bearing
+  // closure blocker (Phase 0A): a concern flagged in the Review tab must be
+  // resolved before the CAPA can be signed. Counted directly off the same
+  // CAPAComment rows evaluateApprovalProgress used to read.
+  const unresolvedConcerns = comments.filter(
+    (c) => c.isConcern && !c.resolvedAt && !c.deletedAt,
+  ).length;
+  if (unresolvedConcerns > 0) {
     return {
       success: false,
-      error: `Cannot close CAPA — pending approvals: ${missingDesc}.`,
+      error: `Approval blocked: ${unresolvedConcerns} unresolved concern${unresolvedConcerns === 1 ? "" : "s"} must be resolved first.`,
     };
   }
 
@@ -344,6 +379,7 @@ export async function signAndCloseCAPA(
       riskLevel: existing.risk,
       closedAt: now,
       closingComment,
+      closingNotes: parsed.data.closingNotes.trim(),
       // SME Section 1, Stage 4 (FULL) — bind the closure signature to
       // the snapshot of every action item. Completion attribution
       // (completedById + completedAt) is included so an inspector can
@@ -393,6 +429,7 @@ export async function signAndCloseCAPA(
           status: "closed",
           closedBy: session.user.name,
           closedAt: now,
+          closingNotes: parsed.data.closingNotes.trim(),
           effectivenessCheck: true,
           effectivenessDate: effectivenessDue,
           closureSignatureId: sig.id,
@@ -406,23 +443,50 @@ export async function signAndCloseCAPA(
             : {}),
         },
       });
+      // Fix 1+2 — close the linked Finding INSIDE the closure transaction so the
+      // gap can't dangle if the signed close rolls back. Canonical Title Case
+      // "Closed" (statusTaxonomy.FINDING_STATUSES) — the old post-tx write used
+      // lowercase "closed", which every Gap-register filter treats as still-OPEN.
+      // updateMany (not update) so deletedAt:null + tenant scope apply and a
+      // soft-deleted/missing finding is a no-op, not a throw that aborts closure.
+      if (updated.findingId) {
+        await tx.finding.updateMany({
+          where: { id: updated.findingId, tenantId: session.user.tenantId, deletedAt: null },
+          data: { status: "Closed" },
+        });
+        // Phase 7 — stamp the closure on the FINDING's own audit trail (module
+        // "Gap Assessment", recordId = findingId), INSIDE this tx so it commits
+        // with the finding close or not at all (same atomicity the finding close
+        // itself was moved here for). Without it, the gap-detail History (sourced
+        // from AuditLog) ends at the finding's own lifecycle and never shows the
+        // CAPA that actually resolved it — the second half of the record's story.
+        await tx.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: "Gap Assessment",
+            action: "FINDING_CLOSED_BY_CAPA",
+            recordId: updated.findingId,
+            recordTitle: existing.reference ?? updated.findingId.slice(0, 8),
+            newValue: JSON.stringify({
+              capaReference: existing.reference,
+              closingNotes: parsed.data.closingNotes.trim(),
+            }),
+          },
+        });
+      }
       return { capa: updated, signedRecord: sig };
     });
-
-    if (capa.findingId) {
-      await prisma.finding.update({
-        where: { id: capa.findingId, tenantId: session.user.tenantId },
-        data: { status: "closed" },
-      });
-    }
 
     // Stage 3 (deviation redesign) — CAPA-close UNBLOCKS a linked deviation but
     // does NOT close it: NO auto-close. A deviation parked in "capa_pending"
     // (set when the CAPA was raised) moves to "pending_qa_review" so QA can
     // perform the Part 11 SIGNED close via closeDeviation (the only close path).
     // Status-guarded via updateMany so a deviation in any other state is never
-    // disturbed (no-op if not capa_pending). Mirrors the Finding cascade above
-    // (post-tx, best-effort).
+    // disturbed (no-op if not capa_pending). This deviation unblock stays
+    // post-tx/best-effort (unlike the finding close, now inside the closure tx).
     if (capa.deviationId) {
       await prisma.deviation.updateMany({
         where: { id: capa.deviationId, tenantId: session.user.tenantId, status: "capa_pending" },
@@ -528,7 +592,20 @@ export async function signAndCloseCAPA(
     revalidatePath(`/capa/${id}`);
     revalidatePath("/gap-assessment");
     revalidatePath("/");
-    return { success: true, data: capa };
+    // Surface the signer identity so the UI can render "Accepted by". The
+    // authoritative record is the SignedRecord (signerId/signerName/signerRole);
+    // this is a convenience mirror on the action return.
+    return {
+      success: true,
+      data: {
+        ...capa,
+        acceptedBy: {
+          id: session.user.id,
+          name: session.user.name,
+          role: session.user.role,
+        },
+      },
+    };
   } catch (err) {
     console.error("[action] signAndCloseCAPA failed:", err);
     return { success: false, error: "Failed to close CAPA" };

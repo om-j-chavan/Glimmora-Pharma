@@ -416,10 +416,41 @@ model Finding {
   rcaMethod    String?
   rcaDetail    String?
   rootCause    String?
+  // Item 17 — RCA provenance, the same shape as assignedAt/By and submittedAt/By.
+  // Written ONLY by saveFindingRCA (the single door to rootCause/rcaMethod/rcaDetail).
+  // rcaRecordedById is the AUTHOR of the analysis — the actor, mirroring
+  // submittedById = the submitter.
+  //
+  // This is a FIRST-CLASS FACT because the close gate depends on it: closing a
+  // finding requires that the closer is not the person who recorded its RCA
+  // (findingCloseBlockers). Deriving that author by scanning FINDING_RCA_RECORDED
+  // audit rows would be the uploadedById mistake — inferring the very fact a control
+  // rests on instead of storing it at the event.
+  //
+  // Null = no RCA recorded, OR recorded before this column existed. Both mean "we
+  // don't know who authored it": the gate treats an unknown author as NOT a match,
+  // so an unattributed RCA never silently satisfies the separation-of-duties check.
+  rcaRecordedAt   DateTime?
+  rcaRecordedById String?
   evidenceLink String?
   // Gap Step 3 — the assignee's work/completion notes (mirrors
   // DeviationTask.completionNotes). Distinct from rootCause (RCA); nullable.
   completionNotes String?
+  // Item 18 — ASSIGNMENT provenance, the one lifecycle event this model recorded
+  // no actor or timestamp for. `owner` is overloaded: createFinding stamps it with
+  // the CREATOR (findings.ts:186) and assignFinding overwrites it (:465), so the
+  // field cannot say whether it holds a raiser or an assignee. These record the
+  // assignment EVENT exactly as submittedAt/By and reworkAt/By record theirs.
+  // assignedById is the ASSIGNER (the actor) — mirroring submittedById = the
+  // submitter; the assignee is `owner`. Written ONLY by assignFinding, now the
+  // single door to changing owner.
+  // Null = never assigned, OR assigned before this column existed. Both mean "we
+  // don't know it was assigned", which is what the UI must say — never inferred
+  // from status (wrong 6 of 7 times: createCAPA and status edits both reach
+  // In Progress without assigning) nor from owner !== createdById (wrong both
+  // ways: QA may assign back to the raiser, findings.ts:436-438).
+  assignedAt   DateTime?
+  assignedById String?
   // Gap Step 4 — submit → QA review → rework loop (mirrors DeviationTask).
   // submittedAt/By: set when the assignee submits. reworkReason is the "current
   // ask" banner; the durable history lives in FindingMessage.
@@ -625,6 +656,10 @@ model CAPA {
   diGateReviewDate   DateTime?
   closedBy           String?
   closedAt           DateTime?
+  // Phase 1 — required closure rationale (min 20 chars, enforced in
+  // signAndCloseCAPA); bound into the closure SignedRecord contentHash.
+  // Nullable so legacy closures predating this column remain valid.
+  closingNotes       String?
   // Substage 6.4 — Linked CC dependency override metadata. Populated only
   // when a Medium/Low risk CAPA is marked implemented while linked Change
   // Controls are still incomplete and the owner has elected to override
@@ -765,6 +800,14 @@ model CAPAActionItem {
   completedByUser User?    @relation("CAPAActionItemCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
   completedAt     DateTime?
   completionNotes String?
+  // Phase 2 — per-person QA acceptance (written by acceptWork). NOT a Part 11
+  // signature (a review step; only closure is signed) — attribution lives here
+  // + in the CAPA_WORK_ACCEPTED audit row. Plain-string acceptedById (no FK)
+  // matches the createdById convention on this model.
+  acceptedBy      String?
+  acceptedById    String?
+  acceptedAt      DateTime?
+  acceptanceNotes String?
   createdAt       DateTime @default(now())
   createdBy       String
   createdById     String?
@@ -1441,6 +1484,13 @@ model Document {
   sourceId         String?
   siteId           String?
   category         String?
+  // Gap-doc bucketing — STABLE source stamped at upload, never re-derived from
+  // the (mutable) finding owner. "create" = Add Finding modal / QA gap-detail
+  // supporting doc; "work" = the assigned worker's categorized upload. Nullable +
+  // default "create" (additive/reversible). Only meaningful for
+  // linkedModule="Gap Assessment" rows; harmless elsewhere. Backfill corrects
+  // legacy gap docs (category → "work", else "create").
+  uploadSource     String?   @default("create")
   sha256           String?
   storageKey       String?
   originalFileName String?
@@ -1886,6 +1936,19 @@ model EvidenceFile {
   // action item (still belongs to its EvidenceItem/category). Nullable +
   // SetNull so removing an action item never deletes the file.
   actionItemId      String?
+  // Phase 3 — STORED provenance, mirroring Document.uploadSource (:1461).
+  //   "gap"      = carried from the originating finding/deviation via
+  //                convertCategorizedDocsToEvidence (read-only).
+  //   "qa_added" = added on the CAPA AFTER raise (deletable). This means
+  //                "added after raise" — it INCLUDES worker worklist uploads,
+  //                NOT only QA. Per-person attribution is actionItemId's job,
+  //                not this field. Do not read the name literally.
+  // Stamped at BOTH evidenceFile.create sites; NEVER inferred from uploadedBy
+  // (that re-buckets on reassignment). No @default on purpose: defaulting to
+  // "qa_added" would make carried read-only files look deletable between the
+  // migration and the backfill, so pre-backfill rows stay null (UI treats
+  // unknown provenance conservatively) and the backfill sets every row.
+  uploadSource      String?
   createdAt         DateTime @default(now())
 
   evidenceItem      EvidenceItem    @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
@@ -2053,6 +2116,21 @@ model CAPAComment {
 
   body            String
   isConcern       Boolean   @default(false)
+
+  // Gap→CAPA carry provenance. Non-null ONLY on the note createCAPA carries from
+  // the originating finding's completionNotes at raise (capas/lifecycle.ts).
+  //
+  // These exist because the carry previously marked itself by PREFIXING the body
+  // with "(work notes from finding FND-…)". That made "is this a carried note?" a
+  // string match, and the finding reference — needed to label it — something you
+  // parse back out of prose. A reworded prefix would have silently un-marked every
+  // note. The fact is stored now, not inferred.
+  //
+  // Ref is denormalised beside the id, the same way every audit row keeps userName
+  // beside userId: the surface that labels a carried note must not have to resolve
+  // a finding to render it, and the ref is what was true AT CARRY TIME.
+  carriedFromFindingId  String?
+  carriedFromFindingRef String?
 
   resolvedAt      DateTime?
   resolvedById    String?

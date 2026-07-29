@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
+import dayjs from "@/lib/dayjs";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import { useRole } from "@/hooks/useRole";
+import { roleLabel } from "@/lib/labels/roles";
+import { CLOSING_NOTES_MIN } from "@/constants/capaValidation";
 // CHANGE CONTROL HIDDEN — ShieldAlert dropped because its only consumer
 // (the override-notice block below) is commented out. To re-enable:
 // restore `ShieldAlert` to this import and uncomment the override block.
@@ -16,7 +21,7 @@ import { STATUS_LABEL } from "@/types/capa";
 interface SignCloseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSign: (data: { meaning: string; password: string; effectivenessConfirmed: boolean }) => void;
+  onSign: (data: { meaning: string; password: string; effectivenessConfirmed: boolean; closingNotes: string }) => void;
   capa: CAPA | null;
   /** Substage 6.4 — display-only echo of the CC dependency override the
    *  operator captured upstream in ActionsPanel. The reason itself rides
@@ -43,6 +48,9 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
   const [signMeaning, setSignMeaning] = useState("");
   const [signPassword, setSignPassword] = useState("");
   const [effectivenessConfirmed, setEffectivenessConfirmed] = useState(false);
+  const [closingNotes, setClosingNotes] = useState("");
+  const signer = useAppSelector((s) => s.auth.user);
+  const { role } = useRole();
 
   // Clear inputs when the modal closes (success or cancel). Keeping them
   // populated across submit attempts means a wrong-password retry doesn't
@@ -54,6 +62,7 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
       setSignMeaning("");
       setSignPassword("");
       setEffectivenessConfirmed(false);
+      setClosingNotes("");
     }
   }, [isOpen]);
 
@@ -64,10 +73,10 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
   const passwordBlank = signPassword.length > 0 && signPassword.trim().length === 0;
 
   function handleSign() {
-    if (!signMeaning || signPassword.trim().length === 0) return;
+    if (!signMeaning || signPassword.trim().length === 0 || closingNotes.trim().length < CLOSING_NOTES_MIN) return;
     // Send the password exactly as typed (never trim a credential — a real
     // password may contain spaces); only the non-empty check is trimmed.
-    onSign({ meaning: signMeaning, password: signPassword, effectivenessConfirmed });
+    onSign({ meaning: signMeaning, password: signPassword, effectivenessConfirmed, closingNotes: closingNotes.trim() });
   }
 
   return (
@@ -116,6 +125,17 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
         <div className="space-y-4">
           <div><p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Signature meaning <span className="text-(--danger)">*</span></p><Dropdown value={signMeaning} onChange={setSignMeaning} placeholder="Select meaning..." width="w-full" options={[{ value: "approve", label: "I approve the corrective actions as complete and effective" }, { value: "verify", label: "I verify the root cause analysis is adequate" }, { value: "confirm", label: "I confirm evidence is sufficient for closure" }]} /></div>
           <div><label htmlFor="sign-password" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Confirm your password <span className="text-(--danger)">*</span></label><input id="sign-password" type="password" className="input text-[12px]" value={signPassword} onChange={(e) => setSignPassword(e.target.value)} placeholder="Re-enter your password" aria-invalid={passwordBlank} aria-describedby={passwordBlank ? "sign-password-error" : undefined} />{passwordBlank ? <p id="sign-password-error" role="alert" className="text-[10px] mt-1" style={{ color: "var(--danger)" }}>Signature password cannot be blank or only spaces.</p> : <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Required for identity verification under 21 CFR Part 11</p>}</div>
+          <div>
+            <label htmlFor="sign-closing-notes" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Closing notes <span className="text-(--danger)">*</span></label>
+            <textarea id="sign-closing-notes" className="input text-[12px] min-h-[70px]" value={closingNotes} onChange={(e) => setClosingNotes(e.target.value)}
+              placeholder={`What resolves this CAPA? (≥ ${CLOSING_NOTES_MIN} characters — bound into the signature's content hash)`} maxLength={4000} />
+            <p className="text-[10px] mt-1" style={{ color: closingNotes.trim().length > 0 && closingNotes.trim().length < CLOSING_NOTES_MIN ? "var(--danger)" : "var(--text-muted)" }}>
+              Recorded on the CAPA and hashed into the Part 11 signature.
+            </p>
+          </div>
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            Accepted by: <strong style={{ color: "var(--text-primary)" }}>{signer?.name ?? "—"}{role ? ` (${roleLabel(role)})` : ""}</strong> · {dayjs().format("DD MMM YYYY")}
+          </p>
           {capa.effectivenessCheck && (
             <div className={clsx("flex items-center justify-between p-3 rounded-lg border", "bg-(--bg-surface) border-(--bg-border)")}>
               <Toggle id="eff-confirm" checked={effectivenessConfirmed} onChange={setEffectivenessConfirmed} label="Effectiveness check confirmed" description="90-day monitoring will be scheduled" />
@@ -139,7 +159,7 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
             <Button
               variant="primary"
               icon={ShieldCheck}
-              disabled={busy || !signMeaning || signPassword.trim().length === 0 || (capa.effectivenessCheck && !effectivenessConfirmed)}
+              disabled={busy || !signMeaning || signPassword.trim().length === 0 || closingNotes.trim().length < CLOSING_NOTES_MIN || (capa.effectivenessCheck && !effectivenessConfirmed)}
               loading={busy}
               onClick={handleSign}
             >

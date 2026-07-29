@@ -415,71 +415,12 @@ export async function reworkDeviationTask(
   }
 }
 
-const MessageSchema = z.object({
-  body: z.string().min(1, "Message cannot be empty").max(2000, "Message too long (2000 char max)"),
-});
-
-/**
- * POST MESSAGE — the SIMPLE QA↔worker rework conversation (flat, append-only;
- * NO threading / concern / resolve — the lightweight alternative to CAPAComment).
- * Gated by the existing two-party split: DEVIATION_QA_ROLES (QA) OR the assignee
- * (isAssignedToTask). authorName/authorRole are denormalised so the thread
- * renders without extra lookups; the two voices are told apart by authorRole.
- */
-export async function postDeviationTaskMessage(
-  taskId: string,
-  input: z.input<typeof MessageSchema>,
-): Promise<ActionResult> {
-  const session = await requireAuth();
-  const parsed = MessageSchema.safeParse(input);
-  if (!parsed.success) {
-    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
-  }
-  const task = await prisma.deviationTask.findFirst({
-    where: { id: taskId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, assigneeId: true, status: true, deviationId: true },
-  });
-  if (!task) return { success: false, error: "Task not found" };
-  const isQA = DEVIATION_QA_ROLES.includes(session.user.role);
-  const isAssignee = isAssignedToTask(session, { ownerId: task.assigneeId });
-  if (!isQA && !isAssignee) {
-    return { success: false, error: "Only QA or the assigned user can post on this task." };
-  }
-  if (task.status === "closed" || task.status === "cancelled") {
-    return { success: false, error: "This task is closed; the conversation is read-only." };
-  }
-  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  try {
-    const created = await prisma.deviationTaskMessage.create({
-      data: {
-        tenantId: session.user.tenantId,
-        taskId,
-        authorId: actor.userId,
-        authorName: actor.displayName,
-        authorRole: actor.role,
-        body: parsed.data.body.trim(),
-      },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: "Deviation Management",
-        action: "DEVIATION_TASK_MESSAGE_POSTED",
-        recordId: task.deviationId,
-        newValue: JSON.stringify({ taskId, messageId: created.id }),
-      },
-    });
-    revalidatePath("/worklist");
-    revalidatePath("/deviation");
-    return { success: true, data: created };
-  } catch (err) {
-    console.error("[action] postDeviationTaskMessage failed:", err);
-    return { success: false, error: sanitizeServerError(err, "Failed to post message") };
-  }
-}
+// postDeviationTaskMessage (the user-facing composer for the flat QA↔worker
+// conversation) is gone with the thread UI that was its only caller. The
+// DeviationTaskMessage table and its rows are RETAINED (Part 11), and are still
+// written by reworkDeviationTask above, which persists QA's rework reason
+// directly. NOTE: that reason now has no display surface on the deviation detail
+// beyond the current-ask banner — see the comment there.
 
 /**
  * REMOVE TASK DOCUMENT — soft-delete a doc the worker attached to THEIR task.

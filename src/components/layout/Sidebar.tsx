@@ -27,7 +27,7 @@ import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useNotificationCount } from "@/components/notifications/NotificationCountProvider";
-import { CAPA_MODULE_VIEW_ROLES } from "@/lib/permissions/roleSets";
+import { CAPA_MODULE_VIEW_ROLES, canViewGovernance } from "@/lib/permissions/roleSets";
 import { logout } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
@@ -165,6 +165,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           if (item.path === "audit-trail")
             // super_admin already returned [] above, so it's excluded here.
             return role === "qa_head" || role === "customer_admin";
+          // Governance & KPIs — restricted to qa_head + customer_admin (the two
+          // tenant quality-oversight identities). super_admin already returned []
+          // above; every other role is excluded. Mirrors the route-level gate.
+          if (item.path === "governance") return canViewGovernance(role);
           return allowedPaths.includes(item.path);
         }),
       })).filter((g) => g.items.length > 0);

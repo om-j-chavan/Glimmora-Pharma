@@ -24,13 +24,28 @@ export function findingVisibilityWhere(session: AuthSession): Prisma.FindingWher
  * ADDITIONAL AND on top of tenant + deletedAt; default `{}` keeps existing
  * callers (dashboard/search) tenant-wide until their cross-cutting phase.
  * React cache() deduplicates within a single request.
+ *
+ * Each row carries `hasEvidenceDoc` — whether the finding has a retrievable
+ * uploaded document. Evidence-presence is a fact about the DOCUMENTS, and every
+ * consumer previously inferred it from `evidenceLink` being non-empty. That only
+ * worked because the upload path used to stamp the filename into evidenceLink;
+ * with that conflation removed, a link is just the author's reference and can be
+ * empty on a finding with plenty of evidence. Stamping the fact here means each
+ * reader (evidence scoring, the missing-evidence alert) asks the right question
+ * instead of re-deriving it from the wrong field.
  */
 export const getFindings = cache(async (tenantId: string, visibility: Prisma.FindingWhereInput = {}) => {
-  return prisma.finding.findMany({
-    where: { tenantId, deletedAt: null, ...visibility },
-    orderBy: { createdAt: "desc" },
-    include: { edits: { orderBy: { editedAt: "asc" } } },
-  });
+  const [rows, docFindingIds] = await Promise.all([
+    prisma.finding.findMany({
+      where: { tenantId, deletedAt: null, ...visibility },
+      orderBy: { createdAt: "desc" },
+      include: { edits: { orderBy: { editedAt: "asc" } } },
+    }),
+    // Same cache() scope as the page's own call — one query per request.
+    getFindingEvidenceDocIds(tenantId),
+  ]);
+  const withDocs = new Set(docFindingIds);
+  return rows.map((f) => ({ ...f, hasEvidenceDoc: withDocs.has(f.id) }));
 });
 
 export interface FindingAssignee { id: string; name: string; role: string }
@@ -103,6 +118,52 @@ export const getFindingEvidenceDocIds = cache(async (tenantId: string) => {
   });
   return [...new Set(docs.map((d) => d.linkedRecordId).filter((x): x is string => !!x))];
 });
+
+/**
+ * Gap→CAPA handoff (Stage 3) — the COMPLETE audit trail for a single finding,
+ * surfaced read-only inside the linked CAPA's "Raised from finding" block so the
+ * gap's in-progress history survives the handoff. Pulled from AuditLog (the full
+ * ALCOA+ trail — every FINDING_* action), NOT FindingEdit (which only records
+ * field edits; that partial trail is the modal's "Edit history"). Keyed by
+ * recordId = the finding id, module-scoped, newest first. READ-ONLY — mirrors
+ * getCapaAuditTrail; writes no audit rows.
+ */
+export interface FindingAuditEntry {
+  id: string;
+  action: string;
+  userName: string;
+  userRole: string | null;
+  recordTitle: string | null;
+  /** Raw newValue JSON. Only SOME finding actions carry a reason/detail here:
+   *  FINDING_REWORK → { reason }, FINDING_ESCALATED_TO_CAPA → { capaReference },
+   *  FINDING_CLOSED_BY_CAPA → { capaReference, closingNotes }. FINDING_SUBMITTED
+   *  and FINDING_REVIEW_CLOSED carry NOTHING — that is not a bug, so the History
+   *  renders those event-only rather than inventing a reason. Do NOT "fix" the
+   *  gaps by reading Finding.reworkReason/completionNotes: those hold the
+   *  LATEST value only and would mislabel older rows. */
+  newValue: string | null;
+  createdAt: string;
+}
+
+export const getFindingAuditTrail = cache(
+  async (findingId: string, tenantId: string): Promise<FindingAuditEntry[]> => {
+    const rows = await prisma.auditLog.findMany({
+      where: { tenantId, module: "Gap Assessment", recordId: findingId },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: { id: true, action: true, userName: true, userRole: true, recordTitle: true, newValue: true, createdAt: true },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      userName: r.userName,
+      userRole: r.userRole,
+      recordTitle: r.recordTitle,
+      newValue: r.newValue,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  },
+);
 
 /**
  * Computed stats for the Gap Assessment page header.

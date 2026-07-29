@@ -53,7 +53,7 @@ interface EvidenceCollectionPanelProps {
   /** Invoked after every successful items load with the per-status counts so
    *  the parent (e.g. the CAPA detail page) can render a tab badge like "3/7"
    *  without re-querying. Optional — panel works standalone without it. */
-  onCountsChange?: (counts: { complete: number; inProgress: number; pending: number; total: number }) => void;
+  onCountsChange?: (counts: { complete: number; inProgress: number; pending: number; total: number; resolved: number }) => void;
   /** Parent CAPA status — the QA reject control only shows at pending_qa_review. */
   capaStatus?: string;
   /** Viewer may disposition (reject) evidence — qa_head (CAPA_REJECT_ROLES). SoD:
@@ -77,7 +77,9 @@ const CATEGORY_ICON: Record<EvidenceCategory, typeof FileText> = {
 
 // Batch 4 Part 4 — at-a-glance labels: Pending / In progress / Answered / N/A.
 const STATUS_LABEL: Record<EvidenceStatus, string> = {
-  PENDING: "Pending",
+  // Phase 6 — the submit gate is ">= 1 category answered" (Phase 1), so an
+  // unanswered category is Optional, not owed. "Pending" implied a debt.
+  PENDING: "Optional",
   IN_PROGRESS: "In progress",
   COMPLETE: "Answered",
   NOT_APPLICABLE: "N/A",
@@ -173,12 +175,17 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
       let complete = 0;
       let inProgress = 0;
       let pending = 0;
+      // resolved = COMPLETE + NOT_APPLICABLE — the terminal-state tally the CAPA
+      // detail's Evidence badge shows (matches page.tsx's resolved definition).
+      // Tracked explicitly so the badge consumes it by name, robust even if
+      // `complete` is later narrowed to COMPLETE-only.
+      let resolved = 0;
       for (const it of loaded) {
-        if (it.status === "COMPLETE" || it.status === "NOT_APPLICABLE") complete++;
+        if (it.status === "COMPLETE" || it.status === "NOT_APPLICABLE") { complete++; resolved++; }
         else if (it.status === "IN_PROGRESS") inProgress++;
         else pending++;
       }
-      onCountsChange({ complete, inProgress, pending, total });
+      onCountsChange({ complete, inProgress, pending, total, resolved });
     }
   }, [capaId, onCountsChange]);
 
@@ -261,7 +268,9 @@ export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChan
       <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-[12px] font-semibold" style={{ color: "var(--text-primary)" }}>
-            {completedCount} of {totalCategories} categories complete
+            {completedCount === 0
+              ? "No categories answered yet — answer at least one to submit"
+              : `${completedCount} categor${completedCount === 1 ? "y" : "ies"} answered — enough to submit`}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -368,17 +377,12 @@ function CategoryUpload({ capaId, onChange }: { capaId: string; onChange: () => 
     <div className="rounded-lg p-3" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
       <p className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--text-primary)" }}>Add evidence</p>
       <div className="flex items-center gap-2 flex-wrap">
-        <select
-          className="input text-[12px]"
+        <Dropdown
           value={category}
-          onChange={(e) => setCategory(e.target.value as EvidenceCategory)}
-          disabled={busy}
-          aria-label="Evidence category"
-        >
-          {EVIDENCE_CATEGORIES.map((c) => (
-            <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>
-          ))}
-        </select>
+          onChange={(v) => setCategory(v as EvidenceCategory)}
+          width="w-56"
+          options={EVIDENCE_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c] }))}
+        />
         <input
           ref={inputRef}
           type="file"
@@ -564,7 +568,9 @@ function EvidenceCard({ item, readOnly, onChange, isExpanded, onToggleExpanded, 
             );
           })()}
         </div>
-        <Badge variant={STATUS_VARIANT[status]}>{STATUS_LABEL[status]}</Badge>
+        {/* Phase 6 — shrink-0 so the pill can't compress in this flex row and clip
+            its text to "Answe…"/"Pend…" (the overflow bug). */}
+        <span className="shrink-0"><Badge variant={STATUS_VARIANT[status]}>{STATUS_LABEL[status]}</Badge></span>
         <ChevronRight
           className="w-3.5 h-3.5 shrink-0"
           style={{ color: "var(--text-muted)" }}
@@ -791,7 +797,10 @@ function FileList({ item, disabled, assigneeMode = false, onChange }: FileListPr
             uploadedBy: uploaderLabel,
             badge: { label: CATEGORY_LABEL[item.category] },
             size: formatSize(f.fileSize),
-            meta: `${dayjs(f.createdAt).fromNow()} · SHA ${f.contentHashSha256.slice(0, 8)}`,
+            // Phase 6 — correct field, correct format: "SHA-256: <first8>…<last4>",
+            // full 64-char hash on hover via the DocList title.
+            meta: `${dayjs(f.createdAt).fromNow()} · SHA-256: ${f.contentHashSha256.slice(0, 8)}…${f.contentHashSha256.slice(-4)}`,
+            title: `SHA-256: ${f.contentHashSha256}`,
           };
         })}
         emptyText="No files uploaded yet."

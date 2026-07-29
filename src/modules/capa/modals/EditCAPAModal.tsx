@@ -15,10 +15,11 @@ import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
 import { roleLabel } from "@/lib/labels/roles";
 import { RcaMethodFields, parseRcaDetail, rcaDetailToText, type RcaDetail } from "./components/RcaMethodFields";
 import { CAPA_RCA_METHODS, rcaMethodOptions } from "@/constants/rcaMethods";
+import { CAPA_TITLE_MIN, CAPA_TITLE_MAX, CAPA_DESCRIPTION_MIN } from "@/constants/capaValidation";
 
 const editSchema = z.object({
-  title: z.string().min(1, "Title required").max(120, "Title must be 120 characters or fewer"),
-  description: z.string().min(10, "Description must be at least 10 characters"),
+  title: z.string().min(CAPA_TITLE_MIN, `Title must be at least ${CAPA_TITLE_MIN} characters`).max(CAPA_TITLE_MAX, `Title must be ${CAPA_TITLE_MAX} characters or fewer`),
+  description: z.string().min(CAPA_DESCRIPTION_MIN, `Description must be at least ${CAPA_DESCRIPTION_MIN} characters`),
   owner: z.string().min(1, "Assigned-to is required"),
   dueDate: z.string().min(1, "Due date required"),
   risk: z.enum(["Critical", "High", "Medium", "Low"]),
@@ -28,7 +29,9 @@ const editSchema = z.object({
   rca: z.string().optional(),
   rcaDetail: z.string().optional(),
   diGate: z.boolean(),
-  diGateStatus: z.enum(["open", "cleared"]).optional(),
+  // Accept every real DB value ("pending" from createCAPA/seed; legacy "open")
+  // so opening a freshly-raised DI CAPA and saving never trips the resolver.
+  diGateStatus: z.enum(["open", "pending", "cleared"]).optional(),
   diGateNotes: z.string().optional(),
   diGateReviewedBy: z.string().optional(),
   diGateReviewDate: z.string().optional(),
@@ -74,7 +77,9 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users }: EditCAPA
         rca: capa.rca ?? "",
         rcaDetail: capa.rcaDetail ?? undefined,
         diGate: capa.diGate,
-        diGateStatus: capa.diGateStatus ?? "open",
+        // Canonical not-cleared value is "pending"; fold legacy "open"/empty
+        // into it so the select always shows a valid option and the row converges.
+        diGateStatus: capa.diGateStatus === "cleared" ? "cleared" : "pending",
         diGateNotes: capa.diGateNotes ?? "",
         diGateReviewedBy: capa.diGateReviewedBy ?? "",
         diGateReviewDate: capa.diGateReviewDate ?? "",
@@ -161,7 +166,7 @@ export function EditCAPAModal({ isOpen, onClose, onSave, capa, users }: EditCAPA
               <div>
                 <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">DI Gate Status <span className="text-(--danger)">*</span></p>
                 <Controller name="diGateStatus" control={form.control} render={({ field }) => (
-                  <Dropdown value={field.value ?? "open"} onChange={field.onChange} width="w-full" options={[{ value: "open", label: "Open — review not done" }, { value: "cleared", label: "Cleared — DI review complete" }]} />
+                  <Dropdown value={field.value ?? "pending"} onChange={field.onChange} width="w-full" options={[{ value: "pending", label: "Pending clearance — review not done" }, { value: "cleared", label: "Cleared — DI review complete" }]} />
                 )} />
                 {form.formState.errors.diGateStatus && <p role="alert" className="text-[11px] text-(--danger) mt-1">{form.formState.errors.diGateStatus.message}</p>}
               </div>

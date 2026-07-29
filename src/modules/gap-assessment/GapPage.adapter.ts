@@ -1,7 +1,8 @@
 import type { Finding as PrismaFinding } from "@prisma/client";
 import type { Finding, FindingSeverity } from "@/store/findings.slice";
 
-/** Prisma Finding plus the edit-history rows the page query includes. */
+/** Prisma Finding plus the edit-history rows the page query includes, and the
+ *  evidence-presence fact getFindings stamps on every row. */
 export type FindingWithEdits = PrismaFinding & {
   edits?: {
     editedBy: string;
@@ -10,6 +11,7 @@ export type FindingWithEdits = PrismaFinding & {
     reason: string | null;
     changes: string;
   }[];
+  hasEvidenceDoc?: boolean;
 };
 
 /* ── Adapt Prisma Finding → slice Finding shape ── */
@@ -26,9 +28,20 @@ export function adaptFinding(p: FindingWithEdits): Finding {
     severity: p.severity as FindingSeverity,
     status: (p.status ?? "Open") as Finding["status"],
     owner: p.owner,
+    // Item 16 — the raiser, so the client can mirror canEditFindingRecord. Undefined
+    // (not "") when null, so the fail-closed guard sees "unknown", not a value.
+    createdById: p.createdById ?? undefined,
+    // Item 18 — the assignment record, so the detail can say "Assigned to" only
+    // when it actually knows. Undefined (not "") when null: absent means unknown.
+    assignedAt: p.assignedAt ? p.assignedAt.toISOString() : undefined,
+    assignedById: p.assignedById ?? undefined,
     targetDate: p.targetDate ? p.targetDate.toISOString() : "",
     evidenceLink: p.evidenceLink ?? "",
+    hasEvidenceDoc: p.hasEvidenceDoc ?? false,
     rootCause: p.rootCause ?? undefined,
+    // Item 17 — the RCA's author, so the close gate's client mirror compares against
+    // the same stored fact the server does.
+    rcaRecordedById: p.rcaRecordedById ?? undefined,
     rcaMethod: p.rcaMethod ?? undefined,
     rcaDetail: p.rcaDetail ?? undefined,
     capaId: p.linkedCAPAId ?? undefined,

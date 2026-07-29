@@ -253,21 +253,31 @@ export function GapEvidenceTab({
                             },
                             {
                               key: "evidenceLink",
-                              header: "Evidence link",
-                              render: (row) =>
-                                row.evidenceHref ? (
+                              // Shows the author's reference when there is one, else the
+                              // uploaded document — the two are separate things and this
+                              // column reports whichever the finding actually has.
+                              header: "Evidence",
+                              render: (row) => {
+                                // A finding can now have a DOCUMENT and no typed link
+                                // (the upload no longer writes one). Without this
+                                // fallback that case rendered an anchor with empty text
+                                // — an invisible link and a label reading "View evidence
+                                // document  for FND-…".
+                                const label = row.evidenceLink?.trim() || (row.evidenceHref ? "Uploaded document" : "");
+                                return row.evidenceHref ? (
                                   <a href={row.evidenceHref} target="_blank" rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1.5 text-[11px] text-[#0ea5e9] hover:underline"
-                                    aria-label={`View evidence document ${row.evidenceLink} for ${row.reference}`}>
+                                    aria-label={`View evidence document ${label} for ${row.reference}`}>
                                     <FileCheck className="w-3.5 h-3.5 text-[#10b981] shrink-0" aria-hidden="true" />
-                                    <span className="truncate" style={{ maxWidth: 180 }}>{row.evidenceLink}</span>
+                                    <span className="truncate" style={{ maxWidth: 180 }}>{label}</span>
                                     <ExternalLink className="w-3 h-3 shrink-0" aria-hidden="true" />
                                   </a>
-                                ) : row.evidenceLink ? (
-                                  <div className="flex items-center gap-1.5"><FileCheck className="w-3.5 h-3.5 text-[#10b981]" aria-hidden="true" /><span className="text-[11px] truncate" style={{ maxWidth: 180, color: "var(--text-secondary)" }}>{row.evidenceLink}</span></div>
+                                ) : label ? (
+                                  <div className="flex items-center gap-1.5"><FileCheck className="w-3.5 h-3.5 text-[#10b981]" aria-hidden="true" /><span className="text-[11px] truncate" style={{ maxWidth: 180, color: "var(--text-secondary)" }}>{label}</span></div>
                                 ) : (
-                                  <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No document linked</span>
-                                ),
+                                  <span className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No evidence</span>
+                                );
+                              },
                             },
                             {
                               key: "status",

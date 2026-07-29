@@ -11,9 +11,11 @@ import type {
 /**
  * ONE normalized "work item" view-model for the rebuilt Worklist. Every assigned
  * work type — a Gap Finding, a CAPA action item, or a Deviation task — is mapped
- * to this shape by a per-source adapter (the DocumentCard playbook: one card/modal,
- * adapters per source). The shared WorkItemCard + WorkItemModal render it; the
- * modal wires the source-specific server actions off `source` + `raw`.
+ * to this shape by a per-source adapter (the DocumentCard playbook: adapters per
+ * source, one rendering surface). Normalising here is what lets the list render
+ * as ONE table instead of three: WorklistPage's columns read this shape, never
+ * `source`. WorkItemModal renders the detail and wires the source-specific server
+ * actions off `source` + `raw`.
  */
 
 export type WorkSource = "finding" | "capa" | "deviation";
@@ -53,6 +55,9 @@ export interface WorkItem {
    *  on the worklist detail when the source record is closed. */
   closureMessage: string | null;
   closedDate: string | null;
+  /** Phase 7 — parent-CAPA status for CAPA items (null for finding/deviation).
+   *  Drives the worklist "accepted & the CAPA is closed" message when "closed". */
+  capaStatus: string | null;
   raw: WorklistFinding | WorklistActionItem | WorklistDeviationTask;
 }
 
@@ -103,6 +108,14 @@ function deviationStatusMeta(s: string): StatusMeta {
 export function findingToWorkItem(f: WorklistFinding, fmt: Fmt): WorkItem {
   const st = findingStatusMeta(f.status);
   const fw = f.framework ? frameworkLabel(f.framework) : null;
+  // Split on the STABLE bucket stamped at upload (the same rule the gap detail
+  // uses): "work" = this worker's own uploads → editable "My documents";
+  // everything else ("create", plus legacy nulls) is the gap's own creation
+  // evidence → read-only "Related documents". Previously ALL of a finding's docs
+  // landed in myDocs, so the gap's creation docs appeared as the worker's own —
+  // and were offered to them with a delete button.
+  const workDocs = f.docs.filter((d) => d.uploadSource === "work");
+  const gapDocs = f.docs.filter((d) => d.uploadSource !== "work");
   return {
     key: `finding:${f.id}`,
     source: "finding", sourceLabel: "Finding", id: f.id,
@@ -120,9 +133,9 @@ export function findingToWorkItem(f: WorklistFinding, fmt: Fmt): WorkItem {
     description: f.requirement,
     reworkReason: f.reworkReason,
     notes: f.completionNotes ?? "",
-    myDocs: f.docs, relatedDocs: [], messages: f.messages,
+    myDocs: workDocs, relatedDocs: gapDocs, messages: f.messages,
     link: { href: "/gap-assessment", label: f.reference ?? "Gap register" },
-    closureMessage: null, closedDate: null,
+    closureMessage: null, closedDate: null, capaStatus: null,
     raw: f,
   };
 }
@@ -155,7 +168,7 @@ export function actionToWorkItem(a: WorklistActionItem, fmt: Fmt): WorkItem {
     // read-only (the origin boundary). The modal renders relatedDocs read-only.
     myDocs: a.docs, relatedDocs: a.relatedDocs, messages: a.messages,
     link: { href: `/capa/${a.capaId}`, label: capaRef },
-    closureMessage: null, closedDate: null,
+    closureMessage: null, closedDate: null, capaStatus: a.capaStatus,
     raw: a,
   };
 }
@@ -184,7 +197,7 @@ export function deviationToWorkItem(t: WorklistDeviationTask, fmt: Fmt): WorkIte
     // uploads (editable); deviationDocs = the parent-deviation module docs (read-only).
     myDocs: t.taskDocs, relatedDocs: t.deviationDocs, messages: t.messages,
     link: { href: "/deviation", label: t.deviationReference ?? "Deviations" },
-    closureMessage: t.closureMessage, closedDate: t.closedDate,
+    closureMessage: t.closureMessage, closedDate: t.closedDate, capaStatus: null,
     raw: t,
   };
 }

@@ -73,6 +73,17 @@ export function AlignmentReviewSection({
     Boolean(capa.alignmentReviewedById) &&
     capa.alignmentReviewedById === currentUser?.id;
 
+  // Phase 4 — the actual fix for "nobody knew what this was for": put the root
+  // cause AND the actions ON the card so "do these match?" can be answered
+  // without leaving it. Live (non-skipped) action descriptions; fall back to the
+  // denormalised correctiveActions blob for legacy CAPAs with no structured rows.
+  const actionsLine =
+    (capa.actionItems ?? [])
+      .filter((a) => a.status !== "skipped")
+      .map((a) => a.description)
+      .join(" · ") ||
+    (capa.correctiveActions ?? "").split("\n").filter(Boolean).join(" · ");
+
   // Override button visibility: must be cosmetic, no override yet, current
   // user can review, and the user did NOT flag the CAPA themselves
   // (separation-of-duties UI gate; the server enforces too).
@@ -194,6 +205,21 @@ export function AlignmentReviewSection({
         )}
       </div>
 
+      {/* Phase 4 — root cause + actions + the question, ON the card. */}
+      <div className="rounded-md p-2 mb-3 space-y-1" style={{ background: "var(--bg-elevated)", border: "1px solid var(--card-border, var(--bg-border))" }}>
+        <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+          <span className="font-semibold mr-1" style={{ color: "var(--text-muted)" }}>Root cause:</span>
+          {capa.rca?.trim() || "— not recorded yet"}
+        </p>
+        <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+          <span className="font-semibold mr-1" style={{ color: "var(--text-muted)" }}>Actions:</span>
+          {actionsLine || "— none defined yet"}
+        </p>
+        <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>
+          Do the actions fix the cause, or just the symptom?
+        </p>
+      </div>
+
       {isLocked && (
         <div
           role="status"
@@ -201,7 +227,7 @@ export function AlignmentReviewSection({
         >
           <Lock className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
           <p className="text-[11px]">
-            Alignment review locked — CAPA has progressed to QA review.
+            Set before submission. Return the CAPA for rework to change it.
           </p>
         </div>
       )}
@@ -344,6 +370,9 @@ export function AlignmentReviewSection({
               </Button>
             ))}
           </div>
+          <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+            <strong>Cosmetic</strong> and <strong>Needs Review</strong> block submission (Cosmetic needs a different QA Head to override).
+          </p>
           {error && (
             <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>
               {error}

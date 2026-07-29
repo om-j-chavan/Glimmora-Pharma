@@ -13,21 +13,38 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
-// Lazy-initialized Razorpay instance
-let _razorpay: Razorpay | null = null;
+/**
+ * Read a required Razorpay env var, or fail with a message that NAMES it.
+ *
+ * The `!` these replace asserted to TypeScript that values were present which are
+ * genuinely absent — a claim nobody checked. The cost was paid at the worst moment:
+ * "`key_id` or `oauthToken` is mandatory", thrown from a bundled chunk with no hint
+ * of which variable or which route.
+ */
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    throw new Error(
+      `${name} is not set. Razorpay is required for this request; add it to your environment (see .env.example).`,
+    );
+  }
+  return v;
+}
 
+/**
+ * LAZY singleton. Constructed on first USE, never at module load.
+ *
+ * Module-scope construction meant a payment SDK had to initialise for the app to
+ * COMPILE: `next build` collects page data by evaluating each route's module, so the
+ * constructor ran at build time and threw without runtime secrets. A route that is
+ * never called at build time now never needs a key.
+ */
+let _razorpay: Razorpay | null = null;
 function getRazorpay(): Razorpay {
   if (!_razorpay) {
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-
-    if (!keyId || !keySecret) {
-      throw new Error("Razorpay credentials not configured. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables.");
-    }
-
     _razorpay = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
+      key_id: requireEnv("RAZORPAY_KEY_ID"),
+      key_secret: requireEnv("RAZORPAY_KEY_SECRET"),
     });
   }
   return _razorpay;
@@ -109,15 +126,13 @@ export async function createOrder(params: CreateOrderParams): Promise<RazorpayOr
  */
 export function verifyPaymentSignature(params: VerifyPaymentParams): boolean {
   const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = params;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-
-  if (!keySecret) {
-    throw new Error("RAZORPAY_KEY_SECRET not configured");
-  }
 
   const body = `${razorpayOrderId}|${razorpayPaymentId}`;
   const expectedSignature = crypto
-    .createHmac("sha256", keySecret)
+    // Was `RAZORPAY_KEY_SECRET!` — an undefined key makes crypto throw
+    // ERR_INVALID_ARG_TYPE ("The 'key' argument must be of type string… Received
+    // undefined"), which names neither the variable nor Razorpay.
+    .createHmac("sha256", requireEnv("RAZORPAY_KEY_SECRET"))
     .update(body)
     .digest("hex");
 
@@ -137,18 +152,20 @@ export function verifyPaymentSignature(params: VerifyPaymentParams): boolean {
  * @returns true if signature is valid
  */
 export function verifyWebhookSignature(body: string, signature: string): boolean {
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
-
-  if (!webhookSecret) {
-    throw new Error("RAZORPAY_WEBHOOK_SECRET not configured");
-  }
-
+  // requireEnv stays OUTSIDE the try, deliberately. A MISSING SECRET is a config
+  // error; an unparseable signature is a security answer. Folding the first into
+  // the catch below returned `false` — "invalid signature" — for an unconfigured
+  // server, which is a config error wearing a security error's clothes: the webhook
+  // would silently reject every legitimate Razorpay callback and look like an
+  // attack. This throws instead, naming RAZORPAY_WEBHOOK_SECRET.
   const expectedSignature = crypto
-    .createHmac("sha256", webhookSecret)
+    .createHmac("sha256", requireEnv("RAZORPAY_WEBHOOK_SECRET"))
     .update(body)
     .digest("hex");
 
   try {
+    // The catch covers timingSafeEqual ONLY — it throws on a length mismatch,
+    // which genuinely means the signature is invalid.
     return crypto.timingSafeEqual(
       Buffer.from(expectedSignature),
       Buffer.from(signature)
@@ -202,19 +219,27 @@ export async function capturePayment(
  * This is safe to expose to the client.
  */
 export function getPublicKey(): string {
-  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? process.env.RAZORPAY_KEY_ID ?? "";
+  // Was `?? process.env.RAZORPAY_KEY_ID!`. That `!` was the QUIET one: with no key
+  // set it returned `undefined` TYPED AS string and handed it to the client's
+  // checkout — no throw, no log, and the type system asserting it was fine. A build
+  // failure is loud and stops you; this shipped. requireEnv makes the same absence
+  // fail where it happens, naming the variable.
+  return process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID ?? requireEnv("RAZORPAY_KEY_ID");
 }
 
 /**
- * Check if Razorpay is configured.
+ * Check if Razorpay is configured (origin).
  */
 export function isConfigured(): boolean {
   return !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
 }
 
-// Export getter for the razorpay instance (lazy-loaded)
+// Lazy instance accessor (origin) — SAFE: getRazorpay() constructs on first ACCESS,
+// never at module load, so this doesn't reintroduce the build-time construction the
+// lazy singleton removed. All current importers use the functions above; kept for
+// any caller that wants the raw instance.
 export const razorpay = {
   get instance() {
     return getRazorpay();
-  }
+  },
 };

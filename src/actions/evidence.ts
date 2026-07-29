@@ -421,6 +421,9 @@ export async function addEvidenceFile(
         uploadedById: actor.userId,
         // Phase 2 — optional per-action scope (validated above).
         actionItemId: actionItemId ?? null,
+        // Phase 3 — added on the CAPA after raise (deletable). "qa_added" means
+        // "added after raise" and includes worker worklist uploads, not only QA.
+        uploadSource: "qa_added",
       },
     });
 

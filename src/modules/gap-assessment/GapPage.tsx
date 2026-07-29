@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BarChart3, ClipboardCheck, ClipboardList, FolderOpen, Plus } from "lucide-react";
-import type { Finding as PrismaFinding } from "@prisma/client";
+import type { Finding as PrismaFinding, CAPA as PrismaCAPA } from "@prisma/client";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { usePlanLimits } from "@/hooks/usePlanLimits";
 import { NoSitesPopup, TabBar, PlanLimitPopup, StatusGuide } from "@/components/shared";
@@ -24,6 +24,8 @@ import {
   type Finding,
   type FindingSeverity,
 } from "@/store/findings.slice";
+import { setCAPAs } from "@/store/capa.slice";
+import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
 import { adaptFinding, type FindingWithEdits } from "./GapPage.adapter";
 import type { FindingAssignee } from "@/lib/queries";
 import {
@@ -36,7 +38,14 @@ import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { linkFindingToSystem as linkFindingToSystemAction } from "@/actions/systems";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
+// Item 19 — the SAME set the server checks the carry against (roleSets' own
+// contract: "Client filter + server validation share this ONE set so the UI
+// can't be bypassed and the two can never drift").
+import { canExecuteCAPA } from "@/lib/permissions/roleSets";
+import { roleLabel } from "@/lib/labels/roles";
+import type { TenantUserConfig } from "@/store/auth.slice";
 import { Drawer } from "@/components/ui/Drawer";
 import { useToast } from "@/components/ui/Toast";
 
@@ -82,10 +91,15 @@ const TABS: { id: TabId; label: string; Icon: typeof BarChart3 }[] = [
 
 /* ── Helpers ── */
 
+/** Evidence presence = an uploaded DOCUMENT or the author's typed reference.
+ *  This used to read `evidenceLink` alone, which only tracked reality while the
+ *  upload path was stamping filenames into it: a finding with documents but no
+ *  typed link scored "Missing" — understating coverage on records that are fully
+ *  evidenced. Closed + evidence → Complete; evidence, still open → Partial. */
 function getEvidenceStatus(f: Finding): "Complete" | "Partial" | "Missing" {
-  if (f.status === "Closed" && f.evidenceLink.trim().length > 0) return "Complete";
-  if (f.evidenceLink.trim().length > 0) return "Partial";
-  return "Missing";
+  const hasEvidence = !!f.hasEvidenceDoc || f.evidenceLink.trim().length > 0;
+  if (!hasEvidence) return "Missing";
+  return f.status === "Closed" ? "Complete" : "Partial";
 }
 function getAreaStatus(rows: { status: "Complete" | "Partial" | "Missing" }[]): "Complete" | "Partial" | "Missing" {
   if (rows.length === 0) return "Complete";
@@ -104,9 +118,12 @@ export interface GapPageProps {
   evidenceDocFindingIds?: string[];
   /** SERVER-SCOPED assignee pool (tenant + the assigner's own site). */
   assignees?: FindingAssignee[];
+  /** Server-fetched CAPAs (Prisma rows) — seeded into Redux so the gap detail's
+   *  Linked-CAPA surfaces can resolve a reference instead of a raw cuid. */
+  capas?: PrismaCAPA[];
 }
 
-export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assignees = [] }: GapPageProps = {}) {
+export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assignees = [], capas: serverCAPAs }: GapPageProps = {}) {
   const router = useRouter();
   const dispatch = useAppDispatch();
 
@@ -116,6 +133,16 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       dispatch(setFindings(serverFindings.map(adaptFinding)));
     }
   }, [serverFindings, dispatch]);
+
+  // Seed the CAPA store too — every Linked-CAPA surface on this page (the detail
+  // panel's reference + status badge, the read-only lock banner, the register's
+  // CAPA column, the History escalation link) resolves against it. Mirrors
+  // CAPAPage / DashboardPage / FDA483Page.
+  useEffect(() => {
+    if (serverCAPAs) {
+      dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
+    }
+  }, [serverCAPAs, dispatch]);
   const { isViewOnly } = useRole();
   // Capability mirror of the server author set (COMPLIANCE_AUTHOR_ROLES) —
   // includes customer_admin, excludes non-author roles. Replaces the old
@@ -155,6 +182,10 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   const [addOpen, setAddOpen] = useState(false);
   const [addedPopup, setAddedPopup] = useState(false);
   const [capaRaisedPopup, setCapaRaisedPopup] = useState(false);
+  // Item 19 — pending carry decision. Non-null ⇒ QA is being asked whether the
+  // gap's assignee carries into the CAPA; the raise is held until they answer.
+  const [carryPrompt, setCarryPrompt] = useState<{ finding: Finding; assignee: TenantUserConfig } | null>(null);
+  const [carryBusy, setCarryBusy] = useState(false);
   const [raisedCapaId, setRaisedCapaId] = useState("");
   // Step 5 — carryover summary (converted evidence count) for the confirmation.
   const [raisedNote, setRaisedNote] = useState("");
@@ -296,8 +327,12 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   //  • typed reference with no file → no href (rendered as plain text)
   function resolveEvidenceHref(findingId: string, link: string): string | undefined {
     const v = link?.trim();
-    if (!v) return undefined;
-    if (/^https?:\/\//i.test(v)) return v;
+    // An author's external URL wins — it is the reference they chose.
+    if (v && /^https?:\/\//i.test(v)) return v;
+    // Otherwise a retrievable document is viewable on its own merit. The empty-
+    // link early-return used to sit above this, so a finding WITH a document but
+    // no typed link rendered no View action — the route is keyed on findingId and
+    // never needed the link at all.
     if (evidenceDocIds.has(findingId)) return `/api/findings/${findingId}/evidence`;
     return undefined;
   }
@@ -356,7 +391,27 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
     return "Low";
   }
 
+  /**
+   * Item 19 — the raise INTERCEPT. A Low gap that was genuinely assigned is QA's
+   * decision to make, so the dialog opens BEFORE createCAPA is called and its
+   * answer rides in on the same call (the action item must be created inside
+   * createCAPA's transaction — a follow-up addActionItem could fail on its own
+   * and strand the work the carry exists to preserve).
+   *
+   * The gate reads assignedAt and nothing else. severity/assignedAt/owner/users
+   * are all already on the client, so this costs no extra query. Null assignedAt
+   * ⇒ unknown ⇒ raise straight through: no dialog, no carry, no prompt.
+   */
   async function handleRaiseCapa(finding: Finding) {
+    const assignee = finding.assignedAt ? users.find((u) => u.id === finding.owner) : undefined;
+    if (finding.severity === "Low" && finding.assignedAt && assignee) {
+      setCarryPrompt({ finding, assignee });
+      return; // raiseCapa runs from the dialog, with QA's answer
+    }
+    await raiseCapa(finding, false);
+  }
+
+  async function raiseCapa(finding: Finding, carryAssignment: boolean) {
     const result = await createCAPAAction({
       title: finding.requirement.slice(0, 120),
       description: finding.requirement,
@@ -367,16 +422,19 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       siteId: finding.siteId || undefined,
       linkedFindingId: finding.id,
       diGateRequired: ["p11", "annex11"].includes(finding.framework),
+      // QA's answer. The server re-derives whether it's permitted.
+      carryAssignment,
     });
     if (!result.success) {
-      // The "Raise CAPA" button is hidden for non-QA (canCreateCAPA), so this
-      // path is a stale-UI / race guard. Log for debugging (warn, not a red
-      // error) and surface a friendly toast instead of a dead click.
-      console.warn("[gap] handleRaiseCapa rejected:", result.error);
+      // Surface the ACTUAL failure. A validation error puts the specific reason in
+      // fieldErrors; a generic "try again" on a deterministic failure is the UI
+      // lying about what happened (and invites the pointless retry we saw).
+      const detail = result.fieldErrors ? Object.values(result.fieldErrors)[0]?.[0] : undefined;
+      console.warn("[gap] handleRaiseCapa rejected:", result.error, result.fieldErrors);
       toast.error(
         result.error === "Only QA Head can create a CAPA."
           ? "Only your QA Head can create a CAPA from this finding."
-          : "Couldn't raise a CAPA from this finding. Please try again.",
+          : detail ?? result.error ?? "Couldn't raise a CAPA from this finding.",
       );
       return;
     }
@@ -450,7 +508,7 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
       for (const ev of evidenceFiles) {
         const fd = new FormData();
         fd.append("file", ev.file);
-        const upRes = await uploadFindingEvidenceAction(created.id, fd);
+        const upRes = await uploadFindingEvidenceAction(created.id, fd, undefined, "create");
         if (!upRes.success) console.error("[gap] uploadFindingEvidence failed:", ev.name, upRes.error);
       }
     }
@@ -459,8 +517,8 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
     router.refresh();
   }
 
-  async function handleLinkEvidence(findingId: string, evidenceLink: string) {
-    const result = await updateFindingAction(findingId, { evidenceLink });
+  async function handleLinkEvidence(findingId: string, evidenceLink: string, reason: string) {
+    const result = await updateFindingAction(findingId, { evidenceLink, reason });
     if (!result.success) {
       // The link action is hidden for non-QA (canEditFinding); stale-UI guard.
       // Warn (not a red error); the modal surfaces `error` inline.
@@ -475,7 +533,9 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   async function handleUploadEvidence(findingId: string, file: File) {
     const fd = new FormData();
     fd.append("file", file);
-    const result = await uploadFindingEvidenceAction(findingId, fd);
+    // #2 — a QA/author doc attached on the gap detail is a supporting document,
+    // not the worker's categorized work → "create" bucket (confirmed decision).
+    const result = await uploadFindingEvidenceAction(findingId, fd, undefined, "create");
     if (!result.success) {
       console.error("[gap] handleUploadEvidence failed:", result.error);
       return { ok: false, error: result.error };
@@ -612,6 +672,61 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
           })]}
         />
       </Drawer>
+
+      {/* Item 19 — the carry decision. QA is DECIDING here, not being told: the
+          raise is paused until they answer, and either answer proceeds with it.
+          Two variants, because a gap assignee is not necessarily a CAPA executor
+          (qa_head is assignable to gaps but is not in CAPA_EXECUTE_ROLES — the
+          largest role in a typical tenant). When they can't own the work we say
+          so and don't offer a choice that would silently do nothing. */}
+      {carryPrompt && (() => {
+        const { finding, assignee } = carryPrompt;
+        const executor = canExecuteCAPA(assignee.role);
+        const close = () => { if (!carryBusy) setCarryPrompt(null); };
+        const go = async (carry: boolean) => {
+          setCarryBusy(true);
+          await raiseCapa(finding, carry);
+          setCarryBusy(false);
+          setCarryPrompt(null);
+        };
+        return (
+          <Modal
+            open
+            onClose={close}
+            title={executor ? "Carry the assignment?" : "Can't carry this assignment"}
+            footer={
+              <div className="flex justify-end gap-2">
+                {executor ? (
+                  <>
+                    <Button variant="secondary" size="sm" disabled={carryBusy} onClick={() => void go(false)}>Don&apos;t carry</Button>
+                    <Button variant="primary" size="sm" disabled={carryBusy} loading={carryBusy} onClick={() => void go(true)}>Carry the assignment</Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="ghost" size="sm" disabled={carryBusy} onClick={close}>Cancel</Button>
+                    <Button variant="primary" size="sm" disabled={carryBusy} loading={carryBusy} onClick={() => void go(false)}>Raise anyway</Button>
+                  </>
+                )}
+              </div>
+            }
+          >
+            {executor ? (
+              <p className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                <strong>{assignee.name}</strong> is assigned to this gap. Carry their work into the CAPA as an action item?
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                  <strong>{assignee.name}</strong> is assigned to this gap, but their role ({roleLabel(assignee.role)}) can&apos;t own CAPA action items.
+                </p>
+                <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                  Raising this CAPA won&apos;t carry their work. You can assign it to a CAPA executor from the CAPA&apos;s Assignments tab afterwards.
+                </p>
+              </div>
+            )}
+          </Modal>
+        );
+      })()}
 
       {/* Popups */}
       <Popup isOpen={addedPopup} variant="success" title="Finding logged" description="Added to the register. Raise a CAPA if corrective action is needed." onDismiss={() => setAddedPopup(false)} />

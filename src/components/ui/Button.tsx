@@ -68,6 +68,7 @@ export function Button({
   disabled,
   children,
   className,
+  type = "button",
   ...props
 }: ButtonProps) {
   const isDisabled = disabled || loading;
@@ -76,6 +77,7 @@ export function Button({
   return (
     <button
       {...props}
+      type={type}
       disabled={isDisabled}
       suppressHydrationWarning
       className={clsx(

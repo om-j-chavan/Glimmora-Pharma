@@ -27,6 +27,8 @@ import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
 import { displayUserName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
 import { useToast } from "@/components/ui/Toast";
+import { TASK_DESCRIPTION_MIN } from "@/constants/capaValidation";
+import type { BadgeVariant } from "@/components/ui/Badge";
 import type { CAPA, CAPAActionItem } from "@/store/capa.slice";
 
 /* ── SME Section 1, Stage 4 (FULL) — structured Action Plan table ──
@@ -54,14 +56,18 @@ const STATUS_LABEL: Record<CAPAActionItem["status"], string> = {
   complete: "Done",
   skipped: "Skipped",
   rework: "Rework",
+  accepted: "Accepted",
 };
 
-const STATUS_VARIANT: Record<CAPAActionItem["status"], "gray" | "amber" | "green" | "red"> = {
+const STATUS_VARIANT: Record<CAPAActionItem["status"], BadgeVariant> = {
   pending: "gray",
   in_progress: "amber",
   complete: "green",
   skipped: "red",
   rework: "red",
+  // Phase 5 — distinct from complete (green): "worker finished" (complete) and
+  // "QA reviewed it" (accepted) are different facts. blue exists in BadgeVariant.
+  accepted: "blue",
 };
 
 export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFilter?: string | null }) {
@@ -196,8 +202,8 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
   // ── Mutations ──
 
   const handleAdd = async () => {
-    if (addDesc.trim().length < 3) {
-      setAddError("Add an action description (at least 3 characters).");
+    if (addDesc.trim().length < TASK_DESCRIPTION_MIN) {
+      setAddError(`Add an action description (at least ${TASK_DESCRIPTION_MIN} characters).`);
       return;
     }
     if (!addOwner) {
@@ -253,7 +259,7 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
 
   const handleEdit = async () => {
     if (!editId) return;
-    if (editDesc.trim().length < 3) { setEditError("Add an action description (at least 3 characters)."); return; }
+    if (editDesc.trim().length < TASK_DESCRIPTION_MIN) { setEditError(`Add an action description (at least ${TASK_DESCRIPTION_MIN} characters).`); return; }
     if (!editOwner) { setEditError("Select who this is assigned to."); return; }
     if (!editDueDate) { setEditError("Pick a due date."); return; }
     // Item 5 — reject only a CHANGE to a past date; an unchanged already-past
@@ -470,7 +476,7 @@ export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFil
           <div className="space-y-3">
             <div>
               <label htmlFor="ai-desc" className="text-[11px] font-medium text-(--text-secondary) block mb-1.5">Action <span className="text-(--danger)">*</span></label>
-              <textarea id="ai-desc" rows={3} className="input text-[12px] w-full resize-none" value={addDesc} onChange={(e) => setAddDesc(e.target.value)} placeholder="Describe the action to take (≥ 3 characters)" />
+              <textarea id="ai-desc" rows={3} className="input text-[12px] w-full resize-none" value={addDesc} onChange={(e) => setAddDesc(e.target.value)} placeholder={`Describe the action to take (≥ ${TASK_DESCRIPTION_MIN} characters)`} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

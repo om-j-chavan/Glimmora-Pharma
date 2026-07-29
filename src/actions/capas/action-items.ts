@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
-import { QA_AUTHORITY_ROLES, isAssignedToTask, canExecuteCAPA } from "@/lib/permissions/roleSets";
+import { QA_AUTHORITY_ROLES, isAssignedToTask, canExecuteCAPA, canReviewAlignment } from "@/lib/permissions/roleSets";
 import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
 import {
   ACTION_ITEMS_AUDIT_MODULE,
@@ -17,6 +17,7 @@ import {
 } from "./_types";
 import { sanitizeServerError } from "@/lib/errors";
 import { notify } from "@/lib/notify";
+import { TASK_DESCRIPTION_MIN } from "@/constants/capaValidation";
 
 // NOTE — actor identity (AUDIT Finding #2 / Rung 3E): completedByUser is a
 // real User FK (completedById). Never connect `session.user.id` (a Tenant id
@@ -70,7 +71,7 @@ function isNotPastDueDate(value: string): boolean {
 // â”€â”€ Schemas â”€â”€
 
 const AddActionItemSchema = z.object({
-  description: z.string().min(3, "Description must be at least 3 characters").max(2000),
+  description: z.string().min(TASK_DESCRIPTION_MIN, `Task description must be at least ${TASK_DESCRIPTION_MIN} characters`).max(2000),
   owner: z.string().min(1, "Owner is required"),
   ownerId: z.string().optional(),
   // Item 5 — a NEW action item can never be given a past due date.
@@ -79,7 +80,7 @@ const AddActionItemSchema = z.object({
 });
 
 const UpdateActionItemSchema = z.object({
-  description: z.string().min(3).max(2000).optional(),
+  description: z.string().min(TASK_DESCRIPTION_MIN, `Task description must be at least ${TASK_DESCRIPTION_MIN} characters`).max(2000).optional(),
   owner: z.string().min(1).optional(),
   ownerId: z.string().nullable().optional(),
   dueDate: z.string().min(1).optional(),
@@ -99,8 +100,13 @@ const DeleteActionItemSchema = z.object({
  * so any downstream reader (legacy reports, the existing UI fallback)
  * still sees a consistent shape. Called inside the same tx as every
  * action-item write.
+ *
+ * EXPORTED for createCAPA's Item 19 assignment carry, which creates an action
+ * item inside its own transaction. Any writer of CAPAActionItem must call this
+ * in the same tx or correctiveActions silently drifts from the rows — the join
+ * lives here and nowhere else.
  */
-async function syncCorrectiveActions(
+export async function syncCorrectiveActions(
   tx: TxClient,
   capaId: string,
   tenantId: string,
@@ -128,12 +134,12 @@ async function getCAPAForActionItemOp(
   capaId: string,
   tenantId: string,
 ): Promise<
-  | { ok: true; capa: { id: string; status: string; reference: string | null; description: string } }
+  | { ok: true; capa: { id: string; status: string; reference: string | null; description: string; dueDate: Date | null } }
   | { ok: false; error: string }
 > {
   const capa = await prisma.cAPA.findFirst({
     where: { id: capaId, tenantId },
-    select: { id: true, status: true, reference: true, description: true },
+    select: { id: true, status: true, reference: true, description: true, dueDate: true },
   });
   if (!capa) return { ok: false, error: "CAPA not found" };
   return { ok: true, capa };
@@ -174,6 +180,16 @@ export async function addActionItem(
       error: isTerminalStatus(capa.status)
         ? ACTION_ITEMS_TERMINAL_MESSAGE
         : ACTION_ITEMS_LOCKED_MESSAGE,
+    };
+  }
+
+  // Phase 3 — a task can't be due AFTER its CAPA, or the CAPA can't close on
+  // time. Compared on UTC calendar days (same basis as the past-date check).
+  // Skipped when the CAPA has no due date (legacy rows).
+  if (capa.dueDate && utcDayMs(new Date(parsed.data.dueDate)) > utcDayMs(capa.dueDate)) {
+    return {
+      success: false,
+      error: `Task due date (${parsed.data.dueDate.slice(0, 10)}) can't be after the CAPA due date (${capa.dueDate.toISOString().slice(0, 10)}) — the CAPA can't close on time.`,
     };
   }
 
@@ -310,7 +326,7 @@ export async function updateActionItem(
   const existing = await prisma.cAPAActionItem.findFirst({
     where: { id: itemId, tenantId: session.user.tenantId },
     include: {
-      capa: { select: { id: true, status: true, reference: true, description: true } },
+      capa: { select: { id: true, status: true, reference: true, description: true, dueDate: true } },
     },
   });
   if (!existing) return { success: false, error: "Action item not found" };
@@ -334,13 +350,23 @@ export async function updateActionItem(
     parsed.data.dueDate === undefined;
   const targetIsCompleteOrSkipped =
     parsed.data.status === "complete" || parsed.data.status === "skipped";
+  // A notes-only save (the worklist "Save notes" button): completionNotes with
+  // no status and no structural field. Distinct from isStatusOnlyUpdate — it
+  // carries NO status, so it is not a transition at all.
+  const isNotesOnlyUpdate =
+    parsed.data.completionNotes !== undefined &&
+    parsed.data.status === undefined &&
+    parsed.data.description === undefined &&
+    parsed.data.owner === undefined &&
+    parsed.data.ownerId === undefined &&
+    parsed.data.dueDate === undefined;
 
   // Phase 3 — authorization: author-role OR assigned-owner path. The owner
   // path permits ONLY a status-only update to pending|in_progress|complete
-  // (+ completionNotes). Structural edits (description/owner/dueDate/
-  // delete) and the skipped/rework statuses stay author-only. requireGxPAuthor
-  // (platform-admin block, above) and the viewer hard-stop baked into
-  // isAssignedToTask both precede this check.
+  // (+ completionNotes), or a notes-only save. Structural edits (description/
+  // owner/dueDate/delete) and the skipped/rework statuses stay author-only.
+  // requireGxPAuthor (platform-admin block, above) and the viewer hard-stop
+  // baked into isAssignedToTask both precede this check.
   // Responsibility map - full edit/reassign of an action item is a QA authority
   // action (QA_AUTHORITY_ROLES). The assignee still makes status-only transitions
   // via the isAssignedOwner branch below.
@@ -355,7 +381,7 @@ export async function updateActionItem(
     if (!isAssignedOwner) {
       return { success: false, error: "Your role does not permit this action." };
     }
-    if (!ownerStatusOnly) {
+    if (!ownerStatusOnly && !isNotesOnlyUpdate) {
       return {
         success: false,
         error:
@@ -430,6 +456,14 @@ export async function updateActionItem(
     if (meaningfullyChanged && !isNotPastDueDate(parsed.data.dueDate)) {
       return { success: false, error: "Due date can't be in the past." };
     }
+    // Phase 3 — a task can't be due AFTER its CAPA (see addActionItem). Skipped
+    // when the CAPA has no due date (legacy rows).
+    if (existing.capa.dueDate && nextMs > utcDayMs(existing.capa.dueDate)) {
+      return {
+        success: false,
+        error: `Task due date (${parsed.data.dueDate.slice(0, 10)}) can't be after the CAPA due date (${existing.capa.dueDate.toISOString().slice(0, 10)}) — the CAPA can't close on time.`,
+      };
+    }
   }
 
   // Build the update payload incrementally.
@@ -470,6 +504,13 @@ export async function updateActionItem(
     data.completedByUser = { disconnect: true };
     data.completedAt = null;
     data.completionNotes = null;
+  } else if (parsed.data.completionNotes !== undefined) {
+    // Notes-only save. Without this branch `data` stayed EMPTY on a
+    // completionNotes-only call — the update was a silent no-op that still
+    // returned success, so the worklist's "Save notes" reported saved and
+    // persisted nothing. Notes are carried WITHOUT touching status or
+    // completion attribution: saving a note is not a completion attestation.
+    data.completionNotes = parsed.data.completionNotes.trim() || null;
   }
 
   try {
@@ -489,6 +530,9 @@ export async function updateActionItem(
     if (ownerChanged) changedFields.push("owner");
     if (dueDateChanged) changedFields.push("dueDate");
     if (parsed.data.status !== undefined) changedFields.push("status");
+    // A notes-only save changes nothing else, so without this the audit row
+    // recorded an empty changedFields — a write with no trail of what moved.
+    if (isNotesOnlyUpdate) changedFields.push("completionNotes");
 
     await prisma.auditLog.create({
       data: {
@@ -734,6 +778,512 @@ export async function loadActionItemsForCAPA(
     orderBy: { sequence: "asc" },
   });
   return { success: true, data: items };
+}
+
+/* ── Phase 2 — per-person QA review surface ──────────────────────────────────
+ *
+ * acceptWork / sendWorkBack operate on ALL of one person's items on a CAPA
+ * (capaId + ownerId); skipTask / reassignTask operate on a single item. All
+ * four are QA-only (CAPA_REVIEW_ROLES — the same gate as reviewRCA/alignment),
+ * run during QA review, and each mutation + its audit row commit in one
+ * transaction. None mint a SignedRecord — these are review steps, not
+ * signatures; only closure is signed.
+ */
+
+const AcceptWorkSchema = z.object({
+  ownerId: z.string().min(1, "ownerId is required"),
+  reviewNotes: z.string().max(2000).optional(),
+});
+
+/**
+ * QA accepts ALL of one person's `complete` items on a CAPA under review.
+ * complete -> accepted. Only `complete` items are touched — unfinished
+ * (pending / in_progress) work is never accepted. Atomic; audited
+ * (CAPA_WORK_ACCEPTED); NOT a Part 11 signature.
+ */
+export async function acceptWork(
+  capaId: string,
+  input: z.input<typeof AcceptWorkSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!canReviewAlignment(session.user.role)) {
+    return { success: false, error: "Only QA Head can accept work." };
+  }
+  const parsed = AcceptWorkSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const lookup = await getCAPAForActionItemOp(capaId, session.user.tenantId);
+  if (!lookup.ok) return { success: false, error: lookup.error };
+  const { capa } = lookup;
+  if (capa.status !== "pending_qa_review") {
+    return { success: false, error: "Work can only be accepted while the CAPA is under QA review." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  // ONLY `complete` items for this person. An in_progress / pending item is not
+  // finished work and is never accepted.
+  const targets = await prisma.cAPAActionItem.findMany({
+    where: { capaId, tenantId: session.user.tenantId, ownerId: parsed.data.ownerId, status: "complete", deletedAt: null },
+    select: { id: true, owner: true },
+  });
+  if (targets.length === 0) {
+    return { success: false, error: "That person has no completed work to accept on this CAPA." };
+  }
+  const ownerName = targets[0].owner;
+  const now = new Date();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.cAPAActionItem.updateMany({
+        where: { capaId, tenantId: session.user.tenantId, ownerId: parsed.data.ownerId, status: "complete", deletedAt: null },
+        data: {
+          status: "accepted",
+          // The QA reviewer who accepted (the worker is the item's owner/ownerId).
+          acceptedBy: session.user.name,
+          acceptedById: session.user.id,
+          acceptedAt: now,
+          acceptanceNotes: parsed.data.reviewNotes?.trim() ?? null,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: ACTION_ITEMS_AUDIT_MODULE,
+          action: "CAPA_WORK_ACCEPTED",
+          recordId: capaId,
+          recordTitle: (capa.reference ?? capa.description).slice(0, 80),
+          newValue: JSON.stringify({
+            ownerId: parsed.data.ownerId,
+            ownerName,
+            itemCount: targets.length,
+            itemIds: targets.map((t) => t.id),
+            reviewNotes: parsed.data.reviewNotes ?? null,
+          }),
+        },
+      });
+    });
+
+    revalidatePath("/capa");
+    revalidatePath(`/capa/${capaId}`);
+    revalidatePath("/worklist");
+    return { success: true, data: { ownerId: parsed.data.ownerId, accepted: targets.length } };
+  } catch (err) {
+    console.error("[action] acceptWork failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to accept work") };
+  }
+}
+
+const SendWorkBackSchema = z.object({
+  ownerId: z.string().min(1, "ownerId is required"),
+  reason: z.string().min(10, "Reason must be at least 10 characters").max(2000),
+});
+
+/**
+ * QA returns ONE person's work for revision. Reopens ONLY that person's items
+ * (complete|accepted -> rework) and unlocks ONLY the evidence categories that
+ * hold their files. The CAPA stays in pending_qa_review — this is NOT a
+ * whole-CAPA bounce, so everyone else's accepted work is untouched. The reason
+ * is written to CAPAActionItem.reworkReason (the same column rejectCAPA uses,
+ * read by the worklist) AND pushed as a REWORK_ASSIGNED notification. Atomic.
+ */
+export async function sendWorkBack(
+  capaId: string,
+  input: z.input<typeof SendWorkBackSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!canReviewAlignment(session.user.role)) {
+    return { success: false, error: "Only QA Head can send work back." };
+  }
+  const parsed = SendWorkBackSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const lookup = await getCAPAForActionItemOp(capaId, session.user.tenantId);
+  if (!lookup.ok) return { success: false, error: lookup.error };
+  const { capa } = lookup;
+  if (capa.status !== "pending_qa_review") {
+    return { success: false, error: "Work can only be sent back while the CAPA is under QA review." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  const targets = await prisma.cAPAActionItem.findMany({
+    where: {
+      capaId,
+      tenantId: session.user.tenantId,
+      ownerId: parsed.data.ownerId,
+      status: { in: ["complete", "accepted"] },
+      deletedAt: null,
+    },
+    select: { id: true, owner: true },
+  });
+  if (targets.length === 0) {
+    return { success: false, error: "That person has no completed or accepted work to send back on this CAPA." };
+  }
+  const itemIds = targets.map((t) => t.id);
+  const ownerName = targets[0].owner;
+  const now = new Date();
+
+  // This person's evidence = the categories holding files tied to their items.
+  // NOTE: EvidenceItem locks are per-CATEGORY (shared across contributors), so a
+  // category with another person's files unlocks for them too — the same
+  // granularity rejectEvidenceCategory already accepts. Per-person isolation
+  // would need a per-file/per-owner evidence lock (schema follow-up).
+  const files = await prisma.evidenceFile.findMany({
+    where: { actionItemId: { in: itemIds }, deletedAt: null },
+    select: { evidenceItemId: true },
+  });
+  const evidenceItemIds = Array.from(new Set(files.map((f) => f.evidenceItemId)));
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.cAPAActionItem.updateMany({
+        where: {
+          capaId,
+          tenantId: session.user.tenantId,
+          ownerId: parsed.data.ownerId,
+          status: { in: ["complete", "accepted"] },
+          deletedAt: null,
+        },
+        data: {
+          status: "rework",
+          reworkReason: parsed.data.reason,
+          reworkRequestedById: actor.userId,
+          reworkRequestedAt: now,
+        },
+      });
+      if (evidenceItemIds.length > 0) {
+        // Mirror rejectEvidenceCategory's per-category unlock so the worker can
+        // re-upload while the CAPA stays in QA review.
+        await tx.evidenceItem.updateMany({
+          where: { id: { in: evidenceItemIds }, capaId },
+          data: { lockedAt: null, lockedBy: null, lockedSignatureId: null },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: ACTION_ITEMS_AUDIT_MODULE,
+          action: "CAPA_WORK_SENT_BACK",
+          recordId: capaId,
+          recordTitle: (capa.reference ?? capa.description).slice(0, 80),
+          newValue: JSON.stringify({
+            ownerId: parsed.data.ownerId,
+            ownerName,
+            reason: parsed.data.reason.slice(0, 200),
+            itemCount: targets.length,
+            itemIds,
+            evidenceCategoriesUnlocked: evidenceItemIds.length,
+          }),
+        },
+      });
+    });
+
+    // Reason reaches the worker's Worklist via the reworkReason column (above)
+    // AND this notification. Fault-isolated; notify() never throws.
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: parsed.data.ownerId,
+      actorUserId: actor.userId,
+      type: "REWORK_ASSIGNED",
+      title: `Work returned for revision (CAPA ${capa.reference ?? capaId})`,
+      body: parsed.data.reason.slice(0, 200),
+      linkPath: "/worklist",
+      entityType: "CAPA",
+      entityId: capaId,
+    });
+
+    revalidatePath("/capa");
+    revalidatePath(`/capa/${capaId}`);
+    revalidatePath("/worklist");
+    return { success: true, data: { ownerId: parsed.data.ownerId, sentBack: targets.length } };
+  } catch (err) {
+    console.error("[action] sendWorkBack failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to send work back") };
+  }
+}
+
+const SkipTaskSchema = z.object({
+  reason: z
+    .string()
+    .min(20, "A reason of at least 20 characters is required to skip a corrective action")
+    .max(2000),
+});
+
+/**
+ * QA skips a single corrective action (status -> skipped). A skipped item no
+ * longer blocks closure (closure accepts accepted|skipped). Reason required
+ * (min 20). Atomic; audited (CAPA_TASK_SKIPPED).
+ */
+export async function skipTask(
+  actionItemId: string,
+  input: z.input<typeof SkipTaskSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!canReviewAlignment(session.user.role)) {
+    return { success: false, error: "Only QA Head can skip a task." };
+  }
+  const parsed = SkipTaskSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const existing = await prisma.cAPAActionItem.findFirst({
+    where: { id: actionItemId, tenantId: session.user.tenantId, deletedAt: null },
+    include: { capa: { select: { id: true, status: true, reference: true, description: true } } },
+  });
+  if (!existing) return { success: false, error: "Action item not found" };
+  if (isTerminalStatus(existing.capa.status)) {
+    return { success: false, error: ACTION_ITEMS_TERMINAL_MESSAGE };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.cAPAActionItem.update({
+        where: { id: actionItemId },
+        data: {
+          status: "skipped",
+          completionNotes: parsed.data.reason.trim(),
+          completedBy: session.user.name,
+          completedByUser: actor.userId ? { connect: { id: actor.userId } } : { disconnect: true },
+          completedAt: new Date(),
+        },
+      });
+      await syncCorrectiveActions(tx, existing.capaId, session.user.tenantId);
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: ACTION_ITEMS_AUDIT_MODULE,
+          action: "CAPA_TASK_SKIPPED",
+          recordId: existing.capa.id,
+          recordTitle: (existing.capa.reference ?? existing.capa.description).slice(0, 80),
+          oldValue: existing.status,
+          newValue: JSON.stringify({ itemId: actionItemId, reason: parsed.data.reason.slice(0, 200) }),
+        },
+      });
+    });
+
+    revalidatePath("/capa");
+    revalidatePath(`/capa/${existing.capa.id}`);
+    revalidatePath("/worklist");
+    return { success: true, data: { id: actionItemId } };
+  } catch (err) {
+    console.error("[action] skipTask failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to skip task") };
+  }
+}
+
+const ReassignTaskSchema = z.object({
+  newOwnerId: z.string().min(1, "New owner is required"),
+  reason: z.string().min(10, "Reason must be at least 10 characters").max(2000),
+});
+
+/**
+ * QA reassigns a single action item to a new owner. The new owner must pass the
+ * SAME executor gate as the original assign (canExecuteCAPA — drops QA Head /
+ * Customer Admin, because assign != execute). Status is unchanged. Audited with
+ * an explicit OLD -> NEW owner handoff (CAPA_TASK_REASSIGNED), not a generic
+ * update, so the who->whom survives in the append-only trail. Atomic.
+ */
+export async function reassignTask(
+  actionItemId: string,
+  input: z.input<typeof ReassignTaskSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!canReviewAlignment(session.user.role)) {
+    return { success: false, error: "Only QA Head can reassign a task." };
+  }
+  const parsed = ReassignTaskSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const existing = await prisma.cAPAActionItem.findFirst({
+    where: { id: actionItemId, tenantId: session.user.tenantId, deletedAt: null },
+    include: { capa: { select: { id: true, status: true, reference: true, description: true } } },
+  });
+  if (!existing) return { success: false, error: "Action item not found" };
+  if (isTerminalStatus(existing.capa.status)) {
+    return { success: false, error: ACTION_ITEMS_TERMINAL_MESSAGE };
+  }
+
+  // New owner must exist AND hold a CAPA-executor role (mirrors addActionItem).
+  const newOwner = await prisma.user.findFirst({
+    where: { id: parsed.data.newOwnerId, tenantId: session.user.tenantId },
+    select: { id: true, name: true, role: true },
+  });
+  if (!newOwner) return { success: false, error: "New owner not found." };
+  if (!canExecuteCAPA(newOwner.role)) {
+    return { success: false, error: "That person's role can't be assigned CAPA actions — choose a CAPA executor." };
+  }
+  if (newOwner.id === existing.ownerId) {
+    return { success: false, error: "That person already owns this task." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  const oldOwnerId = existing.ownerId;
+  const oldOwnerName = existing.owner;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.cAPAActionItem.update({
+        where: { id: actionItemId },
+        data: { owner: newOwner.name, ownerUser: { connect: { id: newOwner.id } } },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: ACTION_ITEMS_AUDIT_MODULE,
+          action: "CAPA_TASK_REASSIGNED",
+          recordId: existing.capa.id,
+          recordTitle: (existing.capa.reference ?? existing.capa.description).slice(0, 80),
+          oldValue: JSON.stringify({ from: { ownerId: oldOwnerId, ownerName: oldOwnerName } }),
+          newValue: JSON.stringify({
+            itemId: actionItemId,
+            to: { ownerId: newOwner.id, ownerName: newOwner.name },
+            reason: parsed.data.reason.slice(0, 200),
+          }),
+        },
+      });
+    });
+
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: newOwner.id,
+      actorUserId: actor.userId,
+      type: "ACTION_ASSIGNED",
+      title: `Action item reassigned to you (CAPA ${existing.capa.reference ?? existing.capa.id})`,
+      body: existing.description.slice(0, 200),
+      linkPath: "/worklist",
+      entityType: "CAPAActionItem",
+      entityId: actionItemId,
+    });
+
+    revalidatePath("/capa");
+    revalidatePath(`/capa/${existing.capa.id}`);
+    revalidatePath("/worklist");
+    return { success: true, data: { id: actionItemId, from: oldOwnerId, to: newOwner.id } };
+  } catch (err) {
+    console.error("[action] reassignTask failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to reassign task") };
+  }
+}
+
+/**
+ * Phase 5 — QA nudges the assignee of an action item (a reminder). NO state
+ * change: notify + audit CAPA_TASK_NUDGED only. It's the middle escalation
+ * between Reassign and Skip on the Assignments tab. Same QA gate as the other
+ * review actions. RATE-LIMITED to one nudge per item per 24h so the audit trail
+ * doesn't fill with CAPA_TASK_NUDGED noise and the worker isn't spammed.
+ */
+export async function nudgeActionItemOwner(actionItemId: string): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!canReviewAlignment(session.user.role)) {
+    return { success: false, error: "Only QA Head can nudge an assignee." };
+  }
+  const existing = await prisma.cAPAActionItem.findFirst({
+    where: { id: actionItemId, tenantId: session.user.tenantId, deletedAt: null },
+    include: { capa: { select: { id: true, reference: true, description: true } } },
+  });
+  if (!existing) return { success: false, error: "Action item not found" };
+  if (!existing.ownerId) return { success: false, error: "This task has no assignee to nudge." };
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  // Rate-limit — one nudge per item per 24h. Reads the prior CAPA_TASK_NUDGED
+  // audit for THIS item (newValue carries the itemId), so it's the same trail
+  // the Assignments tab shows — no separate counter to drift.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const recent = await prisma.auditLog.findFirst({
+    where: {
+      tenantId: session.user.tenantId,
+      action: "CAPA_TASK_NUDGED",
+      recordId: existing.capa.id,
+      newValue: { contains: actionItemId },
+      createdAt: { gte: since },
+    },
+    select: { id: true },
+  });
+  if (recent) {
+    return { success: false, error: "This assignee was already nudged for this task in the last 24 hours." };
+  }
+
+  try {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: session.user.tenantId,
+        userId: actor.userId,
+        userName: actor.displayName,
+        userRole: actor.role,
+        module: ACTION_ITEMS_AUDIT_MODULE,
+        action: "CAPA_TASK_NUDGED",
+        recordId: existing.capa.id,
+        recordTitle: (existing.capa.reference ?? existing.capa.description).slice(0, 80),
+        newValue: JSON.stringify({ itemId: actionItemId, ownerId: existing.ownerId, owner: existing.owner }),
+      },
+    });
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: existing.ownerId,
+      actorUserId: actor.userId,
+      type: "ACTION_ASSIGNED",
+      title: `Reminder: your CAPA task needs attention (CAPA ${existing.capa.reference ?? existing.capa.id})`,
+      body: existing.description.slice(0, 200),
+      linkPath: "/worklist",
+      entityType: "CAPAActionItem",
+      entityId: actionItemId,
+    });
+    revalidatePath("/worklist");
+    revalidatePath(`/capa/${existing.capa.id}`);
+    return { success: true, data: { id: actionItemId } };
+  } catch (err) {
+    console.error("[action] nudgeActionItemOwner failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to nudge assignee") };
+  }
 }
 
 // Used in the actions/capas.ts barrel.
