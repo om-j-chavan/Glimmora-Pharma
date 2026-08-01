@@ -130,6 +130,9 @@ export function DashboardPage({
     if (serverCAPAs) dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
     if (serverDeviations) dispatch(setDeviations(serverDeviations.map(adaptDeviation)));
     if (serverSystems) dispatch(setSystems(serverSystems.map(adaptPrismaSystem)));
+    // GP-CA-016: stamp the load time whenever fresh server props arrive (mount +
+    // every router.refresh()), so the "Updated" label marks the real data load.
+    setLastUpdated(new Date());
   }, [serverFindings, serverCAPAs, serverDeviations, serverSystems, dispatch]);
   // Visibility-SCOPED (Redux). Everything rendered as a record row comes from here.
   const { findings, capas, deviations, systems, roadmap, fda483Events } = useTenantData();
@@ -176,6 +179,9 @@ export function DashboardPage({
   // main content) now lives in a Drawer opened from the header. Mirrors Gap
   // Assessment / Deviation Management.
   const [askAiOpen, setAskAiOpen] = useState(false);
+  // Data-load timestamp (GP-CA-016): set when the server-fetched props arrive
+  // (mount + every router.refresh()), so it marks the actual load, not a render.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const headerActions: PageAction[] = [
     { label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) },
@@ -346,6 +352,14 @@ export function DashboardPage({
 
   const rsCol = rl.color;
 
+  // GP-CA-011: active (non-default) filters shown as dismissable chips. Each chip
+  // resets ONLY its own filter via the existing setter — no new state or filtering.
+  const activeFilterChips: { key: string; label: string; clear: () => void }[] = [
+    ...(timeFilter !== "30" ? [{ key: "time", label: timeFilter === "all" ? "All time" : `Last ${timeFilter} days`, clear: () => setTimeFilter("30") }] : []),
+    ...(siteFilter ? [{ key: "site", label: visibleSites.find((s) => s.id === siteFilter)?.name ?? "Selected site", clear: () => setSiteFilter("") }] : []),
+    ...(sevFilter ? [{ key: "sev", label: sevFilter, clear: () => setSevFilter("") }] : []),
+  ];
+
   /* ══════════════════════════════════════ */
 
   // Root is a <section>, not a second <main> — AppShell already renders the
@@ -362,7 +376,15 @@ export function DashboardPage({
             <Dropdown value={timeFilter} onChange={setTimeFilter} width="w-36" options={[{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "60", label: "Last 60 days" }, { value: "90", label: "Last 90 days" }, { value: "all", label: "All time" }]} />
             {isAdmin && <Dropdown placeholder="All sites" value={siteFilter} onChange={setSiteFilter} width="w-36" options={[{ value: "", label: "All sites" }, ...visibleSites.map((s) => ({ value: s.id, label: s.name }))]} />}
             <Dropdown placeholder="All severities" value={sevFilter} onChange={setSevFilter} width="w-32" options={[{ value: "", label: "All severities" }, { value: "Critical", label: "Critical" }, { value: "High", label: "High" }, { value: "Medium", label: "Medium" }, { value: "Low", label: "Low" }]} />
+            {activeFilterChips.map((c) => (
+              <button key={c.key} type="button" onClick={c.clear} aria-label={`Remove ${c.label} filter`} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ backgroundColor: "var(--bg-border)", color: "var(--text-secondary)" }}>
+                {c.label}
+                <span aria-hidden="true" className="text-[13px] leading-none">×</span>
+              </button>
+            ))}
             {(siteFilter || sevFilter) && <Button variant="ghost" size="sm" onClick={() => { setSiteFilter(""); setSevFilter(""); }}>Clear filters</Button>}
+            {lastUpdated && <span className="text-[11px] whitespace-nowrap" style={{ color: "var(--text-muted)" }}>Updated {dayjs(lastUpdated).tz(timezone).format("D MMM HH:mm")}</span>}
+            <Button variant="ghost" size="sm" onClick={() => router.refresh()}>Refresh</Button>
           </div>
         }
       >
@@ -484,7 +506,7 @@ export function DashboardPage({
             {/* By area */}
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-muted)" }}>By area</p>
             {["Manufacturing", "QC Lab", "QMS", "CSV/IT"].map((area) => { const cnt = filteredFindings.filter((f) => f.area === area && f.status !== "Closed").length; const max = Math.max(...["Manufacturing", "QC Lab", "QMS", "CSV/IT"].map((a) => filteredFindings.filter((f) => f.area === a && f.status !== "Closed").length), 1); return (
-              <div key={area} className="mb-2"><div className="flex justify-between mb-1"><span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{area}</span><span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>{cnt}</span></div><div className={clsx("h-1 rounded-full", "bg-(--bg-border)")}><div className="h-full rounded-full bg-[#0ea5e9]" style={{ width: `${Math.round((cnt / max) * 100)}%` }} /></div></div>
+              <div key={area} className="mb-2" title={`${area}: ${cnt}`}><div className="flex justify-between mb-1"><span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>{area}</span><span className="text-[11px] font-medium" style={{ color: cnt === 0 ? "#64748b" : "var(--text-primary)" }}>{cnt}</span></div><div className={clsx("h-1 rounded-full", "bg-(--bg-border)")}><div className={clsx("h-full rounded-full", cnt === 0 ? "bg-[#64748b] w-1.5" : "bg-[#0ea5e9]")} style={cnt === 0 ? undefined : { width: `${Math.round((cnt / max) * 100)}%` }} /></div></div>
             ); })}
             {/* Quick links */}
             <p className="text-[10px] font-semibold uppercase tracking-wider mb-2 mt-3" style={{ color: "var(--text-muted)" }}>Quick links</p>
