@@ -10,15 +10,31 @@ import clsx from "clsx";
 import { chartDefaults } from "@/lib/chartColors";
 import { MotionList, MotionListItem } from "@/components/motion/Motion";
 
+/** One KPI tile in the summary strip. `subTitle` is optional hover detail. */
+interface Tile {
+  icon: typeof ClipboardList;
+  iconCls: string;
+  label: string;
+  value: number;
+  color: string;
+  sub: string;
+  subTitle?: string;
+}
+
 interface GapSummaryTabProps {
   findingsTotal: number;
   baseCount: number;
   criticalCount: number;
   highCount: number;
   lowCount: number;
+  /** OUTSTANDING aggregate — every status except Closed (not the "Open" status). */
   openCount: number;
   closedCount: number;
   overdueCount: number;
+  /** Active page-level status filter; "" = All statuses. */
+  statusFilter: string;
+  /** Per-status counts over the same filtered set, taxonomy order, zeroes dropped. */
+  statusBreakdown: { status: string; label: string; count: number }[];
   topDrivers: { name: string; count: number; critical: number; high: number }[];
   severityData: { name: string; value: number; fill: string }[];  renderFilters: (compact?: boolean) => ReactNode;
   lastClosedFinding?: { id: string; closedAt?: string } | null;
@@ -30,9 +46,30 @@ interface GapSummaryTabProps {
 
 export function GapSummaryTab({
   findingsTotal, baseCount, criticalCount, highCount, lowCount,
-  openCount, closedCount, overdueCount, topDrivers, severityData, renderFilters, lastClosedFinding,
+  openCount, closedCount, overdueCount, statusFilter, statusBreakdown,
+  topDrivers, severityData, renderFilters, lastClosedFinding,
   playEntrance = true,
 }: GapSummaryTabProps) {
+  // ── "Total findings" sub-label ────────────────────────────────────────────
+  // `openCount` is the OUTSTANDING aggregate (every status but Closed), so it
+  // must never be printed as the individual status word "open" — with the
+  // status filter on "All statuses" a register of In Progress / Submitted /
+  // Rework findings would then read "4 open · 0 closed" while the table below
+  // shows no Open rows at all. Instead:
+  //   • All statuses  → aggregate wording ("outstanding"), with the true
+  //                     per-status breakdown on hover.
+  //   • One status    → that status is named outright; every row in view has it.
+  const statusLabel = statusBreakdown.find((s) => s.status === statusFilter)?.label
+    ?? statusFilter;
+  const breakdownText = statusBreakdown.map((s) => `${s.count} ${s.label}`).join(" · ");
+  const totalSub =
+    findingsTotal === 0 ? "Log your first finding to get started"
+    : baseCount === 0 ? "No findings match the current filters"
+    : statusFilter ? `All ${statusLabel}`
+    : `${openCount} outstanding · ${closedCount} closed`;
+  // Hover detail — the exact status mix behind the aggregate. Omitted when a
+  // single status is filtered (the label already says it).
+  const totalSubTitle = !statusFilter && baseCount > 0 ? breakdownText : undefined;
   // Phase-3 entrance — spread onto each MotionList; initial=false pins the
   // resting state on tab-return remounts, otherwise the primitive's own
   // initial="hidden" stands. All tempo comes from the motion tokens.
@@ -59,20 +96,20 @@ export function GapSummaryTab({
         {/* 2 \u2014 Tiles (inner card cascade) */}
         <MotionListItem>
           <MotionList {...entranceProps} aria-label="Finding statistics" className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        {[
-          { icon: ClipboardList, iconCls: "text-[#0ea5e9]", label: "Total findings", value: baseCount, color: "", sub: findingsTotal === 0 ? "Log your first finding to get started" : `${openCount} open \u00b7 ${closedCount} closed` },
+        {([
+          { icon: ClipboardList, iconCls: "text-[#0ea5e9]", label: "Total findings", value: baseCount, color: "", sub: totalSub, subTitle: totalSubTitle },
           { icon: AlertCircle, iconCls: "text-[#ef4444]", label: "Critical", value: criticalCount, color: "text-[#ef4444]", sub: criticalCount > 0 ? "Immediate action required" : "None" },
           { icon: AlertTriangle, iconCls: "text-[#f59e0b]", label: "High", value: highCount, color: "text-[#f59e0b]", sub: "Prompt attention needed" },
           { icon: Info, iconCls: "text-[#10b981]", label: "Low", value: lowCount, color: "text-[#10b981]", sub: "Low inspection risk" },
           { icon: Clock, iconCls: overdueCount > 0 ? "text-[#ef4444]" : "text-[#10b981]", label: "Overdue", value: overdueCount, color: overdueCount > 0 ? "text-[#ef4444]" : "text-[#10b981]", sub: overdueCount > 0 ? "Past target date" : "All on track" },
-        ].map((tile) => (
+        ] as Tile[]).map((tile) => (
           <MotionListItem key={tile.label} className="stat-card" role="region" aria-label={tile.label}>
             <div className="flex items-center gap-2 mb-2">
               <tile.icon className={clsx("w-5 h-5", tile.iconCls)} aria-hidden="true" />
               <span className="stat-label mb-0">{tile.label}</span>
             </div>
             <div className={clsx("stat-value", tile.color)}>{tile.value}</div>
-            <div className="stat-sub">{tile.sub}</div>
+            <div className="stat-sub" title={tile.subTitle}>{tile.sub}</div>
           </MotionListItem>
         ))}
           </MotionList>

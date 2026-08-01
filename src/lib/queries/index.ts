@@ -25,3 +25,5 @@ export { effectiveFrameworksForTenant, getTenantFrameworkSettings, getFrameworkC
 export type { EffectiveFramework, TenantFrameworkSetting, CatalogFramework } from "./frameworks";
 export { getActiveRegions, getRegionLabelMap, getRegionCatalog } from "./regions";
 export type { RegionOption, RegionCatalogRow } from "./regions";
+export { getNotificationsPage, getNotificationFilterOptions, getNotificationStats } from "./notifications";
+export type { NotificationRow, NotificationFilters, NotificationSortKey, NotificationPageResult, NotificationFilterOptions, NotificationStats } from "./notifications";

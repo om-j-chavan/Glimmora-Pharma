@@ -222,7 +222,7 @@ export async function submitStageReworkTask(
       tenantId: session.user.tenantId,
       recipientUserId: task.createdById,
       actorUserId: actor.userId,
-      type: "ACTION_ASSIGNED",
+      type: "REVIEW_REQUESTED",
       title: `Rework task submitted for review (${task.validationStage.system.reference ?? task.validationStage.stageName})`,
       body: parsed.data.completionNotes.slice(0, 200),
       linkPath: "/csv-csa",

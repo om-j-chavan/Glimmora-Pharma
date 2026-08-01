@@ -1366,7 +1366,7 @@ export async function reviewFinding(findingId: string): Promise<ActionResult> {
       tenantId: session.user.tenantId,
       recipientUserId: finding.owner,
       actorUserId: actor.userId,
-      type: "ACTION_ASSIGNED",
+      type: "FINDING_CLOSED",
       title: `Your gap finding was accepted and closed (${finding.reference ?? findingId.slice(0, 8)})`,
       body: "Accepted and closed by QA.",
       linkPath: "/gap-assessment",

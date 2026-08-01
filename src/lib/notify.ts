@@ -1,4 +1,10 @@
 import { prisma } from "@/lib/prisma";
+import {
+  notificationTypeDefaults,
+  type NotificationPriority,
+  type NotificationSeverity,
+  type NotificationSource,
+} from "@/lib/labels/notifications";
 
 /**
  * In-app notification types (Phase 2). Each maps to a GxP lifecycle event.
@@ -15,6 +21,10 @@ export type NotificationType =
   | "CAPA_VERIFIED"
   | "CAPA_CLOSED"
   | "REWORK_ASSIGNED"
+  // Closure / review-request events — distinct from ACTION_ASSIGNED so the
+  // recipient no longer sees an "assigned" clipboard for a closure (NTF-012).
+  | "FINDING_CLOSED"
+  | "REVIEW_REQUESTED"
   | "DUE_SOON"
   | "OVERDUE"
   // Support desk (in-app only for now; email is a future channel behind the
@@ -39,7 +49,23 @@ export interface NotifyInput {
   linkPath?: string | null;
   entityType?: string | null;
   entityId?: string | null;
+  /** Optional overrides — default to the type's taxonomy (labels/notifications). */
+  priority?: NotificationPriority;
+  severity?: NotificationSeverity;
+  source?: NotificationSource;
+  /** Optional comma-joined tags for search/grouping. */
+  tags?: string | null;
+  /**
+   * Skip best-effort dedupe (default on). Dedupe suppresses an identical
+   * (type, entityId, recipient) emit inside a short window — safe for the
+   * retry/double-submit case (NTF-022). Pass false when repeats are meaningful
+   * (e.g. successive ticket replies).
+   */
+  dedupe?: boolean;
 }
+
+/** How long an identical emit is treated as a duplicate (ms). */
+const DEDUPE_WINDOW_MS = 60_000;
 
 /**
  * Emit one in-app notification. FAULT-ISOLATED: any failure here is swallowed
@@ -59,6 +85,27 @@ export async function notify(input: NotifyInput): Promise<void> {
     if (!recipient) return;
     if (input.actorUserId && recipient === input.actorUserId) return;
 
+    const defaults = notificationTypeDefaults(input.type);
+    const priority = input.priority ?? defaults.priority;
+    const severity = input.severity ?? defaults.severity;
+    const source = input.source ?? "system";
+    const dedupeKey = `${input.type}|${input.entityId ?? ""}|${recipient}`;
+
+    // Best-effort idempotency (NTF-022): suppress an identical emit inside the
+    // window. Not a DB UNIQUE constraint — that would risk violations against
+    // pre-existing duplicate rows and turn a benign retry into an error.
+    if (input.dedupe !== false && input.entityId) {
+      const recent = await prisma.notification.findFirst({
+        where: {
+          dedupeKey,
+          tenantId: input.tenantId,
+          createdAt: { gte: new Date(Date.now() - DEDUPE_WINDOW_MS) },
+        },
+        select: { id: true },
+      });
+      if (recent) return;
+    }
+
     await prisma.notification.create({
       data: {
         tenantId: input.tenantId,
@@ -69,6 +116,11 @@ export async function notify(input: NotifyInput): Promise<void> {
         linkPath: input.linkPath ?? null,
         entityType: input.entityType ?? null,
         entityId: input.entityId ?? null,
+        priority,
+        severity,
+        source,
+        tags: input.tags ?? null,
+        dedupeKey,
       },
     });
   } catch (err) {

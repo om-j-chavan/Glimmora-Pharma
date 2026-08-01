@@ -2303,8 +2303,33 @@ model Notification {
   createdAt       DateTime  @default(now())
   readAt          DateTime?
 
+  // ── Notification Center (Phase 2) — all additive & backward-compatible.
+  // priority drives ranking/badges: critical|high|medium|low|info.
+  priority        String    @default("medium")
+  // severity drives the accent/tone: critical|warning|success|info.
+  severity        String    @default("info")
+  // who/what produced it: user|system|ai (ai reserved for the AI follow-up).
+  source          String    @default("system")
+  // Archive is a soft "move out of the inbox" (recoverable); deletedAt is a
+  // soft delete (hidden everywhere). Neither ever hard-deletes a GxP record.
+  isArchived      Boolean   @default(false)
+  archivedAt      DateTime?
+  deletedAt       DateTime?
+  updatedAt       DateTime  @default(now()) @updatedAt
+  // Free-text tags for search/grouping (comma-joined string — SQLite has no
+  // array type; matches the app's other list-as-string columns).
+  tags            String?
+  // Best-effort idempotency key (type|entityId|recipient|window). Indexed, not
+  // UNIQUE — a constraint would risk violations against pre-existing dup rows;
+  // notify() checks it within a short window instead. See src/lib/notify.ts.
+  dedupeKey       String?
+
   @@index([recipientUserId, isRead, createdAt])
   @@index([tenantId])
+  // Serves the /notifications list order (recipient+tenant pin, createdAt sort) —
+  // the composite the old index couldn't cover (audit finding NTF-019).
+  @@index([recipientUserId, tenantId, isArchived, createdAt])
+  @@index([dedupeKey])
 }
 
 // ── SUPPORT (central Glimmora support desk) ──

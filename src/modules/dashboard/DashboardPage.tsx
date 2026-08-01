@@ -35,7 +35,7 @@ import { isOverdue } from "@/types/capa";
 import {
   computeDashboardKPIs, computeAreaScore, KPI_AREAS,
   severityTrend, isSeverityTrendEmpty, headlineReadinessLabel,
-  isDIException, isValidationDrift,
+  isDIException, isValidationDrift, isOpenFinding,
 } from "@/lib/kpi";
 import { displayUserName } from "@/lib/identity-display";
 import { regulatoryAlertSummary } from "@/lib/ai";
@@ -396,7 +396,7 @@ export function DashboardPage({
             section \u2014 readiness \u2192 site readiness, criticals \u2192 repeat-observation
             risk, CAPA overdue \u2192 CAPA timeliness, CSV \u2192 validation drift. */}
         <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={`${readinessScore}%`} sub={rl.label} href="/governance?tab=kpis#kpi-site-readiness" />
-        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter((f) => f.status !== "Closed").length} total open`} href="/governance?tab=kpis#kpi-repeat-observation" />
+        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter(isOpenFinding).length} total outstanding`} href="/governance?tab=kpis#kpi-repeat-observation" />
         <StatCard icon={Clock} color={capaOverdueRate === null ? "#64748b" : capaOverdueRate === 0 ? "#10b981" : capaOverdueRate <= 20 ? "#f59e0b" : "#ef4444"} label="CAPA overdue" value={capaOverdueRate === null ? "\u2014" : `${capaOverdueRate}%`} sub={openCAPAs.length === 0 ? "No open CAPAs" : `${overdueCAPAs.length} of ${openCAPAs.length} past due`} href="/governance?tab=kpis#kpi-capa-timeliness" />
         <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={filteredSystems.length === 0 ? "No systems registered" : "HIGH risk, not yet validated"} href="/governance?tab=kpis#kpi-validation-drift" />
         <StatCard icon={GraduationCap} color={trainingCompliance === null ? "#64748b" : trainingCompliance >= 90 ? "#10b981" : trainingCompliance >= 70 ? "#f59e0b" : "#ef4444"} label="Training compliance" value={trainingCompliance === null ? "\u2014" : `${trainingCompliance}%`} sub={trainingCompliance === null ? "Not yet tracked" : "of required training complete"} />

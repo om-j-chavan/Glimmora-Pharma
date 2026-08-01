@@ -6,7 +6,6 @@ import findingsReducer from "./findings.slice";
 import capaReducer from "./capa.slice";
 import evidenceReducer from "./evidence.slice";
 import permissionsReducer from "./permissions.slice";
-import notificationsReducer from "./notifications.slice";
 import readinessReducer from "./readiness.slice";
 import deviationReducer from "./deviation.slice";
 import systemsReducer from "./systems.slice";
@@ -22,7 +21,6 @@ const combinedReducer = combineReducers({
   capa: capaReducer,
   evidence: evidenceReducer,
   permissions: permissionsReducer,
-  notifications: notificationsReducer,
   readiness: readinessReducer,
   deviation: deviationReducer,
   systems: systemsReducer,

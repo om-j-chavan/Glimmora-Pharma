@@ -13,6 +13,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "db:generate:dev": "node scripts/generate-dev-client.mjs",
     "db:migrate": "npx prisma migrate dev",
     "db:seed": "npx tsx prisma/seed.ts",
     "db:seed:readiness": "npx tsx prisma/seed-readiness.ts",

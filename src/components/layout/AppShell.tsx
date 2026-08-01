@@ -7,7 +7,6 @@ import { Mail } from "lucide-react";
 import clsx from "clsx";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { useNotificationEngine } from "@/hooks/useNotificationEngine";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { logout, setCredentials, setTenants, type AuthUser, type Tenant } from "@/store/auth.slice";
@@ -21,6 +20,7 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { SiteFilterBanner } from "./SiteFilterBanner";
 import { AIChatbot } from "@/components/chatbot/AIChatbot";
+import { NotificationCountProvider } from "@/components/notifications/NotificationCountProvider";
 
 interface AppShellProps {
   children?: React.ReactNode;
@@ -53,7 +53,6 @@ export function AppShell({ children, initialTenant, initialUser, initialFramewor
     setMounted(true);
   }, []);
 
-  useNotificationEngine();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const dispatch = useAppDispatch();
@@ -276,7 +275,7 @@ export function AppShell({ children, initialTenant, initialUser, initialFramewor
   // 🧱 MAIN APP SHELL
   // =========================
   return (
-    <>
+    <NotificationCountProvider>
       <a href="#main-content" className="sr-only focus:not-sr-only">
         Skip to main content
       </a>
@@ -371,6 +370,6 @@ export function AppShell({ children, initialTenant, initialUser, initialFramewor
       {/* Floating AI assistant — available on every authed page except for
           read-only viewers. Right-click + drag the bubble to move it. */}
       {!isViewOnly && <AIChatbot />}
-    </>
+    </NotificationCountProvider>
   );
 }
