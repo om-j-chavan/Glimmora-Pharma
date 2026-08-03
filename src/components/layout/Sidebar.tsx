@@ -21,12 +21,10 @@ import {
   SlidersHorizontal,
   GraduationCap,
   LifeBuoy,
-  Bell,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
-import { useNotificationCount } from "@/components/notifications/NotificationCountProvider";
 import {
   CAPA_MODULE_VIEW_ROLES,
   canViewGovernance,
@@ -65,7 +63,6 @@ const NAV_GROUPS: NavGroup[] = [
       { path: "deviation", label: "Deviation Management", icon: AlertTriangle },
       { path: "capa", label: "CAPA Tracker", icon: ClipboardList },
       { path: "worklist", label: "Worklist", icon: ListChecks },
-      { path: "notifications", label: "Notifications", icon: Bell },
       { path: "csv-csa", label: "CSV/CSA Validation", icon: Monitor },
       { path: "fda-483", label: "Inspections & Regulatory", icon: Building2 },
       { path: "evidence", label: "Evidence & Documents", icon: FileText },
@@ -106,9 +103,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const toast = useToast();
   const pathname = usePathname();
   const { allowedPaths, role } = useRole();
-  // Live unread badge on the Notifications entry — shares the ONE authoritative
-  // count with the topbar bell (no second poller). 0 when outside a provider.
-  const { unread } = useNotificationCount();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(pathname ?? "")]),
@@ -150,11 +144,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           // through the owner/driver paths, NOT the capa matrix entry. Visible
           // to every non-super_admin role (viewer gets a read-only page).
           if (item.path === "worklist") return true;
-          // Notifications are addressed to a specific user, so — exactly like the
-          // Worklist — every non-super_admin role sees the entry (the query's
-          // (recipient, tenant) pin is the authorization). super_admin returned
-          // [] above and uses the admin console bell instead.
-          if (item.path === "notifications") return true;
           // Support desk is available to every customer role (viewers included).
           if (item.path === "support") return true;
           // Phase 6 cleanup FIX 1 — CAPA module locked to the shared
@@ -341,27 +330,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                           >
                             <item.icon className="w-4 h-4" aria-hidden="true" />
                             <span style={{ flex: 1 }}>{item.label}</span>
-                            {item.path === "notifications" && unread > 0 && (
-                              <span
-                                aria-label={`${unread} unread`}
-                                style={{
-                                  flexShrink: 0,
-                                  minWidth: 18,
-                                  height: 18,
-                                  padding: "0 5px",
-                                  borderRadius: 9,
-                                  background: "#ef4444",
-                                  color: "#fff",
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                }}
-                              >
-                                {unread > 99 ? "99+" : unread}
-                              </span>
-                            )}
                             {isActive && (
                               <span className="sr-only">(current page)</span>
                             )}

@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -143,6 +143,10 @@ export async function createTenant(
       fieldErrors: parsed.error.flatten().fieldErrors,
     };
   }
+
+  // "At least one region" is enforced by CreateTenantSchema itself (.min(1) on
+  // the array), so a create that reaches here already carries a non-empty,
+  // de-duplicated set — no second emptiness check is needed.
 
   // Uniqueness pre-check (case-insensitive) BEFORE the create, so we can return
   // field-specific messages the modal surfaces inline on the right input. The

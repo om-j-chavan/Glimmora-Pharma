@@ -474,10 +474,12 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const toast = useToast();
   const { allSites } = useTenantConfig();
   const { isSuperAdmin, isCustomerAdmin } = useRole();
-  // Show every tenant user — including other customer_admins — so a customer_admin
-  // can manage its whole tenant. Only super_admin (a platform identity, not a
-  // tenant user) is excluded, so its deactivate/edit/delete affordances never render.
-  const visibleUsers = users.filter((u) => u.role !== "super_admin");
+  // Hide platform/admin identities from the Users table, BY ROLE, for ALL viewers:
+  // super_admin (a platform identity, not a tenant user) AND customer_admin
+  // (HIDE-CADMIN-ROW — the admin account manages the tenant but is not itself a
+  // manageable user row; hides all customer_admins if a tenant has several). This
+  // is display filtering only — RBAC/permissions and the count logic are unchanged.
+  const visibleUsers = users.filter((u) => u.role !== "super_admin" && u.role !== "customer_admin");
   const { isAtLimit, getCount, getLimit, tenantPlan } =
     usePlanLimits();
 

@@ -7,7 +7,7 @@ datasource db {
   // with the FastAPI backend), so the schema provider MUST be postgresql to
   // match migration_lock.toml and let `prisma migrate deploy` run. Local dev
   // uses Postgres too (a Neon branch or local instance).
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

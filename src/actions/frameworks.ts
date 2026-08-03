@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/permissions/roleSets";
 import { RESERVED_FRAMEWORK_KEYS } from "@/constants/frameworks";
-import { effectiveFrameworksForTenant, getTenantFrameworkSettings, regionsEmptiedByDisabling, type TenantFrameworkSetting } from "@/lib/queries/frameworks";
+import { effectiveFrameworksForTenant, getTenantFrameworkSettings, regionsEmptiedByDisabling, type TenantFrameworkGroups } from "@/lib/queries/frameworks";
 import { getFrameworkAuditLogs, type FrameworkAuditResult, type FrameworkAuditScope } from "@/lib/queries";
 import { sanitizeServerError } from "@/lib/errors";
 
@@ -42,9 +42,9 @@ export async function loadEffectiveFrameworks(): Promise<{ key: string; name: st
  * Session-scoped: every platform-enabled + region-matched framework for the
  * caller's tenant, with its current per-tenant enabled state. The tab is
  * customer_admin-only; a platform admin (no tenant context) gets []. */
-export async function loadTenantFrameworkSettings(): Promise<TenantFrameworkSetting[]> {
+export async function loadTenantFrameworkSettings(): Promise<TenantFrameworkGroups> {
   const session = await requireAuth();
-  if (isPlatformAdmin(session.user.role)) return [];
+  if (isPlatformAdmin(session.user.role)) return { regions: [], frameworks: [] };
   return getTenantFrameworkSettings(session.user.tenantId);
 }
 
@@ -297,8 +297,15 @@ export async function setFrameworkPlatformEnabled(id: string, enabled: boolean):
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
-    const existing = await prisma.framework.findUnique({ where: { id }, select: { name: true, platformEnabled: true } });
+    const existing = await prisma.framework.findUnique({ where: { id }, select: { name: true, platformEnabled: true, key: true } });
     if (!existing) return { success: false, error: "Framework not found" };
+    // Reserved built-ins are permanent — they can never be platform-disabled
+    // (mirrors the guard in archiveFramework). Enabling a reserved key stays
+    // allowed; this is additional to the ≥1-per-region guard below, not a
+    // replacement. Runs before that guard so a reserved key returns this message.
+    if (!enabled && RESERVED_FRAMEWORK_KEYS.has(existing.key)) {
+      return { success: false, error: "Built-in (reserved) frameworks can't be disabled — they are permanent." };
+    }
     // Stage 4 guard — every region must keep ≥1 active framework. Only on the
     // enabled→disabled transition, and only the REAL guard (server-side). Uses
     // the same active-for-region resolver the Stage-2 view uses, so the guard and
@@ -355,7 +362,15 @@ export async function bulkSetFrameworkPlatformEnabled(ids: string[], enabled: bo
   if (unique.length === 0) return { success: false, error: "No frameworks selected." };
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
-    const rows = await prisma.framework.findMany({ where: { id: { in: unique } }, select: { id: true, name: true, platformEnabled: true } });
+    const rows = await prisma.framework.findMany({ where: { id: { in: unique } }, select: { id: true, name: true, platformEnabled: true, key: true } });
+    // Reserved built-ins can't be platform-disabled — reject the whole batch
+    // (fail-closed, mirroring the single-toggle guard). Enabling is unaffected.
+    if (!enabled) {
+      const reserved = rows.filter((r) => RESERVED_FRAMEWORK_KEYS.has(r.key));
+      if (reserved.length) {
+        return { success: false, error: `Built-in (reserved) frameworks can't be disabled: ${reserved.map((r) => r.name).join(", ")}.` };
+      }
+    }
     const toChange = rows.filter((r) => r.platformEnabled !== enabled); // skip no-ops
     for (const r of toChange) {
       await prisma.framework.update({ where: { id: r.id }, data: { platformEnabled: enabled } });

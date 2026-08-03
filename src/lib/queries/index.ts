@@ -24,7 +24,7 @@ export { getDashboardStats } from "./dashboard";
 export { getWorklist } from "./worklist";
 export type { Worklist, WorklistActionItem, WorklistDeviationTask, WorklistStageTask, WorklistFinding, WorklistDoc } from "./worklist";
 export { effectiveFrameworksForTenant, getTenantFrameworkSettings, getFrameworkCatalog } from "./frameworks";
-export type { EffectiveFramework, TenantFrameworkSetting, CatalogFramework } from "./frameworks";
+export type { EffectiveFramework, TenantFrameworkSetting, TenantFrameworkGroups, CatalogFramework } from "./frameworks";
 export { getActiveRegions, getRegionLabelMap, getRegionCatalog } from "./regions";
 export type { RegionOption, RegionCatalogRow } from "./regions";
 export { getNotificationsPage, getNotificationFilterOptions, getNotificationStats } from "./notifications";

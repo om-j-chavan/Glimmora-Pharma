@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LayoutDashboard, Sparkles } from "lucide-react";
+import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -121,6 +122,11 @@ export function DashboardPage({
   const router = useRouter();
   const dispatch = useAppDispatch();
 
+  // Data-load timestamp (GP-CA-016): set when the server-fetched props arrive
+  // (mount + every router.refresh()), so it marks the actual load, not a render.
+  // Declared ahead of the seeding effect below, which is its only writer.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
   /* ── Seed Redux from the VISIBILITY-SCOPED rows (unchanged behaviour) ───────
      The store is shared with GapPage / DeviationPage / Governance, so seeding it
      tenant-wide would leak hidden records into their lists and exports. */
@@ -129,6 +135,9 @@ export function DashboardPage({
     if (serverCAPAs) dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
     if (serverDeviations) dispatch(setDeviations(serverDeviations.map(adaptDeviation)));
     if (serverSystems) dispatch(setSystems(serverSystems.map(adaptPrismaSystem)));
+    // GP-CA-016: stamp the load time whenever fresh server props arrive (mount +
+    // every router.refresh()), so the "Updated" label marks the real data load.
+    setLastUpdated(new Date());
   }, [serverFindings, serverCAPAs, serverDeviations, serverSystems, dispatch]);
 
   /* ── Authorisation ─────────────────────────────────────────────────────────
@@ -191,7 +200,7 @@ export function DashboardPage({
 
   /* ── Search drawer sources (visibility-scoped, unchanged) ─────────────── */
   const { findings, capas, deviations } = useTenantData();
-  const { sites } = useTenantConfig();
+  const { sites, org } = useTenantConfig();
   const searchSources = useMemo(
     () => [
       ...(canViewCAPAs
@@ -212,6 +221,23 @@ export function DashboardPage({
   // user has exactly one accessible site (selectedSiteId is pinned at login).
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const showSitePicker = !selectedSiteId && sites.length > 1;
+
+  // GP-CA-011: active (non-default) filters shown as dismissable chips. Each chip
+  // resets ONLY its own filter via the existing setter — no new state or filtering.
+  // The site chip is listed only when the picker is shown, so a site-bound user
+  // never sees a chip for a filter they cannot clear.
+  const activeFilterChips = useMemo<{ key: string; label: string; clear: () => void }[]>(
+    () => [
+      ...(timeFilter !== "30"
+        ? [{ key: "time", label: timeFilter === "all" ? "All time" : `Last ${timeFilter} days`, clear: () => setTimeFilter("30") }]
+        : []),
+      ...(showSitePicker && siteFilter
+        ? [{ key: "site", label: sites.find((s) => s.id === siteFilter)?.name ?? "Selected site", clear: () => setSiteFilter("") }]
+        : []),
+      ...(sevFilter ? [{ key: "sev", label: sevFilter, clear: () => setSevFilter("") }] : []),
+    ],
+    [timeFilter, siteFilter, sevFilter, showSitePicker, sites],
+  );
 
   const widgetProps = { data, dashboard, access, canOpen };
 
@@ -296,11 +322,34 @@ export function DashboardPage({
               { value: "Low", label: "Low" },
             ]}
           />
+          {activeFilterChips.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={c.clear}
+              aria-label={`Remove ${c.label} filter`}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border-none cursor-pointer"
+              style={{ backgroundColor: "var(--bg-border)", color: "var(--text-secondary)" }}
+            >
+              {c.label}
+              <span aria-hidden="true" className="text-[13px] leading-none">×</span>
+            </button>
+          ))}
           {(siteFilter || sevFilter) && (
             <Button variant="ghost" size="sm" onClick={() => { setSiteFilter(""); setSevFilter(""); }}>
               Clear filters
             </Button>
           )}
+          {/* GP-CA-016 — the timestamp marks the last DATA load (stamped when the
+              server props arrive), so Refresh visibly moves it. */}
+          {lastUpdated && (
+            <span className="text-[11px] whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
+              Updated {dayjs(lastUpdated).tz(org.timezone).format("D MMM HH:mm")}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => router.refresh()}>
+            Refresh
+          </Button>
         </div>
       }
     >

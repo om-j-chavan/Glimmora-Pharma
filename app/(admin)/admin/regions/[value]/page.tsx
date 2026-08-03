@@ -35,6 +35,7 @@ export default async function Page({ params }: { params: Promise<{ value: string
   return (
     <RegionFrameworksPage
       region={{ value: region.value, label: region.label }}
+      regionTenantCount={region.tenantCount}
       frameworks={frameworks}
       regions={regions}
     />

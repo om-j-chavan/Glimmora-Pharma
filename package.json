@@ -20,6 +20,7 @@
     "db:studio": "npx prisma studio",
     "db:reset": "npx prisma migrate reset",
     "test:mailer": "tsx scripts/test-mailer.ts",
+    "test:unit": "node --import tsx --experimental-test-module-mocks --test \"src/**/*.test.ts\"",
     "test": "playwright test",
     "test:smoke": "playwright test"
   },

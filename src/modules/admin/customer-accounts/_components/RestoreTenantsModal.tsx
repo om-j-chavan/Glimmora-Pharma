@@ -54,7 +54,8 @@ export function RestoreTenantsModal({
         <div className="relative mb-3">
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
           <input
-            type="search"
+            type="text"
+            autoComplete="off"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search deleted companies…"

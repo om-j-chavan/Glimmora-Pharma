@@ -360,7 +360,7 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
           tenantsMovedToGlobal += 1;
         }
       }
-      const tenantRes = { count: tenantIds.length };
+      const tenantsReassigned = tenantIds.length;
 
       // 3) Re-point framework links to GLOBAL, DROPPING redundant ones.
       const links = await tx.frameworkRegion.findMany({ where: { region: value }, select: { id: true, frameworkId: true } });
@@ -391,7 +391,7 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
 
       // 4) Audit-first (atomic with the writes).
       await auditRegion(session, actor, "REGION_ARCHIVED", id, region.label, { status: "Active" }, { status: "Archived" }, tx);
-      if (tenantRes.count || linksMoved || linksDropped) {
+      if (tenantsReassigned || linksMoved || linksDropped) {
         await auditRegion(
           session, actor, "REGION_TENANTS_REASSIGNED", id, region.label,
           { region: value },
@@ -399,7 +399,7 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
             reassignedTo: GLOBAL_REGION_VALUE,
             // Two distinct numbers now: how many tenants lost this region, and
             // how many of those were left region-less and fell back to GLOBAL.
-            tenantsReassigned: tenantRes.count,
+            tenantsReassigned,
             tenantsMovedToGlobal,
             frameworkLinksMoved: linksMoved,
             frameworkLinksDropped: linksDropped,
@@ -407,7 +407,7 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
           tx,
         );
       }
-      return { tenantsReassigned: tenantRes.count, tenantsMovedToGlobal, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped };
+      return { tenantsReassigned, tenantsMovedToGlobal, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped };
     });
 
     revalidatePath("/admin/regions");

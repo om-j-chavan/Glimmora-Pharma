@@ -7,6 +7,7 @@ import { Toggle } from "@/components/ui/Toggle";
 import { Badge } from "@/components/ui/Badge";
 import { DisplayId } from "@/components/ui/DisplayId";
 import { Popup } from "@/components/ui/Popup";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { DataTable, type DataColumn, type RowMenuItem } from "@/components/table/DataTable";
@@ -20,6 +21,9 @@ interface Props {
   region: { value: string; label: string };
   frameworks: CatalogFramework[];
   regions: { value: string; label: string }[];
+  /** Tenants currently on THIS region (cheap, already computed by getRegionCatalog).
+   *  Shown as context in the platform-wide disable confirmation. */
+  regionTenantCount?: number;
 }
 
 /**
@@ -31,11 +35,14 @@ interface Props {
  * "Soft delete" for built-ins (reason shown), and a custom-rendered Scope cell
  * (the escape hatch). All the underlying handlers are unchanged.
  */
-export function RegionFrameworksPage({ region, frameworks, regions }: Props) {
+export function RegionFrameworksPage({ region, frameworks, regions, regionTenantCount }: Props) {
   const router = useRouter();
   const toast = useToast();
   const reservedRegion = isReservedRegion(region.value);
   const [rows, setRows] = useState<CatalogFramework[]>(frameworks);
+  // A DISABLE is platform-wide (all regions, all tenants), so it is confirmed
+  // before the action runs; the optimistic row update only happens on confirm.
+  const [pendingDisable, setPendingDisable] = useState<CatalogFramework | null>(null);
   // LIVE UPDATE (item 5): after add / archive / restore the handlers call
   // router.refresh(), which re-renders this page with a fresh `frameworks` prop.
   // `rows` is local state (needed for the optimistic inline toggle), so sync it
@@ -115,7 +122,7 @@ export function RegionFrameworksPage({ region, frameworks, regions }: Props) {
       render: (f) => f.archived
         ? <Badge variant="amber">Archived</Badge>
         : <div className="flex items-center gap-2">
-            <Toggle id={`plat-${f.id}`} checked={f.platformEnabled} onChange={() => togglePlatform(f, !f.platformEnabled)} label={`${f.name} status`} disabled={busyId === f.id} hideLabel />
+            <Toggle id={`plat-${f.id}`} checked={f.platformEnabled} onChange={() => (f.platformEnabled ? setPendingDisable(f) : togglePlatform(f, true))} label={`${f.name} status`} disabled={busyId === f.id} hideLabel />
             <Badge variant={f.platformEnabled ? "green" : "gray"}>{f.platformEnabled ? "On" : "Off"}</Badge>
           </div> },
   ];
@@ -157,6 +164,30 @@ export function RegionFrameworksPage({ region, frameworks, regions }: Props) {
       />
 
       <AddFrameworkModal open={modalOpen} onClose={() => setModalOpen(false)} regions={regions} framework={editing} defaultRegion={region.value} onSaved={() => router.refresh()} />
+
+      {/* DISABLE is platform-wide — confirm scope before running the action. On
+          confirm the modal closes and togglePlatform runs (optimistic + server);
+          a server rejection (reserved key, or the ≥1-per-region guard) surfaces
+          through the blockWarning Popup below. Enabling stays one-click. */}
+      <ConfirmModal
+        open={!!pendingDisable}
+        onClose={() => setPendingDisable(null)}
+        onConfirm={() => { const fw = pendingDisable; setPendingDisable(null); if (fw) void togglePlatform(fw, false); }}
+        title="Turn off this framework platform-wide?"
+        message={pendingDisable ? (
+          <>
+            Turning off <strong>{pendingDisable.name}</strong> is a <strong>platform-wide</strong> change — it applies to <strong>every region and all tenants</strong>, not just {region.label}. It disappears from every tenant&rsquo;s framework list and the Gap Assessment dropdown.
+            {typeof regionTenantCount === "number" && regionTenantCount > 0 && (
+              <> {regionTenantCount} tenant{regionTenantCount === 1 ? " is" : "s are"} currently on {region.label}.</>
+            )}
+            {" "}Historical records keep their existing tags. Continue?
+          </>
+        ) : null}
+        confirmLabel="Turn off platform-wide"
+        cancelLabel="Cancel"
+        variant="warning"
+        icon={Globe}
+      />
 
       {/* Stage 4 — blocked-disable warning (server is the real guard). */}
       <Popup isOpen={!!blockWarning} variant="warning" title="Can't disable framework" description={blockWarning ?? ""} onDismiss={() => setBlockWarning(null)} />

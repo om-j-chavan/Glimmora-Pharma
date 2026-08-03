@@ -92,11 +92,21 @@ export function ProportionBar({
   color?: string;
 }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  // A zero row is drawn as a short NEUTRAL stub rather than a 0%-width bar: an
+  // invisible track reads as a rendering failure, and a coloured sliver would
+  // imply a non-zero signal. The muted number says the same thing twice, for a
+  // reader who is scanning colour rather than digits.
+  const empty = value === 0;
   return (
-    <div className="mb-2">
+    <div className="mb-2" title={`${label}: ${value}`}>
       <div className="flex justify-between mb-1 gap-2">
         <span className="text-[11px] truncate" style={{ color: "var(--text-secondary)" }}>{label}</span>
-        <span className="text-[11px] font-medium tabular-nums" style={{ color: "var(--text-primary)" }}>{value}</span>
+        <span
+          className="text-[11px] font-medium tabular-nums"
+          style={{ color: empty ? "var(--text-muted)" : "var(--text-primary)" }}
+        >
+          {value}
+        </span>
       </div>
       <div
         className="h-1 rounded-full overflow-hidden"
@@ -107,7 +117,10 @@ export function ProportionBar({
         aria-valuemax={max}
         aria-label={label}
       >
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+        <div
+          className="h-full rounded-full"
+          style={empty ? { width: 6, background: "var(--text-muted)" } : { width: `${pct}%`, background: color }}
+        />
       </div>
     </div>
   );
