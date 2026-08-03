@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/permissions/roleSets";
 import { RESERVED_FRAMEWORK_KEYS } from "@/constants/frameworks";
-import { effectiveFrameworksForTenant, getTenantFrameworkSettings, regionsEmptiedByDisabling, type TenantFrameworkSetting } from "@/lib/queries/frameworks";
+import { effectiveFrameworksForTenant, getTenantFrameworkSettings, regionsEmptiedByDisabling, type TenantFrameworkGroups } from "@/lib/queries/frameworks";
 import { getFrameworkAuditLogs, type FrameworkAuditResult, type FrameworkAuditScope } from "@/lib/queries";
 import { sanitizeServerError } from "@/lib/errors";
 
@@ -42,9 +42,9 @@ export async function loadEffectiveFrameworks(): Promise<{ key: string; name: st
  * Session-scoped: every platform-enabled + region-matched framework for the
  * caller's tenant, with its current per-tenant enabled state. The tab is
  * customer_admin-only; a platform admin (no tenant context) gets []. */
-export async function loadTenantFrameworkSettings(): Promise<TenantFrameworkSetting[]> {
+export async function loadTenantFrameworkSettings(): Promise<TenantFrameworkGroups> {
   const session = await requireAuth();
-  if (isPlatformAdmin(session.user.role)) return [];
+  if (isPlatformAdmin(session.user.role)) return { regions: [], frameworks: [] };
   return getTenantFrameworkSettings(session.user.tenantId);
 }
 

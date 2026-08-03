@@ -107,23 +107,42 @@ export interface TenantFrameworkSetting extends EffectiveFramework {
   enabled: boolean;
   /** Optional grouping label (Item #5) — display only. */
   category: string | null;
+  /** GLOBAL (appliesToAllRegions) → renders in the tab's "Global" section once. */
+  appliesToAllRegions: boolean;
+  /** Which of the tenant's regions this framework is region-linked to (empty for
+   *  GLOBAL). The tab groups a region-specific framework under the FIRST of these
+   *  in the tenant's region order, so it never appears under two regions. */
+  matchedRegions: string[];
+}
+
+/** Grouped shape for the multi-region Frameworks tab: the tenant's region SET
+ *  (ordered — one section each, empty ones included) + the flat framework list,
+ *  each tagged for grouping. */
+export interface TenantFrameworkGroups {
+  regions: string[];
+  frameworks: TenantFrameworkSetting[];
 }
 
 /** Customer-Admin view: every platform-enabled + region-matched framework with
- *  its current per-tenant enabled state (so the tab can toggle each). */
-export const getTenantFrameworkSettings = cache(async (tenantId: string): Promise<TenantFrameworkSetting[]> => {
-  // Multi-region: the union across the tenant's TenantRegion set. findMany returns
-  // each framework once, so a framework linked to two of the tenant's regions is
-  // not duplicated. Empty set → GLOBAL-only (unchanged behavior).
-  const trows = await prisma.tenantRegion.findMany({ where: { tenantId }, select: { region: true } });
+ *  its current per-tenant enabled state (so the tab can toggle each), plus the
+ *  tenant's region set and per-framework grouping tags for the by-region layout. */
+export const getTenantFrameworkSettings = cache(async (tenantId: string): Promise<TenantFrameworkGroups> => {
+  // Multi-region: the union across the tenant's TenantRegion set (ordered so the
+  // tab's region sections are stable). findMany returns each framework once.
+  // Empty set → GLOBAL-only (unchanged behavior).
+  const trows = await prisma.tenantRegion.findMany({ where: { tenantId }, select: { region: true }, orderBy: { region: "asc" } });
   const regions = trows.map((r) => r.region);
   const rows = await prisma.framework.findMany({
     // archivedAt: null → archived frameworks never appear in the tenant tab.
     where: { platformEnabled: true, archivedAt: null, ...regionWhere(regions) },
-    include: { tenantFrameworks: { where: { tenantId }, select: { enabled: true } } },
+    include: {
+      tenantFrameworks: { where: { tenantId }, select: { enabled: true } },
+      // Only the tenant's own regions — enough to group each framework by region.
+      regions: { where: { region: { in: regions } }, select: { region: true } },
+    },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], // manual order (Item #5)
   });
-  return rows.map((f) => ({
+  const frameworks = rows.map((f) => ({
     id: f.id,
     key: f.key,
     name: f.name,
@@ -131,7 +150,10 @@ export const getTenantFrameworkSettings = cache(async (tenantId: string): Promis
     description: f.description,
     enabled: f.tenantFrameworks[0]?.enabled !== false,
     category: f.category,
+    appliesToAllRegions: f.appliesToAllRegions,
+    matchedRegions: f.regions.map((r) => r.region),
   }));
+  return { regions, frameworks };
 });
 
 export interface CatalogFramework {

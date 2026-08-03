@@ -22,7 +22,7 @@ export { getTickets, getTicketStats, getTicket, getSupportTenantOptions, getTick
 export type { TicketListFilters, TicketListResult, TicketStats, TicketDetail, TicketAttachment } from "./support";
 export { getDashboardStats } from "./dashboard";
 export { effectiveFrameworksForTenant, getTenantFrameworkSettings, getFrameworkCatalog } from "./frameworks";
-export type { EffectiveFramework, TenantFrameworkSetting, CatalogFramework } from "./frameworks";
+export type { EffectiveFramework, TenantFrameworkSetting, TenantFrameworkGroups, CatalogFramework } from "./frameworks";
 export { getActiveRegions, getRegionLabelMap, getRegionCatalog } from "./regions";
 export type { RegionOption, RegionCatalogRow } from "./regions";
 export { getNotificationsPage, getNotificationFilterOptions, getNotificationStats } from "./notifications";
