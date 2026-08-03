@@ -1,8 +1,8 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Upload, X, Bot, Trash2 } from "lucide-react";
+import { Plus, X, Bot } from "lucide-react";
 import { AIButton, AIBadge } from "@/components/ai";
 import { classifyFinding, type FindingTriageResult } from "@/lib/ai";
 import type { FindingSeverity } from "@/store/findings.slice";
@@ -14,8 +14,8 @@ import { Input } from "@/components/ui/Input";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
-import { ConfirmModal } from "@/components/ui/ConfirmModal";
-import { DocumentCard } from "@/components/shared/DocumentCard";
+import { StagedDocumentUpload, revokeStagedFiles, type StagedFile } from "@/components/shared/StagedDocumentUpload";
+import { severityDropdownOptions } from "@/lib/severity";
 import { rcaDetailToText, type RcaDetail } from "@/modules/capa/modals/components/RcaMethodFields";
 import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
 import { frameworkLabel } from "@/constants/frameworks";
@@ -50,19 +50,6 @@ const findingSchema = z.object({
 type FindingForm = z.infer<typeof findingSchema>;
 /** Cross-site authors (super_admin / customer_admin) must pick a Site. */
 const crossSiteFindingSchema = findingSchema.extend({ siteId: z.string().min(1, "Site required") });
-
-/** A single evidence file STAGED in the create modal (before the finding
- *  exists). Holds the real `File` so GapPage can upload it via
- *  uploadFindingEvidence once the finding is created; `url` is a local
- *  object URL used only for the in-modal View button. */
-interface StagedEvidenceFile {
-  id: string;
-  file: File;
-  name: string;
-  sizeKb: number;
-  type: DocType;
-  url: string;
-}
 
 type AddFindingPayload = FindingForm & {
   /** Staged evidence files — uploaded to the finding post-create (multi-file). */
@@ -101,11 +88,10 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     resolver: zodResolver(crossSite ? crossSiteFindingSchema : findingSchema),
     defaultValues: { severity: "High", siteId: "", raiseCapaImmediately: false },
   });
-  // Multi-file staged evidence — uploaded to the finding post-create. Each
-  // carries the real File + a local object URL (for the View button).
-  const [evidenceFiles, setEvidenceFiles] = useState<StagedEvidenceFile[]>([]);
-  // Delete-confirmation target (shared ConfirmModal before removing a file).
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  // Multi-file staged evidence — uploaded to the finding post-create. Held by
+  // the shared <StagedDocumentUpload>, which owns the picker, drag & drop,
+  // validation, previews and the remove confirmation.
+  const [evidenceFiles, setEvidenceFiles] = useState<StagedFile[]>([]);
   // Gap RCA (Batch B) — structured method detail. RCA is not collected in the Add
   // form (assessment-time only), but the state is retained so the submit payload
   // shape stays stable (serializes to undefined when no method is set).
@@ -159,39 +145,9 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     return "Other";
   }
 
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    // Multi-file: append EVERY picked file to the staged list (the input allows
-    // multiple, and re-picking adds more — the value is reset so the same file
-    // can be chosen again).
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
-    setEvidenceFiles((prev) => [
-      ...prev,
-      ...files.map((file) => ({
-        id: `${file.name}-${file.size}-${prev.length}-${file.lastModified}`,
-        file,
-        name: file.name,
-        sizeKb: Math.max(1, Math.round(file.size / 1024)),
-        type: inferDocType(file.name),
-        url: URL.createObjectURL(file),
-      })),
-    ]);
-    e.currentTarget.value = "";
-  }
-
-  function confirmRemoveFile() {
-    if (!pendingDeleteId) return;
-    setEvidenceFiles((prev) => {
-      const target = prev.find((f) => f.id === pendingDeleteId);
-      if (target) URL.revokeObjectURL(target.url);
-      return prev.filter((f) => f.id !== pendingDeleteId);
-    });
-    setPendingDeleteId(null);
-  }
-
   /** Revoke every staged object URL (on close / after save) to avoid leaks. */
   function revokeAllStaged() {
-    setEvidenceFiles((prev) => { prev.forEach((f) => URL.revokeObjectURL(f.url)); return []; });
+    setEvidenceFiles((prev) => { revokeStagedFiles(prev); return []; });
   }
 
   // Smart default: auto-select Part 11 framework when the user picks CSV/IT area
@@ -211,13 +167,12 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     const rootCause = data.rcaMethod ? rcaDetailToText(data.rcaMethod, detail) : undefined;
     onSave({
       ...data,
-      evidenceFiles: evidenceFiles.map((f) => ({ file: f.file, name: f.name, type: f.type })),
+      evidenceFiles: evidenceFiles.map((f) => ({ file: f.file, name: f.name, type: inferDocType(f.name) })),
       rootCause: rootCause || undefined,
       rcaDetail: data.rcaMethod ? JSON.stringify(detail) : undefined,
     });
     reset();
     revokeAllStaged();
-    setPendingDeleteId(null);
     setDetail({});
     setTriage(null);
     setTriageError("");
@@ -228,13 +183,11 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
     setDetail({});
     reset();
     revokeAllStaged();
-    setPendingDeleteId(null);
     setTriage(null);
     setTriageError("");
   }
 
   return (
-    <>
     <Modal open={isOpen} onClose={handleClose} title="Report Compliance Gap"
       footer={
         <div className="flex justify-end gap-3">
@@ -298,13 +251,11 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
             </div>
             <div>
               <p className="text-[11px] font-medium text-(--text-secondary) mb-1.5">Severity <span className="text-(--danger)">*</span></p>
-              <Dropdown value={watch("severity") ?? "High"} onChange={(v) => setValue("severity", v as FindingSeverity)} width="w-full"
-                options={[
-                  { value: "Critical", label: "Critical", badge: "C", badgeVariant: "red" as const },
-                  { value: "High", label: "High", badge: "H", badgeVariant: "amber" as const },
-                  { value: "Medium", label: "Medium", badge: "M", badgeVariant: "amber" as const },
-                  { value: "Low", label: "Low", badge: "L", badgeVariant: "green" as const },
-                ]} />
+              {/* Options come from the shared severity taxonomy (lib/severity)
+                  so the pill colours match the read-only Badges elsewhere and
+                  the Deviation form's severity field stays in lockstep. */}
+              <Dropdown placeholder="Select severity..." value={watch("severity") ?? "High"} onChange={(v) => setValue("severity", v as FindingSeverity, { shouldValidate: true })} width="w-full"
+                options={severityDropdownOptions("generic")} />
             </div>
           </div>
 
@@ -404,41 +355,18 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
                 </button>
               ) : undefined}
             />
-            <div className="mt-2 rounded-lg border p-3" style={{ borderColor: "var(--bg-border)", background: "var(--bg-surface)" }}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>Upload evidence files</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>Add one or more documents — each is uploaded to Evidence &amp; Documents and linked to this finding.</p>
-                </div>
-                {/* #2 — MULTIPLE file selection (multiple + add-more). */}
-                <label className="inline-flex shrink-0">
-                  <input type="file" multiple className="hidden" onChange={handleFileChange} />
-                  <span className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium cursor-pointer" style={{ background: "var(--brand-muted)", color: "var(--brand)", border: "1px solid var(--brand-border)" }}>
-                    <Upload className="w-3.5 h-3.5" />
-                    {evidenceFiles.length > 0 ? "Add more" : "Choose files"}
-                  </span>
-                </label>
-              </div>
-              {/* #2 — staged files as the shared <DocumentCard> (View opens the
-                  local file; the Delete/Trash action confirms via ConfirmModal). */}
-              {evidenceFiles.length > 0 && (
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {evidenceFiles.map((f) => (
-                    <DocumentCard
-                      key={f.id}
-                      doc={{
-                        id: f.id,
-                        title: f.name,
-                        meta: `${f.type} · ${f.sizeKb} KB`,
-                        badge: { label: "Pending upload", tone: "amber" },
-                        viewHref: f.url,
-                        downloadHref: null,
-                      }}
-                      onRemove={() => setPendingDeleteId(f.id)}
-                    />
-                  ))}
-                </div>
-              )}
+            {/* #2 — MULTI-file staging via the shared <StagedDocumentUpload>
+                (drag & drop, type/size validation, DocumentCard previews and
+                the remove confirmation all live in that component now). */}
+            <div className="mt-2">
+              <StagedDocumentUpload
+                files={evidenceFiles}
+                onChange={setEvidenceFiles}
+                title="Upload evidence files"
+                hint="Add one or more documents — each is uploaded to Evidence & Documents and linked to this finding."
+                metaFor={(f) => inferDocType(f.name)}
+                confirmMessage="It won't be uploaded to this finding. You can add it again before saving."
+              />
             </div>
           </div>
 
@@ -449,20 +377,6 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
         </div>
       </form>
     </Modal>
-
-    {/* #2 — shared confirm dialog before removing a staged evidence file. */}
-    <ConfirmModal
-      open={!!pendingDeleteId}
-      onClose={() => setPendingDeleteId(null)}
-      onConfirm={confirmRemoveFile}
-      title="Remove this document?"
-      message="It won't be uploaded to this finding. You can add it again before saving."
-      confirmLabel="Remove"
-      cancelLabel="Keep"
-      variant="danger"
-      icon={Trash2}
-    />
-    </>
   );
 }
 

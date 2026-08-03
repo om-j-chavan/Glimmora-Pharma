@@ -74,6 +74,26 @@ adding it.
 
 The investigation must be done by someone other than the person who reported the deviation.
 
+### Get AI help with the root cause analysis
+
+The **Investigation** section carries an **AI RCA** button. It reads this deviation — the description,
+immediate action, severity, area, the names of any attached documents, and anything already written in
+the RCA — together with similar past deviations from your own site, and comes back with:
+
+- probable root causes, ranked, with the evidence behind each
+- contributing factors
+- recommended next investigative steps
+- candidate corrective and preventive actions
+- **information and evidence the investigation is still missing**
+
+Everything it returns is marked as AI-generated and is advisory. Review it, edit anything you disagree
+with, then select **Apply to RCA** to drop the draft into the RCA form. If the form already contains
+your analysis, you are asked to confirm before it is replaced. Applying fills the form only — nothing
+is recorded until you select **Save RCA** yourself, and the form stays marked as AI-drafted until you do.
+
+You can read the analysis even when you can't author the RCA (for example, if you reported the
+deviation); only **Apply to RCA** is withheld.
+
 ### Make the CAPA decision (QA Head)
 
 1. Open the deviation once the investigation is complete.

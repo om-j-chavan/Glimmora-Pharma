@@ -98,6 +98,51 @@ export function getSeverityVariant(
   return canonical ? SEVERITY_BADGE_VARIANT[canonical] : "gray";
 }
 
+// Short pill text shown inside the severity <Dropdown> options. "Maj"/"Min"
+// rather than a bare "M" for both — the FDA taxonomy's Major and Minor share a
+// first letter, and a badge that reads the same for two different severities is
+// worse than no badge at all.
+const SEVERITY_BADGE_ABBR: Record<CanonicalLabel, string> = {
+  Critical: "C",
+  High: "H",
+  Medium: "M",
+  Low: "L",
+  Major: "Maj",
+  Minor: "Min",
+};
+
+/** The subset of BadgeVariant the ui/Dropdown option badge understands. */
+type DropdownBadgeVariant = "default" | "red" | "amber" | "green";
+
+export interface SeverityDropdownOption {
+  value: string;
+  label: string;
+  badge: string;
+  badgeVariant: DropdownBadgeVariant;
+}
+
+/**
+ * Severity <Dropdown> options for a taxonomy, coloured from the SAME
+ * SEVERITY_BADGE_VARIANT map the read-only Badges use — so a severity is the
+ * same colour whether you are picking it in a form or reading it in a table.
+ *
+ * Pass "generic" for CAPA / Gap findings / Change Control (Critical → Low) and
+ * "fda" for Deviations / 483 observations (Critical / Major / Minor). The
+ * taxonomies are NOT interchangeable: FDA regulatory language is Critical /
+ * Major / Minor, so a deviation must never be offered High / Medium / Low.
+ */
+export function severityDropdownOptions(taxonomy: SeverityTaxonomy): SeverityDropdownOption[] {
+  const labels: readonly CanonicalLabel[] = taxonomy === "fda" ? FDA_SEVERITY : GENERIC_SEVERITY;
+  return labels.map((value) => ({
+    value,
+    label: value,
+    badge: SEVERITY_BADGE_ABBR[value],
+    // Every severity maps to red/amber/green, all of which the Dropdown badge
+    // supports — the cast just narrows the wider BadgeVariant union.
+    badgeVariant: SEVERITY_BADGE_VARIANT[value] as DropdownBadgeVariant,
+  }));
+}
+
 /**
  * Preprocessor for Zod severity fields that accept legacy lowercase
  * input but persist TitleCase. Returns the canonical TitleCase label

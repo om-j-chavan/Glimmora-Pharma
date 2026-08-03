@@ -33,11 +33,16 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
-import { Search, Save, CheckCircle2, Pencil, AlertTriangle, ExternalLink } from "lucide-react";
+import { Search, Save, CheckCircle2, Pencil, AlertTriangle, ExternalLink, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { AIButton } from "@/components/ai";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import type { RcaSuggestion } from "@/lib/ai";
+import { DeviationRcaAiModal } from "./DeviationRcaAiModal";
 import type { Deviation, DeviationRCAMethod } from "@/store/deviation.slice";
 import {
   saveInvestigationProgress as saveInvestigationProgressAction,
@@ -123,6 +128,38 @@ function canComplete(method: DeviationRCAMethod, b: RcaBuffers): boolean {
   if (method === "5 Why") return !!b.whys[0]?.trim() && !!b.whys[4]?.trim();
   if (method === "Fishbone") return !!b.fishRoot.trim();
   return !!b.freeform.trim();
+}
+
+/** Does the working buffer already hold analysis for this method? Drives the
+ *  "replace your existing analysis?" pre-flight before an AI draft is applied —
+ *  AI output must never silently overwrite what the investigator wrote. */
+function hasAnalysis(method: DeviationRCAMethod, b: RcaBuffers): boolean {
+  if (method === "5 Why") return b.whys.some((w) => w.trim());
+  if (method === "Fishbone") return !!b.fishRoot.trim() || FISHBONE_CATEGORIES.some((c) => b.cats[c]?.trim());
+  return !!b.freeform.trim();
+}
+
+/** Write an (already user-reviewed) AI suggestion into the RCA buffers.
+ *  Fishbone needs a key remap: the AI contract uses lowercase category keys
+ *  (people/process/…), the form buffer uses the TitleCase display labels. */
+function applySuggestionToBuffers(b: RcaBuffers, s: RcaSuggestion): RcaBuffers {
+  if (s.method === "5 Why") return { ...b, whys: [...s.whys] };
+  if (s.method === "Fishbone") {
+    return {
+      ...b,
+      cats: {
+        ...b.cats,
+        People: s.categories.people,
+        Process: s.categories.process,
+        Equipment: s.categories.equipment,
+        Materials: s.categories.materials,
+        Environment: s.categories.environment,
+        Management: s.categories.management,
+      },
+      fishRoot: s.rootCause,
+    };
+  }
+  return { ...b, freeform: s.rootCause };
 }
 
 /* ── Readable saved-RCA display (duplicated from FDA 483's SavedRcaDisplay,
@@ -256,6 +293,20 @@ export function InvestigationSection({
   // Cancel-edit discard-confirmation strip (Fix 1).
   const [confirmCancel, setConfirmCancel] = useState(false);
 
+  // ── Deviation RCA Intelligence (AI investigation assist) ──────────────
+  // Gated by the same AGI policy every other agent reads: the deviation agent
+  // must be enabled and the tenant must not be in manual mode.
+  const agiMode = useAppSelector((s) => s.settings.agi.mode);
+  const agiDeviationAgent = useAppSelector((s) => s.settings.agi.agents.deviation);
+  const aiAvailable = agiMode !== "manual" && agiDeviationAgent;
+  const [aiOpen, setAiOpen] = useState(false);
+  // An AI draft awaiting the "replace your existing analysis?" confirmation.
+  const [pendingAi, setPendingAi] = useState<{ method: DeviationRCAMethod; suggestion: RcaSuggestion } | null>(null);
+  // True once an AI draft has been written into the buffers — drives the
+  // provenance banner in the RCA modal, so a reviewer can always tell the form
+  // was seeded by the agent rather than typed from scratch.
+  const [aiApplied, setAiApplied] = useState(false);
+
   // Re-seed local state whenever a different deviation is opened, or the
   // server row changes (after router.refresh()).
   useEffect(() => {
@@ -264,6 +315,9 @@ export function InvestigationSection({
     setStarted(false);
     setEditing(false);
     setConfirmCancel(false);
+    setAiOpen(false);
+    setPendingAi(null);
+    setAiApplied(false);
   }, [deviation.id, deviation.rcaMethod, deviation.rcaData, deviation.investigationCompletedAt]);
 
   // The RCA form is now entered in a MODAL (Add/Edit RCA), opened explicitly.
@@ -290,6 +344,7 @@ export function InvestigationSection({
     setEditing(false);
     setStarted(false);
     setConfirmCancel(false);
+    setAiApplied(false);
   }
   function handleCancel() {
     if (dirty) {
@@ -297,6 +352,30 @@ export function InvestigationSection({
       return;
     }
     exitEditing();
+  }
+
+  /** Write a reviewed AI draft into the RCA form and open it for editing. The
+   *  investigator still has to click Save RCA — applying never persists. */
+  function applyAiDraft(m: DeviationRCAMethod, s: RcaSuggestion) {
+    setMethod(m);
+    setBuffers((b) => applySuggestionToBuffers(b, s));
+    // Surface the populated form straight away, in whichever mode fits the
+    // deviation's state (edit for a completed investigation, add otherwise).
+    if (completed) setEditing(true);
+    else setStarted(true);
+    // Deliberately NOT onChanged(): that reports a persisted change and calls
+    // router.refresh(). Nothing has been written yet — the banner inside the
+    // RCA modal is the honest signal.
+    setAiApplied(true);
+  }
+
+  /** Apply entry point — confirms first when it would overwrite existing work. */
+  function handleAiApply(m: DeviationRCAMethod, s: RcaSuggestion) {
+    if (hasAnalysis(m, buffers)) {
+      setPendingAi({ method: m, suggestion: s });
+      return;
+    }
+    applyAiDraft(m, s);
   }
 
   async function persist(complete: boolean) {
@@ -323,24 +402,35 @@ export function InvestigationSection({
         title="Investigation"
         status={completed ? "Completed" : undefined}
         action={
-          completed
-            ? (canInvestigate ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={Pencil}
-                  disabled={!rcaEditable}
-                  title={!rcaEditable ? "RCA cannot be edited after a CAPA is linked" : undefined}
-                  onClick={() => { if (!rcaEditable) return; setEditing(true); setMethod(deviation.rcaMethod ?? null); }}
-                >
-                  Edit RCA
-                </Button>
-              ) : undefined)
-            : (!isReporter ? (
-                <Button variant="primary" size="sm" icon={Search} disabled={!canInvestigate} onClick={() => setStarted(true)}>
-                  Add RCA
-                </Button>
-              ) : undefined)
+          <span className="flex items-center gap-2">
+            {/* AI investigation assist — read-only analysis, so it is offered to
+                anyone who can see the deviation (the reporter included: SoD bars
+                them from AUTHORING the RCA, not from reading an analysis). The
+                Apply action inside the panel is gated on canInvestigate. */}
+            {aiAvailable && (
+              <AIButton size="sm" onClick={() => setAiOpen(true)} aria-label="Analyse this deviation with AI">
+                AI RCA
+              </AIButton>
+            )}
+            {completed
+              ? (canInvestigate ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon={Pencil}
+                    disabled={!rcaEditable}
+                    title={!rcaEditable ? "RCA cannot be edited after a CAPA is linked" : undefined}
+                    onClick={() => { if (!rcaEditable) return; setEditing(true); setMethod(deviation.rcaMethod ?? null); }}
+                  >
+                    Edit RCA
+                  </Button>
+                ) : null)
+              : (!isReporter ? (
+                  <Button variant="primary" size="sm" icon={Search} disabled={!canInvestigate} onClick={() => setStarted(true)}>
+                    Add RCA
+                  </Button>
+                ) : null)}
+          </span>
         }
       />
 
@@ -415,8 +505,24 @@ export function InvestigationSection({
             </div>
           )}
 
-          {/* Method picker */}
-          <div className="flex gap-2 flex-wrap">
+          {/* AI provenance — the form was seeded by the agent, not typed. Stays
+              visible until the draft is saved or the edit is abandoned, so a
+              reviewer can always tell AI-drafted text from user-written text. */}
+          {aiApplied && (
+            <div
+              role="status"
+              className="flex items-start gap-2 p-2 rounded-lg border text-[11px]"
+              style={{ background: "var(--ai-muted)", borderColor: "var(--ai-border)", color: "var(--text-secondary)" }}
+            >
+              <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
+              <span>
+                These fields were pre-filled from an AI draft. Edit anything you disagree with — nothing is recorded until you click <strong>Save RCA</strong>.
+              </span>
+            </div>
+          )}
+
+          {/* Method picker + the AI assist trigger for the picked method. */}
+          <div className="flex gap-2 flex-wrap items-center">
             {METHODS.map((m) => {
               const active = method === m.value;
               return (
@@ -437,6 +543,17 @@ export function InvestigationSection({
                 </button>
               );
             })}
+            {aiAvailable && (
+              <AIButton
+                variant="subtle"
+                size="sm"
+                className="ml-auto"
+                onClick={() => setAiOpen(true)}
+                aria-label={method ? `Draft the ${method} analysis with AI` : "Analyse this deviation with AI"}
+              >
+                {method ? `AI draft — ${method}` : "AI RCA"}
+              </AIButton>
+            )}
           </div>
 
           {!method && (
@@ -525,6 +642,38 @@ export function InvestigationSection({
           )}
         </div>
       </Modal>
+
+      {/* AI investigation assist. Mounted after the RCA modal so its portal
+          paints on top when opened from inside it; opened from the section
+          header it is the only dialog on screen. */}
+      {aiAvailable && (
+        <DeviationRcaAiModal
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          deviation={deviation}
+          method={method}
+          canApply={canInvestigate && (!completed || rcaEditable)}
+          onApply={handleAiApply}
+        />
+      )}
+
+      {/* Pre-flight before an AI draft overwrites analysis already in the form.
+          Nothing is persisted either way — this guards the investigator's
+          unsaved work, which is exactly what AI output must never clobber. */}
+      <ConfirmModal
+        open={pendingAi !== null}
+        onClose={() => setPendingAi(null)}
+        onConfirm={() => {
+          if (pendingAi) applyAiDraft(pendingAi.method, pendingAi.suggestion);
+          setPendingAi(null);
+        }}
+        title="Replace your current analysis?"
+        message="The RCA fields already contain analysis. Applying the AI draft overwrites them. Nothing is saved until you click Save RCA."
+        confirmLabel="Replace"
+        cancelLabel="Keep mine"
+        variant="warning"
+        icon={AlertTriangle}
+      />
     </div>
   );
 }
