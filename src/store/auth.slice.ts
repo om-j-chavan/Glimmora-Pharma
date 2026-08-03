@@ -115,6 +115,8 @@ export interface Tenant {
   // deletedAt null), DELETED (deletedAt set). See src/actions/tenants.ts.
   deletedAt?: string | null;
   mfaEnabled?: boolean;
+  /** Single-QA SoD override (org attests one QA) — super_admin-set; default OFF. */
+  sodSingleQAOverride?: boolean;
   config: TenantConfig;
   // Subscription Phase A — exactly one optional plan per tenant (null until a
   // super_admin assigns one). Replaces the old subscriptionPlans[] array and

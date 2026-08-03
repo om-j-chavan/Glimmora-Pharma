@@ -138,6 +138,7 @@ export interface AccountFormData {
   regulatoryRegions: string[];
   active: boolean;
   mfaEnabled: boolean;
+  sodSingleQAOverride: boolean;
   newPassword: string;
   confirmPassword: string;
   plan: PlanDraft | null;
@@ -172,6 +173,7 @@ export function makeEmptyForm(): AccountFormData {
     regulatoryRegions: [],
     active: true,
     mfaEnabled: false,
+    sodSingleQAOverride: false,
     newPassword: "",
     confirmPassword: "",
     plan: null,

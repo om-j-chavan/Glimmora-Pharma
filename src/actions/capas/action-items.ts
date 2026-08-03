@@ -248,6 +248,31 @@ export async function addActionItem(
         },
       });
       await syncCorrectiveActions(tx, capaId, session.user.tenantId);
+      // Fix B — assigning corrective work advances the CAPA open -> in_progress so
+      // the per-person review gate (acceptWork/sendWorkBack/cancelTask) can open.
+      // Reuses startCAPAProgress's exact guarded transition; idempotent and
+      // concurrency-safe via `where status:"open"` (a no-op once already advanced,
+      // so the manual "Start progress" button just becomes a no-op). Audited
+      // in-transaction (same CAPA_PROGRESS_STARTED shape) ONLY when it actually flips.
+      const advanced = await tx.cAPA.updateMany({
+        where: { id: capaId, tenantId: session.user.tenantId, status: "open" },
+        data: { status: "in_progress" },
+      });
+      if (advanced.count > 0) {
+        await tx.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: "CAPA",
+            action: "CAPA_PROGRESS_STARTED",
+            recordId: capaId,
+            oldValue: "open",
+            newValue: "in_progress",
+          },
+        });
+      }
       return item;
     });
 
@@ -817,8 +842,12 @@ export async function acceptWork(
   const lookup = await getCAPAForActionItemOp(capaId, session.user.tenantId);
   if (!lookup.ok) return { success: false, error: lookup.error };
   const { capa } = lookup;
-  if (capa.status !== "pending_qa_review") {
-    return { success: false, error: "Work can only be accepted while the CAPA is under QA review." };
+  // CAPA lifecycle rework — per-person review happens as work arrives, so accept
+  // is allowed while the CAPA is under investigation (in_progress) too, not only
+  // once the whole CAPA is submitted (pending_qa_review). closeDeviation-style
+  // terminal states stay excluded.
+  if (capa.status !== "in_progress" && capa.status !== "pending_qa_review") {
+    return { success: false, error: "Work can only be accepted while the CAPA is in progress or under QA review." };
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -826,6 +855,14 @@ export async function acceptWork(
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  // SoD (CAPA lifecycle rework) — the reviewer who accepts must NOT be the person
+  // who did the work. The doer is the item owner (ownerId); block self-acceptance
+  // (FK-to-FK on the authoritative User id). Closes a LIVE bug: a QA assigned an
+  // action item could accept their own completed work.
+  if (actor.userId && parsed.data.ownerId === actor.userId) {
+    return { success: false, error: "Separation of duties: you cannot accept your own work. A different QA Head must review it." };
   }
 
   // ONLY `complete` items for this person. An in_progress / pending item is not
@@ -913,8 +950,10 @@ export async function sendWorkBack(
   const lookup = await getCAPAForActionItemOp(capaId, session.user.tenantId);
   if (!lookup.ok) return { success: false, error: lookup.error };
   const { capa } = lookup;
-  if (capa.status !== "pending_qa_review") {
-    return { success: false, error: "Work can only be sent back while the CAPA is under QA review." };
+  // CAPA lifecycle rework — send-back is available as work arrives (in_progress),
+  // not only after whole-CAPA submit (pending_qa_review).
+  if (capa.status !== "in_progress" && capa.status !== "pending_qa_review") {
+    return { success: false, error: "Work can only be sent back while the CAPA is in progress or under QA review." };
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -922,6 +961,12 @@ export async function sendWorkBack(
     requireGxPAuthor(actor);
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+
+  // SoD (CAPA lifecycle rework) — the reviewer who sends work back must NOT be the
+  // person who did the work (item owner). Block self-review (FK-to-FK).
+  if (actor.userId && parsed.data.ownerId === actor.userId) {
+    return { success: false, error: "Separation of duties: you cannot send back your own work. A different QA Head must review it." };
   }
 
   const targets = await prisma.cAPAActionItem.findMany({
@@ -1020,6 +1065,113 @@ export async function sendWorkBack(
   } catch (err) {
     console.error("[action] sendWorkBack failed:", err);
     return { success: false, error: sanitizeServerError(err, "Failed to send work back") };
+  }
+}
+
+const CancelWorkSchema = z.object({
+  ownerId: z.string().min(1, "ownerId is required"),
+  reason: z.string().min(10, "Reason must be at least 10 characters").max(2000),
+});
+
+/**
+ * QA VOIDS a person's still-open work on a CAPA (per-person, mirrors
+ * acceptWork/sendWorkBack). Every NON-terminal item of that owner
+ * (pending|in_progress|complete|rework) -> "cancelled" — a terminal-void state
+ * that, like "skipped", no longer blocks closure. QA-only (canReviewAlignment);
+ * SoD reviewer != owner; NOT a Part 11 signature. Atomic; audited
+ * (CAPA_WORK_CANCELLED). The audit row is the authoritative who/why record — the
+ * item's rework columns are deliberately left null so a cancelled item shows no
+ * "please rework" ask to the worker.
+ */
+export async function cancelTask(
+  capaId: string,
+  input: z.input<typeof CancelWorkSchema>,
+): Promise<ActionResult> {
+  const session = await requireAuth();
+  if (!canReviewAlignment(session.user.role)) {
+    return { success: false, error: "Only QA Head can cancel work." };
+  }
+  const parsed = CancelWorkSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
+
+  const lookup = await getCAPAForActionItemOp(capaId, session.user.tenantId);
+  if (!lookup.ok) return { success: false, error: lookup.error };
+  const { capa } = lookup;
+  if (capa.status !== "in_progress" && capa.status !== "pending_qa_review") {
+    return { success: false, error: "Work can only be cancelled while the CAPA is in progress or under QA review." };
+  }
+
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  try {
+    requireGxPAuthor(actor);
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
+  }
+  // SoD — the reviewer who voids work must not be the person who owns it.
+  if (actor.userId && parsed.data.ownerId === actor.userId) {
+    return { success: false, error: "Separation of duties: you cannot cancel your own work. A different QA Head must do it." };
+  }
+
+  // Void only NON-terminal items — leave already accepted/skipped/cancelled alone.
+  const OPEN_ITEM_STATUSES = ["pending", "in_progress", "complete", "rework"];
+  const targets = await prisma.cAPAActionItem.findMany({
+    where: { capaId, tenantId: session.user.tenantId, ownerId: parsed.data.ownerId, status: { in: OPEN_ITEM_STATUSES }, deletedAt: null },
+    select: { id: true, owner: true },
+  });
+  if (targets.length === 0) {
+    return { success: false, error: "That person has no open work to cancel on this CAPA." };
+  }
+  const ownerName = targets[0].owner;
+  const itemIds = targets.map((t) => t.id);
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.cAPAActionItem.updateMany({
+        where: { capaId, tenantId: session.user.tenantId, ownerId: parsed.data.ownerId, status: { in: OPEN_ITEM_STATUSES }, deletedAt: null },
+        data: { status: "cancelled" },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: ACTION_ITEMS_AUDIT_MODULE,
+          action: "CAPA_WORK_CANCELLED",
+          recordId: capaId,
+          recordTitle: (capa.reference ?? capa.description).slice(0, 80),
+          newValue: JSON.stringify({
+            ownerId: parsed.data.ownerId,
+            ownerName,
+            reason: parsed.data.reason.slice(0, 200),
+            itemCount: targets.length,
+            itemIds,
+          }),
+        },
+      });
+    });
+
+    await notify({
+      tenantId: session.user.tenantId,
+      recipientUserId: parsed.data.ownerId,
+      actorUserId: actor.userId,
+      type: "REWORK_ASSIGNED",
+      title: `Your CAPA work was cancelled (CAPA ${capa.reference ?? capaId})`,
+      body: parsed.data.reason.slice(0, 200),
+      linkPath: "/worklist",
+      entityType: "CAPA",
+      entityId: capaId,
+    });
+
+    revalidatePath("/capa");
+    revalidatePath(`/capa/${capaId}`);
+    revalidatePath("/worklist");
+    return { success: true, data: { ownerId: parsed.data.ownerId, cancelled: targets.length } };
+  } catch (err) {
+    console.error("[action] cancelTask failed:", err);
+    return { success: false, error: sanitizeServerError(err, "Failed to cancel work") };
   }
 }
 

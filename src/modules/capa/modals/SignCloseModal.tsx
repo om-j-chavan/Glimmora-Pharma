@@ -17,11 +17,12 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { CAPA_STATUS_VARIANT as STATUS_VARIANT, getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
 import { STATUS_LABEL } from "@/types/capa";
+import { SodOverrideInputs, isSodOverrideValid } from "@/modules/capa/components/SodOverrideInputs";
 
 interface SignCloseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSign: (data: { meaning: string; password: string; effectivenessConfirmed: boolean; closingNotes: string }) => void;
+  onSign: (data: { meaning: string; password: string; effectivenessConfirmed: boolean; closingNotes: string; sodOverrideReasonCode?: string; sodOverrideJustification?: string }) => void;
   capa: CAPA | null;
   /** Substage 6.4 — display-only echo of the CC dependency override the
    *  operator captured upstream in ActionsPanel. The reason itself rides
@@ -49,8 +50,18 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
   const [signPassword, setSignPassword] = useState("");
   const [effectivenessConfirmed, setEffectivenessConfirmed] = useState(false);
   const [closingNotes, setClosingNotes] = useState("");
+  const [sodReason, setSodReason] = useState("");
+  const [sodJust, setSodJust] = useState("");
   const signer = useAppSelector((s) => s.auth.user);
   const { role } = useRole();
+
+  // Single-QA override (Phase 2, PART A) — sodReveal.closeCreator / closeRcaAuthor
+  // are the server-computed closer==creator / closer==rcaEditedById self-checks for
+  // this user. When either fires under the flag (non-Critical), the override reason
+  // + justification are required IN ADDITION to the e-signature password below.
+  const reveal = capa?.sodReveal;
+  const closeWaiver =
+    Boolean(reveal?.flagOn) && Boolean(reveal) && !reveal!.isCritical && (reveal!.closeCreator || reveal!.closeRcaAuthor);
 
   // Clear inputs when the modal closes (success or cancel). Keeping them
   // populated across submit attempts means a wrong-password retry doesn't
@@ -63,6 +74,8 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
       setSignPassword("");
       setEffectivenessConfirmed(false);
       setClosingNotes("");
+      setSodReason("");
+      setSodJust("");
     }
   }, [isOpen]);
 
@@ -74,9 +87,17 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
 
   function handleSign() {
     if (!signMeaning || signPassword.trim().length === 0 || closingNotes.trim().length < CLOSING_NOTES_MIN) return;
+    if (closeWaiver && !isSodOverrideValid(sodReason, sodJust)) return;
     // Send the password exactly as typed (never trim a credential — a real
     // password may contain spaces); only the non-empty check is trimmed.
-    onSign({ meaning: signMeaning, password: signPassword, effectivenessConfirmed, closingNotes: closingNotes.trim() });
+    onSign({
+      meaning: signMeaning,
+      password: signPassword,
+      effectivenessConfirmed,
+      closingNotes: closingNotes.trim(),
+      sodOverrideReasonCode: closeWaiver ? sodReason : undefined,
+      sodOverrideJustification: closeWaiver ? sodJust.trim() : undefined,
+    });
   }
 
   return (
@@ -133,6 +154,18 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
               Recorded on the CAPA and hashed into the Part 11 signature.
             </p>
           </div>
+          {/* Single-QA override — required IN ADDITION to the e-signature password
+              when you would trip the closure SoD self-check (closer = creator or
+              closer = RCA author) under the flag on a non-Critical CAPA. */}
+          {closeWaiver && (
+            <SodOverrideInputs
+              reasonCode={sodReason}
+              justification={sodJust}
+              onReasonCode={setSodReason}
+              onJustification={setSodJust}
+              disabled={busy}
+            />
+          )}
           <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
             Accepted by: <strong style={{ color: "var(--text-primary)" }}>{signer?.name ?? "—"}{role ? ` (${roleLabel(role)})` : ""}</strong> · {dayjs().format("DD MMM YYYY")}
           </p>
@@ -159,7 +192,7 @@ export function SignCloseModal({ isOpen, onClose, onSign, capa, error, busy }: S
             <Button
               variant="primary"
               icon={ShieldCheck}
-              disabled={busy || !signMeaning || signPassword.trim().length === 0 || closingNotes.trim().length < CLOSING_NOTES_MIN || (capa.effectivenessCheck && !effectivenessConfirmed)}
+              disabled={busy || !signMeaning || signPassword.trim().length === 0 || closingNotes.trim().length < CLOSING_NOTES_MIN || (capa.effectivenessCheck && !effectivenessConfirmed) || (closeWaiver && !isSodOverrideValid(sodReason, sodJust))}
               loading={busy}
               onClick={handleSign}
             >

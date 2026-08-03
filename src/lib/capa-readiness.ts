@@ -81,7 +81,9 @@ const RESOLVED_EVIDENCE_STATUSES: ReadonlySet<string> = new Set([
 // EXPORTED so the UI readouts that REPORT this condition derive from the same
 // set the gate enforces. Re-listing these statuses inline is how a readout ends
 // up saying "Actions 1/2" while Submit is live — one fact, two lists.
-export const DONE_ACTION_STATUSES: ReadonlySet<string> = new Set(["complete", "accepted", "skipped"]);
+// "cancelled" (CAPA lifecycle rework) is a QA-voided assignment — like "skipped"
+// it is settled and does not block submission/closure.
+export const DONE_ACTION_STATUSES: ReadonlySet<string> = new Set(["complete", "accepted", "skipped", "cancelled"]);
 
 export function getCAPAReadiness(
   capa: ReadinessCAPAInput,

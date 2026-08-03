@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { evaluateSodOverride, tenantSodOverrideOn, writeSodOverride } from "./sod-override";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import { canApproveCAPA } from "@/lib/capa-approvals";
 import {
@@ -54,6 +55,9 @@ const RecordEffectivenessSchema = z.object({
     .max(4000, "Notes must be 4000 characters or fewer"),
   password: z.string().min(1, "Password is required to sign"),
   recurrenceObservations: z.array(z.string()).optional(),
+  // Single-QA override (Phase 1) — used ONLY when the self-check fires with flag ON.
+  sodOverrideReasonCode: z.string().optional(),
+  sodOverrideJustification: z.string().optional(),
 });
 
 const RevokeEffectivenessSchema = z.object({
@@ -151,35 +155,49 @@ export async function recordEffectivenessReview(
     if (verSig) blockingSigners.push({ recordType: "CAPA_VERIFICATION", signerId: verSig.signerId });
   }
   const conflict = blockingSigners.find((s) => s.signerId === session.user.id);
+  // Single-QA override (Phase 1) — the effectiveness reviewer normally must not be a
+  // closure/verification signer; the flag can waive it (Critical is a hard floor).
+  let waivedEffectiveness = false;
+  let sodReason = "";
+  let sodJustification = "";
   if (conflict) {
-    try {
-      await prisma.auditLog.create({
-        data: {
-          tenantId: session.user.tenantId,
-          userId: actor.userId,
-          userName: actor.displayName,
-          userRole: actor.role,
-          module: EFFECTIVENESS_AUDIT_MODULE,
-          action: "CAPA_EFFECTIVENESS_BLOCKED_SAME_SIGNER",
-          recordId: capaId,
-          recordTitle: (existing.reference ?? existing.description).slice(0, 80),
-          newValue: JSON.stringify({
-            attemptedBy: session.user.id,
-            conflictingRecordType: conflict.recordType,
-          }),
-        },
-      });
-    } catch (err) {
-      console.error("[action] failed to write CAPA_EFFECTIVENESS_BLOCKED_SAME_SIGNER audit:", err);
-    }
     const which =
       conflict.recordType === "CAPA_CLOSURE"
         ? "signed the closure"
         : "signed the verification";
-    return {
-      success: false,
-      error: `You ${which} for this CAPA. Independent effectiveness review requires a different reviewer (separation of duties).`,
-    };
+    const flagOn = await tenantSodOverrideOn(session.user.tenantId);
+    const d = evaluateSodOverride({
+      risk: existing.risk,
+      flagOn,
+      existingBlockError: `You ${which} for this CAPA. Independent effectiveness review requires a different reviewer (separation of duties).`,
+      input: parsed.data,
+    });
+    if (!d.proceed) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: EFFECTIVENESS_AUDIT_MODULE,
+            action: "CAPA_EFFECTIVENESS_BLOCKED_SAME_SIGNER",
+            recordId: capaId,
+            recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+            newValue: JSON.stringify({
+              attemptedBy: session.user.id,
+              conflictingRecordType: conflict.recordType,
+            }),
+          },
+        });
+      } catch (err) {
+        console.error("[action] failed to write CAPA_EFFECTIVENESS_BLOCKED_SAME_SIGNER audit:", err);
+      }
+      return { success: false, error: d.error };
+    }
+    waivedEffectiveness = true;
+    sodReason = d.reasonCode;
+    sodJustification = d.justification;
   }
 
   // Password re-verify (Part 11 Â§11.200(a)(1)(ii)).
@@ -256,6 +274,22 @@ export async function recordEffectivenessReview(
           effectivenessSignatureId: sig.id,
         },
       });
+      // Single-QA override — waiver record atomic with the signed review; linked to
+      // the effectiveness SignedRecord.
+      if (waivedEffectiveness) {
+        await writeSodOverride(tx, {
+          tenantId: session.user.tenantId,
+          capaId,
+          control: "EFFECTIVENESS",
+          actorUserId: session.user.id,
+          actorName: session.user.name,
+          actorRole: session.user.role,
+          reasonCode: sodReason,
+          justification: sodJustification,
+          recordTitle: existing.reference ?? existing.description,
+          signedRecordId: sig.id,
+        });
+      }
       return { capa: updated, signedRecord: sig };
     });
 

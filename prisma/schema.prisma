@@ -31,6 +31,12 @@ model Tenant {
   // A hard/permanent delete removes the row entirely (cascades to children).
   deletedAt           DateTime?
   mfaEnabled          Boolean  @default(false)
+  // Single-QA SoD override (org attests it operates with one QA). When true, a QA
+  // may complete specific SoD-blocked CAPA steps THEMSELVES — but each waived step
+  // is justified, e-signed where applicable, audited (CAPA_SOD_OVERRIDE_USED), and
+  // recorded in CAPASODOverride. Super-Admin-set ONLY; never a tenant-side control,
+  // never a per-CAPA switch. Phase 0 adds the flag + record only — NO gate reads it yet.
+  sodSingleQAOverride Boolean  @default(false)
   sessionsValidAfter  DateTime @default(now())
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -63,6 +69,7 @@ model Tenant {
   tenantFrameworks      TenantFramework[]
   // Role-Based User Limits (Phase A, INERT) — per-tenant per-role cap OVERRIDES.
   tenantRoleLimits      TenantRoleLimit[]
+<<<<<<< HEAD
   // Regulatory regions this tenant operates under. MANY per tenant — see
   // TenantRegulatoryRegion.
   regulatoryRegions     TenantRegulatoryRegion[]
@@ -93,6 +100,16 @@ model TenantRegulatoryRegion {
   @@unique([tenantId, region])
   @@index([region])
   @@index([tenantId])
+=======
+  // Multi-region — a tenant's applicable regulatory regions (join table). The
+  // scalar regulatoryRegion above is kept as the PRIMARY (regions[0]) shim +
+  // backfill source; this set is the source of truth for framework resolution.
+  regions               TenantRegion[]
+  // Single-QA SoD override — the waiver records raised under this org's flag.
+  capaSodOverrides      CAPASODOverride[]
+  // Same org flag, deviation-closure waivers (DeviationSODOverride).
+  deviationSodOverrides DeviationSODOverride[]
+>>>>>>> b8a1db6 (AAA)
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -640,6 +657,12 @@ model CAPA {
   rcaOverrideById           String?
   rcaOverrideAt             DateTime?
   rcaOverrideReason         String?
+  // RCA-authorship FK (SoD): the User who last EDITED the rca / rcaMethod text
+  // (stamped by updateCAPA on an RCA edit). Distinct from rcaReviewedById (who
+  // APPROVED it) — used to enforce editor ≠ approver (reviewRCA) and closer ≠
+  // RCA author (signAndCloseCAPA). Nullable/additive: legacy + never-edited rows
+  // stay null; a null author disables only the extra author-based SoD checks.
+  rcaEditedById             String?
   // ── SME Section 1, Stage 5 (FULL) — Independent QA Verification ──
   // Verification is a Part-11 signing event distinct from approval and
   // closure. The verifier MUST differ from the creator AND from every
@@ -779,6 +802,8 @@ model CAPA {
   // RUNG 2 — GxP system this CAPA is raised against + RTM rows that cite it.
   system                 GxPSystem?                   @relation(fields: [systemId], references: [id], onDelete: SetNull)
   rtmEntriesViaCapa      RTMEntry[]
+  // Single-QA SoD override — waiver records for SoD steps completed by the same QA.
+  sodOverrides           CAPASODOverride[]
 
   // Phase 2 — effectiveness due-surfacing foundation. Indexed so
   // getEffectivenessChecksDue can scan closed CAPAs whose 90-day
@@ -786,6 +811,65 @@ model CAPA {
   // full table scan.
   @@index([effectivenessDate])
   @@index([deletedAt])
+}
+
+// Single-QA SoD override — ONE row per SoD control WAIVED because the tenant's
+// Tenant.sodSingleQAOverride is on. Additive audit-of-record: who waived which
+// control, when, the required reason-code + free-text justification, and (when the
+// underlying step is signed) the SignedRecord it accompanied. Written IN THE SAME
+// transaction as the waived action (Phase 1). `control` is an app-validated string:
+//   RCA_APPROVAL | RCA_EDITOR_APPROVER | RCA_REJECTION_OVERRIDE | ALIGNMENT_OVERRIDE |
+//   CLOSE_CREATOR | CLOSE_RCA_AUTHOR | EFFECTIVENESS
+// VERIFICATION is EXCLUDED — verifyCAPA is retired/unreachable (Q7).
+model CAPASODOverride {
+  id             String   @id @default(cuid())
+  tenantId       String
+  capaId         String
+  control        String
+  actorUserId    String
+  actorName      String
+  actorRole      String
+  reasonCode     String
+  justification  String
+  // Link to the SignedRecord when the waived step is signed (e.g. close). Null for
+  // unsigned review waivers (RCA / alignment / effectiveness). Plain FK string (no
+  // relation) — mirrors the codebase's other SignedRecord id references.
+  signedRecordId String?
+  createdAt      DateTime @default(now())
+
+  capa   CAPA   @relation(fields: [capaId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([capaId])
+  @@index([tenantId])
+}
+
+// Single-QA SoD override — the DEVIATION analogue of CAPASODOverride. One row per
+// waived identity check at deviation closure, written IN THE SAME signed
+// transaction as the SignedRecord/password close (the signature is never waived —
+// only identity-independence is). Reuses the org-level Tenant.sodSingleQAOverride
+// flag (no new flag). `control` is a String (SQLite has no native enum), values:
+// DEV_CLOSE_REPORTER | DEV_CLOSE_INVESTIGATOR | DEV_CLOSE_ASSIGNEE.
+model DeviationSODOverride {
+  id             String   @id @default(cuid())
+  tenantId       String
+  deviationId    String
+  control        String
+  actorUserId    String
+  actorName      String
+  actorRole      String
+  reasonCode     String
+  justification  String
+  // Link to the closure SignedRecord (deviation close is always signed — a hard
+  // floor). Plain FK string (no relation) — mirrors CAPASODOverride.signedRecordId.
+  signedRecordId String?
+  createdAt      DateTime @default(now())
+
+  deviation Deviation @relation(fields: [deviationId], references: [id], onDelete: Cascade)
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([deviationId])
+  @@index([tenantId])
 }
 
 // ── SME Section 1, Stage 4 (FULL) — Structured CAPA Action Plan items ──
@@ -972,6 +1056,8 @@ model Deviation {
   sourcedCAPA       CAPA?          @relation("CAPADeviationSource")
   // Stage 1 (deviation redesign) — low-priority lightweight tasks (DeviationTask).
   tasks             DeviationTask[] @relation("DeviationTaskDeviation")
+  // Single-QA SoD override — waivers used at this deviation's closure (on-record).
+  sodOverrides      DeviationSODOverride[]
 
   @@index([deletedAt])
 }

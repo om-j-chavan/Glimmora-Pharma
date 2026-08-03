@@ -29,6 +29,7 @@ import {
   type AlignmentStatus,
 } from "@/lib/capa-alignment";
 import type { CAPA } from "@/store/capa.slice";
+import { SodOverrideInputs, isSodOverrideValid } from "@/modules/capa/components/SodOverrideInputs";
 
 /* ── Substage 4.7 — Alignment Review section ──
  *
@@ -87,12 +88,19 @@ export function AlignmentReviewSection({
   // Override button visibility: must be cosmetic, no override yet, current
   // user can review, and the user did NOT flag the CAPA themselves
   // (separation-of-duties UI gate; the server enforces too).
-  const canOverride =
+  const canOverrideBase =
     canReview &&
     !isLocked &&
     status === "cosmetic" &&
-    !overridden &&
-    !flaggedSelf;
+    !overridden;
+  const canOverride = canOverrideBase && !flaggedSelf;
+  // Single-QA override (Phase 2, PART A) — override your OWN cosmetic flag only when
+  // the tenant flag is ON and the CAPA is non-Critical (sodReveal.alignmentOverride
+  // is the server-computed flagger==overrider self-check for this user).
+  const reveal = capa.sodReveal;
+  const alignmentWaiver =
+    Boolean(reveal?.flagOn) && Boolean(reveal) && !reveal!.isCritical && reveal!.alignmentOverride;
+  const canOverrideWaived = canOverrideBase && flaggedSelf && alignmentWaiver;
 
   // Batch 4 Part 3 — view/edit modes. EDIT shows the textarea + verdict picker
   // + Save/Cancel; VIEW shows the saved verdict + reasoning + Edit affordance.
@@ -119,6 +127,8 @@ export function AlignmentReviewSection({
   const [overrideReason, setOverrideReason] = useState("");
   const [overrideBusy, setOverrideBusy] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
+  const [ovSodReason, setOvSodReason] = useState("");
+  const [ovSodJust, setOvSodJust] = useState("");
 
   const submitNewStatus = async (s: AlignmentStatus) => {
     if (notes.trim().length < 10) {
@@ -149,10 +159,16 @@ export function AlignmentReviewSection({
       );
       return;
     }
+    if (canOverrideWaived && !isSodOverrideValid(ovSodReason, ovSodJust)) {
+      setOverrideError("Select a reason code and add a justification (≥ 20 chars) to proceed under single-QA override.");
+      return;
+    }
     setOverrideBusy(true);
     setOverrideError(null);
     const result = await overrideCAPAAlignmentFlag(capa.id, {
       reason: overrideReason.trim(),
+      sodOverrideReasonCode: canOverrideWaived ? ovSodReason : undefined,
+      sodOverrideJustification: canOverrideWaived ? ovSodJust.trim() : undefined,
     });
     setOverrideBusy(false);
     if (!result.success) {
@@ -320,7 +336,7 @@ export function AlignmentReviewSection({
             </div>
           )}
 
-          {status === "cosmetic" && !overridden && flaggedSelf && (
+          {status === "cosmetic" && !overridden && flaggedSelf && !canOverrideWaived && (
             <p
               className="text-[11px] italic"
               style={{ color: "var(--text-muted)" }}
@@ -396,7 +412,7 @@ export function AlignmentReviewSection({
         </div>
       )}
 
-      {canOverride && (
+      {(canOverride || canOverrideWaived) && (
         <Button
           variant="danger"
           size="sm"
@@ -428,6 +444,19 @@ export function AlignmentReviewSection({
             maxLength={2000}
             disabled={overrideBusy}
           />
+          {/* You flagged this yourself — overriding your own cosmetic flag is only
+              permitted under the single-QA override (in addition to the rationale
+              above). */}
+          {canOverrideWaived && (
+            <SodOverrideInputs
+              reasonCode={ovSodReason}
+              justification={ovSodJust}
+              onReasonCode={setOvSodReason}
+              onJustification={setOvSodJust}
+              disabled={overrideBusy}
+              className="mb-2"
+            />
+          )}
           {overrideError && (
             <p
               role="alert"
@@ -454,7 +483,7 @@ export function AlignmentReviewSection({
               size="sm"
               icon={ShieldAlert}
               onClick={() => void submitOverride()}
-              disabled={overrideBusy || overrideReason.trim().length < ALIGNMENT_OVERRIDE_REASON_MIN_LENGTH}
+              disabled={overrideBusy || overrideReason.trim().length < ALIGNMENT_OVERRIDE_REASON_MIN_LENGTH || (canOverrideWaived && !isSodOverrideValid(ovSodReason, ovSodJust))}
               loading={overrideBusy}
             >
               Confirm override

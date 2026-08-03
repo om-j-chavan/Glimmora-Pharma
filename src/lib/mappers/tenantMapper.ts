@@ -13,6 +13,7 @@ type PrismaTenantRow = {
   isActive: boolean;
   deletedAt: Date | null;
   mfaEnabled: boolean;
+  sodSingleQAOverride: boolean;
   createdAt: Date;
   plan?: {
     id: string;
@@ -114,6 +115,7 @@ export function mapTenantFromPrisma(row: PrismaTenantRow): Tenant {
     active: row.isActive,
     deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
     mfaEnabled: row.mfaEnabled,
+    sodSingleQAOverride: row.sodSingleQAOverride,
     config: {
       org: {
         companyName: row.name,

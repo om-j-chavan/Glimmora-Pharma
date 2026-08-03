@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { evaluateSodOverride, tenantSodOverrideOn, writeSodOverride, type SodControl } from "./sod-override";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import { canReviewAlignment } from "@/lib/permissions/roleSets";
 import { LOCKED_CAPA_STATUSES } from "@/lib/evidence-lock";
@@ -45,6 +47,9 @@ const AlignmentOverrideSchema = z.object({
       `Override reason must be at least ${ALIGNMENT_OVERRIDE_REASON_MIN_LENGTH} characters`,
     )
     .max(2000, "Override reason must be 2000 characters or fewer"),
+  // Single-QA override (Phase 1) — used ONLY when the self-check fires with flag ON.
+  sodOverrideReasonCode: z.string().optional(),
+  sodOverrideJustification: z.string().optional(),
 });
 
 // Roles authorised to set / override / clear alignment review. Matches the
@@ -186,6 +191,8 @@ export async function overrideCAPAAlignmentFlag(
       alignmentReviewedBy: true,
       alignmentReviewedById: true,
       alignmentOverrideBy: true,
+      // Single-QA override — Critical is a hard floor (never waivable).
+      risk: true,
     },
   });
   if (!existing) return { success: false, error: "CAPA not found" };
@@ -204,18 +211,25 @@ export async function overrideCAPAAlignmentFlag(
       error: "This cosmetic flag has already been overridden.",
     };
   }
-  // Separation of duties â€” the reviewer who set the cosmetic flag cannot
-  // override it. A different qa_head must do so.
-  if (
-    existing.alignmentReviewedById &&
-    existing.alignmentReviewedById === session.user.id
-  ) {
-    return {
-      success: false,
-      error:
+  // Separation of duties — the reviewer who set the cosmetic flag cannot override
+  // it (+ single-QA override, Phase 1).
+  const waivedControls: SodControl[] = [];
+  let sodReason = "";
+  let sodJustification = "";
+  if (existing.alignmentReviewedById && existing.alignmentReviewedById === session.user.id) {
+    const flagOn = await tenantSodOverrideOn(session.user.tenantId);
+    const d = evaluateSodOverride({
+      risk: existing.risk,
+      flagOn,
+      existingBlockError:
         "The reviewer who flagged this CAPA as cosmetic cannot override their own flag. " +
         "A different QA Head must override.",
-    };
+      input: parsed.data,
+    });
+    if (!d.proceed) return { success: false, error: d.error };
+    waivedControls.push("ALIGNMENT_OVERRIDE");
+    sodReason = d.reasonCode;
+    sodJustification = d.justification;
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -228,32 +242,53 @@ export async function overrideCAPAAlignmentFlag(
 
   try {
     const now = new Date();
-    const capa = await prisma.cAPA.update({
-      where: { id: capaId, tenantId: session.user.tenantId },
-      data: {
-        alignmentOverrideBy: session.user.name,
-        alignmentOverrideById: session.user.id,
-        alignmentOverrideAt: now,
-        alignmentOverrideReason: parsed.data.reason,
-      },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: ALIGNMENT_AUDIT_MODULE,
-        action: "ALIGNMENT_STATUS_OVERRIDE",
-        recordId: capaId,
-        recordTitle: existing.description.slice(0, 80),
-        oldValue: `${existing.alignmentReviewedBy ?? "(unknown)"} flagged as cosmetic`,
-        newValue: JSON.stringify({
-          overrideBy: session.user.name,
-          reason: parsed.data.reason,
-        }),
-      },
-    });
+    const doOverride = async (client: Prisma.TransactionClient) => {
+      const capa = await client.cAPA.update({
+        where: { id: capaId, tenantId: session.user.tenantId },
+        data: {
+          alignmentOverrideBy: session.user.name,
+          alignmentOverrideById: session.user.id,
+          alignmentOverrideAt: now,
+          alignmentOverrideReason: parsed.data.reason,
+        },
+      });
+      await client.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: ALIGNMENT_AUDIT_MODULE,
+          action: "ALIGNMENT_STATUS_OVERRIDE",
+          recordId: capaId,
+          recordTitle: existing.description.slice(0, 80),
+          oldValue: `${existing.alignmentReviewedBy ?? "(unknown)"} flagged as cosmetic`,
+          newValue: JSON.stringify({
+            overrideBy: session.user.name,
+            reason: parsed.data.reason,
+          }),
+        },
+      });
+      return capa;
+    };
+    const capa = waivedControls.length
+      ? await prisma.$transaction(async (tx) => {
+          const c = await doOverride(tx);
+          await writeSodOverride(tx, {
+            tenantId: session.user.tenantId,
+            capaId,
+            control: "ALIGNMENT_OVERRIDE",
+            actorUserId: session.user.id,
+            actorName: session.user.name,
+            actorRole: session.user.role,
+            reasonCode: sodReason,
+            justification: sodJustification,
+            recordTitle: existing.description,
+            signedRecordId: null,
+          });
+          return c;
+        })
+      : await doOverride(prisma);
     revalidatePath("/capa");
     revalidatePath(`/capa/${capaId}`);
     return { success: true, data: capa };

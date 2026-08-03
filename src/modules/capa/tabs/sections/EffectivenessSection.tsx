@@ -22,6 +22,7 @@ import {
 } from "@/actions/capas";
 import { canApproveCAPA } from "@/lib/capa-approvals";
 import type { CAPA } from "@/store/capa.slice";
+import { SodOverrideInputs, isSodOverrideValid } from "@/modules/capa/components/SodOverrideInputs";
 
 /* ── SME Section 1, Stage 6 (FULL) — Effectiveness Review section ──
  *
@@ -70,8 +71,18 @@ export function EffectivenessSection({ capa }: { capa: CAPA }) {
   const canRecordReview =
     isClosed && !isReviewed && canRoleReview && currentUser !== null;
 
+  // Single-QA override (Phase 2, PART A). sodReveal.effectiveness is the server-
+  // computed self-check (this user signed the closure or verification) — the one
+  // comparison the client can't do itself. Reveal the justification inputs when the
+  // waiver applies (flag ON, non-Critical); server re-validates.
+  const reveal = capa.sodReveal;
+  const effectivenessWaiver =
+    Boolean(reveal?.flagOn) && Boolean(reveal) && !reveal!.isCritical && reveal!.effectiveness;
+
   // Modal state for record + revoke.
   const [intent, setIntent] = useState<"record" | "revoke" | null>(null);
+  const [sodReason, setSodReason] = useState("");
+  const [sodJust, setSodJust] = useState("");
   const [verdictChoice, setVerdictChoice] = useState<"effective" | "ineffective" | "partial">(
     "effective",
   );
@@ -86,6 +97,8 @@ export function EffectivenessSection({ capa }: { capa: CAPA }) {
     setNotes("");
     setPassword("");
     setActionError(null);
+    setSodReason("");
+    setSodJust("");
   };
 
   const submitRecord = async () => {
@@ -97,12 +110,18 @@ export function EffectivenessSection({ capa }: { capa: CAPA }) {
       setActionError("Password is required.");
       return;
     }
+    if (effectivenessWaiver && !isSodOverrideValid(sodReason, sodJust)) {
+      setActionError("Select a reason code and add a justification (≥ 20 chars) to proceed under single-QA override.");
+      return;
+    }
     setBusy(true);
     setActionError(null);
     const result = await recordEffectivenessReview(capa.id, {
       verdict: verdictChoice,
       notes: notes.trim(),
       password,
+      sodOverrideReasonCode: effectivenessWaiver ? sodReason : undefined,
+      sodOverrideJustification: effectivenessWaiver ? sodJust.trim() : undefined,
     });
     setBusy(false);
     if (!result.success) {
@@ -357,6 +376,19 @@ export function EffectivenessSection({ capa }: { capa: CAPA }) {
                 disabled={busy}
                 aria-label="Effectiveness review notes"
               />
+              {/* You signed this CAPA's closure/verification — recording the
+                  effectiveness verdict is only permitted under the single-QA
+                  override, in addition to your e-signature password below. */}
+              {effectivenessWaiver && (
+                <SodOverrideInputs
+                  reasonCode={sodReason}
+                  justification={sodJust}
+                  onReasonCode={setSodReason}
+                  onJustification={setSodJust}
+                  disabled={busy}
+                  className="mb-2"
+                />
+              )}
             </>
           )}
           <input
@@ -398,7 +430,8 @@ export function EffectivenessSection({ capa }: { capa: CAPA }) {
               disabled={
                 busy ||
                 !password ||
-                (intent === "record" && notes.trim().length < 20)
+                (intent === "record" && notes.trim().length < 20) ||
+                (intent === "record" && effectivenessWaiver && !isSodOverrideValid(sodReason, sodJust))
               }
               loading={busy}
             >

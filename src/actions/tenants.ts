@@ -54,6 +54,9 @@ const CreateTenantSchema = z.object({
     // is a no-op rather than a 500.
     .transform((values) => [...new Set(values)]),
   isActive: z.boolean().default(true),
+  // Single-QA SoD override — super_admin-only org posture; default OFF. Phase 0
+  // persists it via the generic create/update path; NO CAPA gate reads it yet.
+  sodSingleQAOverride: z.boolean().optional(),
 });
 
 const UpdateTenantSchema = CreateTenantSchema.partial().extend({
@@ -195,6 +198,7 @@ export async function createTenant(
         return row?.customerCode ?? null;
       }, 4);
       try {
+<<<<<<< HEAD
         tenant = await prisma.tenant.create({
           data: {
             ...(parsed.data.id ? { id: parsed.data.id } : {}),
@@ -210,6 +214,25 @@ export async function createTenant(
             // never exist without the regions its framework resolution needs.
             regulatoryRegions: {
               create: parsed.data.regulatoryRegions.map((region) => ({ region })),
+=======
+        // Tenant + region SET written in ONE transaction so the shim
+        // (regulatoryRegion = regions[0]) and the set can never disagree.
+        tenant = await prisma.$transaction(async (tx) => {
+          const created = await tx.tenant.create({
+            data: {
+              ...(parsed.data.id ? { id: parsed.data.id } : {}),
+              name: parsed.data.name,
+              email: parsed.data.email.toLowerCase(),
+              username: parsed.data.username,
+              customerCode,
+              passwordHash,
+              role: "customer_admin",
+              language: parsed.data.language,
+              timezone: parsed.data.timezone,
+              regulatoryRegion: regions[0], // PRIMARY shim; the set below is source of truth
+              isActive: parsed.data.isActive,
+              sodSingleQAOverride: parsed.data.sodSingleQAOverride ?? false,
+>>>>>>> b8a1db6 (AAA)
             },
             isActive: parsed.data.isActive,
           },

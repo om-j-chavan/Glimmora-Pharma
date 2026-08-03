@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { evaluateSodOverride, tenantSodOverrideOn, writeSodOverride, type SodControl } from "./sod-override";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import { canReviewRCA } from "@/lib/permissions/roleSets";
 import {
@@ -49,6 +51,9 @@ const ReviewRCASchema = z.object({
     .string()
     .min(10, "Notes must be at least 10 characters")
     .max(2000, "Notes must be 2000 characters or fewer"),
+  // Single-QA override (Phase 1) — used ONLY when a self-check fires with the flag ON.
+  sodOverrideReasonCode: z.string().optional(),
+  sodOverrideJustification: z.string().optional(),
 });
 
 const OverrideRCASchema = z.object({
@@ -56,6 +61,8 @@ const OverrideRCASchema = z.object({
     .string()
     .min(20, "Override reason must be at least 20 characters")
     .max(2000, "Override reason must be 2000 characters or fewer"),
+  sodOverrideReasonCode: z.string().optional(),
+  sodOverrideJustification: z.string().optional(),
 });
 
 // Roles authorised to set / override / clear an RCA review. Same role
@@ -111,6 +118,10 @@ export async function reviewRCA(
       rcaApproved: true,
       createdBy: true,
       createdById: true,
+      // SoD (CAPA lifecycle rework) — the last RCA editor cannot approve it.
+      rcaEditedById: true,
+      // Single-QA override — Critical is a hard floor (never waivable).
+      risk: true,
     },
   });
   if (!existing) return { success: false, error: "CAPA not found" };
@@ -131,76 +142,158 @@ export async function reviewRCA(
   const isSelfReview = existing.createdById
     ? existing.createdById === session.user.id
     : Boolean(existing.createdBy) && existing.createdBy === session.user.name;
+  // Single-QA override (Phase 1) — collect the waived control(s). Empty = normal path.
+  const waivedControls: SodControl[] = [];
+  let sodReason = "";
+  let sodJustification = "";
   if (isSelfReview) {
-    try {
-      await prisma.auditLog.create({
+    const flagOn = await tenantSodOverrideOn(session.user.tenantId);
+    const d = evaluateSodOverride({
+      risk: existing.risk,
+      flagOn,
+      existingBlockError: "You cannot review the RCA of a CAPA you created. Separation of duties requires a different reviewer.",
+      input: parsed.data,
+    });
+    if (!d.proceed) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: RCA_REVIEW_AUDIT_MODULE,
+            action: "RCA_REVIEW_BLOCKED_SELF_REVIEW",
+            recordId: capaId,
+            recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+            newValue: JSON.stringify({
+              attemptedBy: session.user.id,
+              capaCreator: existing.createdBy,
+              comparedBy: existing.createdById ? "userId" : "displayName",
+            }),
+          },
+        });
+      } catch (err) {
+        console.error("[action] failed to write RCA_REVIEW_BLOCKED_SELF_REVIEW audit:", err);
+      }
+      return { success: false, error: d.error };
+    }
+    waivedControls.push("RCA_APPROVAL");
+    sodReason = d.reasonCode;
+    sodJustification = d.justification;
+  }
+
+  // SoD (CAPA lifecycle rework) — the person who last EDITED the RCA text cannot
+  // be the one who approves/rejects it (editor ≠ approver). rcaEditedById is
+  // stamped by updateCAPA on an RCA edit; null (never edited via that path)
+  // disables only this check. Complements the creator-vs-reviewer guard above.
+  if (existing.rcaEditedById && existing.rcaEditedById === session.user.id) {
+    if (waivedControls.length) {
+      // Same person is creator AND editor — the override was already validated
+      // above (non-Critical, flag on, reason/justification valid); record the
+      // second waived control under the same justification.
+      waivedControls.push("RCA_EDITOR_APPROVER");
+    } else {
+      const flagOn = await tenantSodOverrideOn(session.user.tenantId);
+      const d = evaluateSodOverride({
+        risk: existing.risk,
+        flagOn,
+        existingBlockError: "You edited this root cause analysis, so you cannot also approve it. A different QA reviewer must review it.",
+        input: parsed.data,
+      });
+      if (!d.proceed) {
+        try {
+          await prisma.auditLog.create({
+            data: {
+              tenantId: session.user.tenantId,
+              userId: actor.userId,
+              userName: actor.displayName,
+              userRole: actor.role,
+              module: RCA_REVIEW_AUDIT_MODULE,
+              action: "RCA_REVIEW_BLOCKED_EDITOR_IS_APPROVER",
+              recordId: capaId,
+              recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+              newValue: JSON.stringify({ attemptedBy: session.user.id, rcaEditedById: existing.rcaEditedById }),
+            },
+          });
+        } catch (err) {
+          console.error("[action] failed to write RCA_REVIEW_BLOCKED_EDITOR_IS_APPROVER audit:", err);
+        }
+        return { success: false, error: d.error };
+      }
+      waivedControls.push("RCA_EDITOR_APPROVER");
+      sodReason = d.reasonCode;
+      sodJustification = d.justification;
+    }
+  }
+
+  try {
+    const now = new Date();
+    // A fresh review starts a fresh decision — wipe any prior override.
+    // Same pattern as alignment review's wipe-on-status-change.
+    const doReview = async (client: Prisma.TransactionClient) => {
+      const capa = await client.cAPA.update({
+        where: { id: capaId, tenantId: session.user.tenantId },
+        data: {
+          rcaApproved: parsed.data.approved,
+          rcaReviewedBy: session.user.name,
+          rcaReviewedById: session.user.id,
+          rcaReviewedAt: now,
+          rcaReviewNotes: parsed.data.notes,
+          rcaOverrideBy: null,
+          rcaOverrideById: null,
+          rcaOverrideAt: null,
+          rcaOverrideReason: null,
+        },
+      });
+      await client.auditLog.create({
         data: {
           tenantId: session.user.tenantId,
           userId: actor.userId,
           userName: actor.displayName,
           userRole: actor.role,
           module: RCA_REVIEW_AUDIT_MODULE,
-          action: "RCA_REVIEW_BLOCKED_SELF_REVIEW",
+          action: parsed.data.approved
+            ? "CAPA_RCA_REVIEW_APPROVED"
+            : "CAPA_RCA_REVIEW_REJECTED",
           recordId: capaId,
           recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+          oldValue:
+            existing.rcaApproved === null
+              ? "null"
+              : existing.rcaApproved
+                ? "approved"
+                : "rejected",
           newValue: JSON.stringify({
-            attemptedBy: session.user.id,
-            capaCreator: existing.createdBy,
-            comparedBy: existing.createdById ? "userId" : "displayName",
+            approved: parsed.data.approved,
+            notes: parsed.data.notes,
           }),
         },
       });
-    } catch (err) {
-      console.error("[action] failed to write RCA_REVIEW_BLOCKED_SELF_REVIEW audit:", err);
-    }
-    return {
-      success: false,
-      error: "You cannot review the RCA of a CAPA you created. Separation of duties requires a different reviewer.",
+      return capa;
     };
-  }
-
-  try {
-    const now = new Date();
-    // A fresh review starts a fresh decision â€” wipe any prior override.
-    // Same pattern as alignment review's wipe-on-status-change.
-    const capa = await prisma.cAPA.update({
-      where: { id: capaId, tenantId: session.user.tenantId },
-      data: {
-        rcaApproved: parsed.data.approved,
-        rcaReviewedBy: session.user.name,
-        rcaReviewedById: session.user.id,
-        rcaReviewedAt: now,
-        rcaReviewNotes: parsed.data.notes,
-        rcaOverrideBy: null,
-        rcaOverrideById: null,
-        rcaOverrideAt: null,
-        rcaOverrideReason: null,
-      },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: RCA_REVIEW_AUDIT_MODULE,
-        action: parsed.data.approved
-          ? "CAPA_RCA_REVIEW_APPROVED"
-          : "CAPA_RCA_REVIEW_REJECTED",
-        recordId: capaId,
-        recordTitle: (existing.reference ?? existing.description).slice(0, 80),
-        oldValue:
-          existing.rcaApproved === null
-            ? "null"
-            : existing.rcaApproved
-              ? "approved"
-              : "rejected",
-        newValue: JSON.stringify({
-          approved: parsed.data.approved,
-          notes: parsed.data.notes,
-        }),
-      },
-    });
+    // Single-QA override: the review + waiver record(s) commit atomically in ONE
+    // transaction. Normal path (no waiver) runs unchanged (update then audit).
+    const capa = waivedControls.length
+      ? await prisma.$transaction(async (tx) => {
+          const c = await doReview(tx);
+          for (const control of waivedControls) {
+            await writeSodOverride(tx, {
+              tenantId: session.user.tenantId,
+              capaId,
+              control,
+              actorUserId: session.user.id,
+              actorName: session.user.name,
+              actorRole: session.user.role,
+              reasonCode: sodReason,
+              justification: sodJustification,
+              recordTitle: existing.reference ?? existing.description,
+              signedRecordId: null,
+            });
+          }
+          return c;
+        })
+      : await doReview(prisma);
     revalidatePath("/capa");
     revalidatePath(`/capa/${capaId}`);
     return { success: true, data: capa };
@@ -247,6 +340,7 @@ export async function overrideRCAReview(
       rcaReviewedBy: true,
       rcaReviewedById: true,
       rcaOverrideBy: true,
+      risk: true,
     },
   });
   if (!existing) return { success: false, error: "CAPA not found" };
@@ -265,18 +359,25 @@ export async function overrideRCAReview(
       error: "This RCA rejection has already been overridden.",
     };
   }
-  // Separation of duties â€” the reviewer who rejected the RCA cannot
-  // override their own rejection. A different reviewer must do so.
-  if (
-    existing.rcaReviewedById &&
-    existing.rcaReviewedById === session.user.id
-  ) {
-    return {
-      success: false,
-      error:
+  // Separation of duties — the reviewer who rejected the RCA cannot override their
+  // own rejection (+ single-QA override, Phase 1).
+  const waivedControls: SodControl[] = [];
+  let sodReason = "";
+  let sodJustification = "";
+  if (existing.rcaReviewedById && existing.rcaReviewedById === session.user.id) {
+    const flagOn = await tenantSodOverrideOn(session.user.tenantId);
+    const d = evaluateSodOverride({
+      risk: existing.risk,
+      flagOn,
+      existingBlockError:
         "The reviewer who rejected this RCA cannot override their own verdict. " +
         "A different QA reviewer must override.",
-    };
+      input: parsed.data,
+    });
+    if (!d.proceed) return { success: false, error: d.error };
+    waivedControls.push("RCA_REJECTION_OVERRIDE");
+    sodReason = d.reasonCode;
+    sodJustification = d.justification;
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -289,33 +390,54 @@ export async function overrideRCAReview(
 
   try {
     const now = new Date();
-    const capa = await prisma.cAPA.update({
-      where: { id: capaId, tenantId: session.user.tenantId },
-      data: {
-        rcaApproved: true,
-        rcaOverrideBy: session.user.name,
-        rcaOverrideById: session.user.id,
-        rcaOverrideAt: now,
-        rcaOverrideReason: parsed.data.reason,
-      },
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: session.user.tenantId,
-        userId: actor.userId,
-        userName: actor.displayName,
-        userRole: actor.role,
-        module: RCA_REVIEW_AUDIT_MODULE,
-        action: "CAPA_RCA_REVIEW_OVERRIDE",
-        recordId: capaId,
-        recordTitle: (existing.reference ?? existing.description).slice(0, 80),
-        oldValue: `${existing.rcaReviewedBy ?? "(unknown)"} rejected`,
-        newValue: JSON.stringify({
-          overrideBy: session.user.name,
-          reason: parsed.data.reason,
-        }),
-      },
-    });
+    const doOverride = async (client: Prisma.TransactionClient) => {
+      const capa = await client.cAPA.update({
+        where: { id: capaId, tenantId: session.user.tenantId },
+        data: {
+          rcaApproved: true,
+          rcaOverrideBy: session.user.name,
+          rcaOverrideById: session.user.id,
+          rcaOverrideAt: now,
+          rcaOverrideReason: parsed.data.reason,
+        },
+      });
+      await client.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId,
+          userName: actor.displayName,
+          userRole: actor.role,
+          module: RCA_REVIEW_AUDIT_MODULE,
+          action: "CAPA_RCA_REVIEW_OVERRIDE",
+          recordId: capaId,
+          recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+          oldValue: `${existing.rcaReviewedBy ?? "(unknown)"} rejected`,
+          newValue: JSON.stringify({
+            overrideBy: session.user.name,
+            reason: parsed.data.reason,
+          }),
+        },
+      });
+      return capa;
+    };
+    const capa = waivedControls.length
+      ? await prisma.$transaction(async (tx) => {
+          const c = await doOverride(tx);
+          await writeSodOverride(tx, {
+            tenantId: session.user.tenantId,
+            capaId,
+            control: "RCA_REJECTION_OVERRIDE",
+            actorUserId: session.user.id,
+            actorName: session.user.name,
+            actorRole: session.user.role,
+            reasonCode: sodReason,
+            justification: sodJustification,
+            recordTitle: existing.reference ?? existing.description,
+            signedRecordId: null,
+          });
+          return c;
+        })
+      : await doOverride(prisma);
     revalidatePath("/capa");
     revalidatePath(`/capa/${capaId}`);
     return { success: true, data: capa };

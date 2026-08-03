@@ -49,6 +49,10 @@ export const ACTION_ITEM_STATUSES = [
   // Phase 2 — QA reviewed this person's completed work and accepted it.
   // Terminal-good for closure: complete -> (QA review) -> accepted | rework.
   "accepted",
+  // CAPA lifecycle rework — QA VOIDED this person's assignment (cancelTask). The
+  // work will not be done; treated like "skipped" in the close all-accepted gate
+  // (does not block closure). Terminal-void.
+  "cancelled",
 ] as const;
 export type ActionItemStatus = (typeof ACTION_ITEM_STATUSES)[number];
 
