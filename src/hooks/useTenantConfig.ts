@@ -6,7 +6,9 @@ const DEFAULT_ORG: TenantOrgConfig = {
   companyName: "Pharma Glimmora",
   timezone: "Asia/Kolkata",
   dateFormat: "DD/MM/YYYY",
-  regulatoryRegion: "India",
+  // No regions until the tenant loads — an invented default would show a
+  // customer a region the Super Admin never assigned them.
+  regulatoryRegions: [],
 };
 
 export function useTenantConfig() {

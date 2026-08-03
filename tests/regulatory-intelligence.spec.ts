@@ -43,8 +43,11 @@ test("Regulatory Intelligence: dashboard alert → module → scan → acknowled
   );
   await expect(dashAlert).toBeVisible({ timeout: 10_000 });
 
-  // Click through to the module via the alert's action link.
-  await page.getByRole("button", { name: /review guidance/i }).click();
+  // Click through to the module via the alert's action link. The insight action is
+  // now a real <a> (role "link") rather than a <button> — a navigation affordance
+  // should be an anchor so it supports middle-click, copy-link and assistive-tech
+  // link semantics.
+  await page.getByRole("link", { name: /review guidance/i }).click();
   await page.waitForURL(/\/regulatory-intelligence/, { timeout: 10_000 });
 
   // ── 2. Module page renders the scanned guidance updates ──

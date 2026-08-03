@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES } from "@/lib/auth";
-import { isAssignedToTask } from "@/lib/permissions/roleSets";
+import { isAssignedToTask, canWriteQuality } from "@/lib/permissions/roleSets";
 import { sanitizeServerError } from "@/lib/errors";
 import { CONCERN_MIN } from "@/constants/capaValidation";
 
@@ -215,8 +215,11 @@ export async function addCAPAComment(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // canWriteQuality (not a bare viewer test) — customer_admin is read-only
+  // outside Settings, so the tenant admin may view this module but never
+  // write in it. super_admin is separately blocked by requireGxPAuthor.
+  if (!canWriteQuality(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
 
   // Phase 3 — authorization: author-role OR an assigned-participant path —

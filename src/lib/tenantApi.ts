@@ -118,10 +118,10 @@ export async function createTenantApi(tenant: Tenant): Promise<{ id: string; cus
       username: admin.username ?? admin.email,
       password: admin.password,
       timezone: tenant.config?.org?.timezone ?? "Asia/Kolkata",
-      // Pass the region through as-is (empty string included) so the server-side
-      // required check (Stage 5) rejects an empty region rather than the client
-      // silently coercing it to undefined.
-      regulatoryRegion: tenant.config?.org?.regulatoryRegion ?? "",
+      // Pass the region set through as-is (empty array included) so the
+      // server-side "at least one" check rejects an empty selection rather than
+      // the client silently coercing it to undefined.
+      regulatoryRegions: tenant.config?.org?.regulatoryRegions ?? [],
       isActive: tenant.active ?? true,
     });
     if (!result.success) {
@@ -171,9 +171,10 @@ export async function updateTenantApi(
     if (patch.name !== undefined) data.name = patch.name;
     if (patch.adminEmail !== undefined) data.email = patch.adminEmail;
     if (patch.active !== undefined) data.isActive = patch.active;
-    // Regulatory region (super_admin-owned) lives in config.org — forward it
-    // when the patch carries it so the edit persists server-side.
-    if (patch.config?.org?.regulatoryRegion !== undefined) data.regulatoryRegion = patch.config.org.regulatoryRegion;
+    // Regulatory regions (super_admin-owned) live in config.org — forward the set
+    // when the patch carries it so the edit persists server-side. Omitted → the
+    // server leaves the tenant's current regions untouched.
+    if (patch.config?.org?.regulatoryRegions !== undefined) data.regulatoryRegions = patch.config.org.regulatoryRegions;
     if (Object.keys(data).length === 0) return;
     const result = await updateTenantAction(id, data);
     if (!result.success) {

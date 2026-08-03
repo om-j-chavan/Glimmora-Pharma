@@ -20,15 +20,32 @@ export interface EffectiveFramework {
   description: string | null;
 }
 
-/** Region predicate: GLOBAL frameworks always match; region-specific ones match
- *  only when the tenant's regulatoryRegion is in their FrameworkRegion set. */
-function regionWhere(region: string | null) {
+/**
+ * Region predicate: GLOBAL frameworks always match; a region-specific one
+ * matches when ANY of the tenant's regions is in its FrameworkRegion set.
+ *
+ * A tenant holding several regions therefore sees the UNION of their frameworks
+ * — the correct reading of multi-region: a site shipping to both the US and the
+ * EU must satisfy Part 11 AND Annex 11, not the intersection. `some … in` also
+ * keeps one row per framework, so a framework scoped to two of the tenant's
+ * regions is still listed once.
+ */
+function regionWhere(regions: string[]) {
   return {
     OR: [
       { appliesToAllRegions: true },
-      ...(region ? [{ regions: { some: { region } } }] : []),
+      ...(regions.length ? [{ regions: { some: { region: { in: regions } } } }] : []),
     ],
   };
+}
+
+/** The tenant's assigned region values ([] when it has none). */
+async function tenantRegionValues(tenantId: string): Promise<string[]> {
+  const rows = await prisma.tenantRegulatoryRegion.findMany({
+    where: { tenantId },
+    select: { region: true },
+  });
+  return rows.map((r) => r.region);
 }
 
 /**
@@ -85,11 +102,10 @@ export async function regionsEmptiedByDisabling(frameworkId: string): Promise<{ 
  *   platformEnabled  AND  (GLOBAL OR region matches)  AND  not tenant-disabled.
  */
 export const effectiveFrameworksForTenant = cache(async (tenantId: string): Promise<EffectiveFramework[]> => {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { regulatoryRegion: true } });
-  const region = tenant?.regulatoryRegion ?? null;
+  const regions = await tenantRegionValues(tenantId);
   const rows = await prisma.framework.findMany({
     // archivedAt: null → archived frameworks are invisible to tenants (Stage 2).
-    where: { platformEnabled: true, archivedAt: null, ...regionWhere(region) },
+    where: { platformEnabled: true, archivedAt: null, ...regionWhere(regions) },
     include: { tenantFrameworks: { where: { tenantId }, select: { enabled: true } } },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], // manual order (Item #5), then stable tiebreak
   });
@@ -109,11 +125,10 @@ export interface TenantFrameworkSetting extends EffectiveFramework {
 /** Customer-Admin view: every platform-enabled + region-matched framework with
  *  its current per-tenant enabled state (so the tab can toggle each). */
 export const getTenantFrameworkSettings = cache(async (tenantId: string): Promise<TenantFrameworkSetting[]> => {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { regulatoryRegion: true } });
-  const region = tenant?.regulatoryRegion ?? null;
+  const regions = await tenantRegionValues(tenantId);
   const rows = await prisma.framework.findMany({
     // archivedAt: null → archived frameworks never appear in the tenant tab.
-    where: { platformEnabled: true, archivedAt: null, ...regionWhere(region) },
+    where: { platformEnabled: true, archivedAt: null, ...regionWhere(regions) },
     include: { tenantFrameworks: { where: { tenantId }, select: { enabled: true } } },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }], // manual order (Item #5)
   });

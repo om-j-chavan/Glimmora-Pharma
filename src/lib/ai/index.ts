@@ -315,6 +315,12 @@ export interface DocumentReviewInput {
    * deterministically from the filename + stage.
    */
   file?: File | null;
+  /**
+   * StageDocument id of an already-stored document. Used when `file` is
+   * absent (a scan started from the document list rather than from the
+   * upload itself) to pull the bytes back down from the download route.
+   */
+  documentId?: string | null;
   /** AI access token for the real backend; ignored by the mock. */
   token?: string | null;
 }
@@ -324,6 +330,36 @@ function mapBackendSeverity(s: string): DocumentReviewSeverity {
   if (v === "high" || v === "critical" || v === "major") return "high";
   if (v === "low" || v === "minor" || v === "info") return "low";
   return "medium";
+}
+
+/**
+ * Pull an already-stored stage document's bytes back down so it can be
+ * scanned. The upload path hands the live `File` straight to the backend, but
+ * a review run from the document list (after a reload, or a re-scan) only has
+ * the StageDocument id — /api/stage-documents/[id] is the same authenticated
+ * download route the list already links to, so tenant scope, system
+ * visibility and soft-delete are all enforced server-side.
+ */
+async function fetchStoredStageDocument(
+  documentId: string,
+  fileName: string,
+  fileType?: string,
+): Promise<File> {
+  const res = await fetch(
+    `/api/stage-documents/${encodeURIComponent(documentId)}`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    // The route replies with a JSON {error} body on 401/404/410/500.
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(
+      body?.error ?? `Could not load the stored document (HTTP ${res.status}).`,
+    );
+  }
+  const blob = await res.blob();
+  return new File([blob], fileName, {
+    type: fileType || blob.type || "application/octet-stream",
+  });
 }
 
 export async function getDocumentReview(
@@ -340,12 +376,23 @@ export async function getDocumentReview(
   // Real backend: extract text server-side + score against the rubric.
   // Identical return shape to the mock so flipping MOCK_AI_RESPONSES is
   // the only change required.
-  if (!input.file) {
+  // Bytes come from the freshly-picked File on the upload path; a scan started
+  // from the stored document list has no File and is re-fetched by id.
+  const file =
+    input.file ??
+    (input.documentId
+      ? await fetchStoredStageDocument(
+          input.documentId,
+          input.fileName,
+          input.fileType,
+        )
+      : null);
+  if (!file) {
     throw new Error("Document Review requires the uploaded file to scan.");
   }
   const dto = await scanStageDocument(
     {
-      file: input.file,
+      file,
       stageKey: input.stageKey,
       stageLabel: input.stageLabel,
       systemName: input.systemName,

@@ -66,6 +66,80 @@ export interface KPIFDA483Event {
   commitments: { status: string; dueDate?: string | Date | null }[];
 }
 
+/**
+ * Minimal Deviation shape the KPI maths reads (role dashboards, Phase 4).
+ * Structural, so the RAW `getDeviations` Prisma rows pass straight in —
+ * `detectedDate`/`dueDate` may be a Date (server) or ISO string (client).
+ */
+export interface KPIDeviation {
+  id: string;
+  siteId?: string | null;
+  /** "QC Lab" | "Manufacturing" | "Warehouse" | "Utilities" | "QMS" | … */
+  area: string;
+  /** "process" | "equipment" | "material" | "environmental" | … */
+  category?: string | null;
+  /** FDA or generic taxonomy — normalised by the caller before comparison. */
+  severity: string;
+  /** "open" | "closed" | "rejected" */
+  status: string;
+  dueDate?: string | Date | null;
+  createdAt?: string | Date | null;
+  /** Non-empty → the deviation impacts released/in-process batches. */
+  batchesAffected?: string | null;
+  /** Non-empty → a regulatory-reportable impact was recorded. */
+  regulatoryImpact?: string | null;
+  /** Set once the post-report investigation (RCA) is complete. */
+  investigationCompletedAt?: string | Date | null;
+  /** True once QA has recorded the CAPA-needed verdict. */
+  capaDecisionMade?: boolean | null;
+  /** Set when this deviation was reported as a recurrence of a prior CAPA. */
+  previousCAPAId?: string | null;
+}
+
+/** Minimal ChangeControl shape the KPI maths reads. */
+export interface KPIChangeControl {
+  id: string;
+  /** "Draft" | "In Review" | "Approved" | "In Implementation" | "Implemented" | "Closed" | "Rejected" */
+  status: string;
+  /** "Critical" | "High" | "Medium" | "Low" */
+  risk: string;
+  /** "SOP" | "Equipment" | "Process" | "Product" | "Computer System" | "Material" | "Other" */
+  changeType: string;
+  targetImplementationDate?: string | Date | null;
+}
+
+/** Minimal TrainingRecord shape — the evidence behind training compliance. */
+export interface KPITrainingRecord {
+  /** "pending" | "in_progress" | "completed" | … */
+  status: string;
+  completedAt?: string | Date | null;
+}
+
+/**
+ * Minimal per-inspection readiness row — the shape `getReadinessStats`
+ * already returns in `inspectionsWithReadiness`.
+ */
+export interface KPIInspectionReadiness {
+  id: string;
+  title: string;
+  agency?: string | null;
+  siteName?: string | null;
+  status?: string | null;
+  /** Inspection.expectedDate — the regulatory deadline the org is racing. */
+  expectedDate?: string | Date | null;
+  readinessScore: number;
+  completedActions: number;
+  totalActions: number;
+  overdueActions: number;
+  trainingRecords?: KPITrainingRecord[];
+}
+
+/** A validation stage on a GxP system (qualification progress). */
+export interface KPIValidationStage {
+  /** "not_started" | "in_progress" | "submitted" | "approved" | "rejected" */
+  status: string;
+}
+
 /** A tenant site — only id + name are needed for per-site KPIs. */
 export interface KPISite {
   id: string;

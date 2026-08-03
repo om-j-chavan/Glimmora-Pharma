@@ -1,12 +1,24 @@
 import { notFound } from "next/navigation";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
+import { requireRoleOrDeny } from "@/lib/authz";
+import { GOVERNANCE_VIEW_ROLES } from "@/lib/permissions/roleSets";
 import { RiskDetailPage } from "@/modules/governance/RiskDetailPage";
 import { getRisk, getRiskDocuments, getRiskAuditTrail, getRiskOwners, getRiskConversion } from "@/lib/queries/risks";
+
+// Same module gate as /governance — a risk detail URL must not bypass it. The
+// per-record visibility where-clause below is a SECOND, narrower check; this one
+// answers "may this role open the Governance module at all".
+const ALLOWED_ROLES = new Set<string>(GOVERNANCE_VIEW_ROLES);
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await requireAuth();
+  await requireRoleOrDeny(session, ALLOWED_ROLES, {
+    module: "governance",
+    redirectTo: "/",
+    extra: { path: "/governance/risks/[id]" },
+  });
 
   // IDOR guard: getRisk applies riskVisibilityWhere IN THE QUERY. A seat user who
   // is neither creator nor owner gets null here and sees a 404 — indistinguishable

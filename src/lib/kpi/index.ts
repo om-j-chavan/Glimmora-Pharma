@@ -10,6 +10,7 @@ export * from "./types";
 export * from "./records";
 export * from "./readiness";
 export * from "./computeDashboardKPIs";
+export * from "./computeRoleKPIs";
 export * from "./computeGovernanceKPIs";
 export * from "./computeSiteKPIs";
 export * from "./trend";

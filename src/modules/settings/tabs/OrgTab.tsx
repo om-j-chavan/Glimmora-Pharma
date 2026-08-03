@@ -15,11 +15,11 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { formatDate } from "@/lib/dates";
-import { regulatoryRegionLabel } from "@/constants/regulatoryRegions";
+import { RegulatoryRegionBadges } from "@/components/shared";
 
-// Regulatory Region is Super-Admin-owned and set per-tenant; Customer Admin
-// sees it read-only here and cannot change it, so it is deliberately NOT part
-// of this editable form schema.
+// Regulatory Regions are Super-Admin-owned and set per-tenant; Customer Admin
+// sees them read-only here and cannot change them, so they are deliberately NOT
+// part of this editable form schema.
 const orgSchema = z.object({
   companyName: z.string().min(2, "Company name is required"),
   timezone: z.string().min(1, "Timezone is required"),
@@ -107,7 +107,6 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const tzLabel = TIMEZONES.find((t) => t.value === org.timezone)?.label ?? org.timezone;
   const regionLabelMap = useAppSelector((s) => s.regions.labelMap);
-  const regionLabel = regulatoryRegionLabel(org.regulatoryRegion, regionLabelMap);
 
   return (
     <section aria-labelledby="org-heading" className="w-full space-y-4">
@@ -121,7 +120,20 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
 
         <div className="p-5 grid grid-cols-2 gap-x-8 gap-y-5">
           <Field label="Company Name" value={org.companyName} />
-          <Field label="Regulatory Region" value={regionLabel} />
+          {/* Regulatory Regions are assigned by the platform Super Admin and are
+              deliberately absent from the edit form below — a customer_admin sees
+              them, never edits them. Rendered as chips because a tenant can hold
+              several. */}
+          <div>
+            <p className="text-[11px] font-medium text-(--card-muted) mb-1">
+              {org.regulatoryRegions.length === 1 ? "Regulatory Region" : "Regulatory Regions"}
+            </p>
+            <RegulatoryRegionBadges
+              values={org.regulatoryRegions}
+              labelMap={regionLabelMap}
+              emptyText="Not assigned"
+            />
+          </div>
           <Field label="Timezone" value={tzLabel} />
           <Field label="Organization Created Date" value={orgCreatedAt ? formatDate(orgCreatedAt) : "—"} />
         </div>

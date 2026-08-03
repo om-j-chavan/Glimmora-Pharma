@@ -8,8 +8,9 @@ Every product page follows the same shape: `app/(app)/<route>/page.tsx` is a Ser
 
 ### Dashboard — COMPLETE
 - **Files:** `app/(app)/page.tsx`, `src/modules/dashboard/DashboardPage.tsx`, `src/lib/queries/dashboard.ts`.
-- **What:** QA-head landing page — readiness %, CAPA-overdue KPI, observation volume, 90-day action plan, risk signals, **Area Readiness Heatmap**.
-- **Flow:** page fetches 6 queries in parallel (`getDashboardStats`, `getOverallReadiness`, `getFindings`, `getCAPAs`, `getDeviations`, `getSystems`) and seeds the Redux data slices on mount; widgets render from those slices.
+- **What:** role-based landing page — readiness %, CAPA-overdue KPI, observation volume, 90-day action plan, risk signals, **Area Readiness Heatmap**. Each role's cards/widgets are declared in `src/modules/dashboard/config/*` and authorised by `config/resolve.ts`.
+- **Flow:** page fetches the readiness/record queries in parallel (`getOverallReadiness`, `getReadinessStats`, `getFindings`, `getCAPAs`, `getDeviations`, `getSystems`, `getFDA483Events`, `getWorklist`) and seeds the Redux data slices on mount; widgets render from those slices. `getDashboardStats` is **not** called here — its counts are re-derived from the record arrays through `src/lib/kpi`; it survives for `src/actions/complianceSnapshot.ts`.
+- **Layout:** one content-driven grid (1 col → 2 at `md` → 3 at `lg`); a chart/table widget spans two tracks, a rail card one. It replaced two fixed stacks (2/3 main + 1/3 rail) whose unequal content left a 600–800px dead band. Guarded by `tests/dashboard-layout.spec.ts`.
 - **Note:** **Bug 17** (heatmap) and the empty-on-load issue (**Bug 15**, prior) were fixed this session — the page now seeds findings/CAPAs/deviations/**systems** itself. `systems` slice was re-introduced this session.
 
 ### Gap Assessment (Findings) — COMPLETE (finding workflow added — **largely untested in a browser**)

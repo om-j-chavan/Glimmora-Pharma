@@ -33,13 +33,21 @@ export function SettingsPage() {
   // Tab-level view gating. Both the tab bar and the panels below map over
   // visibleTabs, so excluding a tab here removes the tab button AND its rendered
   // panel (the data never reaches a denied role's DOM).
-  //  - Permissions: hidden from the tab strip for everyone. The tab entry,
-  //    import, and rendered panel are intentionally PRESERVED (not deleted) so it
-  //    is a one-line re-enable; only its visibility in `visibleTabs` is removed.
+  //  - Permissions: a READ-ONLY view of the effective role matrix, shown to the
+  //    two oversight identities (qa_head + customer_admin) plus super_admin.
+  //    Editing stays disabled for everyone except super_admin (PermissionsTab
+  //    enforces that itself). It is deliberately NOT an editable control for
+  //    customer_admin: the matrix is client-side state and is not what authorizes
+  //    anything — module access is enforced by the compiled role-sets in
+  //    lib/permissions/roleSets.ts, the per-route requireRoleOrDeny gates, and
+  //    the server action gates. Showing it read-only lets an admin AUDIT
+  //    who-can-do-what without implying a control that would not be enforced.
   //  - Subscription: plan / user-site limits / billing term / retention is
   //    admin-tier info → customer_admin / super_admin only.
+  const canViewPermissionsTab =
+    role === "qa_head" || role === "customer_admin" || role === "super_admin";
   const visibleTabs = ALL_TABS.filter((t) => {
-    if (t.id === "permissions") return false;
+    if (t.id === "permissions") return canViewPermissionsTab;
     if (t.id === "subscription" && !canManageSettings) return false;
     return true;
   });

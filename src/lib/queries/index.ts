@@ -21,6 +21,8 @@ export { getSites, getUsers } from "./settings";
 export { getTickets, getTicketStats, getTicket, getSupportTenantOptions, getTicketAttachments } from "./support";
 export type { TicketListFilters, TicketListResult, TicketStats, TicketDetail, TicketAttachment } from "./support";
 export { getDashboardStats } from "./dashboard";
+export { getWorklist } from "./worklist";
+export type { Worklist, WorklistActionItem, WorklistDeviationTask, WorklistStageTask, WorklistFinding, WorklistDoc } from "./worklist";
 export { effectiveFrameworksForTenant, getTenantFrameworkSettings, getFrameworkCatalog } from "./frameworks";
 export type { EffectiveFramework, TenantFrameworkSetting, CatalogFramework } from "./frameworks";
 export { getActiveRegions, getRegionLabelMap, getRegionCatalog } from "./regions";

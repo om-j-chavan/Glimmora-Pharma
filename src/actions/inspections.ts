@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
-import { INSPECTION_CREATE_ROLES } from "@/lib/permissions/roleSets";
+import { canWriteReadiness } from "@/lib/permissions/roleSets";
 import { assertTenantOwnsParent } from "@/lib/tenantScope";
 
 type ActionResult<T = unknown> =
@@ -63,11 +63,12 @@ export async function createInspection(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  // Responsibility map - inspection/regulatory records are created by QA
-  // (+ Regulatory Affairs): INSPECTION_CREATE_ROLES. super_admin is blocked
-  // above by requireGxPAuthor; functional/admin roles are rejected server-side.
-  if (!INSPECTION_CREATE_ROLES.includes(session.user.role)) {
-    return { success: false, error: "Only QA Head or Regulatory Affairs can create an inspection." };
+  // Inspection Readiness is a qa_head-owned programme (canWriteReadiness).
+  // customer_admin may VIEW the module but is read-only outside Settings, and
+  // every other role can no longer see /readiness at all — so this now matches
+  // the route gate exactly. super_admin is blocked above by requireGxPAuthor.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Only QA Head can create an inspection." };
   }
   try {
     const inspection = await prisma.inspection.create({
@@ -126,8 +127,12 @@ export async function markActionComplete(actionId: string): Promise<ActionResult
   // Rung 3A-bis.1 — explicit viewer block. The super_admin-IDOR-bypass below
   // is NOT a role restriction; without this a tenant viewer passes the IDOR
   // and completes the action.
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Readiness/Training WRITE gate (canWriteReadiness = qa_head; super_admin is
+  // additionally blocked by requireGxPAuthor on the GxP-authoring paths). This
+  // replaced a bare viewer block that also admitted customer_admin — read-only
+  // outside Settings — and every seat role that can no longer see the module.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   if (session.user.role !== "super_admin") {
     const owned = await prisma.readinessAction.findFirst({
@@ -266,8 +271,12 @@ export async function createTrainingRecord(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Readiness/Training WRITE gate (canWriteReadiness = qa_head; super_admin is
+  // additionally blocked by requireGxPAuthor on the GxP-authoring paths). This
+  // replaced a bare viewer block that also admitted customer_admin — read-only
+  // outside Settings — and every seat role that can no longer see the module.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   try {
     const record = await prisma.trainingRecord.create({
@@ -306,8 +315,12 @@ export async function completeTrainingRecord(
   // Tenant scope check — prevents IDOR (audit finding 1.1)
   // Rung 3A-bis.1 — explicit viewer block (the super_admin-IDOR-bypass below
   // does not restrict viewers).
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Readiness/Training WRITE gate (canWriteReadiness = qa_head; super_admin is
+  // additionally blocked by requireGxPAuthor on the GxP-authoring paths). This
+  // replaced a bare viewer block that also admitted customer_admin — read-only
+  // outside Settings — and every seat role that can no longer see the module.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   if (session.user.role !== "super_admin") {
     const owned = await prisma.trainingRecord.findFirst({
@@ -397,8 +410,12 @@ export async function createSimulation(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Readiness/Training WRITE gate (canWriteReadiness = qa_head; super_admin is
+  // additionally blocked by requireGxPAuthor on the GxP-authoring paths). This
+  // replaced a bare viewer block that also admitted customer_admin — read-only
+  // outside Settings — and every seat role that can no longer see the module.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   try {
     const sim = await prisma.simulation.create({
@@ -442,8 +459,12 @@ export async function completeSimulation(
   // Tenant scope check — prevents IDOR (audit finding 1.1)
   // Rung 3A-bis.1 — explicit viewer block (the super_admin-IDOR-bypass below
   // does not restrict viewers).
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Readiness/Training WRITE gate (canWriteReadiness = qa_head; super_admin is
+  // additionally blocked by requireGxPAuthor on the GxP-authoring paths). This
+  // replaced a bare viewer block that also admitted customer_admin — read-only
+  // outside Settings — and every seat role that can no longer see the module.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   if (session.user.role !== "super_admin") {
     const owned = await prisma.simulation.findFirst({
@@ -523,8 +544,12 @@ export async function createPlaybook(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Readiness/Training WRITE gate (canWriteReadiness = qa_head; super_admin is
+  // additionally blocked by requireGxPAuthor on the GxP-authoring paths). This
+  // replaced a bare viewer block that also admitted customer_admin — read-only
+  // outside Settings — and every seat role that can no longer see the module.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   try {
     const playbook = await prisma.playbook.create({
@@ -574,8 +599,12 @@ export async function deletePlaybook(id: string): Promise<ActionResult> {
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // Readiness/Training WRITE gate (canWriteReadiness = qa_head; super_admin is
+  // additionally blocked by requireGxPAuthor on the GxP-authoring paths). This
+  // replaced a bare viewer block that also admitted customer_admin — read-only
+  // outside Settings — and every seat role that can no longer see the module.
+  if (!canWriteReadiness(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   try {
     await prisma.playbook.delete({ where: { id } });

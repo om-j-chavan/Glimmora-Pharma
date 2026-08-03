@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
-import { FDA483_SIGN_ROLES, FDA483_DELETE_ROLES, INSPECTION_CREATE_ROLES, canWriteQuality } from "@/lib/permissions/roleSets";
+import { FDA483_SIGN_ROLES, FDA483_DELETE_ROLES, INSPECTION_CREATE_ROLES, canWriteFDA483 } from "@/lib/permissions/roleSets";
 import {
   canonicalizeFDA483ResponseContent,
   computeContentHash,
@@ -214,7 +214,7 @@ export async function updateFDA483Event(
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
     }
-    if (!canWriteQuality(session.user.role)) {
+    if (!canWriteFDA483(session.user.role)) {
       return { success: false, error: "Viewers cannot perform this action." };
     }
     const event = await prisma.fDA483Event.update({
@@ -272,7 +272,7 @@ export async function addObservation(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
 
@@ -404,7 +404,7 @@ export async function bulkAddObservationsFromExtraction(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
 
@@ -604,7 +604,7 @@ export async function addCommitment(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
 
@@ -725,7 +725,7 @@ export async function saveResponseDraft(
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
     }
-    if (!canWriteQuality(session.user.role)) {
+    if (!canWriteFDA483(session.user.role)) {
       return { success: false, error: "Viewers cannot perform this action." };
     }
     const event = await prisma.fDA483Event.update({
@@ -769,7 +769,7 @@ export async function saveAGIDraft(
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
     }
-    if (!canWriteQuality(session.user.role)) {
+    if (!canWriteFDA483(session.user.role)) {
       return { success: false, error: "Viewers cannot perform this action." };
     }
     const event = await prisma.fDA483Event.update({
@@ -986,7 +986,7 @@ export async function handoffFDA483Stage(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
 
@@ -1278,7 +1278,7 @@ export async function updateObservation(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
   // Responsibility map - viewers are read-only; editing an observation rejects viewer.
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
 
@@ -1366,7 +1366,7 @@ export async function updateObservation(
  */
 export async function markObservationResponseDrafted(id: string): Promise<ActionResult> {
   const session = await requireAuth();
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot update observations." };
   }
   const existing = await prisma.fDA483Observation.findFirst({
@@ -1477,7 +1477,7 @@ export async function linkCAPAToEvent(
   // Tenant scope check â€” prevents IDOR (audit finding 1.1)
   // Rung 3A-bis.1 — explicit viewer block (the super_admin-IDOR-bypass below
   // does not restrict viewers).
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   if (session.user.role !== "super_admin") {
@@ -1603,7 +1603,7 @@ export async function updateCommitment(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
   // Responsibility map - viewers are read-only; editing a commitment rejects viewer.
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   try {
@@ -1726,7 +1726,7 @@ export async function completeCommitment(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   try {
@@ -1799,7 +1799,7 @@ export async function reopenCommitment(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   try {
@@ -1863,7 +1863,7 @@ export async function addResponseDocument(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   // IDOR guard - verify the caller's tenant owns the parent event before
@@ -1947,7 +1947,7 @@ export async function removeResponseDocument(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
   // Responsibility map - viewers are read-only; removing a response document rejects viewer.
-  if (!canWriteQuality(session.user.role)) {
+  if (!canWriteFDA483(session.user.role)) {
     return { success: false, error: "Viewers cannot perform this action." };
   }
   try {

@@ -6,13 +6,13 @@ import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker, DateRangePicker } from "@/components/ui/DatePicker";
 import {
   deriveAgency,
   computeResponseDeadline,
   DEADLINE_FORMULA_BY_EVENT_TYPE,
   REFERENCE_LABEL_BY_EVENT_TYPE,
 } from "../_shared";
-import { roleLabel } from "@/lib/labels/roles";
 
 const eventSchema = z.object({
   type: z.enum([
@@ -34,7 +34,13 @@ const eventSchema = z.object({
   inspectionDate: z.string().min(1, "Inspection start date required"),
   inspectionEndDate: z.string().optional(),
   responseDeadline: z.string().min(1, "Deadline required"),
-  internalOwnerId: z.string().min(1, "Internal owner required"),
+  // Carried, not asked for. The internal owner is no longer a user-facing
+  // field — it is auto-assigned from `defaultOwnerId` (the creating user) so
+  // record visibility, reminders and the audit entry keep working exactly as
+  // before. Optional HERE so the hidden value can never silently block submit;
+  // createFDA483Event still requires it server-side and surfaces a toast if it
+  // ever arrives blank.
+  internalOwnerId: z.string().optional(),
   leadInvestigator: z.string().optional(),
   status: z.enum(["Open", "Response Due", "Response Submitted", "Closed"]),
 })
@@ -57,20 +63,13 @@ interface Site {
   status: string;
 }
 
-interface User {
-  id: string;
-  name: string;
-  role: string;
-}
-
 export interface AddEventModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (data: EventFormData) => void;
   sites: Site[];
-  users: User[];
-  /** Pre-selected internal owner (the current user when they're a
-   *  compliance role); blank otherwise. */
+  /** Internal owner assigned to the event. Not rendered — the field was removed
+   *  from the form, so this is the sole source of the value. */
   defaultOwnerId?: string;
   lockedSiteId?: string | null;
 }
@@ -94,7 +93,6 @@ export function AddEventModal({
   onClose,
   onSave,
   sites,
-  users,
   defaultOwnerId,
   lockedSiteId,
 }: AddEventModalProps) {
@@ -128,10 +126,16 @@ export function AddEventModal({
   };
   const deadlineHint = DEADLINE_FORMULA_BY_EVENT_TYPE[eventType]?.hintText ?? "";
 
-  // Reset the override flag whenever the modal (re)opens.
+  // Reset the override flag whenever the modal (re)opens, and re-seed the
+  // hidden internal owner. `defaultValues` is captured once at mount and
+  // `form.reset()` restores that same snapshot, so a `defaultOwnerId` that
+  // arrives after mount (Redux/tenant hydration) would otherwise never land —
+  // and with the field no longer rendered there is no manual fallback.
   useEffect(() => {
-    if (open) setDeadlineOverride(false);
-  }, [open]);
+    if (!open) return;
+    setDeadlineOverride(false);
+    form.setValue("internalOwnerId", defaultOwnerId ?? "");
+  }, [open, defaultOwnerId, form]);
 
   // Auto-calculate the deadline from the end date (or start date) + event
   // type. Skipped entirely while the user has overridden it.
@@ -283,48 +287,30 @@ export function AddEventModal({
             </div>
           )}
 
-          {/* Inspection start date */}
-          <div>
-            <label
-              htmlFor="ev-date"
-              className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Inspection start date{" "}
-              <span className="text-(--danger)" aria-hidden="true">*</span>
-            </label>
-            <input
-              id="ev-date"
-              type="date"
-              className="input text-[12px]"
-              aria-required="true"
-              {...form.register("inspectionDate")}
+          {/* Inspection dates — one range control drives both fields, so an end
+              before the start is unreachable through the UI (the zod refine
+              stays as the server-shaped safety net). Leaving the end blank is
+              still valid: a single-day inspection. */}
+          <div className="col-span-2">
+            <DateRangePicker
+              id="ev-inspection-range"
+              label="Inspection dates"
+              required
+              placeholder="Select inspection dates"
+              hint="Start is required · leave the end blank for a single-day inspection"
+              value={{
+                start: inspectionDate ?? "",
+                end: inspectionEndDate ?? "",
+              }}
+              onChange={({ start, end }) => {
+                form.setValue("inspectionDate", start, { shouldValidate: true });
+                form.setValue("inspectionEndDate", end, { shouldValidate: true });
+              }}
+              error={
+                form.formState.errors.inspectionDate?.message ??
+                form.formState.errors.inspectionEndDate?.message
+              }
             />
-            {form.formState.errors.inspectionDate && (
-              <p role="alert" className="text-[11px] text-[#ef4444] mt-1">
-                {form.formState.errors.inspectionDate.message}
-              </p>
-            )}
-          </div>
-
-          {/* Inspection end date */}
-          <div>
-            <label
-              htmlFor="ev-end-date"
-              className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Inspection end date
-            </label>
-            <input
-              id="ev-end-date"
-              type="date"
-              className="input text-[12px]"
-              {...form.register("inspectionEndDate")}
-            />
-            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
-              Optional · defaults to start date if blank
-            </p>
           </div>
 
           {/* Response deadline — auto / override */}
@@ -350,56 +336,25 @@ export function AddEventModal({
                 </Button>
               </div>
             </div>
-            <input
-              id="ev-deadline"
-              type="date"
-              className="input text-[12px]"
-              readOnly={!deadlineOverride}
-              aria-required="true"
-              {...form.register("responseDeadline")}
-            />
-            {form.formState.errors.responseDeadline && (
-              <p role="alert" className="text-[11px] text-[#ef4444] mt-1">
-                {form.formState.errors.responseDeadline.message}
-              </p>
-            )}
-            {deadlineHint && (
-              <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
-                {deadlineHint}
-              </p>
-            )}
-          </div>
-
-          {/* Internal owner */}
-          <div className="col-span-2">
-            <label
-              className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Internal owner{" "}
-              <span className="text-(--danger)" aria-hidden="true">*</span>
-            </label>
             <Controller
-              name="internalOwnerId"
+              name="responseDeadline"
               control={form.control}
               render={({ field }) => (
-                <Dropdown
-                  value={field.value}
+                <DatePicker
+                  id="ev-deadline"
+                  value={field.value ?? ""}
                   onChange={field.onChange}
-                  placeholder="Select QA owner"
-                  width="w-full"
-                  options={users.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
+                  // Auto-computed from the inspection dates + event type until
+                  // [Override] is pressed; disabled mirrors the old readOnly.
+                  disabled={!deadlineOverride}
+                  required
+                  min={inspectionDate || undefined}
+                  placeholder="Select deadline"
+                  hint={deadlineHint || undefined}
+                  error={form.formState.errors.responseDeadline?.message}
                 />
               )}
             />
-            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
-              Notifications + reminders will go to this person
-            </p>
-            {form.formState.errors.internalOwnerId && (
-              <p role="alert" className="text-[11px] text-[#ef4444] mt-1">
-                {form.formState.errors.internalOwnerId.message}
-              </p>
-            )}
           </div>
 
           {/* Lead investigator */}

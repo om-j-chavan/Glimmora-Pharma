@@ -45,7 +45,7 @@ export function PermissionsTab() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
-        <div><h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>Role Permissions</h2><p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>{isSuperAdmin ? "Click any cell to cycle access level. Changes take effect immediately." : "Read-only view \u2014 only Super Admin can edit permissions."}</p></div>
+        <div><h2 className="text-[15px] font-semibold" style={{ color: "var(--text-primary)" }}>Role Permissions</h2><p className="text-[12px] mt-1" style={{ color: "var(--text-muted)" }}>{isSuperAdmin ? "Click any cell to cycle access level. Changes take effect immediately." : "Read-only view of the effective role matrix."}</p></div>
         {isSuperAdmin && <Button variant="ghost" size="sm" icon={RotateCw} onClick={() => { dispatch(resetPermissions()); setSavedPopup(true); }}>Reset all to defaults</Button>}
       </div>
 
@@ -53,7 +53,13 @@ export function PermissionsTab() {
       {!isSuperAdmin && (
         <div className={clsx("flex items-start gap-2 p-3 rounded-2xl border", "bg-(--warning-bg) border-(--warning)")}>
           <Info className="w-4 h-4 text-[#f59e0b] flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>Only Super Admin can edit permissions. You are viewing read-only.</p>
+          <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+            Read-only. Module access is enforced server-side by the platform role
+            model — the per-route authorization gates and the server action role
+            checks — not by this table. Some modules (CSV/CSA, Training &amp;
+            Awareness, Governance, Inspections &amp; Regulatory, CAPA, Audit Trail)
+            are restricted by that role model regardless of the level shown here.
+          </p>
         </div>
       )}
 

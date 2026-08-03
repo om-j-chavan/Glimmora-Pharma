@@ -12,4 +12,5 @@ export { SetupChecklist } from "./SetupChecklist";
 export { SubscriptionPlansPopup } from "./SubscriptionPlansPopup";
 export { DocumentUpload, type LinkedDocument, type DocFileType, type DocStatus } from "./DocumentUpload";
 export { StatusBadge } from "./StatusBadge";
+export { RegulatoryRegionBadges } from "./RegulatoryRegionBadges";
 export { StatusGuide } from "./StatusGuide";

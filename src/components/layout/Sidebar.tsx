@@ -27,7 +27,14 @@ import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
 import { useNotificationCount } from "@/components/notifications/NotificationCountProvider";
-import { CAPA_MODULE_VIEW_ROLES, canViewGovernance } from "@/lib/permissions/roleSets";
+import {
+  CAPA_MODULE_VIEW_ROLES,
+  canViewGovernance,
+  canViewCSV,
+  canViewFDA483,
+  canViewReadiness,
+  canViewAuditTrail,
+} from "@/lib/permissions/roleSets";
 import { logout } from "@/store/auth.slice";
 import { logout as nextAuthLogout } from "@/lib/authClient";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
@@ -160,15 +167,26 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           // lives as the "Ask Regulatory AI" assistant on Settings →
           // Frameworks. The /regulatory-intelligence route still resolves for
           // Dashboard deep-links; it's just removed from the nav.)
-          if (item.path === "readiness" || item.path === "deviation")
-            return true;
-          if (item.path === "audit-trail")
-            // super_admin already returned [] above, so it's excluded here.
-            return role === "qa_head" || role === "customer_admin";
-          // Governance & KPIs — restricted to qa_head + customer_admin (the two
-          // tenant quality-oversight identities). super_admin already returned []
-          // above; every other role is excluded. Mirrors the route-level gate.
+          if (item.path === "deviation") return true;
+          // ── Role-set-gated modules ──────────────────────────────────────
+          // Each helper below is the SAME function the module's route calls via
+          // requireRoleOrDeny, so hiding the entry and blocking the URL can
+          // never drift. These deliberately bypass `allowedPaths` (the
+          // client-side permissions matrix), which is localStorage state and so
+          // is not an authorization source.
+          //
+          // CSV/CSA        → qa_head, customer_admin, csv_val_lead
+          // Readiness      → qa_head, customer_admin
+          // Governance     → qa_head, customer_admin
+          // Audit Trail    → qa_head, customer_admin
+          // Inspections    → qa_head, customer_admin, regulatory_affairs
+          if (item.path === "csv-csa") return canViewCSV(role);
+          if (item.path === "readiness") return canViewReadiness(role);
           if (item.path === "governance") return canViewGovernance(role);
+          // super_admin already returned [] above, so it is excluded here even
+          // though it is a member of AUDIT_TRAIL_VIEW_ROLES.
+          if (item.path === "audit-trail") return canViewAuditTrail(role);
+          if (item.path === "fda-483") return canViewFDA483(role);
           return allowedPaths.includes(item.path);
         }),
       })).filter((g) => g.items.length > 0);

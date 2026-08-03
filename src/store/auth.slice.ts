@@ -27,7 +27,13 @@ export interface TenantOrgConfig {
   companyName: string;
   timezone: string;
   dateFormat: string;
-  regulatoryRegion: string;
+  /**
+   * Every regulatory region this tenant operates under (RegulatoryRegion.value
+   * codes, e.g. ["EMA", "FDA", "MHRA"]). Super-admin owned — a customer_admin
+   * reads it and cannot change it. Always an array, possibly empty for a legacy
+   * tenant that was never assigned one.
+   */
+  regulatoryRegions: string[];
 }
 
 export interface TenantSiteConfig {

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import { assertTenantOwnsParent } from "@/lib/tenantScope";
+import { canWriteCSV } from "@/lib/permissions/roleSets";
 import { deriveSiteCode, isReferenceConflict } from "@/lib/reference";
 
 type ActionResult<T = unknown> =
@@ -110,8 +111,11 @@ export async function createRTMEntry(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // canWriteQuality (not a bare viewer test) — customer_admin is read-only
+  // outside Settings, so the tenant admin may view this module but never
+  // write in it. super_admin is separately blocked by requireGxPAuthor.
+  if (!canWriteCSV(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
   try {
     // RUNG 2.8 — allocate a per-site URS-<SITE_CODE>-<NNNN> reference. Site.code
@@ -170,8 +174,11 @@ export async function updateRTMEntry(
 ): Promise<ActionResult> {
   const session = await requireAuth();
   // RUNG 2 (Phase 12) — viewers are read-only; any other compliance role may edit.
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot edit RTM entries." };
+  // canWriteQuality (not a bare viewer test) — customer_admin is read-only
+  // outside Settings, so the tenant admin may view this module but never
+  // write in it. super_admin is separately blocked by requireGxPAuthor.
+  if (!canWriteCSV(session.user.role)) {
+    return { success: false, error: "Your role does not permit editing RTM entries." };
   }
   const parsed = UpdateRTMSchema.safeParse(input);
   if (!parsed.success) {

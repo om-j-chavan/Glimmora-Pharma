@@ -173,10 +173,13 @@ export function AccountModal({
     if (!email) e.email = "Required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = "Enter a valid email";
 
-    // Regulatory Region is REQUIRED on create (Stage 5) — a tenant must have a
-    // region for its effective frameworks to resolve. Not forced on edit.
-    if (mode === "create" && !form.regulatoryRegion.trim()) {
-      e.regulatoryRegion = "Regulatory Region is required";
+    // At least one Regulatory Region is REQUIRED on create — a tenant must have
+    // one for its effective frameworks to resolve. On EDIT the field is equally
+    // required, because the form always submits the full set: letting it save
+    // empty would silently strip a customer's regions. (Duplicates can't occur —
+    // the picker toggles values — and the server dedupes anyway.)
+    if (form.regulatoryRegions.length === 0) {
+      e.regulatoryRegions = "Select at least one Regulatory Region";
     }
 
     if (mode === "create") {
@@ -268,8 +271,8 @@ export function AccountModal({
     /^[a-z0-9_]+$/.test(form.username.trim()) &&
     form.email.trim().length > 0 &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) &&
-    // Region required on create (Stage 5); not forced on edit.
-    (mode === "edit" || form.regulatoryRegion.trim().length > 0) &&
+    // At least one region, on create AND on edit (the form submits the whole set).
+    form.regulatoryRegions.length > 0 &&
     (mode === "edit"
       ? (!form.newPassword || (form.newPassword.length >= 8 && form.newPassword === form.confirmPassword))
       : form.newPassword.length >= 8 && form.newPassword === form.confirmPassword) &&
@@ -291,7 +294,7 @@ export function AccountModal({
     customerName: "Customer Name",
     username: "Username",
     email: "Email",
-    regulatoryRegion: "Regulatory Region",
+    regulatoryRegions: "Regulatory Region",
     newPassword: "Password",
     confirmPassword: "Confirm Password",
     planMaxUsers: "Max users",
@@ -406,7 +409,7 @@ export function AccountModal({
           set={set}
           mode={mode}
           isSuperAdmin={isSuperAdmin}
-          regionError={errorVisible("regulatoryRegion") ? shownErrors.regulatoryRegion : undefined}
+          regionError={errorVisible("regulatoryRegions") ? shownErrors.regulatoryRegions : undefined}
         />
 
         {/* Plan assignment is now an inline section of the form — no separate

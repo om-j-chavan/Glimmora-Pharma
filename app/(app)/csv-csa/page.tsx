@@ -1,14 +1,26 @@
 import { CSVPage } from "@/modules/csv-csa/CSVPage";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
+import { requireRoleOrDeny } from "@/lib/authz";
+import { CSV_MODULE_VIEW_ROLES } from "@/lib/permissions/roleSets";
 import { getSystems, getDeletedSystems, getSystemsStats, getRTMStats, systemVisibilityWhere } from "@/lib/queries";
 
 export const metadata = {
   title: "CSV/CSA Validation — Pharma Glimmora",
 };
 
+// CSV/CSA is restricted to qa_head + customer_admin + csv_val_lead. Enforced at
+// the ROUTE (server) level so hiding the sidebar entry is not the only barrier —
+// a typed URL is redirected and the denial is written to the audit trail.
+const ALLOWED_ROLES = new Set<string>(CSV_MODULE_VIEW_ROLES);
+
 export default async function Page() {
   const session = await requireAuth();
+  await requireRoleOrDeny(session, ALLOWED_ROLES, {
+    module: "csv-csa",
+    redirectTo: "/",
+    extra: { path: "/csv-csa" },
+  });
   const [systems, stats, rtmStats] = await Promise.all([
     // Phase 4 record-visibility: a non-see-all user sees only systems they
     // created OR are a rework-task assignee on. Stats stay tenant-wide (Phase 6).

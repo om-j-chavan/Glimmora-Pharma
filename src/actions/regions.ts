@@ -224,7 +224,7 @@ export async function updateRegion(id: string, input: { name: string; descriptio
  * deleteTenantWithPassword. Guards, in order:
  *   - reserved (GLOBAL) → never purgeable;
  *   - must be archived (only archived regions are purgeable);
- *   - must have ZERO references (Tenant.regulatoryRegion + FrameworkRegion) —
+ *   - must have ZERO references (TenantRegulatoryRegion + FrameworkRegion) —
  *     Stage 3 auto-reassigns those to GLOBAL on archive, so a purge-ready region
  *     is clean; if any remain, block and name them;
  *   - password verified server-side (wrong password is itself audited).
@@ -246,7 +246,7 @@ export async function permanentlyDeleteRegion(id: string, password: string): Pro
   }
   // Zero-reference precondition (defence-in-depth; Stage 3 keeps it clean).
   const [tenantCount, fwCount] = await Promise.all([
-    prisma.tenant.count({ where: { regulatoryRegion: region.value } }),
+    prisma.tenantRegulatoryRegion.count({ where: { region: region.value } }),
     prisma.frameworkRegion.count({ where: { region: region.value } }),
   ]);
   if (tenantCount || fwCount) {
@@ -291,11 +291,15 @@ export async function previewRegionArchive(id: string): Promise<ActionResult<{ l
   }
   const region = await prisma.regulatoryRegion.findUnique({ where: { id }, select: { value: true, label: true } });
   if (!region) return { success: false, error: "Region not found" };
-  const [tenants, frameworkLinks] = await Promise.all([
-    prisma.tenant.findMany({ where: { regulatoryRegion: region.value }, select: { name: true }, orderBy: { name: "asc" } }),
+  const [links, frameworkLinks] = await Promise.all([
+    prisma.tenantRegulatoryRegion.findMany({
+      where: { region: region.value },
+      select: { tenant: { select: { name: true } } },
+      orderBy: { tenant: { name: "asc" } },
+    }),
     prisma.frameworkRegion.count({ where: { region: region.value } }),
   ]);
-  return { success: true, data: { label: region.label, reserved: isReservedRegion(region.value), tenants: tenants.map((t) => t.name), frameworkLinks } };
+  return { success: true, data: { label: region.label, reserved: isReservedRegion(region.value), tenants: links.map((l) => l.tenant.name), frameworkLinks } };
 }
 
 /**
@@ -303,7 +307,12 @@ export async function previewRegionArchive(id: string): Promise<ActionResult<{ l
  * in-use region now ARCHIVES it AND auto-reassigns every live reference to
  * GLOBAL, all-or-nothing in ONE $transaction:
  *   1. archivedAt = now on the region;
- *   2. every Tenant.regulatoryRegion = <value> → "GLOBAL";
+ *   2. every TenantRegulatoryRegion on <value> is REMOVED, and a tenant left with
+ *      NO region at all falls back to "GLOBAL". Under multi-region that is the
+ *      honest rule: a tenant on {EMA, FDA} losing EMA keeps FDA and must NOT have
+ *      GLOBAL bolted on (it would silently widen its framework scope); a tenant on
+ *      {EMA} alone would otherwise be left region-less, which breaks framework
+ *      resolution and the "at least one region" invariant, so it moves to GLOBAL;
  *   3. every FrameworkRegion.region = <value> → "GLOBAL", with DEDUPE: if the
  *      framework already applies globally (appliesToAllRegions=true) OR already
  *      has a FrameworkRegion row for "GLOBAL", the link is DROPPED instead of
@@ -335,8 +344,23 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
       // 1) Archive the region.
       await tx.regulatoryRegion.update({ where: { id }, data: { archivedAt: new Date() } });
 
-      // 2) Re-point every tenant on this region to GLOBAL.
-      const tenantRes = await tx.tenant.updateMany({ where: { regulatoryRegion: value }, data: { regulatoryRegion: GLOBAL_REGION_VALUE } });
+      // 2) Drop this region from every tenant that holds it; only a tenant left
+      //    with nothing falls back to GLOBAL (see the header note).
+      const holders = await tx.tenantRegulatoryRegion.findMany({
+        where: { region: value },
+        select: { tenantId: true },
+      });
+      const tenantIds = [...new Set(holders.map((h) => h.tenantId))];
+      await tx.tenantRegulatoryRegion.deleteMany({ where: { region: value } });
+      let tenantsMovedToGlobal = 0;
+      for (const tenantId of tenantIds) {
+        const remaining = await tx.tenantRegulatoryRegion.count({ where: { tenantId } });
+        if (remaining === 0) {
+          await tx.tenantRegulatoryRegion.create({ data: { tenantId, region: GLOBAL_REGION_VALUE } });
+          tenantsMovedToGlobal += 1;
+        }
+      }
+      const tenantRes = { count: tenantIds.length };
 
       // 3) Re-point framework links to GLOBAL, DROPPING redundant ones.
       const links = await tx.frameworkRegion.findMany({ where: { region: value }, select: { id: true, frameworkId: true } });
@@ -371,11 +395,19 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
         await auditRegion(
           session, actor, "REGION_TENANTS_REASSIGNED", id, region.label,
           { region: value },
-          { reassignedTo: GLOBAL_REGION_VALUE, tenantsReassigned: tenantRes.count, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped },
+          {
+            reassignedTo: GLOBAL_REGION_VALUE,
+            // Two distinct numbers now: how many tenants lost this region, and
+            // how many of those were left region-less and fell back to GLOBAL.
+            tenantsReassigned: tenantRes.count,
+            tenantsMovedToGlobal,
+            frameworkLinksMoved: linksMoved,
+            frameworkLinksDropped: linksDropped,
+          },
           tx,
         );
       }
-      return { tenantsReassigned: tenantRes.count, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped };
+      return { tenantsReassigned: tenantRes.count, tenantsMovedToGlobal, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped };
     });
 
     revalidatePath("/admin/regions");
@@ -410,7 +442,7 @@ export async function unarchiveRegion(id: string): Promise<ActionResult> {
  * Change a region's VALUE via archive-and-alias WITH reference re-pointing — the
  * inverse decision from framework key-supersede. The value is never mutated in
  * place: a NEW region row is created, the OLD is archived and linked forward
- * (old.aliasOfId → new), and EVERY current reference (Tenant.regulatoryRegion +
+ * (old.aliasOfId → new), and EVERY current reference (TenantRegulatoryRegion +
  * FrameworkRegion.region) is re-pointed to the new value — because those are
  * live CONFIG that must follow the rename (unlike immutable Finding.framework).
  * All-or-nothing in a single transaction. Hard-blocks value reuse.
@@ -449,7 +481,10 @@ export async function supersedeRegionValue(oldId: string, input: { newValue: str
       // b) Archive OLD + link forward to successor (locked direction).
       await tx.regulatoryRegion.update({ where: { id: oldId }, data: { archivedAt: new Date(), aliasOfId: created.id } });
       // c) RE-POINT every live reference from oldValue → newValue.
-      const tenantRes = await tx.tenant.updateMany({ where: { regulatoryRegion: old.value }, data: { regulatoryRegion: newValue } });
+      // The new value is brand-new and globally unique (checked above), so no
+      // tenant can already hold it — a blind updateMany cannot collide with
+      // @@unique([tenantId, region]).
+      const tenantRes = await tx.tenantRegulatoryRegion.updateMany({ where: { region: old.value }, data: { region: newValue } });
       const fwRes = await tx.frameworkRegion.updateMany({ where: { region: old.value }, data: { region: newValue } });
       // d) Audit-first (inside the tx → atomic with the change).
       await auditRegion(

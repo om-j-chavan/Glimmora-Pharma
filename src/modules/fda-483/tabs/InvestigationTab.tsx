@@ -54,6 +54,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { AIButton } from "@/components/ai";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { normalizeSeverityForDisplay } from "@/lib/severity";
@@ -621,13 +622,12 @@ function RaiseCAPAModal({
             >
               Due date *
             </label>
-            <input
+            <DatePicker
               id="raise-capa-due"
-              type="date"
-              className="input w-full text-[12px]"
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              onChange={setDueDate}
               required
+              placeholder="Select due date"
             />
           </div>
         </div>

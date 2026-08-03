@@ -41,12 +41,12 @@ export function AccountSettingsFields({ form, set, mode, isSuperAdmin, regionErr
         <div><label className={LABEL} style={{ color: "var(--text-secondary)" }}>Time Zone</label><Dropdown value={form.timezone} onChange={(v) => set("timezone", v)} options={TIMEZONE_OPTIONS} width="w-full" size="sm" /></div>
       </div>
 
-      {/* Regulatory Region — super_admin owned, backed by the fixed central
-          list. Select an existing value (no runtime add). */}
+      {/* Regulatory Regions — super_admin owned, backed by the central region
+          list. Select one or more existing values (no runtime add). */}
       <div className="mb-3">
         <RegulatoryRegionField
-          value={form.regulatoryRegion}
-          onChange={(v) => set("regulatoryRegion", v)}
+          values={form.regulatoryRegions}
+          onChange={(v) => set("regulatoryRegions", v)}
           required={mode === "create"}
           error={regionError}
         />

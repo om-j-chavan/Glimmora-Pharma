@@ -7,7 +7,7 @@ datasource db {
   // with the FastAPI backend), so the schema provider MUST be postgresql to
   // match migration_lock.toml and let `prisma migrate deploy` run. Local dev
   // uses Postgres too (a Neon branch or local instance).
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -24,10 +24,6 @@ model Tenant {
   language            String   @default("en")
   timezone            String   @default("Asia/Kolkata")
   logoUrl             String?
-  // Regulatory region is owned by the platform super_admin (set on tenant
-  // create/edit), NOT the customer_admin. Nullable for the backfill window.
-  // Values come from the central RegulatoryRegion lookup table.
-  regulatoryRegion    String?
   isActive            Boolean  @default(true)
   // Soft-delete timestamp. Lifecycle: ACTIVE (isActive=true, deletedAt=null),
   // SUSPENDED (isActive=false, deletedAt=null), DELETED-soft (deletedAt set).
@@ -67,6 +63,36 @@ model Tenant {
   tenantFrameworks      TenantFramework[]
   // Role-Based User Limits (Phase A, INERT) — per-tenant per-role cap OVERRIDES.
   tenantRoleLimits      TenantRoleLimit[]
+  // Regulatory regions this tenant operates under. MANY per tenant — see
+  // TenantRegulatoryRegion.
+  regulatoryRegions     TenantRegulatoryRegion[]
+}
+
+// Tenant ↔ regulatory region link. A tenant operates under one OR MORE regions
+// (a manufacturer shipping to the US, the EU and the UK answers to FDA, EMA and
+// MHRA at once), so the region is a SET, not a column.
+//
+// Modelled as a join table rather than a scalar list because the deployed DB is
+// Postgres while local dev runs SQLite, and SQLite has no array type — a
+// relation behaves identically on both. It also mirrors FrameworkRegion, so the
+// two region-reference tables archive, supersede and purge through the same code
+// path.
+//
+// `region` stores the IMMUTABLE RegulatoryRegion.value (e.g. "FDA"), the same
+// bare-string FK convention FrameworkRegion uses. Ownership is unchanged: only
+// the platform super_admin writes these rows; a customer_admin reads them.
+model TenantRegulatoryRegion {
+  id       String @id @default(cuid())
+  tenantId String
+  region   String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // A region can be selected at most once per tenant — the DB-level guarantee
+  // behind the "prevent duplicate selections" rule.
+  @@unique([tenantId, region])
+  @@index([region])
+  @@index([tenantId])
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -111,9 +137,10 @@ model Plan {
 // additionally guards against case-insensitive duplicates.
 model RegulatoryRegion {
   id        String   @id @default(cuid())
-  // IMMUTABLE key — stored as a bare FK string in Tenant.regulatoryRegion and
-  // FrameworkRegion.region. Renaming would orphan those refs, so a value change
-  // is archive-and-alias with reference re-pointing (never an in-place mutation).
+  // IMMUTABLE key — stored as a bare FK string in TenantRegulatoryRegion.region
+  // and FrameworkRegion.region. Renaming would orphan those refs, so a value
+  // change is archive-and-alias with reference re-pointing (never an in-place
+  // mutation).
   value     String   @unique
   // Editable display label (never part of the contract).
   label     String
@@ -2493,8 +2520,8 @@ model Framework {
 }
 
 // Framework ↔ regulatory region link (only meaningful when appliesToAllRegions
-// = false). `region` stores the Tenant.regulatoryRegion string value (e.g. "FDA")
-// — reuses the existing region field; no new column on Tenant.
+// = false). `region` stores a RegulatoryRegion.value (e.g. "FDA") — the same
+// bare-string convention TenantRegulatoryRegion.region uses.
 model FrameworkRegion {
   id          String @id @default(cuid())
   frameworkId String

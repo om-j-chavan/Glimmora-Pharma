@@ -279,14 +279,11 @@ function EventHeader({
   sites,
   timezone,
   dateFormat,
-  ownerName,
 }: {
   event: FDA483Event;
   sites: { id: string; name: string }[];
   timezone: string;
   dateFormat: string;
-  /** Resolves the internal-owner user id to a display name ("Unknown" on miss). */
-  ownerName: (id: string) => string;
 }) {
   const stat = eventStatusBadge(event.status);
   const siteName =
@@ -354,22 +351,13 @@ function EventHeader({
             ? `${dayjs.utc(event.inspectionDate).tz(timezone).format(dateFormat)} → ${dayjs.utc(event.inspectionEndDate).tz(timezone).format(dateFormat)}`
             : `Inspection ${dayjs.utc(event.inspectionDate).tz(timezone).format(dateFormat)}`}
         </p>
-        {/* Line 3 — inspector / internal owner (only when at least one set) */}
-        {(() => {
-          const parts: string[] = [];
-          if (event.leadInvestigator?.trim()) {
-            parts.push(`Inspector: ${event.leadInvestigator.trim()}`);
-          }
-          if (event.internalOwnerId) {
-            parts.push(`Owner: ${ownerName(event.internalOwnerId)}`);
-          }
-          if (parts.length === 0) return null;
-          return (
-            <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-              {parts.join(" · ")}
-            </p>
-          );
-        })()}
+        {/* Line 3 — inspector (the internal owner is intentionally NOT shown;
+            it is an internal routing/visibility attribute, not user-facing) */}
+        {event.leadInvestigator?.trim() && (
+          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            Inspector: {event.leadInvestigator.trim()}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -608,7 +596,12 @@ export function FDA483Page({
       responseDeadline: data.responseDeadline
         ? dayjs(data.responseDeadline).utc().toISOString()
         : "",
-      internalOwnerId: data.internalOwnerId,
+      // Internal owner is no longer a form field (hidden from the UI). It is
+      // still written, because it is what record visibility scopes on
+      // (queries/fda483.ts → OR[createdById, internalOwnerId]) and what the
+      // audit entry names: fall back to the acting user so the event stays
+      // visible to its creator exactly as before.
+      internalOwnerId: data.internalOwnerId || user?.id || "",
       leadInvestigator: data.leadInvestigator || undefined,
     });
     if (!result.success) {
@@ -840,7 +833,6 @@ export function FDA483Page({
               sites={sites}
               timezone={timezone}
               dateFormat={dateFormat}
-              ownerName={(id) => displayUserName(id, users)}
             />
             <StageBanner
               event={liveEvent}
@@ -1158,7 +1150,6 @@ export function FDA483Page({
         onClose={() => setAddEventOpen(false)}
         onSave={onEventSave}
         sites={sites}
-        users={complianceUsers}
         defaultOwnerId={
           complianceUsers.some((u) => u.id === user?.id) ? user?.id : undefined
         }

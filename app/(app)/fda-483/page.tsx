@@ -1,6 +1,8 @@
 import { FDA483Page } from "@/modules/fda-483/FDA483Page";
 import { ErrorBoundary } from "@/components/errors";
 import { requireAuth } from "@/lib/auth";
+import { requireRoleOrDeny } from "@/lib/authz";
+import { FDA483_VIEW_ROLES } from "@/lib/permissions/roleSets";
 import {
   getFDA483Events,
   getFDA483Stats,
@@ -20,8 +22,17 @@ interface PageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
+// Inspections & Regulatory is restricted to regulatory_affairs (owns regulator
+// communication) + qa_head + customer_admin. Route-level gate before any fetch.
+const ALLOWED_ROLES = new Set<string>(FDA483_VIEW_ROLES);
+
 export default async function Page({ searchParams }: PageProps) {
   const session = await requireAuth();
+  await requireRoleOrDeny(session, ALLOWED_ROLES, {
+    module: "fda483",
+    redirectTo: "/",
+    extra: { path: "/fda-483" },
+  });
   const params = (await searchParams) ?? {};
   const rawEventId = params.event;
   const eventId = Array.isArray(rawEventId) ? rawEventId[0] : rawEventId;

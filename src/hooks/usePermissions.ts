@@ -2,7 +2,7 @@ import { useAppSelector } from "./useAppSelector";
 import type { RoleKey, ModuleKey } from "@/store/permissions.slice";
 import {
   getModuleCapabilities,
-  AUDIT_TRAIL_VIEW_ROLES,
+  computeModuleCanView,
   type ModuleCapabilities,
   type PermissionModule,
   type ApprovalTier,
@@ -62,38 +62,22 @@ function buildLegacyPermissions(role: string, gxpSignatory: boolean) {
     canSubmitFDA: isQAHead && gxpSignatory,
     canExportEvents: true,
 
-    // Governance
-    canManageRAID: !isViewer,
+    // Governance — customer_admin is read-only outside Settings, so it may read
+    // and export the risk register but never manage it (mirrors the tightened
+    // GOVERNANCE_MANAGE_ROLES / canCreateRisk server gates).
+    canManageRAID: !isViewer && !isCustomerAdmin,
     canExportReports: !isViewer,
 
-    // Training & Simulations
-    canScheduleSimulation: isQAHead || isCustomerAdmin,
+    // Training & Simulations — scheduling and scoring are BOTH QA-authority
+    // judgments. customer_admin removed from canScheduleSimulation: it may view
+    // the training programme but not schedule, score, or log against it.
+    canScheduleSimulation: isQAHead,
     canUpdateTraining: isQAHead,
     canCompleteSimulation: isQAHead,
   };
 }
 
 export type LegacyPermissions = ReturnType<typeof buildLegacyPermissions>;
-
-// Matrix-keyed modules (the others — deviation / readiness / audit-trail — are
-// not in the permissions matrix and get their canView from role-sets / nav).
-const MATRIX_MODULES = new Set<string>([
-  "dashboard", "gap", "capa", "csv", "fda483", "evidence", "agi", "governance", "settings",
-]);
-
-function computeCanView(
-  role: string,
-  module: PermissionModule,
-  matrix: Record<RoleKey, Record<ModuleKey, string>> | undefined,
-): boolean {
-  // Modules not in the matrix.
-  if (module === "deviation" || module === "readiness") return true; // nav always-on
-  if (module === "audit-trail") return AUDIT_TRAIL_VIEW_ROLES.includes(role);
-  // Matrix-driven modules: view = access level is not "none".
-  if (!MATRIX_MODULES.has(module)) return true;
-  const level = matrix?.[role as RoleKey]?.[module as ModuleKey] ?? "none";
-  return level !== "none";
-}
 
 export function usePermissions(): LegacyPermissions;
 export function usePermissions(
@@ -113,7 +97,7 @@ export function usePermissions(
 
   // New comprehensive per-module capability object.
   if (module) {
-    const canView = computeCanView(role, module, matrix);
+    const canView = computeModuleCanView(role, module, matrix);
     return getModuleCapabilities(role, gxp, canView, module, opts);
   }
 

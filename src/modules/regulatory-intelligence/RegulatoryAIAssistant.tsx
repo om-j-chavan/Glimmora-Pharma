@@ -73,7 +73,12 @@ export function RegulatoryAIAssistant({
 }) {
   // ── Context (grounds every answer) ──
   const { org } = useTenantConfig();
-  const region = org?.regulatoryRegion || "your region";
+  // A tenant can operate under several regions; the model is grounded on ALL of
+  // them, so a question about "my region" answers for the whole footprint rather
+  // than an arbitrary first entry. Raw values (FDA, EMA, …) are passed rather
+  // than display labels — they are the unambiguous codes the prompt already used.
+  const regionValues = org?.regulatoryRegions ?? [];
+  const region = regionValues.join(", ") || "your region";
   const { role } = useRole();
   const roleText = roleLabel(role);
   // Effective enabled frameworks for this tenant (server-resolved, non-persisted).
@@ -316,7 +321,11 @@ export function RegulatoryAIAssistant({
           className="flex items-center gap-2 flex-wrap px-4 py-2.5"
           style={{ borderBottom: "1px solid var(--card-border)", background: "var(--bg-base)" }}
         >
-          <ContextChip icon={Globe} label="Region" value={org?.regulatoryRegion || "Not set"} />
+          <ContextChip
+            icon={Globe}
+            label={regionValues.length === 1 ? "Region" : "Regions"}
+            value={regionValues.join(", ") || "Not set"}
+          />
           <ContextChip icon={UserRound} label="Role" value={roleText} />
           <ContextChip
             icon={Layers}

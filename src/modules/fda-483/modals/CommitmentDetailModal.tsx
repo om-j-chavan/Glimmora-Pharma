@@ -17,6 +17,7 @@ import dayjs from "@/lib/dayjs";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker } from "@/components/ui/DatePicker";
 import { DocumentUpload, type LinkedDocument } from "@/components/shared/DocumentUpload";
 import { roleLabel } from "@/lib/labels/roles";
 import type { Commitment } from "@/types/fda483";
@@ -134,8 +135,14 @@ export function CommitmentDetailModal({ open, mode, commitment, users, onClose, 
               />
             </div>
             <div>
-              <label className={labelCls} style={{ color: "var(--text-muted)" }}>Due date *</label>
-              <input type="date" className="input text-[12px] w-full" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              <label htmlFor="cm-detail-due" className={labelCls} style={{ color: "var(--text-muted)" }}>Due date *</label>
+              <DatePicker
+                id="cm-detail-due"
+                value={dueDate}
+                onChange={setDueDate}
+                required
+                placeholder="Select due date"
+              />
             </div>
           </div>
           <div>

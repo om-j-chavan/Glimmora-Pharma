@@ -67,7 +67,10 @@ export function useRole() {
     canEdit,
     canAccess,
     canSign: gxp && canEdit("capa"),
-    canCloseCapa: gxp && (role === "qa_head" || isSuperAdmin || isCustomerAdmin),
+    // customer_admin removed — closing a CAPA is a quality judgment, and the
+    // server gate (CAPA_CLOSE_ROLES = qa_head) has never accepted the tenant
+    // admin. Advertising it here only produced a button that failed server-side.
+    canCloseCapa: gxp && (role === "qa_head" || isSuperAdmin),
     canApproveDocs: gxp && canEdit("evidence"),
     canEditSettings: canEdit("settings"),
     canViewAGI: canAccessModule("agi"),

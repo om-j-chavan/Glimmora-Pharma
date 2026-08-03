@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
+import { canWriteQuality } from "@/lib/permissions/roleSets";
 import { generateReference, isReferenceConflict } from "@/lib/reference";
 import {
   CHANGE_CONTROL_RISKS,
@@ -70,9 +71,12 @@ const ALLOWED_TRANSITIONS: Record<ChangeControlStatus, ChangeControlStatus[]> = 
 
 /** Roles allowed to approve / reject / close â€” mirrors the QA-tier role
  *  set used elsewhere in the codebase. */
+// customer_admin REMOVED: approving/rejecting/closing a change control is a
+// quality judgment, and the tenant admin is read-only outside Settings
+// (isReadOnlyOutsideSettings). super_admin is retained for parity with the
+// other QA-tier sets but is blocked independently by requireGxPAuthor here.
 const QA_GATE_ROLES: ReadonlySet<string> = new Set([
   "qa_head",
-  "customer_admin",
   "super_admin",
 ]);
 
@@ -350,8 +354,11 @@ export async function createChangeControl(
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
 
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot perform this action." };
+  // canWriteQuality (not a bare viewer test) — customer_admin is read-only
+  // outside Settings, so the tenant admin may view this module but never
+  // write in it. super_admin is separately blocked by requireGxPAuthor.
+  if (!canWriteQuality(session.user.role)) {
+    return { success: false, error: "Your role does not permit this action." };
   }
 
   try {

@@ -69,7 +69,7 @@ const AddFrameworkSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   description: z.string().optional(),
   appliesToAllRegions: z.boolean().default(true),
-  // Region values (Tenant.regulatoryRegion strings) — only used when NOT global.
+  // Region values (RegulatoryRegion.value strings) — only used when NOT global.
   regions: z.array(z.string().min(1)).optional(),
   // Optional grouping label (Item #5) — display metadata.
   category: z.string().optional(),
@@ -181,7 +181,7 @@ const EditFrameworkSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   description: z.string().optional(),
   appliesToAllRegions: z.boolean().default(true),
-  // Region values (Tenant.regulatoryRegion strings) — only used when NOT global.
+  // Region values (RegulatoryRegion.value strings) — only used when NOT global.
   regions: z.array(z.string().min(1)).optional(),
   // Optional grouping label (Item #5) — display metadata; "" clears it.
   category: z.string().optional(),

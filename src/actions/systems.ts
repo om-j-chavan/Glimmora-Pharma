@@ -10,6 +10,7 @@ import {
   CSV_SYSTEM_WRITE_ROLES as SYSTEM_WRITE_ROLES,
   CSV_SYSTEM_DELETE_ROLES as SYSTEM_DELETE_ROLES,
   CSV_CREATE_ROLES,
+  canWriteCSV,
 } from "@/lib/permissions/roleSets";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
@@ -433,8 +434,11 @@ export async function submitStageForReview(stageId: string): Promise<ActionResul
   // Head, IT/CDO, admins). Read-only viewers are blocked. Granting QA Head
   // submit weakens Part 11 SoD by design; the audit entry below still records
   // the actor (userName + userRole) so every submission is attributable.
-  if (session.user.role === "viewer") {
-    return { success: false, error: "Viewers cannot submit stages for review." };
+  // canWriteQuality (not a bare viewer test) — customer_admin is read-only
+  // outside Settings, so the tenant admin may view this module but never
+  // write in it. super_admin is separately blocked by requireGxPAuthor.
+  if (!canWriteCSV(session.user.role)) {
+    return { success: false, error: "Your role does not permit submitting stages for review." };
   }
   // Load for tenant scope (IDOR guard) + status precondition (all roles).
   const stage0 = await prisma.validationStage.findFirst({

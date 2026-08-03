@@ -43,8 +43,19 @@ test("Dashboard + Governance load, agree on readiness, render multi-site, deep-l
   const dashReadinessLabel = await page.locator('a[aria-label^="Overall readiness"]').first().getAttribute("aria-label");
   const dashReadiness = dashReadinessLabel?.match(/(\d+)%/)?.[1];
   expect(dashReadiness, "Dashboard readiness value present").toBeTruthy();
-  // KPI cards present
-  await expect(page.getByRole("link", { name: /CAPA overdue/i })).toBeVisible();
+  // Role-based dashboard: customer_admin's KPI row is the TENANT view (readiness,
+  // compliance score, users, sites, licence). "CAPA overdue" moved to the QA Head
+  // dashboard, which is the role that owns CAPA timeliness — see the qa_head test
+  // below for that card and its #kpi-capa-timeliness deep link.
+  // A StatCard renders as <a aria-label="Label: value. sub"> when it carries a
+  // permitted deep link, and as role="region" aria-label="Label" when the resolver
+  // stripped it — accept either so the assertion tracks the card, not the link.
+  for (const label of ["Compliance score", "Active users", "Licence status"]) {
+    await expect(
+      page.locator(`a[aria-label^="${label}:"], [role="region"][aria-label="${label}"]`).first(),
+      `customer_admin KPI "${label}"`,
+    ).toBeVisible();
+  }
 
   /* ── Governance KPI tab loads ── */
   await page.goto("/governance?tab=kpis");
@@ -69,12 +80,12 @@ test("Dashboard + Governance load, agree on readiness, render multi-site, deep-l
   const rankingCard = page.locator("#kpi-site-readiness");
   await expect(rankingCard).toBeVisible();
 
-  /* ── Deep link: Dashboard CAPA overdue -> Governance CAPA timeliness ── */
+  /* ── Deep link: Dashboard overall readiness -> Governance site readiness ── */
   await page.goto("/");
-  await page.getByRole("link", { name: /CAPA overdue/i }).click();
-  await page.waitForURL((u) => u.pathname === "/governance" && u.hash === "#kpi-capa-timeliness", { timeout: 15_000 });
+  await page.locator('a[aria-label^="Overall readiness"]').first().click();
+  await page.waitForURL((u) => u.pathname === "/governance" && u.hash === "#kpi-site-readiness", { timeout: 15_000 });
   await expect(page.locator("#panel-kpis")).toBeVisible();
-  await expect(page.locator("#kpi-capa-timeliness")).toBeVisible();
+  await expect(page.locator("#kpi-site-readiness")).toBeVisible();
 
   /* ── Error report ── */
   const hydrationIssues = [...spies.consoleErrors, ...spies.pageErrors].filter(isHydration);

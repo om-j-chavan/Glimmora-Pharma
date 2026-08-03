@@ -11,7 +11,7 @@ import type { RegionCatalogRow } from "@/lib/queries";
 /**
  * Add a region (value + label) or edit an existing region's LABEL only. In edit
  * mode the VALUE is shown READ-ONLY — it is an immutable key (stored as a bare
- * FK in Tenant.regulatoryRegion + FrameworkRegion.region); changing it is a
+ * FK in TenantRegulatoryRegion.region + FrameworkRegion.region); changing it is a
  * separate archive-and-alias flow (SupersedeRegionModal), never an edit.
  */
 export function RegionFormModal({

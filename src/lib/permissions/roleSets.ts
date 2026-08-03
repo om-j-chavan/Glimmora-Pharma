@@ -70,6 +70,41 @@ export function canWriteQuality(role: string): boolean {
   return role !== "viewer" && role !== "customer_admin" && !isPlatformAdmin(role);
 }
 
+/* ════════════════════════════════════════════════════════════════════════════
+ * CUSTOMER ADMIN — READ-ONLY OUTSIDE SETTINGS (single source of truth)
+ *
+ * customer_admin administers the TENANT (users, sites, org config, frameworks,
+ * AGI policy, permissions) — all of which live inside the Settings module. It
+ * may NAVIGATE and VIEW every module it is authorized to see, but it must never
+ * create, edit, update, delete, approve, sign, submit or assign a record in any
+ * application module outside Settings.
+ *
+ * `canWriteQuality` above already encodes this for the GxP quality modules
+ * (Gap / Deviation / CAPA / CSV / FDA 483). This predicate is the GENERAL form,
+ * so the NON-GxP modules (Governance risk register, Management decisions,
+ * Inspection Readiness / Training) enforce the same rule instead of each
+ * inventing an "any non-viewer" gate that silently re-admits the admin.
+ *
+ * Use it for every write gate OUTSIDE Settings. Do NOT use it inside Settings —
+ * SETTINGS_MANAGE_ROLES governs there and deliberately INCLUDES customer_admin.
+ * ════════════════════════════════════════════════════════════════════════════ */
+export const READ_ONLY_OUTSIDE_SETTINGS_ROLES: readonly string[] = ["customer_admin"];
+
+/** True when the role may only VIEW application modules outside Settings. */
+export function isReadOnlyOutsideSettings(role: string): boolean {
+  return READ_ONLY_OUTSIDE_SETTINGS_ROLES.includes(role);
+}
+
+/**
+ * The general "may this role write in an application module (outside Settings)"
+ * predicate: blocks `viewer` (read-only), `customer_admin` (admin ≠ doer) and
+ * `super_admin` (platform-only). Non-GxP modules should gate on THIS rather than
+ * on a bare `role !== "viewer"`.
+ */
+export function canWriteOutsideSettings(role: string): boolean {
+  return role !== "viewer" && !isReadOnlyOutsideSettings(role) && !isPlatformAdmin(role);
+}
+
 /**
  * TENANT-WIDE / site-less-by-design roles — they see ALL sites, so a single-site
  * assignment is neither required nor meaningful. Mirrors the "sees all sites"
@@ -219,6 +254,62 @@ export const FDA483_DELETE_ROLES: readonly string[] = ["qa_head"];
  *   unchanged (Phases 3-5 own those). */
 export const CAPA_MODULE_VIEW_ROLES: readonly string[] = ["qa_head", "customer_admin"];
 
+/* ════════════════════════════════════════════════════════════════════════════
+ * MODULE VIEW GATES — nav visibility AND route authorization, one definition.
+ *
+ * These answer "may this role SEE the module at all", which is a DIFFERENT and
+ * strictly coarser question than the per-action capability gates below. Both the
+ * Sidebar (hiding the entry) and each route's `requireRoleOrDeny` (blocking a
+ * typed URL) read these SAME sets, so a hidden nav item can never be reachable
+ * by direct navigation — hiding the link is presentation, the route gate is the
+ * security boundary.
+ *
+ * The permissions MATRIX (store/permissions.slice) is deliberately NOT the
+ * authority here: it is client-side localStorage state, so a user could edit it
+ * and re-show an entry. These role sets are compiled in and read server-side.
+ *
+ * super_admin is absent from every set: it is walled to /admin by the (app)
+ * layout and must never browse tenant compliance modules.
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/** CSV/CSA Validation — the CSV doer, QA authority, and the tenant admin (view-only). */
+export const CSV_MODULE_VIEW_ROLES: readonly string[] = ["qa_head", "customer_admin", "csv_val_lead"];
+export function canViewCSV(role: string): boolean {
+  return CSV_MODULE_VIEW_ROLES.includes(role);
+}
+
+/** Inspection Readiness / Training & Awareness — quality-oversight identities only. */
+export const READINESS_VIEW_ROLES: readonly string[] = ["qa_head", "customer_admin"];
+export function canViewReadiness(role: string): boolean {
+  return READINESS_VIEW_ROLES.includes(role);
+}
+
+/** Inspections & Regulatory (FDA 483) — RA owns regulator comms; QA + admin oversee. */
+export const FDA483_VIEW_ROLES: readonly string[] = ["qa_head", "customer_admin", "regulatory_affairs"];
+export function canViewFDA483(role: string): boolean {
+  return FDA483_VIEW_ROLES.includes(role);
+}
+
+/* ── Module-scoped WRITE gates ────────────────────────────────────────────────
+ * A write gate must be the INTERSECTION of "can see the module" and "may write
+ * quality records". The broad `canWriteQuality` alone is NOT sufficient for a
+ * view-restricted module: it returns true for every functional seat role, so a
+ * role that can no longer OPEN the module would still pass the server check if
+ * it invoked the Server Action directly (action ids are client-reachable — a
+ * hidden UI is not an authorization boundary). Composing with the view gate
+ * closes that path, and keeps one definition behind both.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** CSV/CSA writes — the intersection is csv_val_lead + qa_head. */
+export function canWriteCSV(role: string): boolean {
+  return canViewCSV(role) && canWriteQuality(role);
+}
+
+/** FDA 483 writes — the intersection is qa_head + regulatory_affairs. */
+export function canWriteFDA483(role: string): boolean {
+  return canViewFDA483(role) && canWriteQuality(role);
+}
+
 /* ── CAPA action EXECUTORS ── Who may be ASSIGNED a CAPA action item (drives the
  *  "Assigned To" dropdown AND the addActionItem/updateActionItem server gate).
  *  Deliberately EXCLUDES qa_head (QA AUTHORITY assigns/approves work — it does
@@ -275,7 +366,13 @@ export const PERMISSION_MATRIX_EDIT_ROLES: readonly string[] = ["super_admin"];
  * Governance is non-GxP, so `requireGxPAuthor` does NOT apply and super_admin
  * is a legitimate manager here (unlike the GxP-authoring modules).
  * ══════════════════════════════════════════════════════════════════════════ */
-export const GOVERNANCE_MANAGE_ROLES: readonly string[] = ["customer_admin", "super_admin", "qa_head"];
+// customer_admin REMOVED — it is read-only outside Settings
+// (isReadOnlyOutsideSettings). Governance is an application module, so the
+// tenant admin browses the risk register and management decisions but may not
+// edit or archive them. qa_head is the tenant quality authority that manages
+// them; super_admin stays (governance is non-GxP, so requireGxPAuthor does not
+// apply) though it is walled to /admin in practice.
+export const GOVERNANCE_MANAGE_ROLES: readonly string[] = ["super_admin", "qa_head"];
 
 /* ── Governance module VIEW gate (nav visibility + /governance route) ─────────
  * DISTINCT from GOVERNANCE_MANAGE_ROLES. The module is restricted to the two
@@ -293,9 +390,20 @@ export function canManageGovernance(role: string): boolean {
   return GOVERNANCE_MANAGE_ROLES.includes(role);
 }
 
-/** CREATE: raise a risk. Any non-viewer — seat roles included, by design. */
+/**
+ * CREATE: raise a risk. Composed of the Governance module VIEW gate AND the
+ * write gate, for the same reason canWriteCSV/canWriteFDA483 are composed: the
+ * module is now restricted to qa_head + customer_admin, so a seat role that
+ * cannot open Governance must not be able to raise a risk by invoking the
+ * Server Action directly. customer_admin is filtered out by the write half
+ * (read-only outside Settings), leaving qa_head (+ super_admin oversight).
+ *
+ * This REPLACES the previous "any non-viewer, seat roles included" rule — that
+ * rule predates Governance becoming a view-restricted module.
+ */
 export function canCreateRisk(role: string): boolean {
-  return role !== "viewer";
+  if (isPlatformAdmin(role)) return true;
+  return canViewGovernance(role) && canWriteOutsideSettings(role);
 }
 
 /* ── Management Decisions (Governance Phase 3) ──────────────────────────────
@@ -308,9 +416,12 @@ export function canCreateRisk(role: string): boolean {
  *   • ARCHIVE                            — manage roles ONLY, for any meeting.
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** CREATE: minute a management review. Any non-viewer — seat roles included. */
+/** CREATE: minute a management review. Same composition as canCreateRisk — the
+ *  Governance module view gate AND the write gate — so a role that cannot open
+ *  Governance cannot minute a review via a direct Server Action call either. */
 export function canCreateManagementDecision(role: string): boolean {
-  return role !== "viewer";
+  if (isPlatformAdmin(role)) return true;
+  return canViewGovernance(role) && canWriteOutsideSettings(role);
 }
 
 /**
@@ -377,11 +488,33 @@ export function canEditRisk(
   return risk.createdById === actorUserId || risk.ownerId === actorUserId;
 }
 
-/* ── Inspection Readiness ── non-GxP; admin actions = QA Head / admins ── */
-export const READINESS_ADMIN_ROLES: readonly string[] = ["qa_head", "customer_admin", "super_admin"];
+/* ── Inspection Readiness ── non-GxP. WRITE actions (create/complete an
+ *   inspection, schedule/score a simulation, log training, complete a readiness
+ *   action) are the QA authority's. customer_admin REMOVED — it may VIEW the
+ *   module (READINESS_VIEW_ROLES) but is read-only outside Settings. ── */
+export const READINESS_ADMIN_ROLES: readonly string[] = ["qa_head", "super_admin"];
 
-/* ── Audit Trail ── view gate (route requireRoleOrDeny) ── */
+/**
+ * WRITE gate for every Inspection Readiness / Training action — creating or
+ * completing an inspection, completing a readiness action, scheduling or scoring
+ * a simulation, logging or completing a training record.
+ *
+ * Replaces the per-action `role === "viewer"` blocks those server actions used
+ * to carry. A bare viewer test was too WIDE in both directions after this
+ * change: it admitted customer_admin (now read-only outside Settings) and every
+ * functional seat role (which can no longer even see the module), so the server
+ * accepted writes the UI and the route both deny.
+ */
+export function canWriteReadiness(role: string): boolean {
+  return READINESS_ADMIN_ROLES.includes(role);
+}
+
+/* ── Audit Trail ── view gate (route requireRoleOrDeny). Part of the
+ *   "Readiness & Governance" nav group, so it shares its view audience. ── */
 export const AUDIT_TRAIL_VIEW_ROLES: readonly string[] = ["qa_head", "customer_admin", "super_admin"];
+export function canViewAuditTrail(role: string): boolean {
+  return AUDIT_TRAIL_VIEW_ROLES.includes(role);
+}
 
 /* ════════════════════════════════════════════════════════════════════════════
  * RESPONSIBILITY-MAP role-sets — 21 CFR Part 11 segregation of duties enforced at
@@ -509,6 +642,43 @@ export function canReportDeviation(role: string): boolean {
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
+ * MODULE VIEW RESOLUTION — ONE definition, used by every client surface.
+ *
+ * Both `usePermissions(module)` and `useDashboardAccess()` need to answer "can
+ * this role see this module". They used to compute it independently, and both
+ * read the permissions MATRIX for csv / fda483 / readiness — which is exactly
+ * how the sidebar, the dashboard tiles and the route guards drifted apart.
+ *
+ * Resolution order:
+ *   1. Role-set-gated modules answer from the compiled-in sets above (the same
+ *      ones the server route guards use). The matrix cannot override these.
+ *   2. Everything else falls back to the matrix access level (!== "none").
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/** Modules whose view level comes from the permissions matrix. */
+export const MATRIX_MODULES: ReadonlySet<string> = new Set([
+  "dashboard", "gap", "capa", "csv", "fda483", "evidence", "agi", "governance", "settings",
+]);
+
+export function computeModuleCanView(
+  role: string,
+  module: PermissionModule,
+  matrix: Record<string, Record<string, string>> | undefined,
+): boolean {
+  // 1. Role-set-gated modules — authoritative, matrix-proof.
+  if (module === "csv") return canViewCSV(role);
+  if (module === "fda483") return canViewFDA483(role);
+  if (module === "readiness") return canViewReadiness(role);
+  if (module === "governance") return canViewGovernance(role);
+  if (module === "audit-trail") return canViewAuditTrail(role);
+  if (module === "capa") return CAPA_MODULE_VIEW_ROLES.includes(role);
+  // 2. Not matrix-keyed and not role-set gated (e.g. deviation) — nav always-on.
+  if (!MATRIX_MODULES.has(module)) return true;
+  // 3. Matrix-driven.
+  return (matrix?.[role]?.[module] ?? "none") !== "none";
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
  * Per-module capability computation — the comprehensive mirror of the server
  * role-sets above, consumed by usePermissions(module). Pure function: same
  * inputs → same output, no React/Redux. canView is passed in by the hook
@@ -632,7 +802,10 @@ export function getModuleCapabilities(
     case "governance":
       return {
         canView,
-        canCreate: role !== "viewer",
+        // canCreateRisk (not a bare non-viewer test) so the "Raise risk" /
+        // "Minute a review" buttons match the server gate — customer_admin is
+        // read-only here.
+        canCreate: canCreateRisk(role),
         canEdit: has(GOVERNANCE_MANAGE_ROLES),
         canApprove: false,
         canSign: false,

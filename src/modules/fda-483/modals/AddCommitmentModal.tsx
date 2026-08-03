@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker } from "@/components/ui/DatePicker";
 import { roleLabel } from "@/lib/labels/roles";
 
 // Internal form shape. linkType drives which (optional) source id applies;
@@ -208,10 +209,20 @@ export function AddCommitmentModal({ open, onClose, onSave, users, observations,
           </div>
           <div>
             <label htmlFor="cm-due" className={labelCls} style={{ color: "var(--text-muted)" }}>Due date *</label>
-            <input id="cm-due" type="date" className="input text-[12px] w-full" {...form.register("dueDate")} />
-            {form.formState.errors.dueDate && (
-              <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{form.formState.errors.dueDate.message}</p>
-            )}
+            <Controller
+              name="dueDate"
+              control={form.control}
+              render={({ field }) => (
+                <DatePicker
+                  id="cm-due"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  required
+                  placeholder="Select due date"
+                  error={form.formState.errors.dueDate?.message}
+                />
+              )}
+            />
           </div>
         </div>
 

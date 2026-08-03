@@ -13,13 +13,13 @@ import {
   PauseCircle,
   PlayCircle,
   RefreshCw,
-  Globe,
 } from "lucide-react";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { updateTenant as updateTenantLocal } from "@/store/auth.slice";
-import { regulatoryRegionLabel, GLOBAL_REGION_VALUE } from "@/constants/regulatoryRegions";
+import { GLOBAL_REGION_VALUE } from "@/constants/regulatoryRegions";
 import { toggleTenantMFA } from "@/actions/tenants";
+import { RegulatoryRegionBadges } from "@/components/shared";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
@@ -175,34 +175,25 @@ export function CustomerDetailPage() {
               </p>
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Regulatory Region</p>
-              <p className="text-[14px] font-medium flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
-                <Globe className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
-                {(() => {
-                  const value = tenant.config.org.regulatoryRegion;
-                  if (!value) return <span style={{ color: "var(--text-muted)" }}>—</span>;
-                  const label = regulatoryRegionLabel(value, regionLabelMap);
-                  // Link to the region's page in the merged Regions & Frameworks
-                  // module. The [value] route resolves active, GLOBAL, AND
-                  // archived regions (getRegionCatalog includes archived), so any
-                  // region known to the label map (all regions incl. archived) is
-                  // reachable. GLOBAL is always linkable. A value with no region
-                  // row (purged/unknown edge) degrades to plain text.
-                  const reachable = value === GLOBAL_REGION_VALUE || value in regionLabelMap;
-                  return reachable ? (
-                    <Link
-                      href={`/admin/regions/${encodeURIComponent(value)}`}
-                      className="hover:underline"
-                      style={{ color: "var(--brand)" }}
-                      title={`Open ${label} in Regions & Frameworks`}
-                    >
-                      {label}
-                    </Link>
-                  ) : (
-                    <span>{label}</span>
-                  );
-                })()}
+              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>
+                {tenant.config.org.regulatoryRegions.length === 1 ? "Regulatory Region" : "Regulatory Regions"}
               </p>
+              {/* Each region is its own chip — a tenant can hold several, and a
+                  comma-joined sentence stops being scannable at three. Each links
+                  into the Regions & Frameworks module: the [value] route resolves
+                  active, GLOBAL AND archived regions (getRegionCatalog includes
+                  archived), so any region known to the label map is reachable. A
+                  value with no region row (purged/unknown edge) degrades to a
+                  plain, unlinked chip. */}
+              <RegulatoryRegionBadges
+                values={tenant.config.org.regulatoryRegions}
+                labelMap={regionLabelMap}
+                hrefFor={(value) =>
+                  value === GLOBAL_REGION_VALUE || value in regionLabelMap
+                    ? `/admin/regions/${encodeURIComponent(value)}`
+                    : null
+                }
+              />
             </div>
           </div>
         </div>

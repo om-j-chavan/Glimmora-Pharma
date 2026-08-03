@@ -280,14 +280,23 @@ async function main() {
   }
   console.log("  Extra tier tenants:", extraTenants.map((t) => `${t.code}(${t.tier})`).join(", "));
 
-  // Assign Helios to the EMA region so the region archive → auto-reassign
-  // scenario (Stage 3) has a real in-use region to demonstrate. Idempotent:
-  // only backfills when unset, so a later admin change is never clobbered.
-  const heliosReassigned = await prisma.tenant.updateMany({
-    where: { email: "admin@helios.test", regulatoryRegion: null },
-    data: { regulatoryRegion: "EMA" },
+  // Give Helios the EMA + MHRA regions so the multi-region path (and the region
+  // archive → reassign scenario) has a real multi-region tenant to demonstrate.
+  // Idempotent: only seeds a tenant that has NO regions yet, so a later admin
+  // change is never clobbered.
+  const helios = await prisma.tenant.findUnique({
+    where: { email: "admin@helios.test" },
+    select: { id: true, _count: { select: { regulatoryRegions: true } } },
   });
-  if (heliosReassigned.count) console.log("  Helios → EMA region assigned");
+  if (helios && helios._count.regulatoryRegions === 0) {
+    await prisma.tenantRegulatoryRegion.createMany({
+      data: [
+        { tenantId: helios.id, region: "EMA" },
+        { tenantId: helios.id, region: "MHRA" },
+      ],
+    });
+    console.log("  Helios → EMA + MHRA regions assigned");
+  }
 
   // ── Sites ──
   // Upsert keyed on (tenantId, name) so re-seeding doesn't duplicate rows.
@@ -1188,7 +1197,7 @@ async function main() {
   // ── Regulatory regions (Item #3, parity-critical) ──
   // Seed the RegulatoryRegion lookup from the load-bearing REGULATORY_REGIONS
   // constant so the DB reproduces the EXACT 8 value strings that Tenant.
-  // regulatoryRegion + FrameworkRegion.region already reference. Idempotent by
+  // TenantRegulatoryRegion + FrameworkRegion.region already reference. Idempotent by
   // value; `update: {}` never clobbers an admin-edited label on re-seed.
   for (const r of REGULATORY_REGIONS) {
     await prisma.regulatoryRegion.upsert({

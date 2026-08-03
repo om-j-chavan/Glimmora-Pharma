@@ -397,6 +397,9 @@ export function ValidationPanel({
         fileType: file?.type,
         fileSize: file?.size,
         file,
+        // Upload path passes the live File; a re-scan from the document list
+        // has none, so the gateway re-fetches the bytes by StageDocument id.
+        documentId: docId,
         token,
       });
       setReviews((p) => ({ ...p, [docId]: res }));

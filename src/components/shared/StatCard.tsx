@@ -9,8 +9,12 @@ interface StatCardProps {
   sub: string;
   /**
    * Optional deep link — when set the whole card becomes a keyboard-focusable
-   * link (used to jump from a Dashboard KPI to its Governance scorecard
+   * link (a Dashboard KPI jumping to its owning module or Governance scorecard
    * section). Omit for a plain, non-interactive stat card (unchanged behaviour).
+   *
+   * The role-based dashboard STRIPS this prop when the viewer may not open the
+   * target module, so an absent href is a deliberate authorisation outcome as
+   * well as a styling choice.
    */
   href?: string;
 }
@@ -31,7 +35,9 @@ export function StatCard({ icon: Icon, color, label, value, sub, href }: StatCar
     return (
       <Link
         href={href}
-        aria-label={`${label}: ${value}. View in Governance scorecard`}
+        // Announce the metric and its context rather than naming one specific
+        // destination — KPI cards now link to whichever module owns the metric.
+        aria-label={`${label}: ${value}. ${sub}`}
         className="stat-card block no-underline transition-shadow hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-(--brand)"
       >
         {body}

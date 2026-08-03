@@ -29,6 +29,7 @@ import { store } from "@/store";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
+import { canWriteReadiness } from "@/lib/permissions/roleSets";
 import {
   addCard, updateCard, addSimulation, updateSimulation, addTraining,
   setActiveInspection,
@@ -195,7 +196,12 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
     () => prismaInspections.find((i) => i.id === activeInspectionId) ?? null,
     [prismaInspections, activeInspectionId],
   );
-  const isAdmin = role === "qa_head" || role === "super_admin" || role === "customer_admin";
+  // Readiness WRITE audience. customer_admin is DELIBERATELY excluded — it may
+  // view the whole module (READINESS_VIEW_ROLES gates the route) but is
+  // read-only outside Settings, so every write control below stays hidden for
+  // it. This is the same predicate the readiness server actions enforce, so a
+  // visible button can never fail server-side and vice versa.
+  const isAdmin = canWriteReadiness(role);
 
   const inProgressCount = tenantCards.filter((c) => c.status === "In Progress").length;
   const overdueCount = tenantCards.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length;
@@ -470,7 +476,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         title="Inspection Readiness Program"
         contentPadding={true}
         description={`Prepare for inspections through readiness assessments and gap closure.${activeInspection ? ` \u00b7 ${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready` : ""}`}
-        actions={role !== "viewer" ? [{ label: "Add action", variant: "primary", icon: Plus, onClick: () => setAddCardOpen(true) }] : []}
+        actions={isAdmin ? [{ label: "Add action", variant: "primary", icon: Plus, onClick: () => setAddCardOpen(true) }] : []}
         headerRight={
           /* The readiness-score chip is a display widget, not a PageAction.
              Shown only when an inspection is selected \u2014 no misleading 0%. */
