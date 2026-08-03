@@ -1197,6 +1197,11 @@ export async function updateCAPA(
         }
       : {};
 
+    // SoD (CAPA lifecycle rework) — stamp the RCA author whenever the rca/rcaMethod
+    // text actually changes, so editor ≠ approver (reviewRCA) and closer ≠ RCA
+    // author (signAndCloseCAPA) enforce against the REAL last editor.
+    const rcaAuthorData = (rcaChanged || rcaMethodChanged) ? { rcaEditedById: actor.userId } : {};
+
     // Phase 3 — keep the driver FK in step with the owner string whenever
     // owner is part of this update (resolved/cleared accordingly).
     const ownerIdUpdate =
@@ -1222,6 +1227,7 @@ export async function updateCAPA(
         ...(parsed.data.dueDate ? { dueDate: new Date(parsed.data.dueDate) } : {}),
         ...(parsed.data.owner !== undefined ? { ownerId: ownerIdUpdate } : {}),
         ...rcaInvalidateData,
+        ...rcaAuthorData,
         ...diGateData,
       },
     });

@@ -57,6 +57,7 @@ const STATUS_LABEL: Record<CAPAActionItem["status"], string> = {
   skipped: "Skipped",
   rework: "Rework",
   accepted: "Accepted",
+  cancelled: "Cancelled",
 };
 
 const STATUS_VARIANT: Record<CAPAActionItem["status"], BadgeVariant> = {
@@ -68,6 +69,9 @@ const STATUS_VARIANT: Record<CAPAActionItem["status"], BadgeVariant> = {
   // Phase 5 — distinct from complete (green): "worker finished" (complete) and
   // "QA reviewed it" (accepted) are different facts. blue exists in BadgeVariant.
   accepted: "blue",
+  // CAPA lifecycle rework — QA-voided assignment; neutral/settled (like skipped
+  // it no longer blocks closure).
+  cancelled: "gray",
 };
 
 export function ActionItemsSection({ capa, ownerFilter }: { capa: CAPA; ownerFilter?: string | null }) {

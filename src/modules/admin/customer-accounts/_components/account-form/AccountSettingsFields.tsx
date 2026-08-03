@@ -94,6 +94,21 @@ export function AccountSettingsFields({ form, set, mode, isSuperAdmin, regionErr
             />
           </div>
         )}
+
+        {/* Single-QA SoD override — super_admin only. Org attests it runs with one
+            QA; each waived CAPA SoD step is justified, signed where applicable, and
+            audited. Default OFF. (Phase 0 persists the flag; no gate reads it yet.) */}
+        {isSuperAdmin && (
+          <div className="rounded-lg border p-3" style={{ borderColor: "var(--bg-border)" }}>
+            <Toggle
+              id="toggle-sod-override"
+              label="Single-QA SoD override (org attests one QA)"
+              description="Lets one QA complete separation-of-duties CAPA steps themselves. Each waived step still requires a justification, an e-signature where the step is signed, and a distinct audit entry. Leave OFF unless this org genuinely operates with a single QA."
+              checked={form.sodSingleQAOverride}
+              onChange={(v) => set("sodSingleQAOverride", v)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

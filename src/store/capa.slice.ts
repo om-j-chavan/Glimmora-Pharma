@@ -103,6 +103,31 @@ export interface CAPA {
   // only — schema lacks createdById today.
   createdBy?: string;
   createdAt: string;
+  // CAPA Single-QA SoD override (Phase 2 UI) — server-computed, attached by the
+  // getCAPA detail loader. `sodReveal` mirrors the Phase-1 gate self-checks for the
+  // CURRENT user (so the UI reveals an override input only when the server would
+  // accept one); `sodOverrides` are the waivers actually used, shown on-record.
+  sodReveal?: {
+    flagOn: boolean;
+    isCritical: boolean;
+    rcaApproval: boolean;
+    rcaEditor: boolean;
+    rcaRejectionOverride: boolean;
+    alignmentOverride: boolean;
+    closeCreator: boolean;
+    closeRcaAuthor: boolean;
+    effectiveness: boolean;
+  };
+  sodOverrides?: Array<{
+    id: string;
+    control: string;
+    actorName: string;
+    actorRole: string;
+    reasonCode: string;
+    justification: string;
+    signedRecordId: string | null;
+    createdAt: string;
+  }>;
   // SME Section 1, Stage 2 (FULL) — bidirectional CAPA↔Deviation link.
   // Populated when the row was hydrated via getCAPA / getCAPAs (which
   // include the new deviation relation). Renders the "Linked deviation"

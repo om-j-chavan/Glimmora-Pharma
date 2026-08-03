@@ -62,6 +62,7 @@ export {
   loadActionItemsForCAPA,
   acceptWork,
   sendWorkBack,
+  cancelTask,
   skipTask,
   reassignTask,
   nudgeActionItemOwner,

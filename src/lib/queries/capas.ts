@@ -1,6 +1,89 @@
 import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
+import { normalizeSeverityForDisplay } from "@/lib/severity";
+
+/* ── CAPA Single-QA SoD override (Phase 2 UI) ──────────────────────────────── */
+
+/** One waiver row used on a CAPA (inspector-facing on-record list). */
+export interface CAPASODOverrideRow {
+  id: string;
+  control: string;
+  actorName: string;
+  actorRole: string;
+  reasonCode: string;
+  justification: string;
+  signedRecordId: string | null;
+  createdAt: string;
+}
+
+/** Whether the CURRENT user would trip each gate's self-check on this CAPA, plus
+ *  the tenant flag + Critical hard-floor — computed SERVER-SIDE so the UI reveal
+ *  mirrors the Phase-1 gates exactly (the store CAPA lacks createdById/rcaEditedById). */
+export interface CAPASODReveal {
+  flagOn: boolean;
+  isCritical: boolean;
+  rcaApproval: boolean;
+  rcaEditor: boolean;
+  rcaRejectionOverride: boolean;
+  alignmentOverride: boolean;
+  closeCreator: boolean;
+  closeRcaAuthor: boolean;
+  effectiveness: boolean;
+}
+
+export const getCAPASODOverrides = cache(async (capaId: string, tenantId: string): Promise<CAPASODOverrideRow[]> => {
+  const rows = await prisma.cAPASODOverride.findMany({
+    where: { capaId, tenantId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, control: true, actorName: true, actorRole: true, reasonCode: true, justification: true, signedRecordId: true, createdAt: true },
+  });
+  return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+});
+
+export const getCAPASODReveal = cache(
+  async (capaId: string, tenantId: string, userId: string, userName: string): Promise<CAPASODReveal> => {
+    const [capa, tenant] = await Promise.all([
+      prisma.cAPA.findFirst({
+        where: { id: capaId, tenantId },
+        select: {
+          risk: true, createdById: true, createdBy: true, rcaEditedById: true,
+          rcaReviewedById: true, alignmentReviewedById: true,
+          closureSignatureId: true, verificationSignatureId: true,
+        },
+      }),
+      prisma.tenant.findUnique({ where: { id: tenantId }, select: { sodSingleQAOverride: true } }),
+    ]);
+    const flagOn = tenant?.sodSingleQAOverride === true;
+    const base: CAPASODReveal = {
+      flagOn, isCritical: false, rcaApproval: false, rcaEditor: false, rcaRejectionOverride: false,
+      alignmentOverride: false, closeCreator: false, closeRcaAuthor: false, effectiveness: false,
+    };
+    if (!capa) return base;
+    // Mirror the server: createdById FK, with the display-name fallback for legacy
+    // rows whose createdById is null.
+    const isCreator = capa.createdById ? capa.createdById === userId : !!capa.createdBy && capa.createdBy === userName;
+    const isRcaEditor = !!capa.rcaEditedById && capa.rcaEditedById === userId;
+    // Effectiveness self = the user signed the closure or verification (SoD there).
+    let effectiveness = false;
+    const sigIds = [capa.closureSignatureId, capa.verificationSignatureId].filter((v): v is string => !!v);
+    if (sigIds.length) {
+      const sigs = await prisma.signedRecord.findMany({ where: { id: { in: sigIds } }, select: { signerId: true } });
+      effectiveness = sigs.some((s) => s.signerId === userId);
+    }
+    return {
+      flagOn,
+      isCritical: normalizeSeverityForDisplay(capa.risk, "generic") === "Critical",
+      rcaApproval: isCreator,
+      rcaEditor: isRcaEditor,
+      rcaRejectionOverride: !!capa.rcaReviewedById && capa.rcaReviewedById === userId,
+      alignmentOverride: !!capa.alignmentReviewedById && capa.alignmentReviewedById === userId,
+      closeCreator: isCreator,
+      closeRcaAuthor: isRcaEditor,
+      effectiveness,
+    };
+  },
+);
 
 // SME Section 1, Stage 2 (FULL) — include shape for the bidirectional
 // CAPA↔Deviation link. Reused by both list and detail queries so the

@@ -13,6 +13,12 @@ import {
 } from "@/lib/signing";
 import { readSigningProvenance } from "@/actions/capas/_shared";
 import { SIGNING_AUDIT_MODULE } from "@/actions/capas/_types";
+import {
+  tenantSodOverrideOn,
+  evaluateDeviationSodOverride,
+  writeDeviationSodOverride,
+  type DeviationSodControl,
+} from "@/actions/capas/sod-override";
 import { buildReferencePrefix, generateReference, isReferenceConflict } from "@/lib/reference";
 import { FDA_SEVERITY, coerceSeverityCasing, normalizeSeverityForDisplay } from "@/lib/severity";
 import { INVESTIGATION_RCA_METHODS } from "@/constants/rcaMethods";
@@ -102,6 +108,11 @@ const CloseDeviationSchema = z.object({
   password: z.string().min(1, "Password is required to sign"),
   // Part 11 — a closure MESSAGE is required (records the meaning of the signature).
   notes: z.string().min(5, "A closure message (at least 5 characters) is required").max(2000),
+  // Single-QA SoD override (Phase 1) — supplied ONLY when a close identity self-check
+  // fires with Tenant.sodSingleQAOverride ON and the deviation is non-Critical/Major.
+  // Never removes the e-signature; recorded as a DeviationSODOverride waiver.
+  sodOverrideReasonCode: z.string().optional(),
+  sodOverrideJustification: z.string().optional(),
 });
 
 // Stage 2 (deviation redesign) — default triage priority from FDA severity.
@@ -443,8 +454,35 @@ export async function closeDeviation(
     where: { deviationId: id, tenantId: session.user.tenantId, deletedAt: null, status: { notIn: ["closed", "cancelled"] } },
     select: { id: true, assigneeId: true, status: true },
   });
-  if (activeTask?.assigneeId && activeTask.assigneeId === actor.userId) {
-    return { success: false, error: "Separation of duties: the task assignee cannot also sign its closure. A different QA Head must close it." };
+  // ── Single-QA SoD override (Phase 1) ─────────────────────────────────────
+  // The three identity checks (task-assignee here, reporter + investigator below)
+  // are each WAIVABLE when Tenant.sodSingleQAOverride is ON and the deviation is
+  // non-Critical/Major — but ONLY with a recorded reason code + justification, and
+  // the e-signature is NEVER removed (the waiver rows are written inside the same
+  // password-verified SignedRecord transaction). Compute the self-checks up front;
+  // read the flag only if at least one fires, so the flag-OFF / no-self paths stay
+  // byte-for-byte unchanged and add no query. A closer who trips multiple checks
+  // yields one DeviationSODOverride row per waived control.
+  const reporterSelf = !!existing.createdById && existing.createdById === actor.userId;
+  const investigatorSelf =
+    !!existing.investigationCompletedById && existing.investigationCompletedById === actor.userId;
+  const assigneeSelf = !!activeTask?.assigneeId && activeTask.assigneeId === actor.userId;
+  const sodFlagOn =
+    reporterSelf || investigatorSelf || assigneeSelf
+      ? await tenantSodOverrideOn(session.user.tenantId)
+      : false;
+  const waivedControls: Array<{ control: DeviationSodControl; reasonCode: string; justification: string }> = [];
+
+  if (assigneeSelf) {
+    const decision = evaluateDeviationSodOverride({
+      severity: existing.severity,
+      flagOn: sodFlagOn,
+      existingBlockError:
+        "Separation of duties: the task assignee cannot also sign its closure. A different QA Head must close it.",
+      input: parsed.data,
+    });
+    if (!decision.proceed) return { success: false, error: decision.error };
+    waivedControls.push({ control: "DEV_CLOSE_ASSIGNEE", reasonCode: decision.reasonCode, justification: decision.justification });
   }
 
   // ── Lifecycle precondition (finding #2) ──────────────────────────────────
@@ -481,11 +519,27 @@ export async function closeDeviation(
   // nor the investigator — mirroring guardCapaDecision. Compared on the
   // authoritative User FK (actor.userId), the value these columns are STORED as
   // (finding #3). The task-assignee check above covers the low-priority path.
-  if (existing.createdById && existing.createdById === actor.userId) {
-    return { success: false, error: "Separation of duties: the reporter of a deviation cannot sign its closure. A different QA Head must close it." };
+  if (reporterSelf) {
+    const decision = evaluateDeviationSodOverride({
+      severity: existing.severity,
+      flagOn: sodFlagOn,
+      existingBlockError:
+        "Separation of duties: the reporter of a deviation cannot sign its closure. A different QA Head must close it.",
+      input: parsed.data,
+    });
+    if (!decision.proceed) return { success: false, error: decision.error };
+    waivedControls.push({ control: "DEV_CLOSE_REPORTER", reasonCode: decision.reasonCode, justification: decision.justification });
   }
-  if (existing.investigationCompletedById && existing.investigationCompletedById === actor.userId) {
-    return { success: false, error: "Separation of duties: the investigator cannot sign the closure of their own investigation. A different QA Head must close it." };
+  if (investigatorSelf) {
+    const decision = evaluateDeviationSodOverride({
+      severity: existing.severity,
+      flagOn: sodFlagOn,
+      existingBlockError:
+        "Separation of duties: the investigator cannot sign the closure of their own investigation. A different QA Head must close it.",
+      input: parsed.data,
+    });
+    if (!decision.proceed) return { success: false, error: decision.error };
+    waivedControls.push({ control: "DEV_CLOSE_INVESTIGATOR", reasonCode: decision.reasonCode, justification: decision.justification });
   }
 
   // SME Section 1, Stage 1 â€” CAPA Decision Gate.
@@ -642,6 +696,25 @@ export async function closeDeviation(
             closureSignatureId: sig.id,
           },
         });
+        // Single-QA SoD override (Phase 1) — one waiver row + audit per waived
+        // identity check, linked to THIS closure signature, atomic with the close.
+        // Empty on the normal path (no query, no rows). The signature above is
+        // never conditional on the waiver — identity-independence is waived, the
+        // e-signature is not.
+        for (const w of waivedControls) {
+          await writeDeviationSodOverride(tx, {
+            tenantId: session.user.tenantId,
+            deviationId: existing.id,
+            control: w.control,
+            actorUserId: actor.userId,
+            actorName: actor.displayName,
+            actorRole: actor.role,
+            reasonCode: w.reasonCode,
+            justification: w.justification,
+            recordTitle: existing.title,
+            signedRecordId: sig.id,
+          });
+        }
         // Stage 4 (deviation redesign) — complete the linked low-priority task
         // on the signed close (the deviation IS the regulated record; the task
         // work was lightweight). SoD was enforced above. Atomic with the close.

@@ -68,6 +68,7 @@ import { EffectivenessCriteriaPanel } from "./tabs/EffectivenessCriteriaPanel";
 import { SubmissionChecklist } from "./modals/components/SubmissionChecklist";
 import { ReadinessCopilotPanel } from "./modals/components/ReadinessCopilotPanel";
 import { FlowExplainer } from "./components/FlowExplainer";
+import { SodOverrideBadge, SodOverrideSummary } from "./components/SodOverrideNotes";
 import { SignCloseModal } from "./modals/SignCloseModal";
 import { EditCAPAModal, type EditForm } from "./modals/EditCAPAModal";
 import { getNextStep, type DetailSubTab } from "./modals/helpers/getNextStep";
@@ -303,9 +304,9 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
     setOkMsg("Returned for rework."); router.refresh();
   }
 
-  async function handleSignClose(data: { meaning: string; password: string; effectivenessConfirmed: boolean; closingNotes: string }) {
+  async function handleSignClose(data: { meaning: string; password: string; effectivenessConfirmed: boolean; closingNotes: string; sodOverrideReasonCode?: string; sodOverrideJustification?: string }) {
     setSignBusy(true); setSignError(null);
-    const res = await signAndCloseCAPAServer(capa.id, { password: data.password, signatureMeaning: data.meaning, effectivenessConfirmed: data.effectivenessConfirmed, closingNotes: data.closingNotes });
+    const res = await signAndCloseCAPAServer(capa.id, { password: data.password, signatureMeaning: data.meaning, effectivenessConfirmed: data.effectivenessConfirmed, closingNotes: data.closingNotes, sodOverrideReasonCode: data.sodOverrideReasonCode, sodOverrideJustification: data.sodOverrideJustification });
     setSignBusy(false);
     if (!res.success) { setSignError(res.error || "Sign & close failed."); return; }
     setSignOpen(false); setOkMsg("CAPA signed and closed."); router.refresh();
@@ -493,6 +494,8 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
           <Lock className="w-4 h-4" aria-hidden="true" />
           Closed{capa.closedBy ? ` by ${displayUserName(capa.closedBy, users)}` : ""}{capa.closedAt ? ` on ${dayjs.utc(capa.closedAt).tz(timezone).format(dateFormat)}` : ""}.
         </p>
+        {/* On-record: any single-QA waiver applied at closure (Phase 2, PART B). */}
+        <SodOverrideBadge overrides={capa.sodOverrides} controls={["CLOSE_CREATOR", "CLOSE_RCA_AUTHOR"]} className="mt-1.5 space-y-1" />
         {capa.effectivenessCheck && capa.effectivenessDate && (
           <div className="flex items-center justify-between gap-3 flex-wrap mt-1.5">
             <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
@@ -717,10 +720,12 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
             <section className="capa-card">
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>1 · Root cause analysis</p>
               <RcaBody capa={capa} />
+              <SodOverrideBadge overrides={capa.sodOverrides} controls={["RCA_APPROVAL", "RCA_EDITOR_APPROVER", "RCA_REJECTION_OVERRIDE"]} className="mt-3 space-y-1" />
               <div className="mt-3"><RcaReviewSection capa={capa} onReviewChange={() => router.refresh()} /></div>
             </section>
             <section className="capa-card">
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>2 · Action-to-cause alignment</p>
+              <SodOverrideBadge overrides={capa.sodOverrides} controls={["ALIGNMENT_OVERRIDE"]} className="mb-3 space-y-1" />
               <AlignmentReviewSection capa={capa} onAlignmentChange={() => router.refresh()} />
             </section>
             {capa.diGate && (
@@ -736,12 +741,25 @@ export function CAPADetailPageV2({ capa, readiness, evidence, auditTrail, origin
             <section className="capa-card">
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>5 · Effectiveness</p>
               <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>Measured against the criteria above — scheduled 90 days after closure.</p>
+              <SodOverrideBadge overrides={capa.sodOverrides} controls={["EFFECTIVENESS"]} className="mb-3 space-y-1" />
               <EffectivenessSection capa={capa} />
             </section>
             <section id="capa-discussion" className="capa-card">
               <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>6 · Concerns</p>
               <DiscussionSection capa={capa} onCommentsChange={() => setDiscussionVersion((v) => v + 1)} />
             </section>
+            {/* Phase 2, PART B — every single-QA waiver used on this CAPA, on-record
+                for inspection. Renders only when a waiver was actually used; a
+                default-OFF tenant has no rows, so this section stays absent. */}
+            {(capa.sodOverrides?.length ?? 0) > 0 && (
+              <section className="capa-card">
+                <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>7 · Single-QA overrides</p>
+                <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
+                  Controls waived under the single-QA override on this CAPA. Each is a recorded, audited departure from independent QA review.
+                </p>
+                <SodOverrideSummary overrides={capa.sodOverrides} timezone={timezone} dateFormat={dateFormat} />
+              </section>
+            )}
           </div>
         )}
 

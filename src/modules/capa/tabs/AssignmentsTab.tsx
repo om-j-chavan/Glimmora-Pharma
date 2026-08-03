@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, Bell, Check, ChevronDown, ChevronRight, FileText, RotateCcw, SkipForward, UserCog } from "lucide-react";
+import { AlertTriangle, Ban, Bell, Check, ChevronDown, ChevronRight, FileText, RotateCcw, SkipForward, UserCog } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { Badge, type BadgeVariant } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -13,7 +13,7 @@ import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { displayUserName } from "@/lib/identity-display";
 import { roleLabel } from "@/lib/labels/roles";
 import { canExecuteCAPA } from "@/lib/permissions/roleSets";
-import { acceptWork, sendWorkBack, skipTask, reassignTask, nudgeActionItemOwner, addActionItem } from "@/actions/capas";
+import { acceptWork, sendWorkBack, cancelTask, skipTask, reassignTask, nudgeActionItemOwner, addActionItem } from "@/actions/capas";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { TASK_DESCRIPTION_MIN } from "@/constants/capaValidation";
 import type { CAPA, CAPAActionItem } from "@/store/capa.slice";
@@ -75,7 +75,7 @@ const isOpenItem = (s: string) => s !== "accepted" && s !== "skipped";
  *  of finished work with nothing on it and no explanation. The decision zone
  *  (with [Submit for review]) renders ABOVE the tabs on every tab, so the next
  *  step is already on screen — point at it rather than send anyone hunting. */
-const REVIEW_GATE_HINT = "Not yet submitted for QA review — use Submit for review above, then accept or return each person's work.";
+const REVIEW_GATE_HINT = "This CAPA isn't in a reviewable state — work can be accepted, sent back, or cancelled only while the CAPA is in progress or under QA review.";
 
 export function AssignmentsTab({ capa, evidenceFiles, users, carrySkipped = null, carriedNotes = [], onChanged }: {
   capa: CAPA;
@@ -102,9 +102,12 @@ export function AssignmentsTab({ capa, evidenceFiles, users, carrySkipped = null
   const dateFormat = org.dateFormat;
   const timezone = org.timezone;
   const items = useMemo(() => capa.actionItems ?? [], [capa.actionItems]);
-  // The server's status guard, mirrored — the ONE gate for accept / send-back,
-  // and the ONE input that turns "Done" into "Submitted" in the labels above.
+  // The server's status guard, mirrored. `underQAReview` still drives the
+  // "awaiting review" labels; `canReviewWork` is the accept/send-back/cancel gate —
+  // CAPA lifecycle rework lets QA review each person's work AS IT ARRIVES, while
+  // the CAPA is in progress OR under QA review (mirrors the relaxed server gate).
   const underQAReview = capa.status === "pending_qa_review";
+  const canReviewWork = capa.status === "in_progress" || capa.status === "pending_qa_review";
 
   // ONE source: files indexed by action item + the unattributed count both come
   // from `evidenceFiles`. The Evidence tab's "Not linked" bucket reads the same prop.
@@ -163,6 +166,7 @@ export function AssignmentsTab({ capa, evidenceFiles, users, carrySkipped = null
 
   // Reason-collecting modals.
   const [sendBack, setSendBack] = useState<{ ownerId: string; name: string } | null>(null);
+  const [cancelWork, setCancelWork] = useState<{ ownerId: string; name: string } | null>(null);
   const [skipModal, setSkipModal] = useState<{ id: string; desc: string } | null>(null);
   const [reassignModal, setReassignModal] = useState<{ id: string; desc: string } | null>(null);
   const [reason, setReason] = useState("");
@@ -275,8 +279,10 @@ export function AssignmentsTab({ capa, evidenceFiles, users, carrySkipped = null
                         everyone else is watching, not reviewing. */}
                     {hasSubmitted && (underQAReview ? (
                       <> · <span style={{ color: "var(--status-waiting)" }}>{isQAHead ? "awaiting your review" : "awaiting QA review"}</span></>
+                    ) : canReviewWork ? (
+                      <> · <span style={{ color: "var(--status-waiting)" }}>{isQAHead ? "ready for your review" : "ready for QA review"}</span></>
                     ) : (
-                      <> · not yet submitted for review</>
+                      <> · done</>
                     ))}
                   </p>
                 </div>
@@ -386,9 +392,10 @@ export function AssignmentsTab({ capa, evidenceFiles, users, carrySkipped = null
                     <div className="flex gap-2 flex-wrap pt-1">
                       {hasSubmitted ? (
                         <>
-                          <Button variant="danger" size="sm" icon={RotateCcw} disabled={busy || !underQAReview} title={underQAReview ? undefined : REVIEW_GATE_HINT} onClick={() => { setSendBack({ ownerId: p.ownerId ?? "", name: p.name }); setReason(""); }}>Send this work back</Button>
-                          <Button variant="primary" size="sm" icon={Check} disabled={busy || !underQAReview} title={underQAReview ? undefined : REVIEW_GATE_HINT} onClick={() => p.ownerId && void run(() => acceptWork(capa.id, { ownerId: p.ownerId! }), `Accepted ${p.name}'s work.`)}>Accept this work</Button>
-                          {!underQAReview && (
+                          <Button variant="danger" size="sm" icon={RotateCcw} disabled={busy || !canReviewWork} title={canReviewWork ? undefined : REVIEW_GATE_HINT} onClick={() => { setSendBack({ ownerId: p.ownerId ?? "", name: p.name }); setReason(""); }}>Send this work back</Button>
+                          <Button variant="primary" size="sm" icon={Check} disabled={busy || !canReviewWork} title={canReviewWork ? undefined : REVIEW_GATE_HINT} onClick={() => p.ownerId && void run(() => acceptWork(capa.id, { ownerId: p.ownerId! }), `Accepted ${p.name}'s work.`)}>Accept this work</Button>
+                          <Button variant="ghost" size="sm" icon={Ban} disabled={busy || !canReviewWork} title={canReviewWork ? "Void this person's remaining work" : REVIEW_GATE_HINT} onClick={() => { setCancelWork({ ownerId: p.ownerId ?? "", name: p.name }); setReason(""); }}>Cancel work</Button>
+                          {!canReviewWork && (
                             <p className="text-[11px] basis-full m-0" style={{ color: "var(--text-muted)" }}>{REVIEW_GATE_HINT}</p>
                           )}
                         </>
@@ -461,6 +468,23 @@ export function AssignmentsTab({ capa, evidenceFiles, users, carrySkipped = null
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => setSendBack(null)}>Cancel</Button>
             <Button variant="danger" size="sm" disabled={busy || reason.trim().length < 10} loading={busy}
               onClick={() => sendBack.ownerId && void run(() => sendWorkBack(capa.id, { ownerId: sendBack.ownerId, reason: reason.trim() }), `Sent ${sendBack.name}'s work back.`).then((ok) => ok && setSendBack(null))}>Send back</Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Cancel-work modal — VOID this person's remaining assignment. ── */}
+      {cancelWork && (
+        <Modal open onClose={busy ? () => undefined : () => setCancelWork(null)} title={`Cancel ${cancelWork.name}'s work`}>
+          <p className="text-[12px] mb-2" style={{ color: "var(--text-secondary)" }}>
+            This <strong>voids</strong> all of <strong>{cancelWork.name}&apos;s</strong> still-open items on this CAPA (they move to
+            {" "}<strong>Cancelled</strong>). Cancelled work is settled — it won&apos;t block closure and won&apos;t be reworked. Already
+            accepted or skipped items are untouched. The assignee is notified.
+          </p>
+          <textarea className="input text-[12px] w-full min-h-20 mb-2" placeholder="Reason (≥ 10 characters) — why is this being cancelled?" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => setCancelWork(null)}>Keep it</Button>
+            <Button variant="danger" size="sm" disabled={busy || reason.trim().length < 10} loading={busy}
+              onClick={() => cancelWork.ownerId && void run(() => cancelTask(capa.id, { ownerId: cancelWork.ownerId, reason: reason.trim() }), `Cancelled ${cancelWork.name}'s work.`).then((ok) => ok && setCancelWork(null))}>Cancel work</Button>
           </div>
         </Modal>
       )}

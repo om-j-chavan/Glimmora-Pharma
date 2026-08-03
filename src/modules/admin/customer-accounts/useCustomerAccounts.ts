@@ -189,6 +189,8 @@ export function useCustomerAccounts({
         name: data.customerName,
         adminEmail: data.email,
         active: data.active,
+        // Single-QA SoD override — forwarded to the generic updateTenant path.
+        sodSingleQAOverride: data.sodSingleQAOverride,
         plan: data.plan ? draftToPlanConfig(data.plan, editingTenant.plan?.id ?? `plan-${Date.now()}`) : null,
         config: {
           ...editingTenant.config,
@@ -291,6 +293,7 @@ export function useCustomerAccounts({
         adminEmail: data.email,
         active: data.active,
         mfaEnabled: data.mfaEnabled,
+        sodSingleQAOverride: data.sodSingleQAOverride,
         // Stamp createdAt on the optimistic row so the "Created" column renders
         // immediately (the server default is now()); a later getTenants() reload
         // replaces it with the authoritative value.
@@ -517,6 +520,7 @@ export function useCustomerAccounts({
       regulatoryRegions: editingTenant.config.org.regulatoryRegions ?? [],
       active: editingTenant.active,
       mfaEnabled: !!editingTenant.mfaEnabled,
+      sodSingleQAOverride: !!editingTenant.sodSingleQAOverride,
       newPassword: "",
       confirmPassword: "",
       plan: editingTenant.plan ? planConfigToDraft(editingTenant.plan) : null,

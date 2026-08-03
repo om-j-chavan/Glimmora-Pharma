@@ -123,6 +123,7 @@ export async function createTenantApi(tenant: Tenant): Promise<{ id: string; cus
       // the client silently coercing it to undefined.
       regulatoryRegions: tenant.config?.org?.regulatoryRegions ?? [],
       isActive: tenant.active ?? true,
+      sodSingleQAOverride: tenant.sodSingleQAOverride ?? false,
     });
     if (!result.success) {
       const detail = formatFieldErrors(result.fieldErrors);
@@ -171,10 +172,20 @@ export async function updateTenantApi(
     if (patch.name !== undefined) data.name = patch.name;
     if (patch.adminEmail !== undefined) data.email = patch.adminEmail;
     if (patch.active !== undefined) data.isActive = patch.active;
+<<<<<<< HEAD
     // Regulatory regions (super_admin-owned) live in config.org — forward the set
     // when the patch carries it so the edit persists server-side. Omitted → the
     // server leaves the tenant's current regions untouched.
     if (patch.config?.org?.regulatoryRegions !== undefined) data.regulatoryRegions = patch.config.org.regulatoryRegions;
+=======
+    // Regulatory region (super_admin-owned) lives in config.org — forward it when
+    // the patch carries it. Multi-region: prefer the SET; the server derives the
+    // shim = regions[0]. Fall back to the single field for older callers.
+    if (patch.config?.org?.regions !== undefined) data.regulatoryRegions = patch.config.org.regions;
+    else if (patch.config?.org?.regulatoryRegion !== undefined) data.regulatoryRegion = patch.config.org.regulatoryRegion;
+    // Single-QA SoD override — super_admin-set org posture; forward when present.
+    if (patch.sodSingleQAOverride !== undefined) data.sodSingleQAOverride = patch.sodSingleQAOverride;
+>>>>>>> b8a1db6 (AAA)
     if (Object.keys(data).length === 0) return;
     const result = await updateTenantAction(id, data);
     if (!result.success) {

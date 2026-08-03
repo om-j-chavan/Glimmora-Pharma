@@ -27,6 +27,7 @@ import {
 } from "@/lib/signing";
 import { SIGNING_AUDIT_MODULE, type ActionResult } from "./_types";
 import { readSigningProvenance } from "./_shared";
+import { evaluateSodOverride, tenantSodOverrideOn, writeSodOverride, type SodControl } from "./sod-override";
 
 const SignCloseCAPASchema = z.object({
   // Re-authentication password (Part 11 §11.200(a)(1)(ii)).
@@ -35,6 +36,9 @@ const SignCloseCAPASchema = z.object({
   // "verify", "confirm". Embedded in the canonical content so the
   // signed record carries the operator's stated meaning.
   signatureMeaning: z.string().min(1, "Signature meaning is required"),
+  // Single-QA override (Phase 1) — used ONLY when a self-check fires with flag ON.
+  sodOverrideReasonCode: z.string().optional(),
+  sodOverrideJustification: z.string().optional(),
   // The signer's attestation that they confirmed the effectiveness check at
   // sign time (the SignClose modal's "Effectiveness check confirmed" toggle).
   // Recorded in the closure-signature audit row so the toggle is not decorative.
@@ -109,6 +113,8 @@ export async function signAndCloseCAPA(
       ownerId: true,
       createdBy: true,
       createdById: true,
+      // SoD (CAPA lifecycle rework) — closer must differ from the RCA author.
+      rcaEditedById: true,
     },
   });
   if (!existing) return { success: false, error: "CAPA not found" };
@@ -120,35 +126,91 @@ export async function signAndCloseCAPA(
   // verbatim. This makes the closure signature carry independence DIRECTLY —
   // not transitively via the approval gate — so it survives the future removal
   // of approveCAPA.
+  // Single-QA override (Phase 1) — collect the waived close control(s). Empty = normal.
+  const waivedControls: SodControl[] = [];
+  let sodReason = "";
+  let sodJustification = "";
   const isSelfClose = existing.createdById
     ? existing.createdById === session.user.id
     : Boolean(existing.createdBy) && existing.createdBy === session.user.name;
   if (isSelfClose) {
-    try {
-      await prisma.auditLog.create({
-        data: {
-          tenantId: session.user.tenantId,
-          userId: actor.userId,
-          userName: actor.displayName,
-          userRole: actor.role,
-          module: "CAPA",
-          action: "CAPA_CLOSE_BLOCKED_SELF_CLOSE",
-          recordId: id,
-          recordTitle: (existing.reference ?? existing.description).slice(0, 80),
-          newValue: JSON.stringify({
-            attemptedBy: session.user.id,
-            capaCreator: existing.createdBy,
-            comparedBy: existing.createdById ? "userId" : "displayName",
-          }),
-        },
-      });
-    } catch (err) {
-      console.error("[action] failed to write CAPA_CLOSE_BLOCKED_SELF_CLOSE audit:", err);
+    const flagOn = await tenantSodOverrideOn(session.user.tenantId);
+    const d = evaluateSodOverride({
+      risk: existing.risk,
+      flagOn,
+      existingBlockError: "You cannot sign & close a CAPA you created. Separation of duties requires a different signer.",
+      input: parsed.data,
+    });
+    if (!d.proceed) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: "CAPA",
+            action: "CAPA_CLOSE_BLOCKED_SELF_CLOSE",
+            recordId: id,
+            recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+            newValue: JSON.stringify({
+              attemptedBy: session.user.id,
+              capaCreator: existing.createdBy,
+              comparedBy: existing.createdById ? "userId" : "displayName",
+            }),
+          },
+        });
+      } catch (err) {
+        console.error("[action] failed to write CAPA_CLOSE_BLOCKED_SELF_CLOSE audit:", err);
+      }
+      return { success: false, error: d.error };
     }
-    return {
-      success: false,
-      error: "You cannot sign & close a CAPA you created. Separation of duties requires a different signer.",
-    };
+    waivedControls.push("CLOSE_CREATOR");
+    sodReason = d.reasonCode;
+    sodJustification = d.justification;
+  }
+
+  // Part 11 SoD (CAPA lifecycle rework) — the closer must ALSO differ from whoever
+  // last authored/edited the RCA text (rcaEditedById), so no one both writes the
+  // root-cause analysis and signs the closure. Null (legacy / never-edited via the
+  // stamped path) disables only this extra check. FK-to-FK on the User id.
+  if (existing.rcaEditedById && existing.rcaEditedById === session.user.id) {
+    if (waivedControls.length) {
+      // Same person is creator AND RCA author — override already validated above
+      // (non-Critical, flag on, reason/justification valid); record the 2nd control.
+      waivedControls.push("CLOSE_RCA_AUTHOR");
+    } else {
+      const flagOn = await tenantSodOverrideOn(session.user.tenantId);
+      const d = evaluateSodOverride({
+        risk: existing.risk,
+        flagOn,
+        existingBlockError: "You cannot sign & close a CAPA whose root cause analysis you authored. Separation of duties requires a different signer.",
+        input: parsed.data,
+      });
+      if (!d.proceed) {
+        try {
+          await prisma.auditLog.create({
+            data: {
+              tenantId: session.user.tenantId,
+              userId: actor.userId,
+              userName: actor.displayName,
+              userRole: actor.role,
+              module: "CAPA",
+              action: "CAPA_CLOSE_BLOCKED_RCA_AUTHOR",
+              recordId: id,
+              recordTitle: (existing.reference ?? existing.description).slice(0, 80),
+              newValue: JSON.stringify({ attemptedBy: session.user.id, rcaEditedById: existing.rcaEditedById }),
+            },
+          });
+        } catch (err) {
+          console.error("[action] failed to write CAPA_CLOSE_BLOCKED_RCA_AUTHOR audit:", err);
+        }
+        return { success: false, error: d.error };
+      }
+      waivedControls.push("CLOSE_RCA_AUTHOR");
+      sodReason = d.reasonCode;
+      sodJustification = d.justification;
+    }
   }
 
   // Verification step retired. Closure no longer requires an independent
@@ -229,7 +291,7 @@ export async function signAndCloseCAPA(
   // action code is kept (CAPA_CLOSE_BLOCKED_INCOMPLETE_ACTIONS) to avoid
   // analytics churn; its payload now names WHOSE work is unaccepted.
   const unacceptedActions = actionItems.filter(
-    (a) => a.status !== "accepted" && a.status !== "skipped",
+    (a) => a.status !== "accepted" && a.status !== "skipped" && a.status !== "cancelled",
   );
   if (unacceptedActions.length > 0) {
     const unacceptedByOwner = Array.from(
@@ -475,6 +537,23 @@ export async function signAndCloseCAPA(
               closingNotes: parsed.data.closingNotes.trim(),
             }),
           },
+        });
+      }
+      // Single-QA override — waiver record(s) atomic with the signed close, linked
+      // to the closure SignedRecord. The SignedRecord is still minted (above); the
+      // override adds to, never replaces, the signature.
+      for (const control of waivedControls) {
+        await writeSodOverride(tx, {
+          tenantId: session.user.tenantId,
+          capaId: id,
+          control,
+          actorUserId: session.user.id,
+          actorName: session.user.name,
+          actorRole: session.user.role,
+          reasonCode: sodReason,
+          justification: sodJustification,
+          recordTitle: existing.reference ?? existing.description,
+          signedRecordId: sig.id,
         });
       }
       return { capa: updated, signedRecord: sig };

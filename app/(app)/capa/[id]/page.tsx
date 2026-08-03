@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { ErrorBoundary } from "@/components/errors";
 import { CAPADetailPageV2 } from "@/modules/capa/CAPADetailPageV2";
 import { requireAuth } from "@/lib/auth";
-import { getCAPA, getCapaAuditTrail, getCAPADeviationDocs, getCAPAFindingDocs, getCAPAQaAddedFiles, getCAPAEvidenceByActionItem, getCAPACarriedNotes } from "@/lib/queries/capas";
+import { getCAPA, getCapaAuditTrail, getCAPADeviationDocs, getCAPAFindingDocs, getCAPAQaAddedFiles, getCAPAEvidenceByActionItem, getCAPACarriedNotes, getCAPASODOverrides, getCAPASODReveal } from "@/lib/queries/capas";
 import { getFindingAuditTrail } from "@/lib/queries/findings";
 import { prisma } from "@/lib/prisma";
 import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
@@ -54,10 +54,18 @@ export default async function CAPADetailRoute({ params }: PageProps) {
       ])
     : [[], []];
 
+  // CAPA Single-QA SoD override (Phase 2) — the waivers actually used (on-record,
+  // inspector-facing) + the server-computed reveal telling the UI whether THIS user
+  // would trip each gate under the flag (mirrors the Phase-1 gates exactly).
+  const [sodOverrides, sodReveal] = await Promise.all([
+    getCAPASODOverrides(id, session.user.tenantId),
+    getCAPASODReveal(id, session.user.tenantId, session.user.id, session.user.name ?? ""),
+  ]);
+
   return (
     <ErrorBoundary moduleName="CAPA">
       <CAPADetailPageV2
-        capa={mapCAPAFromPrisma(row)}
+        capa={{ ...mapCAPAFromPrisma(row), sodOverrides, sodReveal }}
         readiness={readiness}
         evidence={{ resolved, total: EVIDENCE_CATEGORY_COUNT }}
         auditTrail={auditTrail}
