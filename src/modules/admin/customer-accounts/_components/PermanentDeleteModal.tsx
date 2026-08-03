@@ -120,6 +120,7 @@ export function PermanentDeleteModal({
           <input
             id="purge-password"
             type="password"
+            autoComplete="new-password"
             autoFocus
             value={password}
             onChange={(e) => { setPassword(e.target.value); setError(null); }}

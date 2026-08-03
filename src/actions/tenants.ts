@@ -43,9 +43,27 @@ const CreateTenantSchema = z.object({
   // lookup. REQUIRED on create (Stage 5) — a tenant must have a region so its
   // effective frameworks resolve. UpdateTenantSchema.partial() keeps it optional
   // on edit (never forces a region onto a legacy null tenant mid-edit).
-  regulatoryRegion: z.string().min(1, "Regulatory Region is required"),
+  // Multi-region: the region SET is the source of truth. `regulatoryRegions` is
+  // the new field; the single `regulatoryRegion` is still accepted for back-compat
+  // and is derived from regions[0]. "≥1 on create" is enforced in the action so
+  // either field can satisfy it (UpdateTenantSchema.partial() keeps both optional).
+  regulatoryRegion: z.string().min(1).optional(),
+  regulatoryRegions: z.array(z.string().min(1)).optional(),
   isActive: z.boolean().default(true),
 });
+
+/** Normalize a region SET from the new array and/or the legacy single field:
+ *  trim, drop blanks, de-dupe, preserve order. regions[0] is the PRIMARY (shim). */
+function normalizeRegions(list?: string[], single?: string | null): string[] {
+  const raw = list && list.length ? list : single ? [single] : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of raw) {
+    const v = r.trim();
+    if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+  }
+  return out;
+}
 
 const UpdateTenantSchema = CreateTenantSchema.partial().extend({
   password: z.string().min(8, "Password must be at least 8 characters").optional(),
@@ -84,6 +102,17 @@ export async function createTenant(
       success: false,
       error: "Validation failed",
       fieldErrors: parsed.error.flatten().fieldErrors,
+    };
+  }
+
+  // Multi-region: resolve the SET (source of truth); regions[0] is the shim.
+  // Required on create — either the new array or the legacy single field satisfies it.
+  const regions = normalizeRegions(parsed.data.regulatoryRegions, parsed.data.regulatoryRegion);
+  if (regions.length === 0) {
+    return {
+      success: false,
+      error: "Validation failed",
+      fieldErrors: { regulatoryRegions: ["At least one Regulatory Region is required."] },
     };
   }
 
@@ -129,20 +158,26 @@ export async function createTenant(
         return row?.customerCode ?? null;
       }, 4);
       try {
-        tenant = await prisma.tenant.create({
-          data: {
-            ...(parsed.data.id ? { id: parsed.data.id } : {}),
-            name: parsed.data.name,
-            email: parsed.data.email.toLowerCase(),
-            username: parsed.data.username,
-            customerCode,
-            passwordHash,
-            role: "customer_admin",
-            language: parsed.data.language,
-            timezone: parsed.data.timezone,
-            regulatoryRegion: parsed.data.regulatoryRegion?.trim() || null,
-            isActive: parsed.data.isActive,
-          },
+        // Tenant + region SET written in ONE transaction so the shim
+        // (regulatoryRegion = regions[0]) and the set can never disagree.
+        tenant = await prisma.$transaction(async (tx) => {
+          const created = await tx.tenant.create({
+            data: {
+              ...(parsed.data.id ? { id: parsed.data.id } : {}),
+              name: parsed.data.name,
+              email: parsed.data.email.toLowerCase(),
+              username: parsed.data.username,
+              customerCode,
+              passwordHash,
+              role: "customer_admin",
+              language: parsed.data.language,
+              timezone: parsed.data.timezone,
+              regulatoryRegion: regions[0], // PRIMARY shim; the set below is source of truth
+              isActive: parsed.data.isActive,
+            },
+          });
+          await tx.tenantRegion.createMany({ data: regions.map((region) => ({ tenantId: created.id, region })) });
+          return created;
         });
         break;
       } catch (err) {
@@ -206,8 +241,15 @@ export async function updateTenant(
     const data: Record<string, unknown> = { ...rest };
     if (rest.email) data.email = rest.email.toLowerCase();
     if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_COST);
-    // Regulatory region: empty string clears it (null); otherwise store trimmed.
-    if (rest.regulatoryRegion !== undefined) data.regulatoryRegion = rest.regulatoryRegion?.trim() || null;
+    // Multi-region: `regulatoryRegions` is NOT a scalar column — strip it from the
+    // tenant update payload and apply it as a set below. Only touch regions when
+    // the caller actually sent region info (partial edits leave the set intact).
+    delete data.regulatoryRegions;
+    const regionsProvided = rest.regulatoryRegions !== undefined || rest.regulatoryRegion !== undefined;
+    const newRegions = regionsProvided ? normalizeRegions(rest.regulatoryRegions, rest.regulatoryRegion) : null;
+    // Keep the shim in sync in the SAME transaction: regulatoryRegion = regions[0]
+    // (empty set → null, preserving the legacy "clear the region" behavior).
+    if (newRegions !== null) data.regulatoryRegion = newRegions[0] ?? null;
 
     // Prefer the specific lifecycle event over the generic TENANT_UPDATED when
     // this edit actually flips isActive — "Account suspended/reactivated" reads
@@ -221,9 +263,16 @@ export async function updateTenant(
       }
     }
 
-    const tenant = await prisma.tenant.update({
-      where: { id },
-      data,
+    const tenant = await prisma.$transaction(async (tx) => {
+      const updated = await tx.tenant.update({ where: { id }, data });
+      // Replace-on-update the region SET when region info was supplied.
+      if (newRegions !== null) {
+        await tx.tenantRegion.deleteMany({ where: { tenantId: id } });
+        if (newRegions.length) {
+          await tx.tenantRegion.createMany({ data: newRegions.map((region) => ({ tenantId: id, region })) });
+        }
+      }
+      return updated;
     });
     await prisma.auditLog.create({
       data: {

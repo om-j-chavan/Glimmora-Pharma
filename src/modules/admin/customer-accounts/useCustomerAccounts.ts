@@ -196,7 +196,9 @@ export function useCustomerAccounts({
             ...editingTenant.config.org,
             companyName: data.customerName,
             timezone: data.timezone,
-            regulatoryRegion: data.regulatoryRegion,
+            // Multi-region: carry the SET; shim = regions[0] kept in sync locally.
+            regions: data.regulatoryRegions,
+            regulatoryRegion: data.regulatoryRegions[0] ?? "",
           },
           users: updatedUsers,
         },
@@ -301,7 +303,9 @@ export function useCustomerAccounts({
             companyName: data.customerName,
             timezone: data.timezone,
             dateFormat: "DD/MM/YYYY",
-            regulatoryRegion: data.regulatoryRegion,
+            // Multi-region: SET + primary shim (regions[0]) for the optimistic row.
+            regions: data.regulatoryRegions,
+            regulatoryRegion: data.regulatoryRegions[0] ?? "",
           },
           sites: [],
           users: [
@@ -514,7 +518,13 @@ export function useCustomerAccounts({
       email: editingTenant.adminEmail,
       language: "English, United States",
       timezone: editingTenant.config.org.timezone,
-      regulatoryRegion: editingTenant.config.org.regulatoryRegion ?? "",
+      // Prefill from the tenant's region SET; fall back to the single shim for a
+      // tenant fetched/seeded without the set.
+      regulatoryRegions: editingTenant.config.org.regions?.length
+        ? editingTenant.config.org.regions
+        : editingTenant.config.org.regulatoryRegion
+          ? [editingTenant.config.org.regulatoryRegion]
+          : [],
       active: editingTenant.active,
       mfaEnabled: !!editingTenant.mfaEnabled,
       newPassword: "",

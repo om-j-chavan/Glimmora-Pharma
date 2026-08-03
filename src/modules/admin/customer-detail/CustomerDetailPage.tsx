@@ -175,32 +175,43 @@ export function CustomerDetailPage() {
               </p>
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Regulatory Region</p>
-              <p className="text-[14px] font-medium flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
-                <Globe className="w-3.5 h-3.5" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+              <p className="text-[11px] uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Regulatory Regions</p>
+              <p className="text-[14px] font-medium flex items-center gap-2 flex-wrap" style={{ color: "var(--text-primary)" }}>
+                <Globe className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
                 {(() => {
-                  const value = tenant.config.org.regulatoryRegion;
-                  if (!value) return <span style={{ color: "var(--text-muted)" }}>—</span>;
-                  const label = regulatoryRegionLabel(value, regionLabelMap);
-                  // Link to the region's page in the merged Regions & Frameworks
-                  // module. The [value] route resolves active, GLOBAL, AND
-                  // archived regions (getRegionCatalog includes archived), so any
-                  // region known to the label map (all regions incl. archived) is
-                  // reachable. GLOBAL is always linkable. A value with no region
-                  // row (purged/unknown edge) degrades to plain text.
-                  const reachable = value === GLOBAL_REGION_VALUE || value in regionLabelMap;
-                  return reachable ? (
-                    <Link
-                      href={`/admin/regions/${encodeURIComponent(value)}`}
-                      className="hover:underline"
-                      style={{ color: "var(--brand)" }}
-                      title={`Open ${label} in Regions & Frameworks`}
-                    >
-                      {label}
-                    </Link>
-                  ) : (
-                    <span>{label}</span>
-                  );
+                  // Multi-region: render EVERY region in the tenant's SET (fall back
+                  // to the single shim). The first (primary) is marked with a ★.
+                  const set = tenant.config.org.regions?.length
+                    ? tenant.config.org.regions
+                    : tenant.config.org.regulatoryRegion
+                      ? [tenant.config.org.regulatoryRegion]
+                      : [];
+                  if (set.length === 0) return <span style={{ color: "var(--text-muted)" }}>—</span>;
+                  // Each links to its page in the merged Regions & Frameworks module.
+                  // The [value] route resolves active, GLOBAL, AND archived regions,
+                  // so any region in the label map is reachable; unknown → plain text.
+                  return set.map((value, i) => {
+                    const label = regulatoryRegionLabel(value, regionLabelMap);
+                    const reachable = value === GLOBAL_REGION_VALUE || value in regionLabelMap;
+                    return (
+                      <span key={value} className="inline-flex items-center">
+                        {i === 0 && <span aria-hidden="true" title="Primary region" style={{ color: "var(--brand)" }}>★&nbsp;</span>}
+                        {reachable ? (
+                          <Link
+                            href={`/admin/regions/${encodeURIComponent(value)}`}
+                            className="hover:underline"
+                            style={{ color: "var(--brand)" }}
+                            title={`Open ${label} in Regions & Frameworks`}
+                          >
+                            {label}
+                          </Link>
+                        ) : (
+                          <span>{label}</span>
+                        )}
+                        {i < set.length - 1 && <span style={{ color: "var(--text-muted)" }}>,&nbsp;</span>}
+                      </span>
+                    );
+                  });
                 })()}
               </p>
             </div>

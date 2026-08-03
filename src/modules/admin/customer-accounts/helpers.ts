@@ -133,8 +133,9 @@ export interface AccountFormData {
   email: string;
   language: string;
   timezone: string;
-  // Regulatory region — super_admin owned. Empty string = unset.
-  regulatoryRegion: string;
+  // Regulatory regions — super_admin owned, MULTI-select. Empty = unset;
+  // regions[0] becomes the primary shim server-side.
+  regulatoryRegions: string[];
   active: boolean;
   mfaEnabled: boolean;
   newPassword: string;
@@ -168,7 +169,7 @@ export function makeEmptyForm(): AccountFormData {
     email: "",
     language: "English, United States",
     timezone: "Asia/Kolkata",
-    regulatoryRegion: "",
+    regulatoryRegions: [],
     active: true,
     mfaEnabled: false,
     newPassword: "",

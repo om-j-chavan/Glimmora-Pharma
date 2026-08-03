@@ -27,7 +27,10 @@ export interface TenantOrgConfig {
   companyName: string;
   timezone: string;
   dateFormat: string;
+  /** PRIMARY region (shim = regions[0]). Kept for back-compat single-region reads. */
   regulatoryRegion: string;
+  /** Full multi-region SET (source of truth). regions[0] mirrors regulatoryRegion. */
+  regions?: string[];
 }
 
 export interface TenantSiteConfig {

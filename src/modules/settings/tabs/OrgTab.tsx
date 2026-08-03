@@ -107,7 +107,9 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const tzLabel = TIMEZONES.find((t) => t.value === org.timezone)?.label ?? org.timezone;
   const regionLabelMap = useAppSelector((s) => s.regions.labelMap);
-  const regionLabel = regulatoryRegionLabel(org.regulatoryRegion, regionLabelMap);
+  // Multi-region: show every region in the SET (fall back to the single shim).
+  const regionValues = org.regions?.length ? org.regions : org.regulatoryRegion ? [org.regulatoryRegion] : [];
+  const regionLabel = regionValues.map((v) => regulatoryRegionLabel(v, regionLabelMap)).join(", ") || "—";
 
   return (
     <section aria-labelledby="org-heading" className="w-full space-y-4">
@@ -121,7 +123,7 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
 
         <div className="p-5 grid grid-cols-2 gap-x-8 gap-y-5">
           <Field label="Company Name" value={org.companyName} />
-          <Field label="Regulatory Region" value={regionLabel} />
+          <Field label={regionValues.length > 1 ? "Regulatory Regions" : "Regulatory Region"} value={regionLabel} />
           <Field label="Timezone" value={tzLabel} />
           <Field label="Organization Created Date" value={orgCreatedAt ? formatDate(orgCreatedAt) : "—"} />
         </div>

@@ -246,7 +246,8 @@ export async function permanentlyDeleteRegion(id: string, password: string): Pro
   }
   // Zero-reference precondition (defence-in-depth; Stage 3 keeps it clean).
   const [tenantCount, fwCount] = await Promise.all([
-    prisma.tenant.count({ where: { regulatoryRegion: region.value } }),
+    // Multi-region: references now live in the TenantRegion set (shim mirrors it).
+    prisma.tenantRegion.count({ where: { region: region.value } }),
     prisma.frameworkRegion.count({ where: { region: region.value } }),
   ]);
   if (tenantCount || fwCount) {
@@ -291,11 +292,12 @@ export async function previewRegionArchive(id: string): Promise<ActionResult<{ l
   }
   const region = await prisma.regulatoryRegion.findUnique({ where: { id }, select: { value: true, label: true } });
   if (!region) return { success: false, error: "Region not found" };
-  const [tenants, frameworkLinks] = await Promise.all([
-    prisma.tenant.findMany({ where: { regulatoryRegion: region.value }, select: { name: true }, orderBy: { name: "asc" } }),
+  const [trRows, frameworkLinks] = await Promise.all([
+    // Multi-region: tenants whose SET includes this region (not just the shim).
+    prisma.tenantRegion.findMany({ where: { region: region.value }, select: { tenant: { select: { name: true } } }, orderBy: { tenant: { name: "asc" } } }),
     prisma.frameworkRegion.count({ where: { region: region.value } }),
   ]);
-  return { success: true, data: { label: region.label, reserved: isReservedRegion(region.value), tenants: tenants.map((t) => t.name), frameworkLinks } };
+  return { success: true, data: { label: region.label, reserved: isReservedRegion(region.value), tenants: trRows.map((r) => r.tenant.name), frameworkLinks } };
 }
 
 /**
@@ -303,7 +305,10 @@ export async function previewRegionArchive(id: string): Promise<ActionResult<{ l
  * in-use region now ARCHIVES it AND auto-reassigns every live reference to
  * GLOBAL, all-or-nothing in ONE $transaction:
  *   1. archivedAt = now on the region;
- *   2. every Tenant.regulatoryRegion = <value> → "GLOBAL";
+ *   2. remove <value> from every tenant's region SET (multi-region boundary):
+ *      other regions are KEPT; GLOBAL is added ONLY when a tenant's set empties.
+ *      The shim (regulatoryRegion) is re-derived only when the archived region was
+ *      that tenant's primary. [FDA,EMA] losing EMA keeps [FDA], never flattens;
  *   3. every FrameworkRegion.region = <value> → "GLOBAL", with DEDUPE: if the
  *      framework already applies globally (appliesToAllRegions=true) OR already
  *      has a FrameworkRegion row for "GLOBAL", the link is DROPPED instead of
@@ -335,8 +340,32 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
       // 1) Archive the region.
       await tx.regulatoryRegion.update({ where: { id }, data: { archivedAt: new Date() } });
 
-      // 2) Re-point every tenant on this region to GLOBAL.
-      const tenantRes = await tx.tenant.updateMany({ where: { regulatoryRegion: value }, data: { regulatoryRegion: GLOBAL_REGION_VALUE } });
+      // 2) Multi-region boundary: remove ONLY this region from each tenant's set.
+      //    Keep their other regions; add GLOBAL only if a set empties. Re-derive the
+      //    shim only when the archived region was that tenant's primary.
+      const affected = await tx.tenantRegion.findMany({ where: { region: value }, select: { tenantId: true } });
+      const affectedIds = [...new Set(affected.map((a) => a.tenantId))];
+      let tenantsReassigned = 0;
+      let emptiedToGlobal = 0;
+      if (affectedIds.length) {
+        await tx.tenantRegion.deleteMany({ where: { region: value } });
+        for (const tenantId of affectedIds) {
+          const remaining = await tx.tenantRegion.findMany({ where: { tenantId }, select: { region: true }, orderBy: { region: "asc" } });
+          if (remaining.length === 0) {
+            // Set emptied → fall back to GLOBAL (set + shim together).
+            await tx.tenantRegion.create({ data: { tenantId, region: GLOBAL_REGION_VALUE } });
+            await tx.tenant.update({ where: { id: tenantId }, data: { regulatoryRegion: GLOBAL_REGION_VALUE } });
+            emptiedToGlobal++;
+          } else {
+            // Other regions remain; only re-point the shim if the primary was archived.
+            const t = await tx.tenant.findUnique({ where: { id: tenantId }, select: { regulatoryRegion: true } });
+            if (t?.regulatoryRegion === value) {
+              await tx.tenant.update({ where: { id: tenantId }, data: { regulatoryRegion: remaining[0].region } });
+            }
+          }
+          tenantsReassigned++;
+        }
+      }
 
       // 3) Re-point framework links to GLOBAL, DROPPING redundant ones.
       const links = await tx.frameworkRegion.findMany({ where: { region: value }, select: { id: true, frameworkId: true } });
@@ -367,15 +396,15 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
 
       // 4) Audit-first (atomic with the writes).
       await auditRegion(session, actor, "REGION_ARCHIVED", id, region.label, { status: "Active" }, { status: "Archived" }, tx);
-      if (tenantRes.count || linksMoved || linksDropped) {
+      if (tenantsReassigned || linksMoved || linksDropped) {
         await auditRegion(
           session, actor, "REGION_TENANTS_REASSIGNED", id, region.label,
           { region: value },
-          { reassignedTo: GLOBAL_REGION_VALUE, tenantsReassigned: tenantRes.count, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped },
+          { removedFrom: value, tenantsAffected: tenantsReassigned, emptiedToGlobal, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped },
           tx,
         );
       }
-      return { tenantsReassigned: tenantRes.count, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped };
+      return { tenantsReassigned, emptiedToGlobal, frameworkLinksMoved: linksMoved, frameworkLinksDropped: linksDropped };
     });
 
     revalidatePath("/admin/regions");
@@ -448,17 +477,21 @@ export async function supersedeRegionValue(oldId: string, input: { newValue: str
       const created = await tx.regulatoryRegion.create({ data: { value: newValue, label: old.label } });
       // b) Archive OLD + link forward to successor (locked direction).
       await tx.regulatoryRegion.update({ where: { id: oldId }, data: { archivedAt: new Date(), aliasOfId: created.id } });
-      // c) RE-POINT every live reference from oldValue → newValue.
-      const tenantRes = await tx.tenant.updateMany({ where: { regulatoryRegion: old.value }, data: { regulatoryRegion: newValue } });
+      // c) RE-POINT every live reference from oldValue → newValue. The region SET
+      //    is the source of truth; the shim (regulatoryRegion) is renamed in step
+      //    with it, so a tenant's primary stays primary (a pure rename never
+      //    changes set membership, so no @@unique([tenantId, region]) collision).
+      const trRes = await tx.tenantRegion.updateMany({ where: { region: old.value }, data: { region: newValue } });
+      await tx.tenant.updateMany({ where: { regulatoryRegion: old.value }, data: { regulatoryRegion: newValue } });
       const fwRes = await tx.frameworkRegion.updateMany({ where: { region: old.value }, data: { region: newValue } });
       // d) Audit-first (inside the tx → atomic with the change).
       await auditRegion(
         session, actor, "REGION_VALUE_SUPERSEDED", created.id, old.label,
         { value: old.value },
-        { value: newValue, tenantsRepointed: tenantRes.count, frameworkLinksRepointed: fwRes.count },
+        { value: newValue, tenantsRepointed: trRes.count, frameworkLinksRepointed: fwRes.count },
         tx,
       );
-      return { oldValue: old.value, newValue, newId: created.id, tenantsRepointed: tenantRes.count, frameworkLinksRepointed: fwRes.count };
+      return { oldValue: old.value, newValue, newId: created.id, tenantsRepointed: trRes.count, frameworkLinksRepointed: fwRes.count };
     });
 
     revalidatePath("/admin/regions");

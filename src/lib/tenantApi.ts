@@ -118,9 +118,10 @@ export async function createTenantApi(tenant: Tenant): Promise<{ id: string; cus
       username: admin.username ?? admin.email,
       password: admin.password,
       timezone: tenant.config?.org?.timezone ?? "Asia/Kolkata",
-      // Pass the region through as-is (empty string included) so the server-side
-      // required check (Stage 5) rejects an empty region rather than the client
-      // silently coercing it to undefined.
+      // Multi-region: the SET is the source of truth (server derives the shim =
+      // regions[0]). Fall back to the single shim for older callers. An empty set
+      // is passed through so the server-side required check (Stage 5) rejects it.
+      regulatoryRegions: tenant.config?.org?.regions ?? (tenant.config?.org?.regulatoryRegion ? [tenant.config.org.regulatoryRegion] : []),
       regulatoryRegion: tenant.config?.org?.regulatoryRegion ?? "",
       isActive: tenant.active ?? true,
     });
@@ -171,9 +172,11 @@ export async function updateTenantApi(
     if (patch.name !== undefined) data.name = patch.name;
     if (patch.adminEmail !== undefined) data.email = patch.adminEmail;
     if (patch.active !== undefined) data.isActive = patch.active;
-    // Regulatory region (super_admin-owned) lives in config.org — forward it
-    // when the patch carries it so the edit persists server-side.
-    if (patch.config?.org?.regulatoryRegion !== undefined) data.regulatoryRegion = patch.config.org.regulatoryRegion;
+    // Regulatory region (super_admin-owned) lives in config.org — forward it when
+    // the patch carries it. Multi-region: prefer the SET; the server derives the
+    // shim = regions[0]. Fall back to the single field for older callers.
+    if (patch.config?.org?.regions !== undefined) data.regulatoryRegions = patch.config.org.regions;
+    else if (patch.config?.org?.regulatoryRegion !== undefined) data.regulatoryRegion = patch.config.org.regulatoryRegion;
     if (Object.keys(data).length === 0) return;
     const result = await updateTenantAction(id, data);
     if (!result.success) {

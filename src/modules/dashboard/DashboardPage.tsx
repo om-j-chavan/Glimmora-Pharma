@@ -392,11 +392,12 @@ export function DashboardPage({
 
       {/* KPI cards */}
       <section aria-label="Key performance indicators" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-        {/* Deep links (Phase 8): each KPI jumps to its Governance scorecard
-            section \u2014 readiness \u2192 site readiness, criticals \u2192 repeat-observation
-            risk, CAPA overdue \u2192 CAPA timeliness, CSV \u2192 validation drift. */}
+        {/* Deep links: readiness / CAPA overdue / CSV still jump to their
+            Governance scorecard section; the Critical findings card jumps to the
+            Findings register pre-filtered by severity (GP-CA-013/014, dashboard
+            half \u2014 the register must read ?tab=register&severity=<sev> to apply it). */}
         <StatCard icon={ShieldCheck} color={rsCol} label="Overall readiness" value={`${readinessScore}%`} sub={rl.label} href="/governance?tab=kpis#kpi-site-readiness" />
-        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter(isOpenFinding).length} total outstanding`} href="/governance?tab=kpis#kpi-repeat-observation" />
+        <StatCard icon={AlertTriangle} color={criticalCount > 0 ? "#ef4444" : "#10b981"} label="Critical findings" value={String(criticalCount)} sub={filteredFindings.length === 0 ? "No findings logged yet" : `${filteredFindings.filter(isOpenFinding).length} total outstanding`} href="/gap-assessment?tab=register&severity=critical" />
         <StatCard icon={Clock} color={capaOverdueRate === null ? "#64748b" : capaOverdueRate === 0 ? "#10b981" : capaOverdueRate <= 20 ? "#f59e0b" : "#ef4444"} label="CAPA overdue" value={capaOverdueRate === null ? "\u2014" : `${capaOverdueRate}%`} sub={openCAPAs.length === 0 ? "No open CAPAs" : `${overdueCAPAs.length} of ${openCAPAs.length} past due`} href="/governance?tab=kpis#kpi-capa-timeliness" />
         <StatCard icon={Database} color={csvHighRisk > 0 ? "#f59e0b" : "#10b981"} label="CSV high risk" value={String(csvHighRisk)} sub={filteredSystems.length === 0 ? "No systems registered" : "HIGH risk, not yet validated"} href="/governance?tab=kpis#kpi-validation-drift" />
         <StatCard icon={GraduationCap} color={trainingCompliance === null ? "#64748b" : trainingCompliance >= 90 ? "#10b981" : trainingCompliance >= 70 ? "#f59e0b" : "#ef4444"} label="Training compliance" value={trainingCompliance === null ? "\u2014" : `${trainingCompliance}%`} sub={trainingCompliance === null ? "Not yet tracked" : "of required training complete"} />
@@ -452,7 +453,7 @@ export function DashboardPage({
               <div className="flex flex-col items-center py-5"><BarChart3 className="w-8 h-8 text-[#334155] mb-2" aria-hidden="true" /><p className="text-[12px]" style={{ color: "var(--text-muted)" }}>No findings logged yet</p></div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={trendData} barSize={14} barGap={2}><CartesianGrid {...chartDefaults.cartesianGrid} /><XAxis dataKey="month" {...chartDefaults.xAxis} /><YAxis {...chartDefaults.yAxis} allowDecimals={false} /><Tooltip {...chartDefaults.tooltip} /><Legend iconType="circle" iconSize={8} formatter={(v: string) => <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{v}</span>} /><Bar dataKey="Critical" name="Critical" fill="#ef4444" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="High" name="High" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Medium" name="Medium" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Low" name="Low" fill="#10b981" stackId="a" radius={[3, 3, 0, 0]} /></BarChart>
+                <BarChart data={trendData} barSize={14} barGap={2}><CartesianGrid {...chartDefaults.cartesianGrid} /><XAxis dataKey="month" {...chartDefaults.xAxis} /><YAxis {...chartDefaults.yAxis} allowDecimals={false} /><Tooltip {...chartDefaults.tooltip} /><Legend iconType="circle" iconSize={8} formatter={(v: string) => <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>{v}</span>} /><Bar dataKey="Critical" name="Critical" fill="#ef4444" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="High" name="High" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Medium" name="Medium" fill="#eab308" stackId="a" radius={[0, 0, 0, 0]} /><Bar dataKey="Low" name="Low" fill="#10b981" stackId="a" radius={[3, 3, 0, 0]} /></BarChart>
               </ResponsiveContainer>
             )}
           </CardSection>
@@ -497,7 +498,7 @@ export function DashboardPage({
           {/* ⑤ Risk signals */}
           <CardSection icon={Activity} iconColor="#ef4444" title="Risk signals">
             {/* By severity */}
-            {(["Critical", "High", "Medium", "Low"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "High" || sev === "Medium" ? "#f59e0b" : "#10b981"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
+            {(["Critical", "High", "Medium", "Low"] as const).map((sev) => { const cnt = filteredFindings.filter((f) => f.severity === sev && f.status !== "Closed").length; const dot = sev === "Critical" ? "#ef4444" : sev === "High" ? "#f59e0b" : sev === "Medium" ? "#eab308" : "#10b981"; const valCol = cnt === 0 ? "#64748b" : cnt <= 2 ? "#f59e0b" : "#ef4444"; return (
               <div key={sev} className="flex items-center justify-between py-2 border-b last:border-0" style={{ borderColor: "var(--bg-border)" }}>
                 <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full" style={{ background: dot }} /><span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>{sev}</span></div>
                 <span className="text-[14px] font-bold" style={{ color: valCol }}>{cnt}</span>

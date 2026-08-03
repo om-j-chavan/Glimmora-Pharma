@@ -11,6 +11,7 @@ type PrismaTenantRow = {
   timezone: string;
   logoUrl: string | null;
   regulatoryRegion: string | null;
+  regions?: Array<{ region: string }>;
   isActive: boolean;
   deletedAt: Date | null;
   mfaEnabled: boolean;
@@ -119,6 +120,9 @@ export function mapTenantFromPrisma(row: PrismaTenantRow): Tenant {
         timezone: row.timezone,
         dateFormat: "DD/MM/YYYY",
         regulatoryRegion: row.regulatoryRegion ?? "",
+        // Multi-region SET (source of truth). Falls back to the shim so a row
+        // fetched without the relation still yields a sensible single-item set.
+        regions: (row.regions ?? []).map((r) => r.region),
       },
       sites: (row.sites ?? []).map(mapSite),
       users: allUsers,

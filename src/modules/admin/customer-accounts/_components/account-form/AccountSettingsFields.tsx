@@ -45,8 +45,8 @@ export function AccountSettingsFields({ form, set, mode, isSuperAdmin, regionErr
           list. Select an existing value (no runtime add). */}
       <div className="mb-3">
         <RegulatoryRegionField
-          value={form.regulatoryRegion}
-          onChange={(v) => set("regulatoryRegion", v)}
+          value={form.regulatoryRegions}
+          onChange={(v) => set("regulatoryRegions", v)}
           required={mode === "create"}
           error={regionError}
         />

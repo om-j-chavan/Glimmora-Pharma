@@ -67,6 +67,10 @@ model Tenant {
   tenantFrameworks      TenantFramework[]
   // Role-Based User Limits (Phase A, INERT) — per-tenant per-role cap OVERRIDES.
   tenantRoleLimits      TenantRoleLimit[]
+  // Multi-region — a tenant's applicable regulatory regions (join table). The
+  // scalar regulatoryRegion above is kept as the PRIMARY (regions[0]) shim +
+  // backfill source; this set is the source of truth for framework resolution.
+  regions               TenantRegion[]
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -2522,6 +2526,22 @@ model TenantFramework {
 
   @@unique([tenantId, frameworkId])
   @@index([tenantId])
+}
+
+// Tenant ↔ regulatory region link (multi-region). Mirrors FrameworkRegion:
+// `region` stores the RegulatoryRegion.value string (e.g. "FDA"). A tenant's
+// set is the source of truth for framework resolution; Tenant.regulatoryRegion
+// is kept in sync as the PRIMARY (regions[0]) shim. No String[] — SQLite (dev)
+// has no scalar-list type, matching the FrameworkRegion pattern.
+model TenantRegion {
+  id       String @id @default(cuid())
+  tenantId String
+  region   String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, region])
+  @@index([region])
 }
 
 // ── ROLE-BASED USER LIMITS (Phase A — INERT foundation) ──
