@@ -29,7 +29,6 @@ export default async function CAPADetailRoute({ params }: PageProps) {
     getCapaAuditTrail(id, session.user.tenantId),
   ]);
   const actionItems = (row.actionItems ?? []).map((a) => ({ status: a.status }));
-  const readiness = getCAPAReadiness(row, actionItems, evidenceItems, criteria);
   const resolved = evidenceItems.filter((e) => e.status === "COMPLETE" || e.status === "NOT_APPLICABLE").length;
   // Req 4 — linked deviation + task docs for the "raised from deviation" block.
   const originDocs = row.deviationId ? await getCAPADeviationDocs(row.deviationId, session.user.tenantId) : [];
@@ -61,6 +60,14 @@ export default async function CAPADetailRoute({ params }: PageProps) {
     getCAPASODOverrides(id, session.user.tenantId),
     getCAPASODReveal(id, session.user.tenantId, session.user.id, session.user.name ?? ""),
   ]);
+
+  // Readiness for the submission checklist — mirrors the submitForReview gate,
+  // including the single-QA evidence waiver (flag ON + non-Critical, reusing the
+  // flag + Critical ceiling already computed in sodReveal), so the checklist and the
+  // server never disagree about whether evidence blocks.
+  const readiness = getCAPAReadiness(row, actionItems, evidenceItems, criteria, {
+    evidenceWaived: sodReveal.flagOn && !sodReveal.isCritical,
+  });
 
   return (
     <ErrorBoundary moduleName="CAPA">

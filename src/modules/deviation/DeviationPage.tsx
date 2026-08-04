@@ -28,7 +28,11 @@ import {
   closeDeviation as closeDeviationAction,
   rejectDeviation as rejectDeviationAction,
   attachDeviationDocument,
+  getDeviationCloseSodContext,
 } from "@/actions/deviations";
+import { SodOverrideInputs, isSodOverrideValid } from "@/modules/capa/components/SodOverrideInputs";
+import { SodOverrideBadge, SodOverrideSummary } from "@/modules/capa/components/SodOverrideNotes";
+import type { DeviationCloseSodReveal, DeviationSODOverrideRow } from "@/lib/queries/deviations";
 import { createCAPA as createCAPAAction } from "@/actions/capas";
 import { assignDeviationTask, reworkDeviationTask } from "@/actions/deviation-tasks";
 import { GroupedTaskDocs } from "@/modules/worklist/DeviationTaskPanel";
@@ -58,7 +62,7 @@ import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity"
 import { addSchema, crossSiteAddSchema, type AddForm } from "./DeviationPage.schemas";
 import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 import { adaptDeviation, type PrismaDeviationWithCapa } from "./DeviationPage.adapter";
-import { InvestigationSection, CapaDecisionSection } from "./DeviationInvestigation";
+import { InvestigationSection } from "./DeviationInvestigation";
 import {
   DeviationIntelligencePanel,
   DeviationIntelligenceRunButton,
@@ -226,6 +230,24 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
   const [closePassword, setClosePassword] = useState("");
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
+  // Single-QA SoD override (Phase 2) — server-computed reveal + on-record waivers for
+  // the selected deviation, plus the modal's reason/justification inputs. Fetched per
+  // selection so the reveal mirrors closeDeviation's Phase-1 gate exactly.
+  const [sodContext, setSodContext] = useState<{ reveal: DeviationCloseSodReveal; overrides: DeviationSODOverrideRow[] } | null>(null);
+  const [closeSodReason, setCloseSodReason] = useState("");
+  const [closeSodJust, setCloseSodJust] = useState("");
+  // Fetch the override reveal + on-record waivers whenever a deviation is selected;
+  // reset the modal inputs on (re)selection so a prior entry never leaks across rows.
+  useEffect(() => {
+    if (!selectedId) { setSodContext(null); return; }
+    let cancelled = false;
+    setCloseSodReason("");
+    setCloseSodJust("");
+    void getDeviationCloseSodContext(selectedId)
+      .then((ctx) => { if (!cancelled) setSodContext(ctx); })
+      .catch(() => { if (!cancelled) setSodContext(null); });
+    return () => { cancelled = true; };
+  }, [selectedId]);
   const [rejectReason, setRejectReason] = useState("");
   // Part 11 — reject is now an e-signature (password + message). Eye toggles for
   // both signature password fields.
@@ -468,13 +490,32 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     router.refresh();
   }
 
+  // Single-QA override needed at close = a self-check trips AND flag ON AND severity
+  // is below the {Critical, Major} ceiling — EXACTLY closeDeviation's proceed-under-
+  // override condition. A self-check that trips while the flag is off / severity is
+  // Critical|Major ⇒ the server still blocks and we show no inputs (today's behaviour).
+  const sodReveal = sodContext?.reveal;
+  const closeOverrideNeeded = Boolean(
+    sodReveal && sodReveal.flagOn && !sodReveal.ceiling &&
+    (sodReveal.reporter || sodReveal.investigator || sodReveal.assignee),
+  );
+  const sodOverrides = sodContext?.overrides ?? [];
+
   async function handleClose() {
     if (!selected || !user) return;
+    if (closeOverrideNeeded && !isSodOverrideValid(closeSodReason, closeSodJust)) {
+      setCloseError("Select a reason code and add a justification (≥ 20 chars) to proceed under single-QA override.");
+      return;
+    }
     setCloseBusy(true);
     setCloseError(null);
     const result = await closeDeviationAction(selected.id, {
       password: closePassword,
       notes: closeNotes, // Part 11 — closure message required (server-enforced)
+      // Single-QA override — supplied ONLY when this closer trips a self-check under
+      // the flag on a non-Critical/Major deviation; the server re-validates.
+      sodOverrideReasonCode: closeOverrideNeeded ? closeSodReason : undefined,
+      sodOverrideJustification: closeOverrideNeeded ? closeSodJust.trim() : undefined,
     });
     setCloseBusy(false);
     if (!result.success) {
@@ -485,6 +526,8 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
     setCloseModal(false);
     setCloseNotes("");
     setClosePassword("");
+    setCloseSodReason("");
+    setCloseSodJust("");
     setCloseError(null);
     setSelectedId(null);
     setSuccessMsg(`${selected.reference ?? selected.id.slice(0, 8)} closed`);
@@ -743,19 +786,10 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               />
             )}
 
-            {/* Tier 2, Item 3 — CAPA Decision (made after investigation, by QA;
-                hidden until the investigation is complete). */}
-            <CapaDecisionSection
-              deviation={selected}
-              currentUserId={user?.id}
-              isQA={isQADecider}
-              writable={selected.status !== "closed" && selected.status !== "rejected" && !isViewer}
-              resolveUser={ownerName}
-              onChanged={(msg) => { setSuccessMsg(msg); setSuccessPopup(true); router.refresh(); }}
-              onError={(msg) => { setErrorMsg(msg); setErrorPopup(true); }}
-              linkedCapaId={selected.linkedCAPAId}
-              linkedCapaRef={selected.linkedCAPARef}
-            />
+            {/* Tier 2, Item 3 — CAPA Decision now renders INSIDE InvestigationSection
+                (the investigation flow), since the decision follows investigation
+                completion. It self-gates on investigationCompletedAt, so the timing /
+                eligibility is unchanged — only the location moved. */}
 
             {selected.batchesAffected && selected.batchesAffected.length > 0 && (
               <div>
@@ -802,8 +836,30 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               <div><p style={{ color: "var(--text-muted)" }}>Due date</p><p className="font-medium" style={{ color: dayjs.utc(selected.dueDate).isBefore(dayjs()) && selected.status !== "closed" ? "#ef4444" : "var(--text-primary)" }}>{dayjs.utc(selected.dueDate).tz(timezone).format(dateFormat)}</p></div>
             </div>
 
-            {selected.closedBy && (
-              <p className="text-[10px]" style={{ color: "#10b981" }}>Closed by {selected.closedBy} · {selected.closedDate ? dayjs.utc(selected.closedDate).tz(timezone).format(dateFormat) : ""}</p>
+            {/* Closure card — the closure record + any single-QA waivers grouped in
+                one tidy card (consistent with the disposition cards). Renders only when
+                the deviation is closed or a waiver was used, so open / flag-OFF / no-
+                waiver deviations show zero extra UI. */}
+            {(selected.closedBy || sodOverrides.length > 0) && (
+              <div className="rounded-lg border p-3 space-y-2" style={{ background: "var(--bg-elevated)", borderColor: "var(--card-border, var(--bg-border))" }}>
+                <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Closure</p>
+                {selected.closedBy && (
+                  <p className="text-[11px] flex items-center gap-1.5" style={{ color: "var(--text-primary)" }}>
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" style={{ color: "#10b981" }} aria-hidden="true" />
+                    Closed by <strong>{selected.closedBy}</strong>
+                    {selected.closedDate ? <span style={{ color: "var(--text-muted)" }}> · {dayjs.utc(selected.closedDate).tz(timezone).format(dateFormat)}</span> : null}
+                  </p>
+                )}
+                {/* On-record single-QA waiver (Phase 2) — visible, not hidden behind a
+                    tooltip; renders nothing when no waiver was used. */}
+                <SodOverrideBadge overrides={sodOverrides} controls={["DEV_CLOSE_REPORTER", "DEV_CLOSE_INVESTIGATOR", "DEV_CLOSE_ASSIGNEE"]} className="space-y-1" />
+                {sodOverrides.length > 0 && (
+                  <div className="pt-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Single-QA overrides</p>
+                    <SodOverrideSummary overrides={sodOverrides} timezone={timezone} dateFormat={dateFormat} />
+                  </div>
+                )}
+              </div>
             )}
 
             {/* SME Section 1, Stage 1 — CAPA Decision Gate banner. Critical
@@ -1042,46 +1098,67 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
           <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
             Deviation <strong>{selected?.reference ?? selected?.id}</strong> will be marked Closed.
           </p>
-          <div>
-            <p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>
-              Closure message <span style={{ color: "var(--danger)" }}>*</span>
-            </p>
-            <textarea
-              rows={3}
-              className="input w-full resize-none"
-              value={closeNotes}
-              onChange={(e) => setCloseNotes(e.target.value)}
-              placeholder="Summary of investigation outcome (required, min 5 chars)..."
-              disabled={closeBusy}
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="sign-deviation-pw"
-              className="text-[11px] font-medium mb-1 block"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Confirm your password <span style={{ color: "var(--danger)" }}>*</span>
-            </label>
-            <div className="relative">
-              <input
-                id="sign-deviation-pw"
-                type={showClosePw ? "text" : "password"}
-                className="input text-[12px] w-full pr-9"
-                value={closePassword}
-                onChange={(e) => setClosePassword(e.target.value)}
-                placeholder="Re-enter your password"
+          {/* Signature card — the two required inputs grouped + aligned under one
+              heading, so the modal reads as a single "sign here" step. */}
+          <div className="rounded-lg border p-3 space-y-3" style={{ background: "var(--bg-elevated)", borderColor: "var(--card-border, var(--bg-border))" }}>
+            <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>Electronic signature</p>
+            <div>
+              <label htmlFor="sign-deviation-notes" className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-secondary)" }}>
+                Closure message <span style={{ color: "var(--danger)" }}>*</span>
+              </label>
+              <textarea
+                id="sign-deviation-notes"
+                rows={3}
+                className="input w-full resize-none"
+                value={closeNotes}
+                onChange={(e) => setCloseNotes(e.target.value)}
+                placeholder="Summary of investigation outcome (required, min 5 chars)..."
                 disabled={closeBusy}
-                autoComplete="current-password"
               />
-              <button type="button" onClick={() => setShowClosePw((v) => !v)} aria-label={showClosePw ? "Hide password" : "Show password"} aria-pressed={showClosePw} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 inline-flex items-center justify-center border-none bg-transparent cursor-pointer text-(--text-muted) hover:text-(--text-primary)">
-                {showClosePw ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
-              </button>
             </div>
-            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
-              Required for identity verification under 21 CFR Part 11
-            </p>
+            <div>
+              <label
+                htmlFor="sign-deviation-pw"
+                className="text-[11px] font-medium mb-1 block"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                Confirm your password <span style={{ color: "var(--danger)" }}>*</span>
+              </label>
+              <div className="relative">
+                <input
+                  id="sign-deviation-pw"
+                  type={showClosePw ? "text" : "password"}
+                  className="input text-[12px] w-full pr-9"
+                  value={closePassword}
+                  onChange={(e) => setClosePassword(e.target.value)}
+                  placeholder="Re-enter your password"
+                  disabled={closeBusy}
+                  autoComplete="current-password"
+                />
+                <button type="button" onClick={() => setShowClosePw((v) => !v)} aria-label={showClosePw ? "Hide password" : "Show password"} aria-pressed={showClosePw} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 inline-flex items-center justify-center border-none bg-transparent cursor-pointer text-(--text-muted) hover:text-(--text-primary)">
+                  {showClosePw ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
+                </button>
+              </div>
+              <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+                Required for identity verification under 21 CFR Part 11
+              </p>
+            </div>
           </div>
+          {/* Single-QA override — required IN ADDITION to the signature above, shown
+              only when this closer trips a self-check under the flag on a non-Critical/
+              Major deviation. Kept visually distinct (amber compliance affordance) but
+              directly beneath the signature card so it reads as part of the same step.
+              Flag off / Critical|Major ⇒ not shown; the server's existing SoD block applies. */}
+          {closeOverrideNeeded && (
+            <SodOverrideInputs
+              reasonCode={closeSodReason}
+              justification={closeSodJust}
+              onReasonCode={setCloseSodReason}
+              onJustification={setCloseSodJust}
+              disabled={closeBusy}
+              description="You would normally be blocked here (independent QA review). Your tenant permits a single-QA override for non-Critical/Major deviations; this override is recorded on the deviation and in the audit trail, in addition to your Part 11 signature."
+            />
+          )}
           {closeError && (
             <p
               role="alert"
@@ -1103,7 +1180,7 @@ export function DeviationPage({ deviations: serverDeviations }: DeviationPagePro
               variant="primary"
               icon={CheckCircle2}
               onClick={handleClose}
-              disabled={closeBusy || !closePassword || closeNotes.trim().length < 5}
+              disabled={closeBusy || !closePassword || closeNotes.trim().length < 5 || (closeOverrideNeeded && !isSodOverrideValid(closeSodReason, closeSodJust))}
               loading={closeBusy}
             >
               Sign &amp; Close

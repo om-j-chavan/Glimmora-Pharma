@@ -40,9 +40,16 @@ interface Props {
   onJustification: (v: string) => void;
   disabled?: boolean;
   className?: string;
+  /** Override the explanatory copy (defaults to the CAPA wording). Lets the same
+   *  component serve deviations ("non-Critical/Major deviations", recorded on the
+   *  deviation) without a second implementation. */
+  description?: string;
 }
 
-export function SodOverrideInputs({ reasonCode, justification, onReasonCode, onJustification, disabled, className }: Props) {
+const DEFAULT_DESCRIPTION =
+  "You would normally be blocked here (independent QA review). Your tenant permits a single-QA override for non-Critical CAPAs; this override is recorded on the CAPA and in the audit trail.";
+
+export function SodOverrideInputs({ reasonCode, justification, onReasonCode, onJustification, disabled, className, description }: Props) {
   const len = justification.trim().length;
   const tooShort = len > 0 && len < SOD_JUSTIFICATION_MIN;
   return (
@@ -55,8 +62,7 @@ export function SodOverrideInputs({ reasonCode, justification, onReasonCode, onJ
         Single-QA override — a reason and justification are required to proceed
       </p>
       <p className="text-[11px] mb-2" style={{ color: "var(--text-secondary)" }}>
-        You would normally be blocked here (independent QA review). Your tenant permits a single-QA override for
-        non-Critical CAPAs; this override is recorded on the CAPA and in the audit trail.
+        {description ?? DEFAULT_DESCRIPTION}
       </p>
       <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason code</label>
       <select

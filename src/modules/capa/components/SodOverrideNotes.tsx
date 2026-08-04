@@ -15,11 +15,20 @@
 import { ShieldAlert } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 
-type SodOverrideRow = NonNullable<
-  import("@/store/capa.slice").CAPA["sodOverrides"]
->[number];
+/** Structural waiver-row shape shared by CAPASODOverride + DeviationSODOverride rows
+ *  (both have the same fields). Kept local so this on-record component serves both. */
+export interface SodOverrideRow {
+  id: string;
+  control: string;
+  actorName: string;
+  actorRole: string;
+  reasonCode: string;
+  justification: string;
+  signedRecordId: string | null;
+  createdAt: string;
+}
 
-/** Human-readable label for each waived control. */
+/** Human-readable label for each waived control (CAPA + Deviation). */
 const CONTROL_LABEL: Record<string, string> = {
   RCA_APPROVAL: "RCA approval",
   RCA_EDITOR_APPROVER: "RCA approval (editor = approver)",
@@ -28,6 +37,10 @@ const CONTROL_LABEL: Record<string, string> = {
   CLOSE_CREATOR: "Closure (closer = creator)",
   CLOSE_RCA_AUTHOR: "Closure (closer = RCA author)",
   EFFECTIVENESS: "Effectiveness review",
+  // Deviation close controls (DeviationSODOverride).
+  DEV_CLOSE_REPORTER: "Closure (closer = reporter)",
+  DEV_CLOSE_INVESTIGATOR: "Closure (closer = investigator)",
+  DEV_CLOSE_ASSIGNEE: "Closure (closer = task assignee)",
 };
 
 /** Human-readable label for each reason code. */

@@ -5,6 +5,47 @@ import type { AuthSession } from "@/lib/auth";
 import { canSeeAllRecords, resolveVisibilityUid } from "@/lib/permissions/recordVisibility";
 import type { WorklistDoc } from "@/lib/queries/worklist";
 
+/* ── Deviation Single-QA SoD override (Phase 2 UI) ─────────────────────────────
+ * Mirrors the CAPA equivalents in queries/capas.ts. `DeviationSODOverrideRow` is the
+ * on-record waiver shape; `DeviationCloseSodReveal` tells the Sign-&-Close modal
+ * whether the CURRENT user would trip a close self-check (reporter/investigator/
+ * task-assignee ≠ closer) AND the tenant flag is ON AND severity is NOT in the
+ * {Critical, Major} ceiling — computed server-side so the UI mirrors closeDeviation's
+ * Phase-1 gate exactly. The reveal itself is assembled in the getDeviationCloseSodContext
+ * server action (it needs requireAuth + resolveUserFk); this module owns the types +
+ * the on-record row read. */
+
+export interface DeviationSODOverrideRow {
+  id: string;
+  control: string;
+  actorName: string;
+  actorRole: string;
+  reasonCode: string;
+  justification: string;
+  signedRecordId: string | null;
+  createdAt: string;
+}
+
+export interface DeviationCloseSodReveal {
+  flagOn: boolean;
+  /** severity ∈ {Critical, Major} (FDA taxonomy) — never waivable. */
+  ceiling: boolean;
+  reporter: boolean;
+  investigator: boolean;
+  assignee: boolean;
+}
+
+export const getDeviationSODOverrides = cache(
+  async (deviationId: string, tenantId: string): Promise<DeviationSODOverrideRow[]> => {
+    const rows = await prisma.deviationSODOverride.findMany({
+      where: { deviationId, tenantId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, control: true, actorName: true, actorRole: true, reasonCode: true, justification: true, signedRecordId: true, createdAt: true },
+    });
+    return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+  },
+);
+
 /**
  * Deviation record-visibility fragment — the COMPOSE TEMPLATE (CSV copies this).
  *

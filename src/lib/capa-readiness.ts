@@ -90,6 +90,13 @@ export function getCAPAReadiness(
   actionItems: ReadinessActionItem[],
   evidenceItems: ReadinessEvidenceItem[],
   criteria: ReadinessCriterion[],
+  // Single-QA SoD override — when the caller determines the tenant flag is ON and
+  // the CAPA is NON-Critical, it passes `evidenceWaived: true` and condition (e)
+  // stops blocking. Kept as a plain boolean the caller computes (from the SAME flag
+  // the SoD gates read + the Critical ceiling), so this module stays pure — no flag
+  // read, no Prisma. Omitted / false = the default: evidence required exactly as
+  // before. NOTHING else is affected (RCA / alignment / DI / actions / criteria).
+  options?: { evidenceWaived?: boolean },
 ): CAPAReadiness {
   const conditions: ReadinessCondition[] = [];
 
@@ -153,13 +160,19 @@ export function getCAPAReadiness(
   const resolved = evidenceItems.filter((e) =>
     RESOLVED_EVIDENCE_STATUSES.has(e.status),
   ).length;
-  const evidenceMet = resolved >= 1;
+  // Single-QA override waives the evidence requirement (non-Critical only; the
+  // caller applies the ceiling). Flag OFF ⇒ evidenceWaived falsy ⇒ `resolved >= 1`
+  // exactly as before.
+  const evidenceWaived = options?.evidenceWaived === true;
+  const evidenceMet = evidenceWaived || resolved >= 1;
   conditions.push({
     key: "evidence",
     label: "At least one evidence category answered",
     met: evidenceMet,
     detail: evidenceMet
-      ? undefined
+      ? evidenceWaived && resolved < 1
+        ? "Waived — single-QA override is enabled for this tenant"
+        : undefined
       : "Answer at least one evidence category (complete or mark N/A)",
   });
 

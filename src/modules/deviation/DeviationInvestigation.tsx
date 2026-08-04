@@ -236,6 +236,7 @@ interface WorkflowProps {
 export function InvestigationSection({
   deviation,
   currentUserId,
+  isQA,
   writable,
   resolveUser,
   onChanged,
@@ -374,6 +375,25 @@ export function InvestigationSection({
           </p>
         </div>
       )}
+
+      {/* Tier 2, Item 3 — CAPA Decision. MOVED here from the deviation detail page so
+          it lives in the investigation flow (the decision is made AFTER investigation
+          completes). CapaDecisionSection self-gates on investigationCompletedAt (returns
+          null until then), so it appears for exactly the same deviations at the same
+          timing as before — only its render LOCATION changed, in one place. Every prop
+          it needs is already an InvestigationSection prop; linkedCapa* come off the
+          deviation. */}
+      <CapaDecisionSection
+        deviation={deviation}
+        currentUserId={currentUserId}
+        isQA={isQA}
+        writable={writable}
+        resolveUser={resolveUser}
+        onChanged={onChanged}
+        onError={onError}
+        linkedCapaId={deviation.linkedCAPAId}
+        linkedCapaRef={deviation.linkedCAPARef}
+      />
 
       {/* RCA modal — method picker + per-method form (was rendered inline). Save
           completes the investigation (persist(true) → completeInvestigation),

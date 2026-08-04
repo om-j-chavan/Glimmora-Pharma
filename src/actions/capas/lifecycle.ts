@@ -8,6 +8,8 @@ import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, COMP
 import { CAPA_DI_GATE_ROLES, CAPA_REJECT_ROLES, CAPA_REOPEN_ROLES, CAPA_CREATE_ROLES, DEVIATION_QA_ROLES, isAssignedToTask, canExecuteCAPA } from "@/lib/permissions/roleSets";
 import { syncCorrectiveActions } from "./action-items";
 import { getCAPAReadiness } from "@/lib/capa-readiness";
+import { tenantSodOverrideOn } from "./sod-override";
+import { normalizeSeverityForDisplay } from "@/lib/severity";
 import { RISK_DUE_DATE_OFFSET_DAYS } from "@/lib/capa-approvals";
 import { CAPA_TITLE_MIN, CAPA_TITLE_MAX, CAPA_DESCRIPTION_MIN, REJECT_REASON_MIN, DI_CLEARANCE_MIN } from "@/constants/capaValidation";
 import { fileStorage } from "@/lib/fileStorage";
@@ -1417,7 +1419,20 @@ export async function submitForReview(id: string): Promise<ActionResult> {
       }),
     ]);
 
-    const readiness = getCAPAReadiness(existing, actionItems, evidenceItems, criteria);
+    // Single-QA SoD override — the evidence checklist is OPTIONAL for a NON-Critical
+    // CAPA when the tenant flag is ON (same flag + Critical ceiling the SoD gates
+    // use). Flag OFF, or a Critical CAPA, ⇒ evidence required exactly as before.
+    const sodFlagOn = await tenantSodOverrideOn(session.user.tenantId);
+    const evidenceWaived =
+      sodFlagOn && normalizeSeverityForDisplay(existing.risk, "generic") !== "Critical";
+    // Whether the waiver actually CARRIED the submit (evidence was genuinely absent),
+    // as opposed to evidence being present anyway — only the former is recorded.
+    const evidenceResolved = evidenceItems.filter(
+      (e) => e.status === "COMPLETE" || e.status === "NOT_APPLICABLE",
+    ).length;
+    const evidenceActuallyWaived = evidenceWaived && evidenceResolved < 1;
+
+    const readiness = getCAPAReadiness(existing, actionItems, evidenceItems, criteria, { evidenceWaived });
     if (!readiness.allMet) {
       try {
         await prisma.auditLog.create({
@@ -1482,6 +1497,36 @@ export async function submitForReview(id: string): Promise<ActionResult> {
         newValue: JSON.stringify({ accessBasis: submitBasis }),
       },
     });
+
+    // Single-QA SoD override — record WHY this CAPA advanced without evidence, in the
+    // same "CAPA / SoD Override" trail as the other single-QA waivers, so a CAPA that
+    // later closes without evidence shows the override was on. Automatic (no per-use
+    // reason/justification — the waiver is the tenant flag itself), so this is a
+    // documented audit row rather than a justification-carrying CAPASODOverride.
+    if (evidenceActuallyWaived) {
+      try {
+        await prisma.auditLog.create({
+          data: {
+            tenantId: session.user.tenantId,
+            userId: actor.userId,
+            userName: actor.displayName,
+            userRole: actor.role,
+            module: "CAPA / SoD Override",
+            action: "CAPA_SOD_OVERRIDE_USED",
+            recordId: id,
+            recordTitle: (existing.reference ?? existing.title).slice(0, 80),
+            newValue: JSON.stringify({
+              control: "EVIDENCE_WAIVED",
+              waivedRule: "evidence>=1 optional under single-QA override",
+              automatic: true,
+              risk: existing.risk,
+            }),
+          },
+        });
+      } catch (err) {
+        console.error("[action] failed to write CAPA_SOD_OVERRIDE_USED (evidence) audit:", err);
+      }
+    }
 
     revalidatePath("/capa");
     revalidatePath(`/capa/${id}`);

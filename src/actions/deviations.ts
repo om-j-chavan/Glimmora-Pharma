@@ -19,6 +19,11 @@ import {
   writeDeviationSodOverride,
   type DeviationSodControl,
 } from "@/actions/capas/sod-override";
+import {
+  getDeviationSODOverrides,
+  type DeviationCloseSodReveal,
+  type DeviationSODOverrideRow,
+} from "@/lib/queries/deviations";
 import { buildReferencePrefix, generateReference, isReferenceConflict } from "@/lib/reference";
 import { FDA_SEVERITY, coerceSeverityCasing, normalizeSeverityForDisplay } from "@/lib/severity";
 import { INVESTIGATION_RCA_METHODS } from "@/constants/rcaMethods";
@@ -767,6 +772,50 @@ export async function closeDeviation(
     console.error("[action] closeDeviation failed:", err);
     return { success: false, error: "Failed to close deviation" };
   }
+}
+
+/**
+ * Single-QA SoD override — client-callable reveal + on-record rows for the Sign &
+ * Close Deviation modal (Phase 2 UI). Computes, for the CURRENT user, whether closing
+ * this deviation would trip each identity self-check (reporter/investigator/task-
+ * assignee ≠ closer) — mirroring closeDeviation's Phase-1 gate EXACTLY (same
+ * resolveUserFk actor, same active-task query, same {Critical, Major} FDA ceiling,
+ * same tenant flag) — so the UI never offers an override the server would reject nor
+ * hides one it accepts. Also returns the DeviationSODOverride rows already used, for
+ * the on-record badge/summary. Read-only; enforces nothing (closeDeviation is the gate).
+ */
+export async function getDeviationCloseSodContext(
+  deviationId: string,
+): Promise<{ reveal: DeviationCloseSodReveal; overrides: DeviationSODOverrideRow[] }> {
+  const session = await requireAuth();
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  const [existing, activeTask, tenant, overrides] = await Promise.all([
+    prisma.deviation.findFirst({
+      where: { id: deviationId, tenantId: session.user.tenantId },
+      select: { createdById: true, investigationCompletedById: true, severity: true },
+    }),
+    prisma.deviationTask.findFirst({
+      where: { deviationId, tenantId: session.user.tenantId, deletedAt: null, status: { notIn: ["closed", "cancelled"] } },
+      select: { assigneeId: true },
+    }),
+    prisma.tenant.findUnique({ where: { id: session.user.tenantId }, select: { sodSingleQAOverride: true } }),
+    getDeviationSODOverrides(deviationId, session.user.tenantId),
+  ]);
+  const flagOn = tenant?.sodSingleQAOverride === true;
+  if (!existing) {
+    return { reveal: { flagOn, ceiling: false, reporter: false, investigator: false, assignee: false }, overrides };
+  }
+  const canon = normalizeSeverityForDisplay(existing.severity, "fda");
+  return {
+    reveal: {
+      flagOn,
+      ceiling: canon === "Critical" || canon === "Major",
+      reporter: !!existing.createdById && existing.createdById === actor.userId,
+      investigator: !!existing.investigationCompletedById && existing.investigationCompletedById === actor.userId,
+      assignee: !!activeTask?.assigneeId && activeTask.assigneeId === actor.userId,
+    },
+    overrides,
+  };
 }
 
 export async function rejectDeviation(
