@@ -20,6 +20,11 @@ import type {
   DeviationClusterInput,
   DeviationCluster,
   DeviationIntelligenceResult,
+  DeviationRcaInput,
+  DeviationRcaAnalysis,
+  DeviationRcaRootCause,
+  DeviationRcaFactor,
+  DeviationRcaRelated,
   DriftDetectionResult,
   FindingTriageResult,
   FindingTriageSeverity,
@@ -1197,6 +1202,103 @@ export function mockDeviationIntelligence(
     clusters,
     analyzedCount: deviations.length,
     patternCount: clusters.length,
+    scannedAt: new Date().toISOString(),
+    source: "mock",
+  };
+}
+
+/* ── Feature N — Deviation RCA Intelligence (per deviation) ──────────
+ * Crash-safety fallback for getDeviationRcaAnalysis. Reuses the SAME keyword
+ * pools and method shapers as mockRcaSuggestions, so the applyable draft is
+ * identical in structure to the real backend's. `source: "mock"` makes the
+ * panel render the grey "Demo data" provenance badge — demo content must never
+ * wear the AI colour in a regulated tool.
+ *
+ * Everything derived here comes from data the caller already supplied (the
+ * deviation's own fields and the history slice). Nothing is invented: no
+ * fabricated deviation references, batch numbers, or document names. */
+export function mockDeviationRcaAnalysis(
+  input: DeviationRcaInput,
+): DeviationRcaAnalysis {
+  const narrative = [input.title, input.description, input.immediateAction]
+    .filter(Boolean)
+    .join(" — ");
+  const pool = selectRcaPool(narrative);
+  const entries = pool.suggestions;
+
+  const draft: RcaSuggestion =
+    input.method === "5 Why"
+      ? shape5Why(entries[0], narrative || input.title)
+      : input.method === "Fishbone"
+        ? shapeFishbone(entries[0])
+        : shapeFreeform(entries[0], input.method);
+
+  const probableRootCauses: DeviationRcaRootCause[] = entries.map((e, i) => ({
+    title: e.rootCause,
+    rationale: e.factors.contributing,
+    likelihood: i === 0 ? "High" : i === 1 ? "Medium" : "Low",
+    evidence: [e.factors.proximal],
+  }));
+
+  const f = entries[0].factors;
+  const contributingFactors: DeviationRcaFactor[] = [
+    { category: "People", factor: f.people },
+    { category: "Process", factor: f.process },
+    { category: "Equipment", factor: f.equipment },
+    { category: "Materials", factor: f.materials },
+    { category: "Environment", factor: f.environment },
+    { category: "Management", factor: f.management },
+  ];
+
+  // Information gaps are computed from what the record ACTUALLY lacks, so the
+  // fallback still tells the investigator something true about their data.
+  const missingInformation: string[] = [];
+  if (input.documentNames.length === 0) {
+    missingInformation.push("No supporting documents are attached — add the batch record, log extract, or instrument printout that evidences the event.");
+  }
+  if (input.description.trim().length < 80) {
+    missingInformation.push("The description is brief — record when the event was detected, who detected it, and which equipment or line was involved.");
+  }
+  if (!input.immediateAction.trim()) {
+    missingInformation.push("No immediate action is recorded — document what was done to contain the event at detection.");
+  }
+  if (input.batchesAffected.length === 0) {
+    missingInformation.push("No affected batches are listed — confirm product impact, or state explicitly that no batch was affected.");
+  }
+
+  // Only references the caller supplied; same area is the deterministic match.
+  const relatedDeviations: DeviationRcaRelated[] = input.history
+    .filter((h) => h.reference && h.area && h.area === input.area)
+    .slice(0, 4)
+    .map((h) => ({
+      reference: h.reference,
+      reason: `Same area (${h.area})${h.category ? ` · ${h.category}` : ""}`,
+    }));
+
+  return {
+    summary: `Advisory read of ${input.reference || "this deviation"}: the evidence is most consistent with ${entries[0].rootCause.charAt(0).toLowerCase()}${entries[0].rootCause.slice(1)} Verify against the batch record and interview the operators involved before recording the RCA.`,
+    confidence: entries[0].confidence,
+    probableRootCauses,
+    contributingFactors,
+    recommendations: [
+      "Interview the operators and reviewer involved to confirm the sequence of events.",
+      "Pull the batch record and any instrument/audit-trail extract covering the event window.",
+      `Check whether other batches in ${input.area || "this area"} over the same period show the same signature.`,
+      "Confirm whether the governing SOP was current, trained, and available at the point of work.",
+    ],
+    correctiveActions: [
+      "Correct the affected record/batch disposition and document the justification.",
+      "Re-train the personnel involved against the governing procedure and record the assessment.",
+    ],
+    preventiveActions: [
+      "Revise the procedure to remove the ambiguity that allowed the deviation.",
+      "Add a verification step or system control at the point the failure occurred.",
+    ],
+    missingInformation,
+    relatedDeviations,
+    draft,
+    method: input.method,
+    analyzedHistoryCount: input.history.length,
     scannedAt: new Date().toISOString(),
     source: "mock",
   };

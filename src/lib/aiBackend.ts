@@ -47,6 +47,8 @@ import type {
   RegulatoryIntelligenceResult,
   DeviationClusterInput,
   DeviationIntelligenceResult,
+  DeviationRcaInput,
+  DeviationRcaAnalysis,
   DriftDetectionResult,
   ResponseDraftEvent,
   RcaMethod,
@@ -544,6 +546,20 @@ export function fetchRcaSuggestions(
   return request<RcaSuggestion[]>("/api/v1/rca-suggestions/generate", {
     method: "POST",
     jsonBody: { method, observationText, observationSeverity, siteContext },
+    token,
+  });
+}
+
+/** Feature N — per-deviation RCA intelligence: root causes, contributing
+ *  factors, recommendations, CAPA candidates, evidence gaps + a method-shaped
+ *  RCA draft the investigator can apply. Advisory; nothing is auto-applied. */
+export function fetchDeviationRcaAnalysis(
+  input: DeviationRcaInput,
+  token?: string | null,
+): Promise<DeviationRcaAnalysis> {
+  return request<DeviationRcaAnalysis>("/api/v1/deviation-rca/analyze", {
+    method: "POST",
+    jsonBody: input,
     token,
   });
 }

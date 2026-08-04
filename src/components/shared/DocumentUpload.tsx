@@ -55,10 +55,14 @@ function downloadLinkedDocument(doc: LinkedDocument) {
 
 /* ── Helpers ── */
 
-const FILE_TYPE_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt";
-const MAX_SIZE_MB = 25;
+/** The ONE supported-file contract for attachment UIs. Exported so the staged
+ *  (pre-create) uploader in StagedDocumentUpload validates against exactly the
+ *  same list — two upload surfaces accepting different files is a bug users
+ *  only discover after picking a file. */
+export const FILE_TYPE_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.txt";
+export const MAX_SIZE_MB = 25;
 
-function fileTypeFromName(name: string): DocFileType {
+export function fileTypeFromName(name: string): DocFileType {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "pdf") return "pdf";
   if (ext === "doc") return "doc";
@@ -71,7 +75,7 @@ function fileTypeFromName(name: string): DocFileType {
   return "txt";
 }
 
-function formatSize(bytes: number): string {
+export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;

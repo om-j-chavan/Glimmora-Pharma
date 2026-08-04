@@ -207,9 +207,39 @@ export interface TicketAttachment {
   id: string;
   fileName: string;
   originalFileName: string | null;
+  /** Short, human display type ("PDF", "PNG") — see `displayType`. */
   fileType: string | null;
+  /** Human-readable size ("23 B", "1.2 MB") — see `displaySize`. */
+  fileSize: string | null;
+  /** Display name of the uploader, for the attachment's provenance line. */
+  uploadedBy: string;
   hasFile: boolean;
   createdAt: Date;
+}
+
+/**
+ * `Document.fileSize` is a String column that different writers fill
+ * differently: createDocument stores RAW BYTES (`String(file.size)`), while
+ * e.g. uploadFindingEvidence stores an already-formatted `"12 KB"`. Normalise
+ * here so the card never prints a bare "24" and calls it a size.
+ */
+function displaySize(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!/^\d+$/.test(raw.trim())) return raw; // already formatted by its writer
+  const bytes = Number(raw);
+  if (!Number.isFinite(bytes)) return raw;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** `fileType` holds the MIME type ("image/png"). Prefer the file's extension
+ *  as the display label ("PNG") — matching how every other document tile in the
+ *  app labels a file — and fall back to the MIME when there is no extension. */
+function displayType(fileName: string, mime: string | null): string | null {
+  const ext = fileName.includes(".") ? fileName.split(".").pop() : null;
+  if (ext && ext.length <= 5) return ext.toUpperCase();
+  return mime;
 }
 
 /** Attachments for a ticket — Document rows linked via linkedModule="Support".
@@ -225,14 +255,16 @@ export async function getTicketAttachments(
   if (!ticket || !canViewTicket(session, ticket)) return [];
   const docs = await prisma.document.findMany({
     where: { linkedModule: "Support", linkedRecordId: ticketId, tenantId: ticket.tenantId, deletedAt: null },
-    select: { id: true, fileName: true, originalFileName: true, fileType: true, storageKey: true, createdAt: true },
+    select: { id: true, fileName: true, originalFileName: true, fileType: true, fileSize: true, uploadedBy: true, storageKey: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
   return docs.map((d) => ({
     id: d.id,
     fileName: d.fileName,
     originalFileName: d.originalFileName,
-    fileType: d.fileType,
+    fileType: displayType(d.originalFileName ?? d.fileName, d.fileType),
+    fileSize: displaySize(d.fileSize),
+    uploadedBy: d.uploadedBy,
     hasFile: !!d.storageKey,
     createdAt: d.createdAt,
   }));

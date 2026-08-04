@@ -6,6 +6,7 @@ jobs:
   - name: migrate
     kind: PRE_DEPLOY
     github:
+      repo: baarez-technology/Glimmora-Pharma
       branch: devAI
       deploy_on_push: true
     source_dir: /
@@ -27,21 +28,35 @@ jobs:
 
 services:
   # ── FastAPI AI backend ────────────────────────────────────────────────────
+  # Deployed from its OWN repo, not from a copy vendored into this one. The
+  # former `source_dir: /backend` snapshot drifted months behind `ai_develop`
+  # (it carried 12 of 24 routers and none of the help/draft/search/summary
+  # services), so every newer AI endpoint 404'd in production while working
+  # locally. Never re-vendor this code — point at the source of truth.
   - name: api
     github:
-      branch: devAI
+      repo: baarez-technology/pharma_glimmora_ai_backend
+      branch: ai_develop
       deploy_on_push: true
-    source_dir: /backend
+    source_dir: /
     environment_slug: python
     build_command: pip install -r requirements.txt
     run_command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --log-level info
     http_port: 8080
     instance_size_slug: basic-xs
     instance_count: 1
+    # `preserve_path_prefix` is REQUIRED. Without it DO strips the matched
+    # prefix before forwarding, so `/api/v1/auth/login` reaches FastAPI as
+    # `/auth/login` and 404s even though the route exists. (Observable proof:
+    # GET /v1 returned the body of `@app.get("/")`, GET /api/ai/health returned
+    # the body of `@app.get("/health")` — both root-level routes.)
     routes:
       - path: /v1
+        preserve_path_prefix: true
       - path: /api/ai
+        preserve_path_prefix: true
       - path: /api/v1
+        preserve_path_prefix: true
     health_check:
       http_path: /health
       initial_delay_seconds: 30
@@ -58,19 +73,29 @@ services:
       - key: PINECONE_API_KEY
         scope: RUN_AND_BUILD_TIME
         type: SECRET
-      - key: JWT_SECRET
+      # The backend reads SECRET_KEY (app/routers/auth_router.py), not
+      # JWT_SECRET — under the old name it silently fell back to the insecure
+      # hardcoded dev key that signs every JWT.
+      - key: SECRET_KEY
         scope: RUN_AND_BUILD_TIME
         type: SECRET
+      # Production is auto-detected via RENDER / ENV / ENVIRONMENT. On DO none
+      # of those were set, so the backend believed it was in development:
+      # SECRET_KEY was optional and token verification was fail-open (a bad or
+      # missing `auth` header was allowed through instead of 401).
+      - key: ENV
+        scope: RUN_AND_BUILD_TIME
+        value: production
+      # Consumed by the CORS middleware in app/main.py (comma-separated).
+      # ${APP_URL} resolves to the app's own public URL.
       - key: ALLOWED_ORIGINS
         scope: RUN_AND_BUILD_TIME
         value: ${APP_URL}
-      - key: TAVILY_API_KEY
-        scope: RUN_AND_BUILD_TIME
-        type: SECRET
 
   # ── Next.js frontend ──────────────────────────────────────────────────────
   - name: web
     github:
+      repo: baarez-technology/Glimmora-Pharma
       branch: devAI
       deploy_on_push: true
     source_dir: /

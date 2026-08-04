@@ -18,7 +18,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { roleLabel } from "@/lib/labels/roles";
 import type { TicketAttachment } from "@/lib/queries";
-import { DocumentCard } from "@/components/documents/DocumentCard";
+import { TicketAttachmentsPanel } from "./TicketAttachmentsPanel";
 import {
   canTransition,
   RESOLUTION_CATEGORIES,
@@ -242,16 +242,17 @@ export function TicketDetailView({ detail, attachments, manage, canEscalate, can
           </div>
         )}
 
-        {attachments.length > 0 && (
-          <div className="mt-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>Attachments</p>
-            <div className="space-y-2">
-              {attachments.map((a) => (
-                <DocumentCard key={a.id} doc={a} />
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Attachments — view / add / remove. Always rendered (it carries its
+            own empty state); add + remove are gated inside the panel by the
+            SAME server gates createDocument / deleteDocument enforce. A
+            terminal ticket is read-only, and a bystander who can see the
+            ticket but isn't its requester or handler reads only. */}
+        <TicketAttachmentsPanel
+          ticketId={ticket.id}
+          attachments={attachments}
+          editable={!isTerminal}
+          involved={isRequester || manage}
+        />
       </div></div>
 
       {/* Status Management panel — clickable action cards, grouped. Hidden on a
@@ -446,6 +447,16 @@ export function TicketDetailView({ detail, attachments, manage, canEscalate, can
             <textarea id="e-desc" rows={4} className="input text-[12px] resize-none" {...editForm.register("description")} />
             {editForm.formState.errors.description && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{editForm.formState.errors.description.message}</p>}
           </div>
+          {/* Attachments are NOT collected here. This dialog is save-on-submit
+              (nothing persists until "Save changes") while attachments upload
+              immediately — the ticket already exists, so there is nothing to
+              defer. Mixing the two would make "Cancel" ambiguous: it would
+              discard the field edits but not the uploads. They live in the
+              always-available Attachments section instead, which also stays
+              usable after this dialog closes for good (it is New/Open only). */}
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+            Attachments are managed in the <strong>Attachments</strong> section on this page.
+          </p>
         </form>
       </Modal>
 

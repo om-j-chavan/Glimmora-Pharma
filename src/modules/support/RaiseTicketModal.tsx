@@ -76,6 +76,9 @@ export function RaiseTicketModal({
   const role = useAppSelector((s) => s.auth.user?.role) ?? "";
   const requireSite = role === "customer_admin";
   const [files, setFiles] = useState<File[]>([]);
+  // Determinate attachment progress — the ticket is created first, then each
+  // file is persisted in turn, so "Uploading 2 of 5…" is real, not a guess.
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
 
   const { register, handleSubmit, control, watch, reset, setValue, setError, trigger, getValues, formState: { errors, isSubmitting } } =
     useForm<FormValues>({
@@ -164,9 +167,20 @@ export function RaiseTicketModal({
     // We create the ticket above, then persist each collected file with the
     // returned id. Uploading before the ticket existed would orphan the files.
     if (files.length > 0) {
-      const { failed } = await uploadDocuments(files, { module: "Support", recordId: res.data.id });
+      setUploadProgress({ done: 0, total: files.length });
+      const { failed, firstError } = await uploadDocuments(
+        files,
+        { module: "Support", recordId: res.data.id },
+        (done, total) => setUploadProgress({ done, total }),
+      );
+      setUploadProgress(null);
       if (failed > 0) {
-        toast.error(`Ticket created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload.`);
+        // Say WHY where the server told us — a role rejection needs a different
+        // response from the user than a size rejection.
+        toast.error(
+          `Ticket created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload.` +
+            (firstError ? ` ${firstError}` : ""),
+        );
       }
     }
     toast.success(`Ticket ${res.data.reference ?? ""} raised.`);
@@ -319,7 +333,15 @@ export function RaiseTicketModal({
 
         <div>
           <label className={lbl} style={{ color: "var(--text-muted)" }}>Attachments (optional)</label>
-          <DocumentUpload files={files} onChange={setFiles} onReject={(m) => toast.error(m)} />
+          <DocumentUpload files={files} onChange={setFiles} disabled={isSubmitting} onReject={(m) => toast.error(m)} />
+          {uploadProgress && (
+            <p role="status" aria-live="polite" className="text-[11px] mt-1.5" style={{ color: "var(--text-secondary)" }}>
+              Uploading attachment {uploadProgress.done} of {uploadProgress.total}…
+            </p>
+          )}
+          <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+            You can also add or remove attachments later from the ticket&apos;s Attachments section.
+          </p>
         </div>
       </form>
     </Modal>

@@ -21,6 +21,7 @@ import {
   mockRegulatoryIntelligence,
   buildRegulatoryUpdates,
   mockDeviationIntelligence,
+  mockDeviationRcaAnalysis,
   mockDriftDetection,
   mockFindingTriage,
   mockApprovalBrief,
@@ -31,6 +32,7 @@ import {
   scanStageDocument,
   fetchRegulatoryIntelligence,
   fetchDeviationClusters,
+  fetchDeviationRcaAnalysis,
   fetchDriftDetection,
   fetchResponseDraft,
   fetchRcaSuggestions,
@@ -79,6 +81,7 @@ export const AI_MOCK = {
   documentReview: false, // Feature D — POST /api/v1/document-review/scan
   regulatoryIntelligence: false, // Feature E — GET  /api/v1/regulatory-intelligence/scan
   deviationIntelligence: false, // Feature F — POST /api/v1/deviation-intelligence/analyze
+  deviationRca: false, // Feature N — POST /api/v1/deviation-rca/analyze (per-deviation RCA assist)
   driftDetection: false, // Feature H — GET  /api/v1/drift-detection/scan
   findingTriage: false, // Feature I — POST /api/v1/finding-triage/classify
   approvalBrief: false, // Feature J — POST /api/v1/capa-approval-brief/generate
@@ -587,6 +590,116 @@ export async function getDeviationIntelligence(
       err,
     );
     return mockDeviationIntelligence(deviations);
+  }
+}
+
+/* ── Feature N — Deviation RCA Intelligence (per deviation) ──────────
+ * Opened from the RCA section of a single deviation's detail view. Distinct
+ * from Feature F above, which clusters the WHOLE register: this reads ONE
+ * deviation in depth (description, immediate action, severity, area/category,
+ * attached document names, any RCA text already written) plus a slice of that
+ * tenant's similar past deviations, and returns investigation assist for it.
+ *
+ * CAN DO (AI-assisted): propose candidate root causes, name contributing
+ * factors, recommend next investigative steps, draft candidate corrective /
+ * preventive actions, and flag evidence the investigation is still missing.
+ * CANNOT DO (human only): complete the investigation, decide whether a CAPA is
+ * required, close the deviation. Every output is advisory and is applied to the
+ * RCA form only on an explicit user click — never automatically. */
+
+/** A past deviation offered to the agent for comparison. Reference/title only —
+ *  no documents or personal data leave the app. */
+export interface DeviationRcaHistoryItem {
+  reference: string;
+  title: string;
+  area: string;
+  category: string;
+  severity: string;
+  /** The recorded root cause, when that deviation's investigation completed. */
+  rootCause: string;
+}
+
+/** Everything the investigator can see about the deviation under analysis. */
+export interface DeviationRcaInput {
+  /** Shapes the applyable draft — must be the method picked in the RCA form. */
+  method: RcaMethod;
+  reference: string;
+  title: string;
+  description: string;
+  severity: string;
+  category: string;
+  area: string;
+  type: string;
+  immediateAction: string;
+  batchesAffected: string[];
+  /** File NAMES only. The bytes never leave the app; the names still tell the
+   *  agent what evidence exists and, by omission, what does not. */
+  documentNames: string[];
+  /** RCA text already entered, so the agent builds on it instead of ignoring it. */
+  existingRootCause: string;
+  history: DeviationRcaHistoryItem[];
+}
+
+export type DeviationRcaLikelihood = "High" | "Medium" | "Low";
+
+export interface DeviationRcaRootCause {
+  title: string;
+  rationale: string;
+  likelihood: DeviationRcaLikelihood;
+  /** Specific details from the deviation that support this candidate. */
+  evidence: string[];
+}
+
+export interface DeviationRcaFactor {
+  /** Fishbone-style bucket (People / Process / Equipment / …). */
+  category: string;
+  factor: string;
+}
+
+export interface DeviationRcaRelated {
+  reference: string;
+  reason: string;
+}
+
+export interface DeviationRcaAnalysis {
+  summary: string;
+  /** 0–100 — the agent's confidence in the LEADING root cause. */
+  confidence: number;
+  probableRootCauses: DeviationRcaRootCause[];
+  contributingFactors: DeviationRcaFactor[];
+  recommendations: string[];
+  correctiveActions: string[];
+  preventiveActions: string[];
+  /** Evidence/information the investigation still needs. Empty = nothing flagged. */
+  missingInformation: string[];
+  /** Only references the agent was actually shown — never fabricated. */
+  relatedDeviations: DeviationRcaRelated[];
+  /** The leading analysis shaped into the RCA form's method. This is the ONLY
+   *  part that can be written into the investigator's fields, and only on an
+   *  explicit "Apply" click. */
+  draft: RcaSuggestion;
+  method: RcaMethod;
+  analyzedHistoryCount: number;
+  scannedAt: string;
+  source: "mock" | "backend";
+}
+
+export async function getDeviationRcaAnalysis(
+  input: DeviationRcaInput,
+): Promise<DeviationRcaAnalysis> {
+  if (AI_MOCK.deviationRca) {
+    logMockUsage("getDeviationRcaAnalysis");
+    await delay(900);
+    return mockDeviationRcaAnalysis(input);
+  }
+  try {
+    return await fetchDeviationRcaAnalysis(input, currentAiToken());
+  } catch (err) {
+    console.error(
+      "[ai] getDeviationRcaAnalysis: backend failed, falling back to mock.",
+      err,
+    );
+    return mockDeviationRcaAnalysis(input);
   }
 }
 
