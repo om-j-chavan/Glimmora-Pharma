@@ -44,8 +44,8 @@ type PrismaTenantRow = {
     isActive: boolean;
     siteId: string | null;
   }>;
-  /** Region link rows (TenantRegulatoryRegion). Absent when not included. */
-  regulatoryRegions?: Array<{ region: string }>;
+  /** Region link rows (TenantRegion relation). Absent when not included. */
+  regions?: Array<{ region: string }>;
 };
 
 function mapSite(site: NonNullable<PrismaTenantRow["sites"]>[number]): TenantSiteConfig {
@@ -121,10 +121,12 @@ export function mapTenantFromPrisma(row: PrismaTenantRow): Tenant {
         companyName: row.name,
         timezone: row.timezone,
         dateFormat: "DD/MM/YYYY",
-        // A tenant may operate under several regions; the link rows are the
-        // whole set. Sorted so the chips render in a stable order rather than
-        // in row-insertion order, which changes every time the set is edited.
-        regulatoryRegions: (row.regulatoryRegions ?? [])
+        // A tenant may operate under several regions; the TenantRegion link rows
+        // are the whole set. Read the AAA relation `row.regions` but keep the
+        // domain field name `regulatoryRegions` the UI already uses (Path Z).
+        // Sorted so the chips render in a stable order rather than in
+        // row-insertion order, which changes every time the set is edited.
+        regulatoryRegions: (row.regions ?? [])
           .map((r) => r.region)
           .sort((a, b) => a.localeCompare(b)),
       },

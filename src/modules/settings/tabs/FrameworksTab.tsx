@@ -24,7 +24,7 @@ export function FrameworksTab({ readOnly = false }: { readOnly?: boolean }) {
   const regionLabelMap = useAppSelector((s) => s.regions.labelMap);
 
   // Server-backed per-tenant framework settings, GROUPED for the by-region tab:
-  // { regions: the tenant's TenantRegulatoryRegion set (ordered), frameworks: the flat list
+  // { regions: the tenant's TenantRegion set (ordered), frameworks: the flat list
   // each tagged appliesToAllRegions + matchedRegions }. Already region-filtered +
   // platform-enabled by getTenantFrameworkSettings. `null` = still loading.
   const [data, setData] = useState<TenantFrameworkGroups | null>(null);

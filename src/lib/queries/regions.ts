@@ -58,7 +58,7 @@ export interface RegionCatalogRow {
   archived: boolean;
   /** Successor via old.aliasOf (Stage 3) — set on an archived, superseded row. */
   successor: { value: string; label: string } | null;
-  /** How many tenants have this value selected (TenantRegulatoryRegion). A tenant
+  /** How many tenants have this value selected (TenantRegion). A tenant
    *  with several regions is counted once under EACH of them. */
   tenantCount: number;
   /** How many FrameworkRegion links currently point at this value. */
@@ -74,7 +74,7 @@ export const getRegionCatalog = cache(async (): Promise<RegionCatalogRow[]> => {
       orderBy: { createdAt: "asc" },
       include: { aliasOf: { select: { value: true, label: true } } },
     }),
-    prisma.tenantRegulatoryRegion.groupBy({ by: ["region"], _count: true }),
+    prisma.tenantRegion.groupBy({ by: ["region"], _count: true }),
     prisma.frameworkRegion.groupBy({ by: ["region"], _count: true }),
   ]);
   const tenantCounts = new Map(tenantGroups.map((g) => [g.region, g._count]));

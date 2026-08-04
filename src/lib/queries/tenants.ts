@@ -15,7 +15,7 @@ export const getTenants = cache(async (): Promise<Tenant[]> => {
       plan: true,
       sites: true,
       users: true,
-      regulatoryRegions: { select: { region: true } },
+      regions: { select: { region: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -29,7 +29,7 @@ export const getTenant = cache(async (id: string): Promise<Tenant | null> => {
       plan: true,
       sites: true,
       users: true,
-      regulatoryRegions: { select: { region: true } },
+      regions: { select: { region: true } },
     },
   });
   return row ? mapTenantFromPrisma(row) : null;

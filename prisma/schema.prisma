@@ -24,6 +24,12 @@ model Tenant {
   language            String   @default("en")
   timezone            String   @default("Asia/Kolkata")
   logoUrl             String?
+  // Regulatory region is owned by the platform super_admin (set on tenant
+  // create/edit), NOT the customer_admin. Nullable for the backfill window.
+  // Values come from the central RegulatoryRegion lookup table. Multi-region
+  // keeps this as the PRIMARY shim (= regions[0]); the TenantRegion set is the
+  // source of truth for framework resolution.
+  regulatoryRegion    String?
   isActive            Boolean  @default(true)
   // Soft-delete timestamp. Lifecycle: ACTIVE (isActive=true, deletedAt=null),
   // SUSPENDED (isActive=false, deletedAt=null), DELETED-soft (deletedAt set).
@@ -69,38 +75,6 @@ model Tenant {
   tenantFrameworks      TenantFramework[]
   // Role-Based User Limits (Phase A, INERT) — per-tenant per-role cap OVERRIDES.
   tenantRoleLimits      TenantRoleLimit[]
-<<<<<<< HEAD
-  // Regulatory regions this tenant operates under. MANY per tenant — see
-  // TenantRegulatoryRegion.
-  regulatoryRegions     TenantRegulatoryRegion[]
-}
-
-// Tenant ↔ regulatory region link. A tenant operates under one OR MORE regions
-// (a manufacturer shipping to the US, the EU and the UK answers to FDA, EMA and
-// MHRA at once), so the region is a SET, not a column.
-//
-// Modelled as a join table rather than a scalar list because the deployed DB is
-// Postgres while local dev runs SQLite, and SQLite has no array type — a
-// relation behaves identically on both. It also mirrors FrameworkRegion, so the
-// two region-reference tables archive, supersede and purge through the same code
-// path.
-//
-// `region` stores the IMMUTABLE RegulatoryRegion.value (e.g. "FDA"), the same
-// bare-string FK convention FrameworkRegion uses. Ownership is unchanged: only
-// the platform super_admin writes these rows; a customer_admin reads them.
-model TenantRegulatoryRegion {
-  id       String @id @default(cuid())
-  tenantId String
-  region   String
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  // A region can be selected at most once per tenant — the DB-level guarantee
-  // behind the "prevent duplicate selections" rule.
-  @@unique([tenantId, region])
-  @@index([region])
-  @@index([tenantId])
-=======
   // Multi-region — a tenant's applicable regulatory regions (join table). The
   // scalar regulatoryRegion above is kept as the PRIMARY (regions[0]) shim +
   // backfill source; this set is the source of truth for framework resolution.
@@ -109,7 +83,25 @@ model TenantRegulatoryRegion {
   capaSodOverrides      CAPASODOverride[]
   // Same org flag, deviation-closure waivers (DeviationSODOverride).
   deviationSodOverrides DeviationSODOverride[]
->>>>>>> b8a1db6 (AAA)
+}
+
+// Tenant ↔ regulatory region link (multi-region). A tenant operates under one OR
+// MORE regions (a manufacturer shipping to the US, the EU and the UK answers to
+// FDA, EMA and MHRA at once), so the region is a SET. Modelled as a join table
+// rather than a scalar array because local dev runs SQLite (no array type) while
+// the deployed DB is Postgres, and because it mirrors FrameworkRegion. `region`
+// stores the IMMUTABLE RegulatoryRegion.value (e.g. "FDA"), the same bare-string
+// FK convention FrameworkRegion uses. Only the platform super_admin writes these
+// rows; a customer_admin reads them.
+model TenantRegion {
+  id       String @id @default(cuid())
+  tenantId String
+  region   String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, region])
+  @@index([region])
 }
 
 // Plan.tier is a String, not a Prisma enum, because SQLite (via Prisma) has no
@@ -154,7 +146,7 @@ model Plan {
 // additionally guards against case-insensitive duplicates.
 model RegulatoryRegion {
   id        String   @id @default(cuid())
-  // IMMUTABLE key — stored as a bare FK string in TenantRegulatoryRegion.region
+  // IMMUTABLE key — stored as a bare FK string in TenantRegion.region
   // and FrameworkRegion.region. Renaming would orphan those refs, so a value
   // change is archive-and-alias with reference re-pointing (never an in-place
   // mutation).
@@ -2607,7 +2599,7 @@ model Framework {
 
 // Framework ↔ regulatory region link (only meaningful when appliesToAllRegions
 // = false). `region` stores a RegulatoryRegion.value (e.g. "FDA") — the same
-// bare-string convention TenantRegulatoryRegion.region uses.
+// bare-string convention TenantRegion.region uses.
 model FrameworkRegion {
   id          String @id @default(cuid())
   frameworkId String

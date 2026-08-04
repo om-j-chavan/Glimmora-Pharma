@@ -43,7 +43,7 @@ function regionWhere(regions: string[]) {
  *  Frameworks tab's per-region sections render in a stable order rather than in
  *  link-row insertion order, which changes every time the set is edited. */
 async function tenantRegionValues(tenantId: string): Promise<string[]> {
-  const rows = await prisma.tenantRegulatoryRegion.findMany({
+  const rows = await prisma.tenantRegion.findMany({
     where: { tenantId },
     select: { region: true },
     orderBy: { region: "asc" },

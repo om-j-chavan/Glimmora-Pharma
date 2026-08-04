@@ -286,10 +286,10 @@ async function main() {
   // change is never clobbered.
   const helios = await prisma.tenant.findUnique({
     where: { email: "admin@helios.test" },
-    select: { id: true, _count: { select: { regulatoryRegions: true } } },
+    select: { id: true, _count: { select: { regions: true } } },
   });
-  if (helios && helios._count.regulatoryRegions === 0) {
-    await prisma.tenantRegulatoryRegion.createMany({
+  if (helios && helios._count.regions === 0) {
+    await prisma.tenantRegion.createMany({
       data: [
         { tenantId: helios.id, region: "EMA" },
         { tenantId: helios.id, region: "MHRA" },
@@ -1197,7 +1197,7 @@ async function main() {
   // ── Regulatory regions (Item #3, parity-critical) ──
   // Seed the RegulatoryRegion lookup from the load-bearing REGULATORY_REGIONS
   // constant so the DB reproduces the EXACT 8 value strings that Tenant.
-  // TenantRegulatoryRegion + FrameworkRegion.region already reference. Idempotent by
+  // TenantRegion + FrameworkRegion.region already reference. Idempotent by
   // value; `update: {}` never clobbers an admin-edited label on re-seed.
   for (const r of REGULATORY_REGIONS) {
     await prisma.regulatoryRegion.upsert({

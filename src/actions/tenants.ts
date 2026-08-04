@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -39,25 +39,34 @@ const CreateTenantSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
   language: z.string().default("en"),
   timezone: z.string().default("Asia/Kolkata"),
-  // Regulatory regions — super_admin owned, chosen from the central ACTIVE-region
-  // lookup. A tenant may operate under SEVERAL (a manufacturer shipping to the
-  // US, the EU and the UK answers to FDA, EMA and MHRA at once), and at least one
-  // is REQUIRED on create so its effective frameworks resolve.
-  // `UpdateTenantSchema.partial()` keeps the field optional on edit — omitting it
-  // leaves the current set untouched — but SENDING it must still send a non-empty
-  // set, which is why the min(1) lives on the array itself.
-  regulatoryRegions: z
-    .array(z.string().trim().min(1))
-    .min(1, "Select at least one Regulatory Region")
-    // Duplicate selections are meaningless and would trip the
-    // @@unique([tenantId, region]) index — collapse them here so a repeated value
-    // is a no-op rather than a 500.
-    .transform((values) => [...new Set(values)]),
+  // Regulatory region — super_admin owned, chosen from the central ACTIVE-region
+  // lookup. REQUIRED on create (Stage 5) — a tenant must have a region so its
+  // effective frameworks resolve. UpdateTenantSchema.partial() keeps it optional
+  // on edit (never forces a region onto a legacy null tenant mid-edit).
+  // Multi-region: the region SET is the source of truth. `regulatoryRegions` is
+  // the new field; the single `regulatoryRegion` is still accepted for back-compat
+  // and is derived from regions[0]. "≥1 on create" is enforced in the action so
+  // either field can satisfy it (UpdateTenantSchema.partial() keeps both optional).
+  regulatoryRegion: z.string().min(1).optional(),
+  regulatoryRegions: z.array(z.string().min(1)).optional(),
   isActive: z.boolean().default(true),
   // Single-QA SoD override — super_admin-only org posture; default OFF. Phase 0
   // persists it via the generic create/update path; NO CAPA gate reads it yet.
   sodSingleQAOverride: z.boolean().optional(),
 });
+
+/** Normalize a region SET from the new array and/or the legacy single field:
+ *  trim, drop blanks, de-dupe, preserve order. regions[0] is the PRIMARY (shim). */
+function normalizeRegions(list?: string[], single?: string | null): string[] {
+  const raw = list && list.length ? list : single ? [single] : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of raw) {
+    const v = r.trim();
+    if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+  }
+  return out;
+}
 
 const UpdateTenantSchema = CreateTenantSchema.partial().extend({
   password: z.string().min(8, "Password must be at least 8 characters").optional(),
@@ -83,54 +92,6 @@ const AssignPlanSchema = z.object({
   startDate: z.string().min(1),
 });
 
-/**
- * Validate a submitted region set against the central RegulatoryRegion lookup.
- *
- * Two rules, in this order:
- *   • a value with no region row is REJECTED — it would resolve no frameworks and
- *     render as a raw code everywhere;
- *   • an ARCHIVED value is rejected UNLESS the tenant already holds it. Archiving
- *     re-points tenants to GLOBAL, so this only matters for a legacy row that
- *     slipped through: editing such a tenant's name must not be blocked by a
- *     region it did not just choose.
- *
- * Returns null when the set is acceptable, or the fieldErrors payload to return.
- */
-async function invalidRegions(
-  values: string[],
-  tenantId?: string,
-): Promise<Record<string, string[]> | null> {
-  const rows = await prisma.regulatoryRegion.findMany({
-    where: { value: { in: values } },
-    select: { value: true, archivedAt: true },
-  });
-  const byValue = new Map(rows.map((r) => [r.value, r]));
-
-  const unknown = values.filter((v) => !byValue.has(v));
-  if (unknown.length) {
-    return { regulatoryRegions: [`Unknown Regulatory Region: ${unknown.join(", ")}`] };
-  }
-
-  const archived = values.filter((v) => byValue.get(v)?.archivedAt);
-  if (archived.length) {
-    const held = tenantId
-      ? new Set(
-          (await prisma.tenantRegulatoryRegion.findMany({
-            where: { tenantId, region: { in: archived } },
-            select: { region: true },
-          })).map((r) => r.region),
-        )
-      : new Set<string>();
-    const newlyArchived = archived.filter((v) => !held.has(v));
-    if (newlyArchived.length) {
-      return {
-        regulatoryRegions: [`These Regulatory Regions are archived and can't be assigned: ${newlyArchived.join(", ")}`],
-      };
-    }
-  }
-  return null;
-}
-
 export async function createTenant(
   input: z.input<typeof CreateTenantSchema>,
 ): Promise<ActionResult> {
@@ -147,9 +108,16 @@ export async function createTenant(
     };
   }
 
-  // "At least one region" is enforced by CreateTenantSchema itself (.min(1) on
-  // the array), so a create that reaches here already carries a non-empty,
-  // de-duplicated set — no second emptiness check is needed.
+  // Multi-region: resolve the SET (source of truth); regions[0] is the shim.
+  // Required on create — either the new array or the legacy single field satisfies it.
+  const regions = normalizeRegions(parsed.data.regulatoryRegions, parsed.data.regulatoryRegion);
+  if (regions.length === 0) {
+    return {
+      success: false,
+      error: "Validation failed",
+      fieldErrors: { regulatoryRegions: ["At least one Regulatory Region is required."] },
+    };
+  }
 
   // Uniqueness pre-check (case-insensitive) BEFORE the create, so we can return
   // field-specific messages the modal surfaces inline on the right input. The
@@ -170,11 +138,6 @@ export async function createTenant(
     if (Object.keys(dupFields).length > 0) {
       return { success: false, error: "This account already exists.", fieldErrors: dupFields };
     }
-  }
-
-  const regionErrors = await invalidRegions(parsed.data.regulatoryRegions);
-  if (regionErrors) {
-    return { success: false, error: "Validation failed", fieldErrors: regionErrors };
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -198,23 +161,6 @@ export async function createTenant(
         return row?.customerCode ?? null;
       }, 4);
       try {
-<<<<<<< HEAD
-        tenant = await prisma.tenant.create({
-          data: {
-            ...(parsed.data.id ? { id: parsed.data.id } : {}),
-            name: parsed.data.name,
-            email: parsed.data.email.toLowerCase(),
-            username: parsed.data.username,
-            customerCode,
-            passwordHash,
-            role: "customer_admin",
-            language: parsed.data.language,
-            timezone: parsed.data.timezone,
-            // Region links are created WITH the tenant, so a tenant row can
-            // never exist without the regions its framework resolution needs.
-            regulatoryRegions: {
-              create: parsed.data.regulatoryRegions.map((region) => ({ region })),
-=======
         // Tenant + region SET written in ONE transaction so the shim
         // (regulatoryRegion = regions[0]) and the set can never disagree.
         tenant = await prisma.$transaction(async (tx) => {
@@ -232,10 +178,10 @@ export async function createTenant(
               regulatoryRegion: regions[0], // PRIMARY shim; the set below is source of truth
               isActive: parsed.data.isActive,
               sodSingleQAOverride: parsed.data.sodSingleQAOverride ?? false,
->>>>>>> b8a1db6 (AAA)
             },
-            isActive: parsed.data.isActive,
-          },
+          });
+          await tx.tenantRegion.createMany({ data: regions.map((region) => ({ tenantId: created.id, region })) });
+          return created;
         });
         break;
       } catch (err) {
@@ -258,7 +204,6 @@ export async function createTenant(
         action: "TENANT_CREATED",
         recordId: tenant.id,
         recordTitle: parsed.data.name,
-        newValue: JSON.stringify({ regulatoryRegions: parsed.data.regulatoryRegions }),
       },
     });
     revalidatePath("/admin");
@@ -294,32 +239,21 @@ export async function updateTenant(
   if (!parsed.success) {
     return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
   }
-  if (parsed.data.regulatoryRegions) {
-    const regionErrors = await invalidRegions(parsed.data.regulatoryRegions, id);
-    if (regionErrors) {
-      return { success: false, error: "Validation failed", fieldErrors: regionErrors };
-    }
-  }
-
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
-    // `regulatoryRegions` is a RELATION, not a scalar column — pull it out of the
-    // spread so it never reaches `tenant.update`'s scalar data.
-    const { password, regulatoryRegions, ...rest } = parsed.data;
+    const { password, ...rest } = parsed.data;
     const data: Record<string, unknown> = { ...rest };
     if (rest.email) data.email = rest.email.toLowerCase();
     if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_COST);
-
-    // Region set: omitted → untouched; present → REPLACED wholesale, so the
-    // submitted set is exactly what the tenant ends up with. Delete-then-create
-    // rather than a diff because the set is tiny and a full replace cannot leave
-    // a stale row behind. `regionsBefore` is read first so the audit entry records
-    // the real transition rather than just the new value.
-    const regionsBefore = regulatoryRegions
-      ? (await prisma.tenantRegulatoryRegion.findMany({ where: { tenantId: id }, select: { region: true } }))
-          .map((r) => r.region)
-          .sort((a, b) => a.localeCompare(b))
-      : null;
+    // Multi-region: `regulatoryRegions` is NOT a scalar column — strip it from the
+    // tenant update payload and apply it as a set below. Only touch regions when
+    // the caller actually sent region info (partial edits leave the set intact).
+    delete data.regulatoryRegions;
+    const regionsProvided = rest.regulatoryRegions !== undefined || rest.regulatoryRegion !== undefined;
+    const newRegions = regionsProvided ? normalizeRegions(rest.regulatoryRegions, rest.regulatoryRegion) : null;
+    // Keep the shim in sync in the SAME transaction: regulatoryRegion = regions[0]
+    // (empty set → null, preserving the legacy "clear the region" behavior).
+    if (newRegions !== null) data.regulatoryRegion = newRegions[0] ?? null;
 
     // Prefer the specific lifecycle event over the generic TENANT_UPDATED when
     // this edit actually flips isActive — "Account suspended/reactivated" reads
@@ -333,24 +267,17 @@ export async function updateTenant(
       }
     }
 
-    // Scalar edit and region-set replace go in ONE transaction: a tenant must
-    // never be left renamed but half-re-regioned.
     const tenant = await prisma.$transaction(async (tx) => {
       const updated = await tx.tenant.update({ where: { id }, data });
-      if (regulatoryRegions) {
-        await tx.tenantRegulatoryRegion.deleteMany({ where: { tenantId: id } });
-        await tx.tenantRegulatoryRegion.createMany({
-          data: regulatoryRegions.map((region) => ({ tenantId: id, region })),
-        });
+      // Replace-on-update the region SET when region info was supplied.
+      if (newRegions !== null) {
+        await tx.tenantRegion.deleteMany({ where: { tenantId: id } });
+        if (newRegions.length) {
+          await tx.tenantRegion.createMany({ data: newRegions.map((region) => ({ tenantId: id, region })) });
+        }
       }
       return updated;
     });
-
-    const regionsChanged =
-      regionsBefore !== null &&
-      regulatoryRegions !== undefined &&
-      regionsBefore.join("|") !== [...regulatoryRegions].sort((a, b) => a.localeCompare(b)).join("|");
-
     await prisma.auditLog.create({
       data: {
         tenantId: session.user.tenantId,
@@ -360,15 +287,6 @@ export async function updateTenant(
         module: "Admin",
         action: auditAction,
         recordId: id,
-        // Only record a region transition when the set actually moved — an
-        // unrelated edit shouldn't leave a "regions changed" entry that says
-        // nothing changed.
-        ...(regionsChanged
-          ? {
-              oldValue: JSON.stringify({ regulatoryRegions: regionsBefore }),
-              newValue: JSON.stringify({ regulatoryRegions: [...regulatoryRegions!].sort((a, b) => a.localeCompare(b)) }),
-            }
-          : {}),
       },
     });
     revalidatePath("/admin");

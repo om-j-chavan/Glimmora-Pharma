@@ -224,7 +224,7 @@ export async function updateRegion(id: string, input: { name: string; descriptio
  * deleteTenantWithPassword. Guards, in order:
  *   - reserved (GLOBAL) → never purgeable;
  *   - must be archived (only archived regions are purgeable);
- *   - must have ZERO references (TenantRegulatoryRegion + FrameworkRegion) —
+ *   - must have ZERO references (TenantRegion + FrameworkRegion) —
  *     Stage 3 auto-reassigns those to GLOBAL on archive, so a purge-ready region
  *     is clean; if any remain, block and name them;
  *   - password verified server-side (wrong password is itself audited).
@@ -246,7 +246,7 @@ export async function permanentlyDeleteRegion(id: string, password: string): Pro
   }
   // Zero-reference precondition (defence-in-depth; Stage 3 keeps it clean).
   const [tenantCount, fwCount] = await Promise.all([
-    prisma.tenantRegulatoryRegion.count({ where: { region: region.value } }),
+    prisma.tenantRegion.count({ where: { region: region.value } }),
     prisma.frameworkRegion.count({ where: { region: region.value } }),
   ]);
   if (tenantCount || fwCount) {
@@ -292,7 +292,7 @@ export async function previewRegionArchive(id: string): Promise<ActionResult<{ l
   const region = await prisma.regulatoryRegion.findUnique({ where: { id }, select: { value: true, label: true } });
   if (!region) return { success: false, error: "Region not found" };
   const [links, frameworkLinks] = await Promise.all([
-    prisma.tenantRegulatoryRegion.findMany({
+    prisma.tenantRegion.findMany({
       where: { region: region.value },
       select: { tenant: { select: { name: true } } },
       orderBy: { tenant: { name: "asc" } },
@@ -307,7 +307,7 @@ export async function previewRegionArchive(id: string): Promise<ActionResult<{ l
  * in-use region now ARCHIVES it AND auto-reassigns every live reference to
  * GLOBAL, all-or-nothing in ONE $transaction:
  *   1. archivedAt = now on the region;
- *   2. every TenantRegulatoryRegion on <value> is REMOVED, and a tenant left with
+ *   2. every TenantRegion on <value> is REMOVED, and a tenant left with
  *      NO region at all falls back to "GLOBAL". Under multi-region that is the
  *      honest rule: a tenant on {EMA, FDA} losing EMA keeps FDA and must NOT have
  *      GLOBAL bolted on (it would silently widen its framework scope); a tenant on
@@ -346,17 +346,17 @@ export async function archiveRegion(id: string): Promise<ActionResult> {
 
       // 2) Drop this region from every tenant that holds it; only a tenant left
       //    with nothing falls back to GLOBAL (see the header note).
-      const holders = await tx.tenantRegulatoryRegion.findMany({
+      const holders = await tx.tenantRegion.findMany({
         where: { region: value },
         select: { tenantId: true },
       });
       const tenantIds = [...new Set(holders.map((h) => h.tenantId))];
-      await tx.tenantRegulatoryRegion.deleteMany({ where: { region: value } });
+      await tx.tenantRegion.deleteMany({ where: { region: value } });
       let tenantsMovedToGlobal = 0;
       for (const tenantId of tenantIds) {
-        const remaining = await tx.tenantRegulatoryRegion.count({ where: { tenantId } });
+        const remaining = await tx.tenantRegion.count({ where: { tenantId } });
         if (remaining === 0) {
-          await tx.tenantRegulatoryRegion.create({ data: { tenantId, region: GLOBAL_REGION_VALUE } });
+          await tx.tenantRegion.create({ data: { tenantId, region: GLOBAL_REGION_VALUE } });
           tenantsMovedToGlobal += 1;
         }
       }
@@ -442,7 +442,7 @@ export async function unarchiveRegion(id: string): Promise<ActionResult> {
  * Change a region's VALUE via archive-and-alias WITH reference re-pointing — the
  * inverse decision from framework key-supersede. The value is never mutated in
  * place: a NEW region row is created, the OLD is archived and linked forward
- * (old.aliasOfId → new), and EVERY current reference (TenantRegulatoryRegion +
+ * (old.aliasOfId → new), and EVERY current reference (TenantRegion +
  * FrameworkRegion.region) is re-pointed to the new value — because those are
  * live CONFIG that must follow the rename (unlike immutable Finding.framework).
  * All-or-nothing in a single transaction. Hard-blocks value reuse.
@@ -484,7 +484,7 @@ export async function supersedeRegionValue(oldId: string, input: { newValue: str
       // The new value is brand-new and globally unique (checked above), so no
       // tenant can already hold it — a blind updateMany cannot collide with
       // @@unique([tenantId, region]).
-      const tenantRes = await tx.tenantRegulatoryRegion.updateMany({ where: { region: old.value }, data: { region: newValue } });
+      const tenantRes = await tx.tenantRegion.updateMany({ where: { region: old.value }, data: { region: newValue } });
       const fwRes = await tx.frameworkRegion.updateMany({ where: { region: old.value }, data: { region: newValue } });
       // d) Audit-first (inside the tx → atomic with the change).
       await auditRegion(

@@ -706,9 +706,12 @@ export async function closeDeviation(
             tenantId: session.user.tenantId,
             deviationId: existing.id,
             control: w.control,
-            actorUserId: actor.userId,
-            actorName: actor.displayName,
-            actorRole: actor.role,
+            // The waiver actor is the SIGNER (matches SignedRecord.signerId above
+            // and the CAPA writeSodOverride convention); session.user.id is the
+            // non-null signed-in identity, not a User FK column here.
+            actorUserId: session.user.id,
+            actorName: session.user.name,
+            actorRole: session.user.role,
             reasonCode: w.reasonCode,
             justification: w.justification,
             recordTitle: existing.title,
