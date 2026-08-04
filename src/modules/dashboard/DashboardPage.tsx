@@ -360,13 +360,22 @@ export function DashboardPage({
         <KpiGrid {...widgetProps} />
 
         {/* The widget grid. One column on phones, two on tablets, three from `lg`.
-            `items-start` keeps every card at its natural height (a list card is not
-            stretched to a chart's height), and every item carries `min-w-0` so a
-            wide child — a chart's ResponsiveContainer, the action-plan table —
-            measures against its track instead of forcing the track wider. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-start [grid-auto-flow:row_dense]">
+            `items-stretch` + `h-full` on each item AND its card make every card in a
+            row share that row's height, so tops AND bottoms line up and no short panel
+            leaves a blank band beside (or under) a taller neighbour — the dead space
+            the old `items-start` left. A card's `.card-body` is capped
+            (`max-h-[26rem]`) and scrolls internally (`overflow-y-auto`) while its
+            header stays fixed, so a long list (AI insights, risk signals, action plan)
+            scrolls in place instead of stretching the page; the fixed-height charts sit
+            under the cap and never scroll or clip. `min-w-0` keeps a wide child (a
+            chart's ResponsiveContainer, the action-plan table) measuring against its
+            track. `gap-4 lg:gap-6` is the same rhythm token as the KPI row above. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch [grid-auto-flow:row_dense]">
           {widgets.map(({ key, wide }) => (
-            <div key={key} className={wide ? "min-w-0 md:col-span-2" : "min-w-0"}>
+            <div
+              key={key}
+              className={`min-w-0 h-full [&>*]:h-full [&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto${wide ? " md:col-span-2" : ""}`}
+            >
               <DashboardWidget widget={key} {...widgetProps} />
             </div>
           ))}

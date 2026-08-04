@@ -37,7 +37,9 @@ export const KpiGrid = memo(function KpiGrid({ data, dashboard }: DashboardWidge
     <section
       aria-label="Key performance indicators"
       // Same gap tokens as the widget grid below it, so the page has ONE rhythm.
-      className={`grid grid-cols-1 ${cols} gap-4 lg:gap-6`}
+      // `items-stretch` + `h-full` on each StatCard make every KPI card in a row
+      // share that row's height (tops AND bottoms aligned), matching the widget grid.
+      className={`grid grid-cols-1 ${cols} gap-4 lg:gap-6 items-stretch *:h-full`}
     >
       {dashboard.kpis.map((kpi) => {
         const { value, sub, color } = kpi.select(data);
