@@ -34,7 +34,8 @@ import {
   removeTenantUser,
   type TenantUserConfig,
 } from "@/store/auth.slice";
-import { aiSignup, generateUserId, AiAuthError } from "@/lib/aiAuth";
+import { generateUserId } from "@/lib/aiAuth";
+import { provisionAiAccount } from "@/actions/aiAccount";
 import {
   createUser,
   updateUser,
@@ -199,7 +200,8 @@ function UserForm({
   submitIcon: typeof Plus;
   roleOptions: DropdownOption[];
   mode?: "add" | "edit";
-}) {  const { allSites: tenantSites } = useTenantConfig();
+}) {
+  const { allSites: tenantSites } = useTenantConfig();
 
   // Password visibility — default hidden, one toggle per field, covers both the
   // Add and Edit modals (this form backs both).
@@ -460,7 +462,8 @@ function UserForm({
 }
 
 export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
-  const dispatch = useAppDispatch();  const {
+  const dispatch = useAppDispatch();
+  const {
     users,
     tenantId,
     plan,
@@ -651,26 +654,28 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
 
     // 2) Best-effort AI backend provisioning (unchanged). A failure here is
     //    non-fatal — the DB user already exists and can log in.
-    const customerAdmin = users.find(
-      (u) => u.role === "customer_admin" && u.aiUserId,
-    );
-    const customerId = customerAdmin?.aiUserId ?? tenantId;
+    // The AI service scopes every tenant query by the `customer_id` claim in
+    // the token the server mints, which is always the tenantId — so provision
+    // under the tenantId. Deriving it from the customer-admin's aiUserId (as
+    // this did) produced an identifier the token never carries, so anything
+    // written under it was unreadable.
+    const customerId = tenantId;
+    // Provisioning runs server-side (src/actions/aiAccount.ts): the password
+    // never leaves the server, and no access token comes back — nothing in the
+    // browser needs one now that /api/ai-proxy mints its own per request.
     let aiUserId: string | undefined;
-    let aiAccessToken: string | undefined;
-    try {
-      const res = await aiSignup({
-        user_id: aiId,
-        username,
-        email: data.email,
-        password: data.password ?? "",
-        customer_id: customerId,
-        role: data.role,
-      });
-      aiUserId = aiId;
-      aiAccessToken = res.access_token;
-    } catch (err) {
-      const reason = err instanceof AiAuthError ? err.message : "unknown";
-      console.error("[UsersTab] AI signup failed — DB user created, AI token deferred:", reason);
+    const provisioned = await provisionAiAccount({
+      userId: aiId,
+      username,
+      email: data.email,
+      password: data.password ?? "",
+      customerId,
+      role: data.role,
+    });
+    if (provisioned.success) {
+      aiUserId = provisioned.data.aiUserId;
+    } else {
+      console.error("[UsersTab] AI provisioning failed — DB user created, AI account deferred:", provisioned.error);
     }
 
     // 3) Mirror to Redux using the DB id so #5's status/signatory toggles and
@@ -690,7 +695,6 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           password: data.password,
           username,
           aiUserId,
-          aiAccessToken,
         },
       }),
     );
@@ -756,30 +760,26 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
     // aiUserId sentinel). Once aiUserId is set we never re-sign-up — edits
     // become local + Neon-only.
     if (!editingUser.aiUserId) {
-      const customerAdmin = users.find(
-        (u) => u.role === "customer_admin" && u.aiUserId,
-      );
-      const customerId = customerAdmin?.aiUserId ?? tenantId;
+      // Same tenantId scoping as the create path above.
+      const customerId = tenantId;
       // AI backend requires username ≥ 3 chars. The email's local part can
       // be shorter (e.g. "qa@..." → "qa"), so pad with the user id suffix.
       const localPart = data.email.split("@")[0] ?? "";
       const username =
         localPart.length >= 3 ? localPart : `${localPart}_${editingUser.id.slice(-4)}`;
-      try {
-        const res = await aiSignup({
-          user_id: editingUser.id,
-          username,
-          email: data.email,
-          password: data.password ?? editingUser.password ?? "",
-          customer_id: customerId,
-          role: data.role,
-        });
-        patch.aiUserId = editingUser.id;
-        patch.aiAccessToken = res.access_token;
+      const provisioned = await provisionAiAccount({
+        userId: editingUser.id,
+        username,
+        email: data.email,
+        password: data.password ?? editingUser.password ?? "",
+        customerId,
+        role: data.role,
+      });
+      if (provisioned.success) {
+        patch.aiUserId = provisioned.data.aiUserId;
         patch.username = username;
-      } catch (err) {
-        const reason = err instanceof AiAuthError ? err.message : "unknown";
-        console.error("[UsersTab] AI signup retry on edit failed:", reason);
+      } else {
+        console.error("[UsersTab] AI provisioning retry on edit failed:", provisioned.error);
       }
     }
 

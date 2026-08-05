@@ -3,7 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 /**
  * MULTIPLE REGULATORY REGIONS — end-to-end.
  *
- * A tenant holds a SET of regions (TenantRegulatoryRegion), not one column, so
+ * A tenant holds a SET of regions (TenantRegion), not one column, so
  * the properties worth proving here are the ones a type-check can't reach: that
  * the Super Admin can pick several, that the set survives a reload (i.e. it
  * really persisted rather than living in Redux), that re-opening the editor shows

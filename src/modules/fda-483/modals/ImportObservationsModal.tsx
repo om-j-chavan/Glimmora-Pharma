@@ -31,7 +31,6 @@ import { AIButton } from "@/components/ai";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Toast";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import {
   getFda483Extraction,
   type ExtractedSeverity,
@@ -116,13 +115,8 @@ export function ImportObservationsModal({
   onImport,
 }: ImportObservationsModalProps) {
   const toast = useToast();
-  const aiToken = useAppSelector((s) => {
-    const u = s.auth.user;
-    if (!u) return "anonymous";
-    if (u.aiAccessToken) return u.aiAccessToken;
-    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
-    return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? "anonymous";
-  });
+  // No AI credential is read here: calls go to the same-origin proxy, which
+  // authenticates the session and attaches the upstream token server-side.
 
   const [step, setStep] = useState<Step>("upload");
   const [rows, setRows] = useState<ImportReviewRow[]>([]);
@@ -174,7 +168,6 @@ export function ImportObservationsModal({
         fileName: file.name,
         inspectionReference,
         facility,
-        token: aiToken,
       });
 
       setNote(result.note);

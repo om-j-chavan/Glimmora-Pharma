@@ -9,9 +9,12 @@
  *
  * THREE RULES, all preserved from the original panel:
  *
- *   1. AGI POLICY STILL GOVERNS. Nothing is emitted while `agi.mode === "manual"`,
- *      and an agent-specific insight requires its agent to be enabled — the same
- *      `agiSettings` gate the previous rail used.
+ *   1. THIS IS NOT AN AI SURFACE. Every line is a deterministic threshold over
+ *      the tenant's own records — no model, no backend AI call, nothing
+ *      generated. It was previously branded and gated as if it were an AGI
+ *      agent panel; that branding has been removed (see ComplianceSignalsWidget),
+ *      with it the AGI-policy gate, which had no meaning for computed counts:
+ *      switching AI agents to manual should not hide a count of overdue CAPAs.
  *
  *   2. EVERY INSIGHT IS EVIDENCED. Each line reports a count the tenant's own
  *      records produce, via the shared `src/lib/kpi` formulas. There is no
@@ -25,7 +28,6 @@
  * 3 to 5 keeps the same React key so the card does not unmount/remount.
  */
 
-import { regulatoryAlertSummary } from "@/lib/ai";
 import type { DashboardDataset } from "./dataset";
 import type { CanOpen, LinkModule } from "./derive";
 import type { AIInsightStream } from "./types";
@@ -40,7 +42,9 @@ export interface DashboardInsight {
   module?: LinkModule;
 }
 
-/** The AGI-policy shape the settings slice exposes (mode + per-agent toggles). */
+/** The AGI-policy shape the settings slice exposes (mode + per-agent toggles).
+ *  Re-exported for consumers that still model it; this module no longer reads
+ *  it — compliance signals are computed counts and are not gated on AI policy. */
 export interface AgiPolicy {
   mode: string;
   agents: Record<string, boolean>;
@@ -52,7 +56,7 @@ const s = (n: number) => (n === 1 ? "" : "s");
  * Stream generators — one per role concern
  * ══════════════════════════════════════════════════════════════════════════ */
 
-type StreamFn = (d: DashboardDataset, agi: AgiPolicy) => DashboardInsight[];
+type StreamFn = (d: DashboardDataset) => DashboardInsight[];
 
 /** Organisation roll-up + licence/seat risk — Customer Admin. */
 const organisationStream: StreamFn = (d) => {
@@ -196,39 +200,25 @@ const qualityStream: StreamFn = (d) => {
 };
 
 /** 483 deadlines, commitments and external guidance — Regulatory Affairs. */
-const regulatoryStream: StreamFn = (d, agi) => {
+const regulatoryStream: StreamFn = (d) => {
   const out: DashboardInsight[] = [];
   const r = d.regulatory;
 
-  // EXTERNAL FDA/EMA guidance monitoring — EMITTED FIRST, deliberately.
-  //
-  // This is the one stream item sourced from the pre-existing
-  // `regulatoryAlertSummary()` fixture rather than tenant records (see the note at
-  // src/lib/ai/index.ts:597). It is carried over unchanged from the previous
-  // dashboard rail — behind its own AGI agent toggle — rather than extended, and no
-  // new fixture data was introduced anywhere in this feature.
-  //
-  // The original rail pushed it first with the comment "so it stays within the
-  // insights.slice(0, 5) the rail renders": it is EXTERNAL guidance, independent of
-  // tenant findings, so it must not be crowded out by internal volume. Keeping it
-  // first here preserves that guarantee for every role whose config includes the
-  // regulatory stream.
-  if (agi.agents.regulatory) {
-    const reg = regulatoryAlertSummary();
-    if (reg.newRequirements > 0) {
-      out.push({
-        id: "regulatory-new-requirements", type: "warning",
-        text: `${reg.newRequirements} new FDA/EMA regulatory requirement${s(reg.newRequirements)} flagged — review compliance alignment.`,
-        action: "Review guidance", href: "/regulatory-intelligence",
-      });
-    } else if (reg.total > 0) {
-      out.push({
-        id: "regulatory-updates", type: "info",
-        text: `${reg.total} FDA/EMA guidance update${s(reg.total)} monitored this period.`,
-        action: "Review guidance", href: "/regulatory-intelligence",
-      });
-    }
-  }
+  /* REMOVED — the "N new FDA/EMA regulatory requirements flagged" insight.
+   *
+   * It called regulatoryAlertSummary(), which counted a hardcoded six-item
+   * guidance list in the browser bundle. Every tenant saw the same numbers,
+   * forever, phrased as the result of a live agency scan.
+   *
+   * The drift equivalent (driftAlertSummary) was removed earlier for exactly
+   * this reason. A real regulatory scan is asynchronous — it reads agency
+   * guidance through an LLM — so it cannot be served from this synchronous
+   * generator. The Regulatory Intelligence page (/regulatory-intelligence)
+   * shows the live scan, badged with its own provenance.
+   *
+   * To restore a dashboard card here, thread a real scan result through
+   * DashboardDataset — do not reintroduce a fixture.
+   */
 
   if (r.overdueResponses > 0) {
     out.push({
@@ -290,7 +280,7 @@ const regulatoryStream: StreamFn = (d, agi) => {
 };
 
 /** CSV drift, qualification gaps and periodic review — CSV Lead / IT-CDO. */
-const validationStream: StreamFn = (d, agi) => {
+const validationStream: StreamFn = (d) => {
   const out: DashboardInsight[] = [];
   const v = d.validation;
 
@@ -310,8 +300,11 @@ const validationStream: StreamFn = (d, agi) => {
       action: "View systems", href: "/csv-csa", module: "csv",
     });
   }
-  // Drift Detection agent — gated exactly as the previous rail gated it.
-  if (agi.agents.drift && v.drift > 0) {
+  // Validation drift, computed from the tenant's own system records via
+  // isValidationDrift (@/lib/kpi). Unrelated to the Drift Detection AI agent
+  // (/csv-csa), which reads the audit trail through an LLM — this used to be
+  // gated on that agent's toggle, which conflated the two.
+  if (v.drift > 0) {
     out.push({
       id: "drift-open", type: "warning",
       text: `${v.drift} system${s(v.drift)} showing validation drift — overdue revalidation or Part 11 / Annex 11 non-compliance.`,
@@ -484,13 +477,12 @@ const STREAMS: Record<AIInsightStream, StreamFn> = {
 export interface InsightInput {
   streams: readonly AIInsightStream[];
   data: DashboardDataset;
-  agi: AgiPolicy;
   canOpen: CanOpen;
   limit?: number;
 }
 
 /**
- * Build the role's AGI insight list.
+ * Build the role's compliance-signal list.
  *
  * SELECTION IS ROUND-ROBIN ACROSS STREAMS, and that is the important part.
  *
@@ -509,13 +501,9 @@ export interface InsightInput {
  * a link the viewer cannot follow is stripped rather than rendered dead.
  */
 export function buildInsights({
-  streams, data, agi, canOpen, limit = 5,
+  streams, data, canOpen, limit = 5,
 }: InsightInput): DashboardInsight[] {
-  // AGI policy gate — identical to the previous rail: manual mode emits nothing and
-  // the panel renders its "configure agents" state instead.
-  if (agi.mode === "manual") return [];
-
-  const perStream = streams.map((stream) => STREAMS[stream](data, agi));
+  const perStream = streams.map((stream) => STREAMS[stream](data));
   const deepest = Math.max(0, ...perStream.map((s) => s.length));
 
   const collected: DashboardInsight[] = [];

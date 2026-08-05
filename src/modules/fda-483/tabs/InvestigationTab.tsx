@@ -52,7 +52,7 @@ import type { CAPA } from "@/store/capa.slice";
 import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { AIButton } from "@/components/ai";
+import { AIButton, AIBadge } from "@/components/ai";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
@@ -784,6 +784,10 @@ function RaiseCAPAModal({
                 </p>
               </div>
 
+              {/* Provenance — a deterministic fallback pre-fill must not be
+                  mistaken for a model reading of this observation. */}
+              <AIBadge source={aiPrefill.source} />
+
               <p className="text-[10px] italic" style={{ color: "var(--text-muted)" }}>
                 AI pre-fill is a starting point. Final wording is your
                 responsibility under 21 CFR Part 11.
@@ -1009,6 +1013,10 @@ function AiRcaModal({
           </p>
         ) : current ? (
           <>
+            {/* Provenance. These suggestions are applied into a regulated RCA
+                record, so the reviewer must be able to tell a live model answer
+                from the backend's deterministic fallback before adopting one. */}
+            <AIBadge source={current.source} />
             {/* Pill selector */}
             <div
               className="flex items-center gap-2 flex-wrap"

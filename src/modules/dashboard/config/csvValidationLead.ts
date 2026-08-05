@@ -53,7 +53,7 @@ export const csvValidationLeadDashboard: DashboardConfig = {
   ],
 
   ai: {
-    title: "AI Validation Recommendations",
+    title: "Validation Signals",
     streams: ["validation", "quality"],
     limit: 6,
   },

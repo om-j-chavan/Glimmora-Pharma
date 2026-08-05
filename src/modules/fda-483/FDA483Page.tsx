@@ -1088,7 +1088,7 @@ export function FDA483Page({
                     const siteName =
                       sites.find((s) => s.id === liveEvent.siteId)?.name ??
                       liveEvent.siteId;
-                    const { draft } = await getResponseDraft({
+                    const { draft, source } = await getResponseDraft({
                       reference: liveEvent.referenceNumber,
                       agency: liveEvent.agency,
                       site: siteName,
@@ -1114,6 +1114,16 @@ export function FDA483Page({
                         };
                       }),
                     });
+                    // Provenance. The draft text itself is left untouched — a
+                    // letter to a regulator must not carry a banner — so the
+                    // author is told out-of-band that this came from the
+                    // backend's deterministic template rather than the model,
+                    // and therefore needs a closer read before signing.
+                    if (source !== "backend") {
+                      toast.error(
+                        "AI was unavailable, so this is a template draft, not a model-written one. Review every section before signing.",
+                      );
+                    }
                     const result = await saveAGIDraftServer(liveEvent.id, draft);
                     if (!result.success) {
                       toast.error(`Could not complete action: ${result.error || "Failed to generate AGI draft. Please try again."}`);

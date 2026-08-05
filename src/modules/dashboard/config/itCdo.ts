@@ -55,7 +55,7 @@ export const itCdoDashboard: DashboardConfig = {
   ],
 
   ai: {
-    title: "AI Validation & DI Insights",
+    title: "Validation & Data-Integrity Signals",
     streams: ["validation", "quality"],
     limit: 5,
   },

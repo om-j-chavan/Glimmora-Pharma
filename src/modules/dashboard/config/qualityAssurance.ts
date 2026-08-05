@@ -50,7 +50,7 @@ export const qualityAssuranceDashboard: DashboardConfig = {
   quickActions: [SHARED_MY_WORKLIST, QA_CREATE_DEVIATION, SHARED_RAISE_RISK],
 
   ai: {
-    title: "AI Quality Insights",
+    title: "Quality Signals",
     streams: ["quality"],
     limit: 5,
   },

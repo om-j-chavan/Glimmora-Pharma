@@ -19,7 +19,6 @@ import { Sparkles, RotateCcw, AlertTriangle } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { AIButton } from "@/components/ai";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiDraftSend, AiChatError, type DraftKind, type DraftResponse } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
 
@@ -51,13 +50,8 @@ interface Props {
 }
 
 export function AiDraftModal({ open, onClose, context, mode = "text", recordId = "-", module = "-", onInsert }: Props) {
-  const aiToken = useAppSelector((s) => {
-    const u = s.auth.user;
-    if (!u) return "anonymous";
-    if (u.aiAccessToken) return u.aiAccessToken;
-    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
-    return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? "anonymous";
-  });
+  // No AI credential is read here: calls go to the same-origin proxy, which
+  // authenticates the session and attaches the upstream token server-side.
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +66,7 @@ export function AiDraftModal({ open, onClose, context, mode = "text", recordId =
     setBusy(true);
     setError(null);
     try {
-      const res = await aiDraftSend(context, { kind: MODE_KIND[mode], tone: nextTone, recordId, module }, aiToken);
+      const res = await aiDraftSend(context, { kind: MODE_KIND[mode], tone: nextTone, recordId, module });
       setResult(res);
       if (res.status !== "drafted") { setError("Couldn't produce a draft. Please try again."); return; }
       if (mode === "text") setText(res.draft);

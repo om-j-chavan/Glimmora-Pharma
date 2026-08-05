@@ -63,7 +63,7 @@ export const operationsHeadDashboard: DashboardConfig = {
   ],
 
   ai: {
-    title: "AI Operational Insights",
+    title: "Operational Signals",
     streams: ["operations", "quality"],
     limit: 5,
   },

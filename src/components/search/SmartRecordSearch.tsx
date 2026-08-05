@@ -15,7 +15,6 @@ import { useState, useMemo, useEffect, type CSSProperties, type ReactNode } from
 import { Search, Sparkles, X, FileText, Download, ListFilter, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { AIButton } from "@/components/ai";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiSearchSend, AiChatError, type SearchResultResponse } from "@/lib/aiChat";
 import { executeSearch, type SearchCondition, type SearchFilters } from "@/lib/aiSearch";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -93,13 +92,8 @@ interface Props {
 }
 
 export function SmartRecordSearch({ sources, title = "Search", defaultScope, allowCrossModule }: Props) {
-  const aiToken = useAppSelector((s) => {
-    const u = s.auth.user;
-    if (!u) return "anonymous";
-    if (u.aiAccessToken) return u.aiAccessToken;
-    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
-    return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? "anonymous";
-  });
+  // No AI credential is read here: calls go to the same-origin proxy, which
+  // authenticates the session and attaches the upstream token server-side.
 
   const multi = sources.length > 1;
   const crossOk = allowCrossModule ?? multi;
@@ -152,7 +146,7 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
     if (!q || busy) return;
     setBusy(true); setError(null); setShowEditFor(null);
     try {
-      const results = await Promise.all(activeSources.map((s) => aiSearchSend(q, aiToken, s.module)));
+      const results = await Promise.all(activeSources.map((s) => aiSearchSend(q, s.module)));
       const next: Record<string, Entry> = {};
       activeSources.forEach((s, i) => {
         next[s.module] = { result: results[i], conditions: (results[i].filters?.conditions ?? []) as SearchCondition[] };

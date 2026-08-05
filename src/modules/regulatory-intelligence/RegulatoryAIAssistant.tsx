@@ -86,16 +86,8 @@ export function RegulatoryAIAssistant({
   const frameworkList = useAppSelector((s) => s.frameworks.list);
   const activeFrameworks = frameworkList.map((f) => ({ key: f.key, label: f.name }));
 
-  // AI backend token — same resolution the floating Compliance Assistant uses.
-  // The backend is permissive, so we fall back to "anonymous" rather than
-  // blocking the user when no per-user token is cached.
-  const aiToken = useAppSelector((s) => {
-    const u = s.auth.user;
-    if (!u) return "anonymous";
-    if (u.aiAccessToken) return u.aiAccessToken;
-    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
-    return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? "anonymous";
-  });
+  // No AI credential is read here: calls go to the same-origin proxy, which
+  // authenticates the session and attaches the upstream token server-side.
 
   const [uiState, setUiState] = useState<UiState>("idle");
   const [input, setInput] = useState("");
@@ -151,7 +143,6 @@ export function RegulatoryAIAssistant({
         region,
         roleLabel: roleText,
         activeFrameworks,
-        token: aiToken,
         history,
       });
       setThread((t) => [...t, { question: q, answer, auto: opts?.auto }]);

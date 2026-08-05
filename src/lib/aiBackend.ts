@@ -1,13 +1,13 @@
 /**
- * Unified, typed client for the deployed AI backend.
- * Base: https://pharma-glimmora-ai-backend.onrender.com
+ * Unified, typed browser client for the AI backend.
  *
- * One function per OpenAPI operation. All protected endpoints take a
- * `token` argument (the user's aiAccessToken from Redux) which is sent
- * as the `auth` header. Login/signup don't need the token.
+ * One function per operation. Every call goes to the same-origin
+ * /api/ai-proxy route, which checks the caller's session and attaches the
+ * upstream access token server-side — so no function here takes, reads, or
+ * stores a credential. (They used to take a `token` argument that the browser
+ * pulled out of Redux; that is gone, along with the token itself.)
  *
- * Re-exports the existing aiAuth (login/signup) and aiChat (chat/voice)
- * helpers so callers only need this module.
+ * Re-exports the aiChat (chat/voice) helpers so callers only need this module.
  *
  * Every call goes through `request()` which logs:
  *   [aiBackend] METHOD /path → sending
@@ -18,8 +18,6 @@
 export {
   AI_API_BASE,
   AiAuthError,
-  aiSignup,
-  aiLogin,
   generateCustomerId,
   generateUserId,
   type AiSignupRequest,
@@ -28,6 +26,7 @@ export {
 
 export {
   aiChatSend,
+  aiAssistantSend,
   aiVoiceChat,
   aiVoiceTranscribe,
   aiVoiceSpeak,
@@ -36,6 +35,8 @@ export {
   AiChatError,
   type ChatMessage,
   type ChatResponse,
+  type AssistantResponse,
+  type AssistantRoute,
 } from "./aiChat";
 
 import { AI_API_BASE } from "./aiAuth";
@@ -51,6 +52,7 @@ import type {
   DeviationRcaAnalysis,
   DriftDetectionResult,
   ResponseDraftEvent,
+  ResponseDraftResult,
   RcaMethod,
   RcaSuggestion,
   CAPAPrefill,
@@ -59,6 +61,8 @@ import type {
   ApprovalBriefResult,
   ReadinessGuidanceInput,
   ReadinessGuidanceResult,
+  ReworkTasksInput,
+  ReworkTasksResult,
 } from "./ai";
 
 /* ── Error type ────────────────────────────────────────────────── */
@@ -104,24 +108,23 @@ function flattenDetail(parsed: unknown, status: number): string {
 interface RequestOpts extends Omit<RequestInit, "body" | "headers"> {
   jsonBody?: unknown;
   formBody?: FormData;
-  token?: string | null;
   /** Statuses to log as info instead of error (e.g. 404 from by-capa lookups before a stage is submitted). */
   silentStatuses?: number[];
 }
 
 async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
-  const { jsonBody, formBody, token, silentStatuses, ...rest } = opts;
+  const { jsonBody, formBody, silentStatuses, ...rest } = opts;
   const method = rest.method ?? "GET";
   const tag = `[aiBackend] ${method} ${path}`;
   const headers = new Headers();
   if (jsonBody !== undefined) headers.set("Content-Type", "application/json");
-  if (token) headers.set("auth", token);
+  // No auth header: the proxy attaches it. See app/api/ai-proxy/[...path]/route.ts.
   const body = jsonBody !== undefined ? JSON.stringify(jsonBody) : formBody;
   const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
   console.info(`${tag} → sending`);
   let res: Response;
   try {
-    res = await fetch(`${AI_API_BASE}${path}`, { ...rest, headers, body });
+    res = await fetch(`${AI_API_BASE}${path}`, { ...rest, headers, body, credentials: "same-origin" });
   } catch (err) {
     console.error(`${tag} ✗ network error`, err);
     throw err;
@@ -179,7 +182,7 @@ export interface CapaCreateInput {
   document?: File | null;
 }
 
-export async function capaCreate(input: CapaCreateInput, token: string): Promise<CAPACreateResponse> {
+export async function capaCreate(input: CapaCreateInput): Promise<CAPACreateResponse> {
   const fd = new FormData();
   fd.append("customer_id", input.customer_id);
   fd.append("problem_statement", input.problem_statement);
@@ -188,17 +191,17 @@ export async function capaCreate(input: CapaCreateInput, token: string): Promise
   fd.append("equipment_product", input.equipment_product);
   fd.append("initial_severity", input.initial_severity);
   if (input.document) fd.append("document", input.document);
-  return request<CAPACreateResponse>("/api/v1/capa/create", { method: "POST", formBody: fd, token });
+  return request<CAPACreateResponse>("/api/v1/capa/create", { method: "POST", formBody: fd });
 }
 
-export const capaListAll = (token: string) =>
-  request<unknown>("/api/v1/capa/all", { method: "GET", token });
+export const capaListAll = () =>
+  request<unknown>("/api/v1/capa/all", { method: "GET" });
 
-export const capaListByCustomer = (customerId: string, token: string) =>
-  request<unknown>(`/api/v1/capa/customer/${encodeURIComponent(customerId)}`, { method: "GET", token });
+export const capaListByCustomer = (customerId: string) =>
+  request<unknown>(`/api/v1/capa/customer/${encodeURIComponent(customerId)}`, { method: "GET" });
 
-export const capaStatus = (capaId: string, token: string) =>
-  request<unknown>(`/api/v1/capa/status/${encodeURIComponent(capaId)}`, { method: "GET", token, silentStatuses: [404] });
+export const capaStatus = (capaId: string) =>
+  request<unknown>(`/api/v1/capa/status/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
 
 export interface AlertDismissalRequest {
   capa_id: string;
@@ -208,8 +211,8 @@ export interface AlertDismissalRequest {
   dismissed_by: string;
 }
 
-export const capaDismissAlert = (body: AlertDismissalRequest, token: string) =>
-  request<unknown>("/api/v1/capa/dismiss-alert", { method: "POST", jsonBody: body, token });
+export const capaDismissAlert = (body: AlertDismissalRequest) =>
+  request<unknown>("/api/v1/capa/dismiss-alert", { method: "POST", jsonBody: body });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* RCA                                                            */
@@ -228,14 +231,14 @@ export interface RCACreateResponse {
   [k: string]: unknown;
 }
 
-export const rcaSubmit = (body: RCACreateRequest, token: string) =>
-  request<RCACreateResponse>("/api/v1/rca/submit", { method: "POST", jsonBody: body, token });
+export const rcaSubmit = (body: RCACreateRequest) =>
+  request<RCACreateResponse>("/api/v1/rca/submit", { method: "POST", jsonBody: body });
 
-export const rcaByCapa = (capaId: string, token: string) =>
-  request<unknown>(`/api/v1/rca/capa/${encodeURIComponent(capaId)}`, { method: "GET", token, silentStatuses: [404] });
+export const rcaByCapa = (capaId: string) =>
+  request<unknown>(`/api/v1/rca/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
 
-export const rcaStatus = (rcaId: string, token: string) =>
-  request<unknown>(`/api/v1/rca/status/${encodeURIComponent(rcaId)}`, { method: "GET", token });
+export const rcaStatus = (rcaId: string) =>
+  request<unknown>(`/api/v1/rca/status/${encodeURIComponent(rcaId)}`, { method: "GET" });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* Action Plan                                                    */
@@ -259,14 +262,14 @@ export interface ActionPlanCreateResponse {
   [k: string]: unknown;
 }
 
-export const actionPlanSubmit = (body: ActionPlanCreateRequest, token: string) =>
-  request<ActionPlanCreateResponse>("/api/v1/action-plan/submit", { method: "POST", jsonBody: body, token });
+export const actionPlanSubmit = (body: ActionPlanCreateRequest) =>
+  request<ActionPlanCreateResponse>("/api/v1/action-plan/submit", { method: "POST", jsonBody: body });
 
-export const actionPlanByCapa = (capaId: string, token: string) =>
-  request<unknown>(`/api/v1/action-plan/capa/${encodeURIComponent(capaId)}`, { method: "GET", token, silentStatuses: [404] });
+export const actionPlanByCapa = (capaId: string) =>
+  request<unknown>(`/api/v1/action-plan/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
 
-export const actionPlanStatus = (id: string, token: string) =>
-  request<unknown>(`/api/v1/action-plan/status/${encodeURIComponent(id)}`, { method: "GET", token });
+export const actionPlanStatus = (id: string) =>
+  request<unknown>(`/api/v1/action-plan/status/${encodeURIComponent(id)}`, { method: "GET" });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* Implementation Monitoring                                      */
@@ -292,14 +295,14 @@ export interface MonitoringResponse {
   [k: string]: unknown;
 }
 
-export const monitoringCheck = (body: MonitoringRequest, token: string) =>
-  request<MonitoringResponse>("/api/v1/monitoring/check", { method: "POST", jsonBody: body, token });
+export const monitoringCheck = (body: MonitoringRequest) =>
+  request<MonitoringResponse>("/api/v1/monitoring/check", { method: "POST", jsonBody: body });
 
-export const monitoringByCapa = (capaId: string, token: string) =>
-  request<unknown>(`/api/v1/monitoring/capa/${encodeURIComponent(capaId)}`, { method: "GET", token, silentStatuses: [404] });
+export const monitoringByCapa = (capaId: string) =>
+  request<unknown>(`/api/v1/monitoring/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
 
-export const monitoringStatus = (id: string, token: string) =>
-  request<unknown>(`/api/v1/monitoring/status/${encodeURIComponent(id)}`, { method: "GET", token });
+export const monitoringStatus = (id: string) =>
+  request<unknown>(`/api/v1/monitoring/status/${encodeURIComponent(id)}`, { method: "GET" });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* Effectiveness Check                                            */
@@ -333,14 +336,14 @@ export interface EffectivenessResponse {
   [k: string]: unknown;
 }
 
-export const effectivenessCheck = (body: EffectivenessRequest, token: string) =>
-  request<EffectivenessResponse>("/api/v1/effectiveness/check", { method: "POST", jsonBody: body, token });
+export const effectivenessCheck = (body: EffectivenessRequest) =>
+  request<EffectivenessResponse>("/api/v1/effectiveness/check", { method: "POST", jsonBody: body });
 
-export const effectivenessByCapa = (capaId: string, token: string) =>
-  request<unknown>(`/api/v1/effectiveness/capa/${encodeURIComponent(capaId)}`, { method: "GET", token, silentStatuses: [404] });
+export const effectivenessByCapa = (capaId: string) =>
+  request<unknown>(`/api/v1/effectiveness/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
 
-export const effectivenessStatus = (id: string, token: string) =>
-  request<unknown>(`/api/v1/effectiveness/status/${encodeURIComponent(id)}`, { method: "GET", token });
+export const effectivenessStatus = (id: string) =>
+  request<unknown>(`/api/v1/effectiveness/status/${encodeURIComponent(id)}`, { method: "GET" });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* CAPA Closure                                                   */
@@ -363,24 +366,24 @@ export interface ClosureResponse {
   [k: string]: unknown;
 }
 
-export const closureInitiate = (body: ClosureRequest, token: string) =>
-  request<ClosureResponse>("/api/v1/closure/initiate", { method: "POST", jsonBody: body, token });
+export const closureInitiate = (body: ClosureRequest) =>
+  request<ClosureResponse>("/api/v1/closure/initiate", { method: "POST", jsonBody: body });
 
-export const closureByCapa = (capaId: string, token: string) =>
-  request<unknown>(`/api/v1/closure/capa/${encodeURIComponent(capaId)}`, { method: "GET", token, silentStatuses: [404] });
+export const closureByCapa = (capaId: string) =>
+  request<unknown>(`/api/v1/closure/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
 
-export const closureStatus = (id: string, token: string) =>
-  request<unknown>(`/api/v1/closure/status/${encodeURIComponent(id)}`, { method: "GET", token });
+export const closureStatus = (id: string) =>
+  request<unknown>(`/api/v1/closure/status/${encodeURIComponent(id)}`, { method: "GET" });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* Audit Trail                                                    */
 /* ══════════════════════════════════════════════════════════════ */
 
-export const auditAll = (token: string) =>
-  request<unknown>("/api/v1/audit/all", { method: "GET", token });
+export const auditAll = () =>
+  request<unknown>("/api/v1/audit/all", { method: "GET" });
 
-export const auditRecord = (recordId: string, token: string) =>
-  request<unknown>(`/api/v1/audit/record/${encodeURIComponent(recordId)}`, { method: "GET", token });
+export const auditRecord = (recordId: string) =>
+  request<unknown>(`/api/v1/audit/record/${encodeURIComponent(recordId)}`, { method: "GET" });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* Users                                                          */
@@ -412,16 +415,17 @@ export interface StageDocReviewResponse {
    *  NOT run — this is explicitly not a clean pass. */
   note?: string | null;
   scanned_at: string;
+  /** "backend" for a live scan, "fallback" when the model call failed. */
+  source?: string;
 }
 
 /**
- * Pre-check an uploaded validation document against the rubric. Used by the
- * mock-first gateway's getDocumentReview() when MOCK_AI_RESPONSES is false.
- * The file is sent as multipart so the backend can extract its text.
+ * Pre-check an uploaded validation document against the rubric, via the
+ * gateway's getDocumentReview(). The file is sent as multipart so the backend
+ * can extract its text server-side.
  */
 export async function scanStageDocument(
   input: { file: File; stageKey: string; stageLabel: string; systemName: string },
-  token: string,
 ): Promise<StageDocReviewResponse> {
   const fd = new FormData();
   fd.append("file", input.file);
@@ -431,7 +435,6 @@ export async function scanStageDocument(
   return request<StageDocReviewResponse>("/api/v1/document-review/scan", {
     method: "POST",
     formBody: fd,
-    token,
   });
 }
 
@@ -459,16 +462,17 @@ export interface Fda483ExtractionResponse {
   /** Non-null when nothing extractable was found (e.g. a scanned PDF). */
   note?: string | null;
   extracted_at: string;
+  /** "backend" for a live extraction, "fallback" when the model call failed. */
+  source?: string;
 }
 
 /**
- * Extract inspectional observations from an uploaded FDA 483 PDF. Used by the
- * mock-first gateway's getFda483Extraction() when AI_MOCK.fda483Extraction is
- * false. The file is sent as multipart so the backend can extract its text.
+ * Extract inspectional observations from an uploaded FDA 483 PDF, via the
+ * gateway's getFda483Extraction(). The file is sent as multipart so the
+ * backend can extract its text server-side.
  */
 export async function scanFda483Document(
   input: { file: File; inspectionReference: string; facility: string },
-  token: string,
 ): Promise<Fda483ExtractionResponse> {
   const fd = new FormData();
   fd.append("file", input.file);
@@ -477,7 +481,6 @@ export async function scanFda483Document(
   return request<Fda483ExtractionResponse>("/api/v1/fda483-extraction/scan", {
     method: "POST",
     formBody: fd,
-    token,
   });
 }
 
@@ -485,53 +488,45 @@ export async function scanFda483Document(
 /* AGI agents (Regulatory / Deviation / Batch / Drift)            */
 /* ══════════════════════════════════════════════════════════════ */
 /**
- * Real-backend counterparts to the mock-first gateway in src/lib/ai/index.ts.
- * Each returns the SAME shape the gateway's mock returns (the backend routers
- * emit those camelCase keys directly), so the gateway can return the result
- * unchanged. These AGI surfaces are tenant-agnostic / send their own input, so
- * they don't require the AI auth token. The gateway wraps each call in a
- * try/catch that falls back to the deterministic mock on failure.
+ * Counterparts to the feature gateway in src/lib/ai/index.ts. The backend
+ * routers emit these camelCase keys directly, so the gateway returns the result
+ * unchanged. Each router degrades to a deterministic result server-side when
+ * its model call fails (see the AI service's app/fallbacks/), and stamps
+ * `source` so the UI can badge a non-live answer.
  */
 
 /** Feature E — FDA/EMA/ICH guidance monitoring (LLM over the agent's prompt). */
-export function fetchRegulatoryIntelligence(
-  token?: string | null,
-): Promise<RegulatoryIntelligenceResult> {
+export function fetchRegulatoryIntelligence(): Promise<RegulatoryIntelligenceResult> {
   return request<RegulatoryIntelligenceResult>(
     "/api/v1/regulatory-intelligence/scan",
-    { method: "GET", token },
+    { method: "GET" },
   );
 }
 
 /** Feature F — semantic clustering of the tenant's own deviation history. */
 export function fetchDeviationClusters(
   deviations: DeviationClusterInput[],
-  token?: string | null,
 ): Promise<DeviationIntelligenceResult> {
   return request<DeviationIntelligenceResult>(
     "/api/v1/deviation-intelligence/analyze",
-    { method: "POST", jsonBody: { deviations }, token },
+    { method: "POST", jsonBody: { deviations } },
   );
 }
 
 /** Feature H — drift/anomaly detection grounded in the real audit trail. */
-export function fetchDriftDetection(
-  token?: string | null,
-): Promise<DriftDetectionResult> {
+export function fetchDriftDetection(): Promise<DriftDetectionResult> {
   return request<DriftDetectionResult>("/api/v1/drift-detection/scan", {
     method: "GET",
-    token,
   });
 }
 
 /** Feature C — formal FDA-483 response-letter draft (LLM long-form generation). */
 export function fetchResponseDraft(
   event: ResponseDraftEvent,
-  token?: string | null,
-): Promise<{ draft: string; characterCount: number }> {
-  return request<{ draft: string; characterCount: number }>(
+): Promise<ResponseDraftResult> {
+  return request<ResponseDraftResult>(
     "/api/v1/response-draft/generate",
-    { method: "POST", jsonBody: event, token },
+    { method: "POST", jsonBody: event },
   );
 }
 
@@ -541,12 +536,10 @@ export function fetchRcaSuggestions(
   observationText: string,
   observationSeverity: string,
   siteContext: string,
-  token?: string | null,
 ): Promise<RcaSuggestion[]> {
   return request<RcaSuggestion[]>("/api/v1/rca-suggestions/generate", {
     method: "POST",
     jsonBody: { method, observationText, observationSeverity, siteContext },
-    token,
   });
 }
 
@@ -555,12 +548,10 @@ export function fetchRcaSuggestions(
  *  RCA draft the investigator can apply. Advisory; nothing is auto-applied. */
 export function fetchDeviationRcaAnalysis(
   input: DeviationRcaInput,
-  token?: string | null,
 ): Promise<DeviationRcaAnalysis> {
   return request<DeviationRcaAnalysis>("/api/v1/deviation-rca/analyze", {
     method: "POST",
     jsonBody: input,
-    token,
   });
 }
 
@@ -569,12 +560,10 @@ export function fetchCapaPrefill(
   observationText: string,
   rcaRootCause: string,
   observationSeverity: string,
-  token?: string | null,
 ): Promise<CAPAPrefill> {
   return request<CAPAPrefill>("/api/v1/capa-prefill/generate", {
     method: "POST",
     jsonBody: { observationText, rcaRootCause, observationSeverity },
-    token,
   });
 }
 
@@ -585,12 +574,10 @@ export function fetchFindingTriage(
   area: string,
   purpose: string,
   activeFrameworks: string[],
-  token?: string | null,
 ): Promise<FindingTriageResult> {
   return request<FindingTriageResult>("/api/v1/finding-triage/classify", {
     method: "POST",
     jsonBody: { requirement, area, purpose, activeFrameworks },
-    token,
   });
 }
 
@@ -598,12 +585,10 @@ export function fetchFindingTriage(
  *  prose + Python-appended gate facts). Reviewer assist only; never a verdict. */
 export function fetchApprovalBrief(
   input: ApprovalBriefInput,
-  token?: string | null,
 ): Promise<ApprovalBriefResult> {
   return request<ApprovalBriefResult>("/api/v1/capa-approval-brief/generate", {
     method: "POST",
     jsonBody: input,
-    token,
   });
 }
 
@@ -611,12 +596,23 @@ export function fetchApprovalBrief(
  *  (LLM prose grounded in the computed unmet list). Authoring guidance only. */
 export function fetchReadinessGuidance(
   input: ReadinessGuidanceInput,
-  token?: string | null,
 ): Promise<ReadinessGuidanceResult> {
   return request<ReadinessGuidanceResult>(
     "/api/v1/capa-readiness-guidance/generate",
-    { method: "POST", jsonBody: input, token },
+    { method: "POST", jsonBody: input },
   );
+}
+
+/** Feature O — assignable rework tasks from a QA rejection + review findings.
+ *  Replaces the browser-side keyword engine that used to sit behind the
+ *  "Suggest tasks (AI)" button (src/lib/ai/reworkTasks.ts). */
+export function fetchReworkTasks(
+  input: ReworkTasksInput,
+): Promise<ReworkTasksResult> {
+  return request<ReworkTasksResult>("/api/v1/rework-tasks/suggest", {
+    method: "POST",
+    jsonBody: input,
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════ */
@@ -625,33 +621,33 @@ export function fetchReadinessGuidance(
 
 import type { RootState } from "@/store";
 
-/**
- * Reads the AI access token off the currently logged-in user's tenant
- * record. Returns a placeholder `"anonymous"` string instead of null when
- * no real token is available — the AI backend was made permissive on
- * 2026-05-15, so the placeholder satisfies every `if (!token)` UI gate
- * without blocking the user, and the now-optional Authorization header
- * is ignored server-side.
+/* REMOVED — selectAiToken().
+ *
+ * It read the AI backend's bearer token out of the Redux auth slice so client
+ * components could put it in an `auth` header. That made the browser the holder
+ * of a second service's credential (persisted to localStorage with the rest of
+ * the slice), and because the slice was almost never populated it returned the
+ * literal string "anonymous" — which a strict backend rejects with 401, so
+ * every AGI surface silently fell through to its client-side mock.
+ *
+ * The token is now minted per request by app/api/ai-proxy/[...path]/route.ts
+ * from the caller's session and never leaves the server. Client components need
+ * no token at all — do not reintroduce a selector here.
  */
-export function selectAiToken(state: RootState): string {
-  const u = state.auth.user;
-  if (!u) return "anonymous";
-  if (u.aiAccessToken) return u.aiAccessToken;
-  const tenant = state.auth.tenants.find((t) => t.id === u.tenantId);
-  return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? "anonymous";
-}
 
 /**
- * Same idea for the active customer_id (the customer admin's aiUserId for
- * the current user's tenant). Falls back to tenantId if the customer admin
- * isn't signed up yet — the backend will reject and the caller can show
- * a helpful error.
+ * The tenant id the AI service scopes records by.
+ *
+ * This must equal the `customer_id` claim in the token the server mints
+ * (src/lib/aiToken.server.ts), or a record written under one id becomes
+ * invisible when read under the other. That claim is always the NextAuth
+ * tenantId, so this returns the tenantId — nothing else.
+ *
+ * It used to resolve a chain: the user's own `aiCustomerId`, else the tenant's
+ * customer-admin `aiUserId`, else the tenantId. That produced a different
+ * identifier depending on which users happened to be provisioned, while the
+ * token said something else entirely.
  */
 export function selectAiCustomerId(state: RootState): string | null {
-  const u = state.auth.user;
-  if (!u) return null;
-  if (u.aiCustomerId) return u.aiCustomerId;
-  const tenant = state.auth.tenants.find((t) => t.id === u.tenantId);
-  const admin = tenant?.config?.users?.find((x) => x.role === "customer_admin" && x.aiUserId);
-  return admin?.aiUserId ?? u.tenantId ?? null;
+  return state.auth.user?.tenantId ?? null;
 }

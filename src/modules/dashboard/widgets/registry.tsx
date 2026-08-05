@@ -25,7 +25,7 @@ import dynamic from "next/dynamic";
 import { CHANGE_CONTROL_ENABLED } from "@/lib/change-control-constants";
 import type { DashboardWidgetKey } from "../config";
 import { ActionPlanWidget } from "./ActionPlanWidget";
-import { AIInsightsWidget } from "./AIInsightsWidget";
+import { ComplianceSignalsWidget } from "./ComplianceSignalsWidget";
 import { AlertsWidget } from "./AlertsWidget";
 import { AreaHeatmapWidget } from "./AreaHeatmapWidget";
 import { ComplianceStatusWidget } from "./ComplianceStatusWidget";
@@ -75,7 +75,9 @@ const WIDGETS: Record<DashboardWidgetKey, ComponentType<DashboardWidgetProps> | 
   "change-control-status": CHANGE_CONTROL_ENABLED ? ChangeControlWidget : null,
   "action-plan": ActionPlanWidget,
   // side rail
-  "ai-insights": AIInsightsWidget,
+  // Registry key kept: it is persisted in every role dashboard config.
+  // The widget itself is deterministic compliance signals, not AI.
+  "ai-insights": ComplianceSignalsWidget,
   "risk-signals": RiskSignalsWidget,
   "compliance-status": ComplianceStatusWidget,
   "pending-tasks": PendingTasksWidget,

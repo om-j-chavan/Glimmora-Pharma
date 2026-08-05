@@ -12,8 +12,11 @@ import { test, expect } from "@playwright/test";
  *   3. Clicking a clustered deviation reference opens its detail.
  *   4. Re-run re-runs the clustering (deterministic — same result).
  *
- * Data is the deterministic mock in src/lib/ai/mockData.ts driven by the
- * live seeded deviations. Login: QA Head. Requires `npm run db:seed`.
+ * Data comes from POST /api/v1/deviation-intelligence/analyze over the live
+ * seeded deviations. With no OPENAI_API_KEY (or on a model error) the AI
+ * service serves its deterministic clustering fallback
+ * (app/fallbacks/intelligence.py), so the assertions below hold either way.
+ * Login: QA Head. Requires `npm run db:seed` and the AI service running.
  */
 
 const QA_HEAD = { email: "qa@pharmaglimmora.com", password: "Demo@123" };

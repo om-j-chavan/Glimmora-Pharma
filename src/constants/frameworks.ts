@@ -4,7 +4,7 @@
  * Finding.framework across the app; they must never be renamed or dropped.
  *
  * This constant unifies the three former label dictionaries (AddFindingModal
- * FRAMEWORK_LABELS, GapRegisterTab FRAMEWORK_LABELS, mockData TRIAGE_FRAMEWORK_
+ * FRAMEWORK_LABELS, GapRegisterTab FRAMEWORK_LABELS, the old mockData TRIAGE_FRAMEWORK_
  * LABELS) into one. `frameworkLabel(key)` resolves any key — including a legacy
  * key whose catalog row has since been disabled/removed — so historical
  * findings always render a label (falls back to a prettified key).

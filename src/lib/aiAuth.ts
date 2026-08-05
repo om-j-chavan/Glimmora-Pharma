@@ -1,24 +1,49 @@
 /**
- * Client for the deployed AI backend's /api/v1/auth/* endpoints.
+ * Where AI calls are addressed.
  *
- *   POST /api/v1/auth/signup  → creates a user, returns access_token
- *   POST /api/v1/auth/login   → returns a fresh access_token
+ * In the browser this is ALWAYS the same-origin proxy at
+ * `app/api/ai-proxy/[...path]`. The proxy checks the NextAuth session, mints the
+ * upstream access token server-side, and forwards the call. So the browser never
+ * learns the AI service's address and never carries a credential for it.
  *
- * Signup is called once when a new app user is created and again is gated
- * by the user's `aiUserId` flag (already-signed-up sentinel). Login is
- * called every time the user signs in to the app and refreshes the cached
- * `aiAccessToken` on the user record so the modules that hit the AI
- * endpoints can include the `auth` header.
+ * There is deliberately no `NEXT_PUBLIC_AI_API_URL` escape hatch any more: it
+ * let a deployment point client-side fetches straight at the AI service, which
+ * bypassed the session check and the token injection in one step.
+ *
+ * Server-side callers (server actions, route handlers) go direct to the
+ * upstream — they are already inside the trust boundary and have no proxy to
+ * route through. `BACKEND_URL` / `NEXT_PUBLIC_API_URL` mirror the proxy's own
+ * resolution so there is one place the address is decided.
+ *
+ * Signup/login against the AI service are NOT here. They exchange a password
+ * for a bearer token, so they run server-side only — see
+ * `src/lib/aiAccount.server.ts` and the `provisionAiAccount` server action.
  */
 
-// Browser-side defaults to the same-origin /api/ai-proxy passthrough so we
-// never hit CORS preflight failures when Render cold-starts. Server-side and
-// explicit env override go straight to the upstream.
-const AI_UPSTREAM = "https://pharma-glimmora-ai-backend.onrender.com";
+/** Same-origin proxy path. Every browser AI request goes through this. */
+export const AI_PROXY_PATH = "/api/ai-proxy";
+
+/** Direct upstream base for server-side callers. */
+export function aiUpstreamBase(): string {
+  return (
+    process.env.BACKEND_URL ??
+    process.env.NEXT_PUBLIC_API_URL?.replace(/\/api$/, "") ??
+    "http://localhost:8000"
+  );
+}
 
 export const AI_API_BASE =
-  process.env.NEXT_PUBLIC_AI_API_URL ??
-  (typeof window === "undefined" ? AI_UPSTREAM : "/api/ai-proxy");
+  typeof window === "undefined" ? aiUpstreamBase() : AI_PROXY_PATH;
+
+export class AiAuthError extends Error {
+  status: number;
+  body: unknown;
+  constructor(status: number, message: string, body: unknown) {
+    super(message);
+    this.status = status;
+    this.body = body;
+  }
+}
 
 export interface AiSignupRequest {
   user_id: string;
@@ -37,100 +62,6 @@ export interface AiAuthResponse {
   role?: string;
   message?: string;
 }
-
-export class AiAuthError extends Error {
-  status: number;
-  body: unknown;
-  constructor(status: number, message: string, body: unknown) {
-    super(message);
-    this.status = status;
-    this.body = body;
-  }
-}
-
-/** Redacts password-ish fields before logging the request body. */
-function safeBody(body: unknown): unknown {
-  if (!body || typeof body !== "object") return body;
-  const clone: Record<string, unknown> = { ...(body as Record<string, unknown>) };
-  if ("password" in clone) clone.password = "***";
-  return clone;
-}
-
-/** Flattens FastAPI's `detail` array into a readable single line. */
-function formatDetail(parsed: unknown, status: number): string {
-  if (parsed && typeof parsed === "object" && "detail" in parsed) {
-    const d = (parsed as { detail?: unknown }).detail;
-    if (Array.isArray(d)) {
-      return d
-        .map((item) => {
-          if (item && typeof item === "object") {
-            const it = item as { loc?: unknown[]; msg?: string };
-            const field = Array.isArray(it.loc) ? it.loc.slice(1).join(".") : "?";
-            return `${field}: ${it.msg ?? "invalid"}`;
-          }
-          return String(item);
-        })
-        .join("; ");
-    }
-    if (typeof d === "string") return d;
-  }
-  return `Request failed (${status})`;
-}
-
-/**
- * Posts a JSON body to the AI backend.
- *
- * `silent` demotes the failure log from error → warn for callers where
- * a 4xx is expected/normal (e.g. the best-effort AI login that fires on
- * every app sign-in). The error is still thrown so the caller can react;
- * we just don't pollute the dev console with red lines for non-actionable
- * cases.
- */
-async function postJson<T>(path: string, body: unknown, silent = false): Promise<T> {
-  const tag = `[aiAuth] POST ${path}`;
-  const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
-  console.info(`${tag} → sending`, safeBody(body));
-  let res: Response;
-  try {
-    res = await fetch(`${AI_API_BASE}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    (silent ? console.warn : console.error)(`${tag} ✗ network error`, err);
-    throw err;
-  }
-  const text = await res.text();
-  let parsed: unknown = null;
-  try {
-    parsed = text ? JSON.parse(text) : null;
-  } catch {
-    parsed = text;
-  }
-  const ms = typeof performance !== "undefined" ? Math.round(performance.now() - startedAt) : 0;
-  if (!res.ok) {
-    const detail = formatDetail(parsed, res.status);
-    (silent ? console.warn : console.error)(
-      `${tag} ✗ ${res.status} (${ms}ms) — ${detail}`,
-      { body: safeBody(body), response: parsed },
-    );
-    throw new AiAuthError(res.status, detail, parsed);
-  }
-  console.info(`${tag} ✓ ${res.status} (${ms}ms)`, parsed);
-  return parsed as T;
-}
-
-export const aiSignup = (body: AiSignupRequest) =>
-  postJson<AiAuthResponse>("/api/v1/auth/signup", body);
-
-/**
- * @param silent when true, a 401 from the backend is logged at warn
- *               level instead of error. Use for best-effort auto-login
- *               attempts (the app login flow's AI token refresh).
- */
-export const aiLogin = (username: string, password: string, silent = false) =>
-  postJson<AiAuthResponse>("/api/v1/auth/login", { username, password }, silent);
 
 /* ── Helpers for ID generation ─────────────────────────────────── */
 

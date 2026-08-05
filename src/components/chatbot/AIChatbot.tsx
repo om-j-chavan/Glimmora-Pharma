@@ -9,9 +9,8 @@ import { AIButton } from "@/components/ai";
 // server. We dynamically import() the runtime inside startRecording so
 // it only loads in the browser.
 import type { RnnoiseWorkletNode as RnnoiseNode } from "@sapphi-red/web-noise-suppressor";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import {
-  aiHelpSend,
+  aiAssistantSend,
   aiVoiceChat,
   aiVoiceTranscribe,
   aiVoiceSpeak,
@@ -21,9 +20,6 @@ import {
   type TicketPrefill,
 } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
-import { isDataQuestion, formatDataAnswer } from "@/lib/aiData";
-import { getSmallTalkReply } from "@/lib/aiSmallTalk";
-import { getComplianceSnapshot } from "@/actions/complianceSnapshot";
 import { RaiseTicketModal, type RaiseTicketPrefill } from "@/modules/support/RaiseTicketModal";
 
 /**
@@ -93,19 +89,10 @@ function loadSuppressionLevel(): number {
 }
 
 export function AIChatbot() {
-  // Token from logged-in user record (set by app login flow). Prefer the
-  // token on auth.user (always populated by refreshAiToken) and fall back
-  // to the tenant.config.users entry for older sessions.
-  // AI backend was made permissive on 2026-05-15 — auth is no longer enforced
-  // server-side, so we fall back to a placeholder so the existing UI gates
-  // (`if (!aiToken)`) keep passing instead of blocking the user.
-  const aiToken = useAppSelector((s) => {
-    const u = s.auth.user;
-    if (!u) return "anonymous";
-    if (u.aiAccessToken) return u.aiAccessToken;
-    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
-    return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? "anonymous";
-  });
+  // No AI credential is read here. Every call below goes to a same-origin route
+  // that authenticates the NextAuth session and attaches the upstream token
+  // server-side. This component used to pull a bearer token out of Redux (which
+  // was almost always the placeholder string "anonymous") and send it itself.
 
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -210,50 +197,26 @@ export function AIChatbot() {
     const text = input.trim();
     if (!text || busy) return;
     setError(null);
-    if (!aiToken) {
-      setError("AI session is missing. Sign out and sign back in to refresh your token.");
-      return;
-    }
     setInput("");
     const userMsg: UiMessage = { role: "user", content: text };
     const next = [...messages, userMsg];
     setMessages(next);
     setBusy(true);
 
-    // Small talk first ("hi", "thanks", "tell me a joke", "who are you?") —
-    // answered instantly with a friendly canned reply, no LLM call. The helper
-    // returns null for anything naming a compliance term, so a real question is
-    // never swallowed by a pleasantry. Synchronous → no busy spinner needed.
-    const smallTalk = getSmallTalkReply(text, next.length);
-    if (smallTalk) {
-      setMessages([...next, { role: "assistant", content: smallTalk }]);
-      setBusy(false);
-      return;
-    }
-
-    // Live-data / count questions ("how many open CAPAs?", "any overdue
-    // deviations?") are answered from the tenant's actual records via a
-    // read-only server action — the grounded /help corpus cannot (and must
-    // not) answer these. Knowledge / how-to questions fall through to the
-    // grounded path below, unchanged.
-    if (isDataQuestion(text)) {
-      try {
-        const snapshot = await getComplianceSnapshot();
-        setMessages([...next, { role: "assistant", content: formatDataAnswer(text, snapshot) }]);
-      } catch (e) {
-        console.error("[chatbot] data query failed", e);
-        setError(friendlyAiError(e, "Couldn't read your live data just now. Please try again."));
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
-
+    // One call. The assistant decides server-side whether this is small talk,
+    // a live-data question ("how many open CAPAs?"), or a knowledge question,
+    // and answers accordingly — all three come back in the same shape, so this
+    // component renders them identically.
+    //
+    // That routing used to happen right here: a small-talk regex table, a
+    // data-question classifier, a live-figures formatter and a separate server
+    // action, with the browser choosing which endpoint to call. See
+    // app/assistant_service.py on the AI service.
     try {
       // Send only role+content as history — the backend ignores extra fields,
       // but stripping keeps the payload clean.
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
-      const res = await aiHelpSend(text, history, aiToken);
+      const res = await aiAssistantSend(text, history);
       const meta: HelpMeta = {
         status: res.status,
         band: res.confidence_band,
@@ -367,10 +330,6 @@ export function AIChatbot() {
 
   async function startRecording() {
     setError(null);
-    if (!aiToken) {
-      setError("AI session is missing. Sign out and sign back in to refresh your token.");
-      return;
-    }
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("Microphone is not available in this browser.");
       return;
@@ -607,7 +566,7 @@ export function AIChatbot() {
   }
 
   async function sendRecorded() {
-    if (!aiToken || !recordedBlob) return;
+    if (!recordedBlob) return;
     const blob = recordedBlob;
     setError(null);
 
@@ -622,7 +581,7 @@ export function AIChatbot() {
       setRecordSeconds(0);
       setVoiceState("idle");
       try {
-        const r = await aiVoiceTranscribe(blob, aiToken);
+        const r = await aiVoiceTranscribe(blob);
         const transcribed = (r as { text?: string }).text ?? "";
         setInput((prev) => (prev ? `${prev} ${transcribed}` : transcribed));
       } catch (e) {
@@ -647,7 +606,7 @@ export function AIChatbot() {
     setRecordSeconds(0);
     setVoiceState("idle");
     try {
-      const result = await aiVoiceChat(blob, aiToken, messages);
+      const result = await aiVoiceChat(blob, messages);
       const url = URL.createObjectURL(result.audio);
       if (audioRef.current) {
         audioRef.current.src = url;
@@ -679,11 +638,11 @@ export function AIChatbot() {
 
   // TTS — speak a stored assistant reply on demand.
   async function speakMessage(idx: number, text: string) {
-    if (!aiToken || !text || !text.trim()) return;
+    if (!text || !text.trim()) return;
     setTtsIdx(idx);
     setError(null);
     try {
-      const audio = await aiVoiceSpeak(text, "nova", aiToken);
+      const audio = await aiVoiceSpeak(text, "nova");
       const url = URL.createObjectURL(audio);
       if (audioRef.current) {
         audioRef.current.src = url;
