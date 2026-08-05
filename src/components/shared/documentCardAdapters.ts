@@ -4,6 +4,7 @@ import type { EvidenceLibraryDoc, DocOrigin } from "@/lib/queries/evidenceLibrar
 import type { WorklistDoc } from "@/lib/queries/worklist";
 import { EVIDENCE_CATEGORY_LABEL, type EvidenceCategory } from "@/lib/queries/evidence";
 import { RISK_DOC_CATEGORY_LABEL, type RiskDocCategory } from "@/constants/risk";
+import { formatDocumentSource } from "@/lib/labels/documentSource";
 
 /**
  * Per-source adapters → the shared <DocumentCard>'s normalized DocumentCardView.
@@ -22,7 +23,7 @@ export function evidenceDocToCardView(d: EvidenceLibraryDoc): DocumentCardView {
     id: d.id,
     title: d.title,
     meta: [d.category, d.uploaderName, d.uploadedAt ? dayjs(d.uploadedAt).format("DD MMM YYYY") : ""].filter(Boolean).join(" · "),
-    badge: { label: d.originLabel, tone: ORIGIN_TONE[d.origin] },
+    badge: { label: formatDocumentSource(d.originLabel), tone: ORIGIN_TONE[d.origin] },
     locked: d.locked,
     viewHref: d.url,
     downloadHref: d.hasFile ? d.url : null,

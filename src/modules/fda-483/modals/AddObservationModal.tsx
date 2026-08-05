@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -6,34 +6,24 @@ import type { Observation } from "@/types/fda483";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { useAppSelector } from "@/hooks/useAppSelector";
+import { frameworkLabel } from "@/constants/frameworks";
 import {
   USER_PICKABLE_OBSERVATION_STATUSES,
   isServerOnlyObservationStatus,
 } from "../_shared";
 
-/* Picklists for Area + Regulation. The form schema still stores a plain
- * string — the Dropdown writes the chosen string, and "Other" reveals a
- * free-text input so users can specify anything outside the list. */
+/* Area is a fixed picklist; Regulation Cited is now driven by the tenant's
+ * enabled frameworks (Settings > Frameworks), read from the same Redux source
+ * (s.frameworks.list) the rest of the app uses — see the component body. The
+ * form schema still stores a plain string — the Dropdown writes the chosen
+ * label, and "Other" reveals a free-text input for anything outside the list. */
 const AREA_OPTIONS = [
   "QC", "QA", "Production", "Packaging", "Warehouse", "Lab", "Engineering",
   "Materials Management", "IT/CSV", "Quality Engineering", "Validation", "Other",
 ].map((v) => ({ value: v, label: v }));
 
-const REGULATION_OPTIONS = [
-  "21 CFR Part 11 (Electronic Records)",
-  "21 CFR Part 210 (cGMP)",
-  "21 CFR Part 211 (Finished Pharmaceuticals)",
-  "21 CFR Part 820 (Medical Devices)",
-  "EU GMP Annex 1 (Sterile Manufacturing)",
-  "EU GMP Annex 11 (Computerised Systems)",
-  "ICH Q7 (API GMP)",
-  "ICH Q9 (Quality Risk Management)",
-  "ICH Q10 (Pharmaceutical Quality System)",
-  "Other",
-].map((v) => ({ value: v, label: v }));
-
 const AREA_PRESETS = AREA_OPTIONS.map((o) => o.value).filter((v) => v !== "Other");
-const REGULATION_PRESETS = REGULATION_OPTIONS.map((o) => o.value).filter((v) => v !== "Other");
 
 const obsSchema = z.object({
   number: z.coerce.number().min(1, "Number required"),
@@ -66,6 +56,23 @@ export function AddObservationModal({
     defaultValues: { number: defaultNumber, text: "", area: "", regulation: "", severity: "High" as const, status: "Open" as const },
   });
 
+  // Regulation Cited options = the tenant's ENABLED frameworks (Settings >
+  // Frameworks), from the same Redux source (hydrated app-wide in AppShell)
+  // that the Settings tab and other modules read. Each option's value === its
+  // display label (a plain string), matching what the observation record stores.
+  const frameworkList = useAppSelector((s) => s.frameworks.list);
+  const regulationPresets = useMemo(
+    () => frameworkList.map((f) => frameworkLabel(f.key, f.name)),
+    [frameworkList],
+  );
+  const regulationOptions = useMemo(
+    () => [
+      ...regulationPresets.map((label) => ({ value: label, label })),
+      { value: "Other", label: "Other" },
+    ],
+    [regulationPresets],
+  );
+
   // When the stored value isn't one of the presets (and isn't empty), the
   // "Other" branch is active and its free-text input carries the value.
   const [areaOther, setAreaOther] = useState(false);
@@ -83,7 +90,7 @@ export function AddObservationModal({
           status: editingObs.status,
         });
         setAreaOther(!!editingObs.area && !AREA_PRESETS.includes(editingObs.area));
-        setRegOther(!!editingObs.regulation && !REGULATION_PRESETS.includes(editingObs.regulation));
+        setRegOther(!!editingObs.regulation && !regulationPresets.includes(editingObs.regulation));
       } else {
         form.reset({
           number: defaultNumber,
@@ -113,6 +120,21 @@ export function AddObservationModal({
       open={open}
       onClose={handleClose}
       title={editingObs ? "Edit observation" : "Add observation"}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" type="button" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            type="button"
+            loading={form.formState.isSubmitting}
+            onClick={form.handleSubmit(handleSubmit)}
+          >
+            {editingObs ? "Save" : "Add observation"}
+          </Button>
+        </div>
+      }
     >
       <form
         onSubmit={form.handleSubmit(handleSubmit)}
@@ -216,7 +238,7 @@ export function AddObservationModal({
                     }}
                     width="w-full"
                     placeholder="Select regulation..."
-                    options={REGULATION_OPTIONS}
+                    options={regulationOptions}
                   />
                   {regOther && (
                     <input
@@ -291,22 +313,6 @@ export function AddObservationModal({
               </p>
             )}
           </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={handleClose}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            type="submit"
-            loading={form.formState.isSubmitting}
-          >
-            {editingObs ? "Save" : "Add observation"}
-          </Button>
         </div>
       </form>
     </Modal>

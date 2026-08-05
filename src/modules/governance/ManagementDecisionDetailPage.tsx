@@ -179,8 +179,8 @@ export function ManagementDecisionDetailPage({ decision, docs, audit, participan
 
   return (
     <PageLayout
-      breadcrumb={{ parent: "Governance & KPIs", parentHref: "/governance", current: reference }}
-      description={decision.topic}
+      breadcrumb={{ parent: "Governance & KPIs", parentHref: "/governance", current: decision.topic }}
+      description={reference}
       actions={canEdit ? [{ label: "Amend", onClick: () => setEditOpen(true), variant: "primary", icon: Pencil }] : []}
       headerRight={
         <button
@@ -194,7 +194,7 @@ export function ManagementDecisionDetailPage({ decision, docs, audit, participan
         </button>
       }
     >
-      <div className="space-y-5 max-w-4xl">
+      <div className="space-y-5">
         {/* Meeting info */}
         <div className="rounded-lg border p-4" style={{ background: "var(--bg-surface)", borderColor: "var(--bg-border)" }}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">

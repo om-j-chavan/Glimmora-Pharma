@@ -21,10 +21,12 @@ import {
   SlidersHorizontal,
   GraduationCap,
   LifeBuoy,
+  Bell,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useRole } from "@/hooks/useRole";
+import { useNotificationCount } from "@/components/notifications/NotificationCountProvider";
 import {
   CAPA_MODULE_VIEW_ROLES,
   canViewGovernance,
@@ -103,6 +105,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const toast = useToast();
   const pathname = usePathname();
   const { allowedPaths, role } = useRole();
+  // Live unread badge on the Notifications entry — shares the ONE authoritative
+  // count with the topbar bell (no second poller). 0 when outside a provider.
+  const { unread } = useNotificationCount();
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set([getGroupForPath(pathname ?? "")]),
@@ -347,6 +352,44 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* ── Footer ── */}
       <div style={{ borderTop: "1px solid var(--bg-border)" }}>
+        {/* Notifications — a standalone nav item pinned just above Sign Out.
+            Per-user (the query's (recipient, tenant) pin IS the authorization), so
+            every non-super_admin role sees it; super_admin uses the admin console. */}
+        {role !== "super_admin" && (
+          <div style={{ padding: "8px 8px 0" }}>
+            <Link
+              href="/notifications"
+              className={`nav-item${pathname?.startsWith("/notifications") ? " active" : ""}`}
+              aria-current={pathname?.startsWith("/notifications") ? "page" : undefined}
+              style={{ width: "100%" }}
+              onClick={() => onNavigate?.()}
+            >
+              <Bell className="w-4 h-4" aria-hidden="true" />
+              <span style={{ flex: 1 }}>Notifications</span>
+              {unread > 0 && (
+                <span
+                  aria-label={`${unread} unread`}
+                  style={{
+                    flexShrink: 0,
+                    minWidth: 18,
+                    height: 18,
+                    padding: "0 5px",
+                    borderRadius: 9,
+                    background: "#ef4444",
+                    color: "#fff",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
+            </Link>
+          </div>
+        )}
         <div style={{ padding: "8px 8px 4px" }}>
           <button
             type="button"

@@ -191,8 +191,8 @@ export function RiskDetailPage({ risk, docs, audit, owners, conversion }: RiskDe
 
   return (
     <PageLayout
-      breadcrumb={{ parent: "Governance & KPIs", parentHref: "/governance", current: reference }}
-      description={risk.title}
+      breadcrumb={{ parent: "Governance & KPIs", parentHref: "/governance", current: risk.title }}
+      description={reference}
       actions={canEdit ? [{ label: "Edit", onClick: () => setEditOpen(true), variant: "primary", icon: Pencil }] : []}
       headerRight={
         <button
@@ -206,7 +206,7 @@ export function RiskDetailPage({ risk, docs, audit, owners, conversion }: RiskDe
         </button>
       }
     >
-      <div className="space-y-5 max-w-4xl">
+      <div className="space-y-5">
         {/* Badges */}
         <div className="flex items-center gap-2 flex-wrap">
           <Badge variant={getSeverityVariant(risk.severity, "generic")}>

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { deleteDocument } from "@/actions/documents";
+import { formatDocumentSource } from "@/lib/labels/documentSource";
 import type { EvidenceLibraryDoc } from "@/lib/queries/evidenceLibrary";
 
 /**
@@ -114,7 +115,7 @@ export function DocumentDetailsModal({
           )}
 
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
-            <Field label="Source module" value={doc.originLabel} />
+            <Field label="Source module" value={formatDocumentSource(doc.originLabel)} />
             <Field label="Type" value={doc.category ?? "—"} />
             <Field label="Uploader" value={doc.uploaderName} />
             <Field label="Uploaded" value={uploaded} />
