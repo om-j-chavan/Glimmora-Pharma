@@ -26,8 +26,8 @@ import { revalidatePath } from "next/cache";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk } from "@/lib/auth";
-import { canCreateRisk, canEditRisk, canManageGovernance } from "@/lib/permissions/roleSets";
+import { requireAuth, resolveUserFk, resolveCreateSiteId } from "@/lib/auth";
+import { canCreateRisk, canEditRisk, canManageGovernance, canCreateAcrossSites } from "@/lib/permissions/roleSets";
 import { riskVisibilityWhere } from "@/lib/queries/risks";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
@@ -59,8 +59,14 @@ const CreateRiskSchema = z.object({
   category: z.enum(RISK_CATEGORIES),
   severity: z.enum(RISK_SEVERITIES),
   likelihood: z.enum(RISK_LIKELIHOODS),
-  ownerId: z.string().min(1, "Owner is required"),
+  // Owner is optional at the schema level: a site-bound creator omits it (the
+  // server assigns the creator as owner). A canCreateAcrossSites creator MUST
+  // supply it — enforced in the action, where the role is known.
+  ownerId: z.string().optional(),
   siteId: z.string().optional().nullable(),
+  // Creation is limited to Open/Closed. Mitigating/Converted are lifecycle
+  // transitions reached later via updateRisk / conversion, never at creation.
+  status: z.enum(["Open", "Closed"]).optional(),
   targetDate: z.string().optional().nullable(),
   mitigationPlan: z.string().optional().nullable(),
 });
@@ -110,16 +116,41 @@ export async function createRisk(input: z.input<typeof CreateRiskSchema>): Promi
 
   const tenantId = session.user.tenantId;
   const actor = await resolveUserFk(session.user.id, tenantId, session.user.role);
+  const isCrossSite = canCreateAcrossSites(session.user.role);
 
-  if (!(await assertOwnerInTenant(parsed.data.ownerId, tenantId))) {
-    return { success: false, error: "Selected owner is not an active user in your organization." };
+  // OWNER (option A): a canCreateAcrossSites creator (admin login, no seat User FK)
+  // PICKS an owner; every site-bound creator IS the owner (their own seat identity).
+  // Never null on either path.
+  let ownerId: string;
+  if (isCrossSite) {
+    if (!parsed.data.ownerId) {
+      return { success: false, error: "Owner is required.", fieldErrors: { ownerId: ["Owner is required."] } };
+    }
+    if (!(await assertOwnerInTenant(parsed.data.ownerId, tenantId))) {
+      return { success: false, error: "Selected owner is not an active user in your organization." };
+    }
+    ownerId = parsed.data.ownerId;
+  } else {
+    if (!actor.userId) {
+      return { success: false, error: "Your account has no user identity to own the risk. Contact your admin." };
+    }
+    ownerId = actor.userId;
   }
-  const site = await resolveSiteCode(parsed.data.siteId, tenantId);
-  if (!site.ok) return { success: false, error: "Selected site is not in your organization." };
+
+  // SITE (option A): the shared helper — a canCreateAcrossSites creator must CHOOSE
+  // a site (validated to the tenant); every other role is auto-scoped to its own
+  // User.siteId (a site-less non-admin is rejected here). Never null.
+  const siteRes = await resolveCreateSiteId(session, parsed.data.siteId);
+  if (!siteRes.ok) return { success: false, error: siteRes.error };
+  const resolvedSiteId = siteRes.siteId;
+  const siteCode = await resolveSiteCode(resolvedSiteId, tenantId);
+
+  // Creation is Open/Closed only (schema-enforced); default Open when unspecified.
+  const createStatus = parsed.data.status ?? "Open";
 
   // Site-scoped reference: RISK-<SITE>-<YEAR>-<NNN>, falling back to
-  // RISK-<YEAR>-<NNN> when the risk is tenant-level or the site has no code.
-  const referencePrefix = buildReferencePrefix("RISK", site.code);
+  // RISK-<YEAR>-<NNN> when the site has no code.
+  const referencePrefix = buildReferencePrefix("RISK", siteCode.ok ? siteCode.code : null);
 
   const MAX_REF_RETRIES = 5;
   let created: { id: string; reference: string | null } | null = null;
@@ -141,14 +172,14 @@ export async function createRisk(input: z.input<typeof CreateRiskSchema>): Promi
           data: {
             reference,
             tenantId,
-            siteId: parsed.data.siteId || null,
+            siteId: resolvedSiteId,
             title: parsed.data.title,
             description: parsed.data.description,
             category: parsed.data.category,
             severity: parsed.data.severity,
             likelihood: parsed.data.likelihood,
-            status: "Open",
-            ownerId: parsed.data.ownerId,
+            status: createStatus,
+            ownerId,
             // Record-visibility dual-write: the id FK is authoritative, the
             // name string is for display. Stamped from the SESSION, never the
             // client payload, so a creator can't be spoofed.

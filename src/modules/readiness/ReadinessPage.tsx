@@ -29,7 +29,7 @@ import { store } from "@/store";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { useRole } from "@/hooks/useRole";
 import { usePermissions } from "@/hooks/usePermissions";
-import { canWriteReadiness } from "@/lib/permissions/roleSets";
+import { canWriteReadiness, canCreateAcrossSites } from "@/lib/permissions/roleSets";
 import {
   addCard, updateCard, addSimulation, updateSimulation, addTraining,
   setActiveInspection,
@@ -47,6 +47,7 @@ import { Popup } from "@/components/ui/Popup";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
+import { DatePicker } from "@/components/ui/DatePicker";
 import { TabBar, StatCard, CardSection, DataTable, type Column } from "@/components/shared";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { RoadmapPrismaTab } from "./RoadmapPrismaTab";
@@ -202,6 +203,11 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   // it. This is the same predicate the readiness server actions enforce, so a
   // visible button can never fail server-side and vice versa.
   const isAdmin = canWriteReadiness(role);
+  // New-Inspection site field (Governance option A): hidden for site-bound creators
+  // (auto-scoped to their own site server-side), shown only for canCreateAcrossSites
+  // roles who must pick. Same signal the server (createInspection → resolveCreateSiteId)
+  // gates on, so UI and server agree.
+  const showInspSite = canCreateAcrossSites(role);
 
   const inProgressCount = tenantCards.filter((c) => c.status === "In Progress").length;
   const overdueCount = tenantCards.filter((c) => c.status !== "Complete" && dayjs.utc(c.dueDate).isBefore(dayjs())).length;
@@ -282,12 +288,15 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
   }
 
   async function handleCreateInspection() {
-    if (!inspTitle.trim() || !inspSite || !inspLead || !inspDate) return;
-    const site = allSites.find((s) => s.id === inspSite);
+    // Site is required only when the picker is shown (cross-site creators); site-bound
+    // creators are auto-scoped server-side, so an empty inspSite is fine for them.
+    if (!inspTitle.trim() || !inspLead || !inspDate || (showInspSite && !inspSite)) return;
 
     const result = await createInspectionAction({
       title: inspTitle.trim(),
-      siteName: site?.name ?? inspSite,
+      // Server resolves the authoritative site (option A) — ignores this for
+      // site-bound creators, uses it for cross-site creators.
+      siteId: inspSite || undefined,
       agency: inspAgency,
       type: inspType,
       expectedDate: inspDate ? dayjs(inspDate).utc().toISOString() : undefined,
@@ -476,7 +485,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
         title="Inspection Readiness Program"
         contentPadding={true}
         description={`Prepare for inspections through readiness assessments and gap closure.${activeInspection ? ` \u00b7 ${completeCount} of ${totalCards} actions complete \u00b7 ${readinessScore}% ready` : ""}`}
-        actions={isAdmin ? [{ label: "Add action", variant: "primary", icon: Plus, onClick: () => setAddCardOpen(true) }] : []}
+        actions={[]}
         headerRight={
           /* The readiness-score chip is a display widget, not a PageAction.
              Shown only when an inspection is selected \u2014 no misleading 0%. */
@@ -1111,21 +1120,31 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
       </Modal>
 
       {/* ═══ CREATE INSPECTION MODAL ═══ */}
-      <Modal open={createInspOpen} onClose={() => setCreateInspOpen(false)} title="Create New Inspection">
-        <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+      <Modal
+        open={createInspOpen}
+        onClose={() => setCreateInspOpen(false)}
+        title="Create New Inspection"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCreateInspOpen(false)}>Cancel</Button>
+            <Button variant="primary" icon={Plus} disabled={!inspTitle.trim() || !inspLead || !inspDate || (showInspSite && !inspSite)} onClick={handleCreateInspection}>Create Inspection</Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
           <Input id="insp-title" label="Inspection title" required value={inspTitle} onChange={(e) => setInspTitle(e.target.value)} placeholder="FDA GMP Inspection Q2 2026" />
           <div className="grid grid-cols-2 gap-3">
             <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Agency *</p><Dropdown value={inspAgency} onChange={(v) => setInspAgency(v as InspectionAgency)} options={["FDA", "EMA", "MHRA", "WHO", "Internal"].map((a) => ({ value: a, label: a }))} width="w-full" /></div>
             <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Type *</p><Dropdown value={inspType} onChange={(v) => setInspType(v as InspectionType)} options={[{ value: "announced", label: "Announced" }, { value: "unannounced", label: "Unannounced" }, { value: "follow_up", label: "Follow-up" }, { value: "pre_approval", label: "Pre-approval" }]} width="w-full" /></div>
           </div>
-          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Site *</p><Dropdown value={inspSite} onChange={setInspSite} options={allSites.map((s) => ({ value: s.id, label: s.name }))} width="w-full" placeholder="Select site..." /></div>
-          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Expected date <span style={{ color: "var(--danger)" }}>*</span></p><input type="date" className="input w-full" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /><p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>Anchors the readiness countdown.</p></div>
+          {/* Site — hidden for site-bound creators (auto-scoped to their own site on
+              the server); shown only for canCreateAcrossSites roles who must pick. */}
+          {showInspSite && (
+            <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Site *</p><Dropdown value={inspSite} onChange={setInspSite} options={allSites.map((s) => ({ value: s.id, label: s.name }))} width="w-full" placeholder="Select site..." /></div>
+          )}
+          <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Expected date <span style={{ color: "var(--danger)" }}>*</span></p><DatePicker id="insp-date" value={inspDate} onChange={setInspDate} placeholder="Select date" className="w-full" /><p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>Anchors the readiness countdown.</p></div>
           <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Inspection lead *</p><Dropdown value={inspLead} onChange={setInspLead} options={users.filter((u) => u.role === "qa_head" || u.role === "customer_admin").map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))} width="w-full" placeholder="Select lead..." /></div>
           <Textarea id="insp-notes" label="Notes" rows={2} value={inspNotes} onChange={(e) => setInspNotes(e.target.value)} placeholder="Context or background..." />
-          <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
-            <Button variant="secondary" onClick={() => setCreateInspOpen(false)}>Cancel</Button>
-            <Button variant="primary" icon={Plus} disabled={!inspTitle.trim() || !inspSite || !inspLead || !inspDate} onClick={handleCreateInspection}>Create Inspection</Button>
-          </div>
         </div>
       </Modal>
       <Popup isOpen={inspCreatedPopup} variant="success" title="Inspection created" description={`${inspTitle || "Inspection"} created with its readiness plan. Open it to start preparing.`} onDismiss={() => setInspCreatedPopup(false)} />

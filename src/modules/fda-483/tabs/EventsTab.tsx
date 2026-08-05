@@ -6,11 +6,13 @@ import {
   Filter,
   Plus,
   ArrowRight,
+  Search,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { FDA483Event, EventStatus } from "@/types/fda483";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Input } from "@/components/ui/Input";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
 import { DataTable, type Column } from "@/components/shared";
@@ -81,16 +83,38 @@ export function EventsTab({
   onOpenEvent,
   onAddEvent,
 }: EventsTabProps) {
+  // Client-side text search — narrows the already-filtered list by reference,
+  // type, or site name. Presentation only: it never touches the parent's
+  // filter/query state, just this component's rendered/paginated slice.
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const searchedEvents = q
+    ? filteredEvents.filter(
+        (e) =>
+          e.referenceNumber.toLowerCase().includes(q) ||
+          e.type.toLowerCase().includes(q) ||
+          (sites.find((s) => s.id === e.siteId)?.name ?? "")
+            .toLowerCase()
+            .includes(q),
+      )
+    : filteredEvents;
+
+  // Clears both the local search and the parent-owned dropdown filters.
+  const handleClear = () => {
+    setSearch("");
+    onClearFilters();
+  };
+
   // Client-side pagination — same shared Pagination + page size (25) the other
-  // list modules use. Reset to page 1 whenever the filters change.
+  // list modules use. Reset to page 1 whenever the filters or search change.
   const [page, setPage] = useState(1);
   const pageSize = 25;
   useEffect(() => {
     setPage(1);
-  }, [typeFilter, agencyFilter, statusFilter, siteFilter]);
-  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
+  }, [typeFilter, agencyFilter, statusFilter, siteFilter, search]);
+  const totalPages = Math.max(1, Math.ceil(searchedEvents.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pageEvents = filteredEvents.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pageEvents = searchedEvents.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
     <>
@@ -100,6 +124,16 @@ export function EventsTab({
         className="flex items-center gap-3 flex-wrap p-3 rounded-2xl mb-4"
         style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
       >
+        <Input
+          id="events-search"
+          type="search"
+          icon={Search}
+          placeholder="Search events…"
+          aria-label="Search events by reference or type"
+          className="w-full sm:w-56"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
         <Filter className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--text-muted)" }} aria-hidden="true" />
         <span className="text-[12px] font-medium" style={{ color: "var(--text-secondary)" }}>Filters</span>
         <Dropdown
@@ -144,10 +178,10 @@ export function EventsTab({
         />
         <div className="ml-auto flex items-center gap-2">
           <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-            {filteredEvents.length} of {events.length}
+            {searchedEvents.length} of {events.length}
           </span>
-          {anyFilter && (
-            <Button variant="ghost" size="sm" onClick={onClearFilters}>Clear</Button>
+          {(anyFilter || q) && (
+            <Button variant="ghost" size="sm" onClick={handleClear}>Clear</Button>
           )}
         </div>
       </section>
@@ -168,12 +202,12 @@ export function EventsTab({
             </Button>
           )}
         </div>
-      ) : filteredEvents.length === 0 ? (
+      ) : searchedEvents.length === 0 ? (
         <div className="card p-8 text-center">
           <p className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
             No events match the current filters
           </p>
-          <Button variant="ghost" size="sm" className="mt-2" onClick={onClearFilters}>
+          <Button variant="ghost" size="sm" className="mt-2" onClick={handleClear}>
             Clear filters
           </Button>
         </div>
@@ -192,14 +226,18 @@ export function EventsTab({
                 : undefined
             }
             footer={
-              <Pagination
-                page={safePage}
-                pageSize={pageSize}
-                total={filteredEvents.length}
-                onChange={setPage}
-                itemLabel="event"
-                className="mt-4"
-              />
+              // px-4 aligns the "Showing …" line with the table's row cells
+              // (bodyCell px-4); pt-2/pb-3 give it breathing room from the table
+              // and the card edge.
+              <div className="px-4 pt-2 pb-3">
+                <Pagination
+                  page={safePage}
+                  pageSize={pageSize}
+                  total={searchedEvents.length}
+                  onChange={setPage}
+                  itemLabel="event"
+                />
+              </div>
             }
             columns={[
               {

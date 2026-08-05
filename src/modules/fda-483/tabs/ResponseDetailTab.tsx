@@ -39,6 +39,7 @@ import {
   Paperclip,
   AlertCircle,
   Download,
+  Trash2,
 } from "lucide-react";
 import { downloadPDF, downloadLetterPDF, type Cell } from "@/lib/exportTable";
 import dayjs from "@/lib/dayjs";
@@ -52,6 +53,7 @@ import { Button } from "@/components/ui/Button";
 import { AIButton } from "@/components/ai";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { computeReadinessRows, getEffectiveEventStatus, isEventLocked, FDA483_AUDIT_MODULE } from "../_shared";
 import type { DetailTab } from "../useEventDetailUrlState";
@@ -107,6 +109,9 @@ export interface ResponseDetailTabProps {
   onSignSubmit: () => void;
   /** Cross-tab nav from the readiness mini-section (spec #27). */
   onNavigate: (target: { tab: DetailTab; obsIndex?: number }) => void;
+  /** Optional actions rendered at the LEFT of the export toolbar row (e.g. the
+   *  Summarize affordance), so it sits on one line with the PDF buttons. */
+  leadingActions?: React.ReactNode;
 }
 
 /* ── Tiny presentational helpers ─────────────────────────────────── */
@@ -182,6 +187,7 @@ export function ResponseDetailTab({
   onGenerateAGIDraft,
   onSignSubmit,
   onNavigate,
+  leadingActions,
 }: ResponseDetailTabProps) {
   const router = useRouter();
   const toast = useToast();
@@ -189,6 +195,8 @@ export function ResponseDetailTab({
   /* ── Local UI state ── */
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  // Attached-document id pending delete confirmation (null = no prompt open).
+  const [pendingDeleteDocId, setPendingDeleteDocId] = useState<string | null>(null);
   // Track whether the AI generation request has been kicked off this
   // open-cycle so we don't fire the server action twice if React
   // re-renders the tab while the modal is open.
@@ -337,29 +345,46 @@ export function ResponseDetailTab({
     );
   }
 
+  // Runs the actual removal once the user confirms the delete prompt.
+  async function confirmDeleteDoc() {
+    if (!pendingDeleteDocId) return;
+    const result = await removeResponseDocument(pendingDeleteDocId, liveEvent.id);
+    setPendingDeleteDocId(null);
+    if (!result.success) {
+      toast.error(
+        `Could not complete action: ${result.error || "Failed to remove document. Please try again."}`,
+      );
+      return;
+    }
+    router.refresh();
+  }
+
   return (
     <div className="space-y-4">
-      {/* ── Export toolbar ── */}
-      <div className="flex justify-end gap-2 flex-wrap">
-        <Button
-          variant="primary"
-          size="sm"
-          icon={Download}
-          onClick={exportResponseLetter}
-          disabled={!draftText}
-          title={draftText ? "Download the response letter as a PDF to send to the agency" : "Write or generate the response draft first"}
-        >
-          Download response letter (PDF)
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={Download}
-          onClick={exportResponsePackage}
-          disabled={liveEvent.observations.length === 0}
-        >
-          Export observations (PDF)
-        </Button>
+      {/* ── One-row toolbar: Summarize (left) · PDF exports (right) ── */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">{leadingActions}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Download}
+            onClick={exportResponseLetter}
+            disabled={!draftText}
+            title={draftText ? "Download the response letter as a PDF to send to the agency" : "Write or generate the response draft first"}
+          >
+            Download response letter (PDF)
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={Download}
+            onClick={exportResponsePackage}
+            disabled={liveEvent.observations.length === 0}
+          >
+            Export observations (PDF)
+          </Button>
+        </div>
       </div>
 
       {/* ── Submitted success card (only when terminal) ── */}
@@ -725,6 +750,19 @@ export function ResponseDetailTab({
               module={FDA483_AUDIT_MODULE}
               existingDocs={liveEvent.responseDocuments ?? []}
               onUpload={async (doc) => {
+                // Duplicate guard: reject a document already attached to THIS
+                // response. A fresh upload has no stable document id at attach
+                // time (the picker mints a throwaway client id), so match on
+                // fileName + fileSize — the keys the response record persists.
+                const alreadyAttached = (liveEvent.responseDocuments ?? []).some(
+                  (d) => d.fileName === doc.fileName && d.fileSize === doc.fileSize,
+                );
+                if (alreadyAttached) {
+                  toast.error("This document is already attached");
+                  // Throw so DocumentUpload aborts its "Document attached" popup
+                  // and no second copy is persisted.
+                  throw new Error("This document is already attached");
+                }
                 // Server Actions throw — they don't return { success: false }
                 // — for the framework body-size limit ("Body exceeded N MB
                 // limit"), which fires BEFORE addResponseDocument runs. Wrap
@@ -764,19 +802,9 @@ export function ResponseDetailTab({
                 }
                 router.refresh();
               }}
-              onDelete={async (docId) => {
-                const result = await removeResponseDocument(
-                  docId,
-                  liveEvent.id,
-                );
-                if (!result.success) {
-                  toast.error(
-                    `Could not complete action: ${result.error || "Failed to remove document. Please try again."}`,
-                  );
-                  return;
-                }
-                router.refresh();
-              }}
+              // Confirm before removing — the actual delete runs in
+              // confirmDeleteDoc() on confirm; Cancel aborts.
+              onDelete={(docId) => setPendingDeleteDocId(docId)}
               readOnly={isTerminal}
             />
             <p
@@ -1188,6 +1216,26 @@ export function ResponseDetailTab({
           </div>
         </div>
       </Modal>
+
+      {/* Confirm before removing an attached document (destructive). */}
+      <ConfirmModal
+        open={!!pendingDeleteDocId}
+        onClose={() => setPendingDeleteDocId(null)}
+        onConfirm={confirmDeleteDoc}
+        title="Remove attached document?"
+        message={
+          pendingDeleteDocId
+            ? `“${
+                (liveEvent.responseDocuments ?? []).find(
+                  (d) => d.id === pendingDeleteDocId,
+                )?.fileName ?? "This document"
+              }” will be removed from the response package.`
+            : undefined
+        }
+        confirmLabel="Remove"
+        variant="danger"
+        icon={Trash2}
+      />
     </div>
   );
 }

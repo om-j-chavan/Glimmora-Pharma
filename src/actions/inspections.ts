@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
+import { requireAuth, resolveUserFk, requireGxPAuthor, resolveCreateSiteId } from "@/lib/auth";
 import { canWriteReadiness } from "@/lib/permissions/roleSets";
 import { assertTenantOwnsParent } from "@/lib/tenantScope";
 
@@ -13,7 +13,10 @@ type ActionResult<T = unknown> =
 
 const CreateInspectionSchema = z.object({
   title: z.string().min(3),
-  siteName: z.string().min(1),
+  // Site is resolved server-side (Governance option A): a site-bound creator omits
+  // it (auto-scoped to their User.siteId); a canCreateAcrossSites creator supplies
+  // it. Never trusted as a free-text name from the client.
+  siteId: z.string().optional().nullable(),
   agency: z.string().min(1),
   type: z.enum(["announced", "unannounced", "follow_up", "pre_approval"]),
   expectedDate: z.string().optional(),
@@ -70,11 +73,25 @@ export async function createInspection(
   if (!canWriteReadiness(session.user.role)) {
     return { success: false, error: "Only QA Head can create an inspection." };
   }
+
+  // SITE (Governance option A): a site-bound creator (qa_head — the only role that
+  // can create here) is auto-scoped to its own User.siteId; a canCreateAcrossSites
+  // creator uses its pick; a site-less non-admin is rejected. Never null. The
+  // Inspection model stores the site NAME, so resolve the authoritative id → name.
+  const siteRes = await resolveCreateSiteId(session, parsed.data.siteId);
+  if (!siteRes.ok) return { success: false, error: siteRes.error };
+  const site = await prisma.site.findFirst({
+    where: { id: siteRes.siteId, tenantId: session.user.tenantId },
+    select: { name: true },
+  });
+  if (!site) return { success: false, error: "Resolved site is not in your organization." };
+  const siteName = site.name;
+
   try {
     const inspection = await prisma.inspection.create({
       data: {
         title: parsed.data.title,
-        siteName: parsed.data.siteName,
+        siteName,
         agency: parsed.data.agency,
         type: parsed.data.type,
         inspectionLead: parsed.data.inspectionLead ?? null,

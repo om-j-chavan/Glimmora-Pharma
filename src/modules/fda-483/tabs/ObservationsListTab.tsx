@@ -21,7 +21,7 @@
  */
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import {
@@ -109,6 +109,14 @@ const OBS_FILTER_CHIPS: {
   { key: "needsRca", label: "Needs RCA", predicate: (o) => !o.rootCause?.trim() },
   { key: "needsCapa", label: "Needs CAPA", predicate: (o) => !o.capaId },
 ];
+
+// Chips are grouped All | severity | status | action-needed; a thin divider is
+// rendered before the first chip of each group after "All". Presentation only.
+const OBS_FILTER_GROUP_STARTS = new Set<ObsFilterKey>([
+  "critical",
+  "open",
+  "needsRca",
+]);
 
 function truncate(s: string, n: number) {
   if (!s) return "";
@@ -219,17 +227,19 @@ export function ObservationsListTab({
           )}
         </div>
 
-        {/* Filter chips (Item 2) — single-select; counts shown when > 0. */}
+        {/* Filter chips — single-select pill/segmented row, grouped
+            All | severity | status | action-needed; counts shown when > 0.
+            Presentation only; each chip's predicate is unchanged. */}
         {observations.length > 0 && (
           <div
-            className="px-4 py-3 border-b flex items-center gap-2 flex-wrap"
+            className="px-4 py-3 border-b flex items-center gap-1.5 flex-wrap"
             style={{ borderColor: "var(--bg-border)" }}
           >
             <span
               className="text-[11px] font-semibold mr-1"
               style={{ color: "var(--text-muted)" }}
             >
-              Filter:
+              Filter
             </span>
             {OBS_FILTER_CHIPS.map((chip) => {
               const isActive = filter === chip.key;
@@ -238,17 +248,52 @@ export function ObservationsListTab({
                   ? 0
                   : observations.filter(chip.predicate).length;
               return (
-                <Button
-                  key={chip.key}
-                  variant={isActive ? "primary" : "ghost"}
-                  size="xs"
-                  onClick={() =>
-                    setFilter((prev) => (prev === chip.key ? "all" : chip.key))
-                  }
-                >
-                  {chip.label}
-                  {count > 0 ? ` (${count})` : ""}
-                </Button>
+                <Fragment key={chip.key}>
+                  {OBS_FILTER_GROUP_STARTS.has(chip.key) && (
+                    <span
+                      aria-hidden="true"
+                      className="w-px h-4 mx-0.5"
+                      style={{ background: "var(--bg-border)" }}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() =>
+                      setFilter((prev) =>
+                        prev === chip.key ? "all" : chip.key,
+                      )
+                    }
+                    className={
+                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium border transition-colors " +
+                      (isActive
+                        ? "border-transparent text-white"
+                        : "text-(--text-secondary) hover:bg-(--bg-elevated)")
+                    }
+                    style={
+                      isActive
+                        ? { background: "var(--brand)" }
+                        : { borderColor: "var(--bg-border)" }
+                    }
+                  >
+                    {chip.label}
+                    {count > 0 && (
+                      <span
+                        className="rounded-full px-1.5 text-[10px] font-semibold leading-4"
+                        style={
+                          isActive
+                            ? { background: "rgba(255,255,255,0.22)", color: "#fff" }
+                            : {
+                                background: "var(--bg-border)",
+                                color: "var(--text-muted)",
+                              }
+                        }
+                      >
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                </Fragment>
               );
             })}
           </div>
@@ -275,26 +320,6 @@ export function ObservationsListTab({
                 Add the first observation from this FDA 483 to start the
                 investigation workflow.
               </p>
-              {canAct && (
-                <div className="flex items-center justify-center gap-2 flex-wrap">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={Plus}
-                    onClick={onAddObservation}
-                  >
-                    Add observation
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    icon={FileUp}
-                    onClick={onImportFromPdf}
-                  >
-                    Import from 483 PDF
-                  </Button>
-                </div>
-              )}
             </div>
           </div>
         ) : filtered.length === 0 ? (

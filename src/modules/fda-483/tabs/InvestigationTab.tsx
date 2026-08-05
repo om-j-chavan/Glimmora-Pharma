@@ -39,6 +39,7 @@ import {
   Plus,
   Save,
   Pencil,
+  X,
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
@@ -58,7 +59,6 @@ import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { normalizeSeverityForDisplay } from "@/lib/severity";
-import { roleLabel } from "@/lib/labels/roles";
 import dayjs from "@/lib/dayjs";
 import {
   getRcaSuggestions,
@@ -131,12 +131,12 @@ export interface InvestigationTabProps {
   /** Raise CAPA for the focused observation. The parent already has
    *  the pre-fill payload (uses liveEvent + selectedObs + user); this
    *  callback is fire-and-forget on the parent side. `formData` carries
-   *  the modal's edited title / description / risk / dueDate / ownerId so
-   *  the parent persists the user's edits rather than only the prefill. */
+   *  the modal's edited title / description / risk / dueDate so the parent
+   *  persists the user's edits rather than only the prefill. The CAPA owner
+   *  is NOT sent — createCAPA assigns it to the authenticated QA creator. */
   onRaiseCAPA: (
     obs: Observation,
     formData: {
-      ownerId: string;
       title: string;
       description: string;
       risk: string;
@@ -405,15 +405,12 @@ interface RaiseCAPAModalProps {
   onClose: () => void;
   observation: Observation;
   event: FDA483Event;
-  /** Active compliance users — populates the Owner picker. */
-  users: { id: string; name: string; role: string }[];
   /** Tenant sites — resolves event.siteId to a readable site name. */
   sites?: { id: string; name: string }[];
   /** Submit handler — receives the full edited form payload so the parent
-   *  persists the user's edits (not just the prefill). `ownerId` is the
-   *  picked owner's user id. */
+   *  persists the user's edits (not just the prefill). No owner: the CAPA
+   *  owner is assigned server-side (createCAPA → the QA creator). */
   onSubmit: (formData: {
-    ownerId: string;
     title: string;
     description: string;
     risk: string;
@@ -426,7 +423,6 @@ function RaiseCAPAModal({
   onClose,
   observation,
   event,
-  users,
   sites,
   onSubmit,
 }: RaiseCAPAModalProps) {
@@ -443,7 +439,6 @@ function RaiseCAPAModal({
   const [title, setTitle] = useState(defaultTitle);
   const [description, setDescription] = useState(defaultDescription);
   const [risk, setRisk] = useState<string>(defaultRisk);
-  const [owner, setOwner] = useState<string>("");
   const [dueDate, setDueDate] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   // AI CAPA pre-fill (mocked) — now a manual nested-modal flow, not auto-fill.
@@ -462,7 +457,6 @@ function RaiseCAPAModal({
     setTitle(defaultTitle);
     setDescription(defaultDescription);
     setRisk(defaultRisk);
-    setOwner("");
     setDueDate("");
     setSubmitting(false);
     setAiModalOpen(false);
@@ -499,14 +493,17 @@ function RaiseCAPAModal({
     toast.success("AI pre-fill applied. Edit and submit the CAPA.");
   }
 
-  const canSubmit = !!owner && !!dueDate && !submitting;
+  // Only the due date gates submit now — the owner picker was removed (the CAPA
+  // owner is assigned server-side to the QA creator). Previously this also
+  // required `owner`, so a picked due date could never be submitted until an
+  // owner was chosen; that was the real "date won't submit" blocker.
+  const canSubmit = !!dueDate && !submitting;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
     setSubmitting(true);
     onSubmit({
-      ownerId: owner,
       title: title.trim(),
       description: description.trim(),
       risk,
@@ -522,24 +519,38 @@ function RaiseCAPAModal({
       open={open}
       onClose={onClose}
       title={`Raise CAPA for Observation #${observation.number}`}
+      header={
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
+          <span className="text-[14px] font-semibold text-(--text-primary)">
+            Raise CAPA for Observation #{observation.number}
+          </span>
+          <div className="flex items-center gap-2">
+            {/* AI Pre-fill — manual trigger; opens the nested AI modal. Gated on
+                an existing RCA since the pre-fill is derived from it. */}
+            <AIButton
+              disabled={!observation.rootCause}
+              title={
+                observation.rootCause
+                  ? "Generate a CAPA pre-fill from the RCA"
+                  : "Complete the RCA first"
+              }
+              onClick={handleOpenAiPrefill}
+            >
+              AI Pre-fill
+            </AIButton>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors duration-150"
+            >
+              <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      }
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
-        {/* AI Pre-fill — manual trigger; opens the nested AI modal. Gated on
-         *  an existing RCA since the pre-fill is derived from it. */}
-        <div className="flex justify-end">
-          <AIButton
-            disabled={!observation.rootCause}
-            title={
-              observation.rootCause
-                ? "Generate a CAPA pre-fill from the RCA"
-                : "Complete the RCA first"
-            }
-            onClick={handleOpenAiPrefill}
-          >
-            AI Pre-fill
-          </AIButton>
-        </div>
-
         {/* Title */}
         <div>
           <label
@@ -578,8 +589,10 @@ function RaiseCAPAModal({
           />
         </div>
 
-        {/* Risk + Owner + Due Date */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Risk + Due Date (Owner removed — assigned server-side to the QA
+            creator). size="sm" on the Dropdown matches the DatePicker's py-2.5
+            field height so both fields align in the row. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label
               className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
@@ -591,27 +604,13 @@ function RaiseCAPAModal({
               value={risk}
               onChange={setRisk}
               width="w-full"
+              size="sm"
               options={[
                 { value: "Critical", label: "Critical" },
                 { value: "High", label: "High" },
                 { value: "Medium", label: "Medium" },
                 { value: "Low", label: "Low" },
               ]}
-            />
-          </div>
-          <div>
-            <label
-              className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Owner *
-            </label>
-            <Dropdown
-              value={owner}
-              onChange={setOwner}
-              width="w-full"
-              placeholder="Select owner"
-              options={users.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
             />
           </div>
           <div>
@@ -627,6 +626,7 @@ function RaiseCAPAModal({
               value={dueDate}
               onChange={setDueDate}
               required
+              min={dayjs().format("YYYY-MM-DD")}
               placeholder="Select due date"
             />
           </div>
@@ -1738,7 +1738,7 @@ export function InvestigationTab({
             <Badge variant={rcaStatusBadge.variant}>{rcaStatusBadge.label}</Badge>
           </div>
           <div className="ml-auto flex items-center gap-3">
-            {obsSavedAt && !showRcaSummary && (
+            {obsSavedAt && !showRcaSummary && !isEditingRca && (
               <span
                 className="text-[11px]"
                 style={{ color: "var(--text-muted)" }}
@@ -1746,7 +1746,7 @@ export function InvestigationTab({
                 Saved at {obsSavedAt}
               </span>
             )}
-            {!showRcaSummary && (
+            {!showRcaSummary && !isEditingRca && (
               <AIButton
                 disabled={!writable || !selectedObs.rcaMethod}
                 title={
@@ -1809,7 +1809,12 @@ export function InvestigationTab({
               )}
             </div>
           ) : (
-            <>
+            /* The RCA editor renders inline while first authoring; once the RCA
+               is complete, "Edit RCA" re-opens this SAME editor inside a Modal
+               (presentation only — the per-method Save actions are unchanged). */
+            (() => {
+              const editor = (
+                <>
               {/* Edit-warning banner when a CAPA is already linked */}
               {isEditingRca && selectedObs.capaId && (
                 <div
@@ -1862,7 +1867,7 @@ export function InvestigationTab({
 
               {/* Item #4 — set the expectation that manual fill is the default;
                *  AI suggestions are supplementary. */}
-              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              <p className="text-[11px] my-3" style={{ color: "var(--text-muted)" }}>
                 Pick a method, then fill in the analysis directly — or use the
                 ✨ AI Suggestion button above as a starting point.
               </p>
@@ -1942,19 +1947,23 @@ export function InvestigationTab({
                         "Complete all 5 Whys to identify root cause"}
                     </p>
                   </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={Save}
-                    disabled={!writable || !can5WhySave}
-                    onClick={() => {
-                      onSave5Why();
-                      setEditingRcaFor(null);
-                      recordSaveStamp();
-                    }}
-                  >
-                    Complete RCA
-                  </Button>
+                  {/* Inline authoring keeps Complete RCA here; the Edit-RCA
+                      modal renders it in the footer instead. */}
+                  {!isEditingRca && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={Save}
+                      disabled={!writable || !can5WhySave}
+                      onClick={() => {
+                        onSave5Why();
+                        setEditingRcaFor(null);
+                        recordSaveStamp();
+                      }}
+                    >
+                      Complete RCA
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -2029,19 +2038,21 @@ export function InvestigationTab({
                       placeholder="Summarize the primary root cause identified…"
                     />
                   </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={Save}
-                    disabled={!writable || !canFishboneSave}
-                    onClick={() => {
-                      onSaveFishbone();
-                      setEditingRcaFor(null);
-                      recordSaveStamp();
-                    }}
-                  >
-                    Complete RCA
-                  </Button>
+                  {!isEditingRca && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={Save}
+                      disabled={!writable || !canFishboneSave}
+                      onClick={() => {
+                        onSaveFishbone();
+                        setEditingRcaFor(null);
+                        recordSaveStamp();
+                      }}
+                    >
+                      Complete RCA
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -2079,19 +2090,21 @@ export function InvestigationTab({
                     }}
                     placeholder={`Document your ${selectedObs.rcaMethod.toLowerCase()} analysis here…`}
                   />
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    icon={Save}
-                    disabled={!writable || !canFreeformSave}
-                    onClick={() => {
-                      onSaveFreeform();
-                      setEditingRcaFor(null);
-                      recordSaveStamp();
-                    }}
-                  >
-                    Complete RCA
-                  </Button>
+                  {!isEditingRca && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={Save}
+                      disabled={!writable || !canFreeformSave}
+                      onClick={() => {
+                        onSaveFreeform();
+                        setEditingRcaFor(null);
+                        recordSaveStamp();
+                      }}
+                    >
+                      Complete RCA
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -2103,7 +2116,88 @@ export function InvestigationTab({
                   Pick an analysis method above to begin.
                 </p>
               )}
-            </>
+                </>
+              );
+              // Map the active method to its save handler + gate so the single
+              // footer "Complete RCA" button drives the SAME save the inline
+              // per-method buttons did.
+              const activeRcaSave =
+                selectedObs.rcaMethod === "5 Why"
+                  ? { run: onSave5Why, canSave: can5WhySave }
+                  : selectedObs.rcaMethod === "Fishbone"
+                    ? { run: onSaveFishbone, canSave: canFishboneSave }
+                    : selectedObs.rcaMethod === "Fault Tree" ||
+                        selectedObs.rcaMethod === "Barrier Analysis"
+                      ? { run: onSaveFreeform, canSave: canFreeformSave }
+                      : null;
+              // Re-editing a completed RCA opens the editor in a Modal; initial
+              // authoring keeps it inline. Same fields, same Save actions. In the
+              // modal, AI Suggestion sits in the header (before X); Complete RCA
+              // (primary) + Cancel live in the footer.
+              return isEditingRca ? (
+                <Modal
+                  open
+                  onClose={() => setEditingRcaFor(null)}
+                  title="Edit Root Cause Analysis"
+                  header={
+                    <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-(--bg-border)">
+                      <span className="text-[14px] font-semibold text-(--text-primary)">
+                        Edit Root Cause Analysis
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <AIButton
+                          disabled={!writable || !selectedObs.rcaMethod}
+                          title={
+                            selectedObs.rcaMethod
+                              ? "Get an AI suggestion for this method"
+                              : "Pick a method first"
+                          }
+                          onClick={() => setAiRcaModalOpen(selectedObs.id)}
+                        >
+                          AI Suggestion
+                        </AIButton>
+                        <button
+                          type="button"
+                          onClick={() => setEditingRcaFor(null)}
+                          aria-label="Close"
+                          className="w-7 h-7 rounded-md flex items-center justify-center bg-transparent hover:bg-(--bg-hover) border-none cursor-pointer transition-colors duration-150"
+                        >
+                          <X className="w-3.5 h-3.5 text-(--text-muted)" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  }
+                  footer={
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon={Save}
+                        type="button"
+                        disabled={!writable || !activeRcaSave || !activeRcaSave.canSave}
+                        onClick={() => {
+                          activeRcaSave?.run();
+                          setEditingRcaFor(null);
+                          recordSaveStamp();
+                        }}
+                      >
+                        Complete RCA
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => setEditingRcaFor(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  }
+                >
+                  {editor}
+                </Modal>
+              ) : (
+                editor
+              );
+            })()
           )}
         </div>
       </div>
@@ -2185,7 +2279,7 @@ export function InvestigationTab({
                   </li>
                   <li>
                     <span style={{ color: "var(--text-primary)" }}>Site:</span>{" "}
-                    {liveEvent.siteId}
+                    {siteContext}
                   </li>
                 </ul>
               </div>
@@ -2337,7 +2431,6 @@ export function InvestigationTab({
         onClose={() => setRaiseCapaOpen(false)}
         observation={selectedObs}
         event={liveEvent}
-        users={users}
         sites={sites}
         onSubmit={(formData) => onRaiseCAPA(selectedObs, formData)}
       />

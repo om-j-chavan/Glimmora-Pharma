@@ -8,6 +8,8 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { CategorizedDocUploader, type DocUploadEntry } from "@/components/shared/CategorizedDocUploader";
 import { roleLabel } from "@/lib/labels/roles";
+import { useRole } from "@/hooks/useRole";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 import dayjs from "@/lib/dayjs";
 import {
   RISK_CATEGORIES,
@@ -88,6 +90,12 @@ export function RiskModal({
   open, onClose, risk, owners, sites, docs = [], onSubmit, onUploadDocs, onRemoveDoc,
 }: RiskModalProps) {
   const isEdit = !!risk;
+  const { role } = useRole();
+  // In CREATE mode, owner + site are auto-assigned server-side for site-bound
+  // creators (fields hidden here); only canCreateAcrossSites creators (who have no
+  // single seat/site) pick them. Edit mode always shows both. Same signal the
+  // server (createRisk) gates on, so UI and server never disagree.
+  const showOwnerSite = isEdit || canCreateAcrossSites(role);
   const [serverError, setServerError] = useState("");
   const [stagedDocs, setStagedDocs] = useState<DocUploadEntry[]>([]);
 
@@ -257,40 +265,72 @@ export function RiskModal({
           ) : (
             <div>
               <label className={LABEL} style={{ color: "var(--text-muted)" }}>Status</label>
-              <p className="text-[12px] pt-2" style={{ color: "var(--text-secondary)" }}>
-                Open <span className="text-[10px] italic">(new risks always start Open)</span>
-              </p>
+              {/* Create path: Open/Closed toggle (a new risk is Open, or Closed if
+                  already resolved). Mitigating/Converted are later lifecycle states. */}
+              <Controller
+                name="status" control={control}
+                render={({ field }) => (
+                  <div className="inline-flex rounded-lg border overflow-hidden" role="group" aria-label="Status" style={{ borderColor: "var(--bg-border)" }}>
+                    {(["Open", "Closed"] as const).map((s) => {
+                      const active = (field.value || "Open") === s;
+                      return (
+                        <button
+                          key={s} type="button"
+                          onClick={() => field.onChange(s)}
+                          aria-pressed={active}
+                          className="text-[12px] font-medium px-4 py-1.5 border-none cursor-pointer transition-colors"
+                          style={active
+                            ? { background: "var(--brand)", color: "#fff" }
+                            : { background: "transparent", color: "var(--text-secondary)" }}
+                        >
+                          {s}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              />
             </div>
           )}
 
-          {/* Owner */}
-          <div>
-            <label className={LABEL} style={{ color: "var(--text-muted)" }}>Owner *</label>
-            <Controller
-              name="ownerId" control={control} rules={{ required: "Owner is required" }}
-              render={({ field }) => (
-                <Dropdown
-                  value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full"
-                  options={owners.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
-                />
-              )}
-            />
-            {formState.errors.ownerId && <p role="alert" className={ERR}>{formState.errors.ownerId.message}</p>}
-          </div>
+          {/* Owner — hidden on CREATE for site-bound creators (auto-set to the
+              creator server-side); shown in edit mode and for cross-site creators. */}
+          {showOwnerSite && (
+            <div>
+              <label className={LABEL} style={{ color: "var(--text-muted)" }}>Owner *</label>
+              <Controller
+                name="ownerId" control={control} rules={{ required: "Owner is required" }}
+                render={({ field }) => (
+                  <Dropdown
+                    value={field.value} onChange={field.onChange} placeholder="Select owner" width="w-full"
+                    options={owners.map((u) => ({ value: u.id, label: `${u.name} (${roleLabel(u.role)})` }))}
+                  />
+                )}
+              />
+              {formState.errors.ownerId && <p role="alert" className={ERR}>{formState.errors.ownerId.message}</p>}
+            </div>
+          )}
 
-          {/* Site — drives the <SITE> segment of the reference. */}
-          <div>
-            <label className={LABEL} style={{ color: "var(--text-muted)" }}>Site</label>
-            <Controller
-              name="siteId" control={control}
-              render={({ field }) => (
-                <Dropdown
-                  value={field.value} onChange={field.onChange} placeholder="Tenant-level (no site)" width="w-full"
-                  options={[{ value: "", label: "— Tenant-level (no site)" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
-                />
-              )}
-            />
-          </div>
+          {/* Site — drives the <SITE> segment of the reference. Hidden on CREATE for
+              site-bound creators (auto-set to their own site server-side); shown in
+              edit mode and for cross-site creators (who must pick a real site). */}
+          {showOwnerSite && (
+            <div>
+              <label className={LABEL} style={{ color: "var(--text-muted)" }}>Site{isEdit ? "" : " *"}</label>
+              <Controller
+                name="siteId" control={control}
+                render={({ field }) => (
+                  <Dropdown
+                    value={field.value} onChange={field.onChange}
+                    placeholder={isEdit ? "Tenant-level (no site)" : "Select site"} width="w-full"
+                    options={isEdit
+                      ? [{ value: "", label: "— Tenant-level (no site)" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]
+                      : sites.map((s) => ({ value: s.id, label: s.name }))}
+                  />
+                )}
+              />
+            </div>
+          )}
 
           {/* Target date */}
           <div>

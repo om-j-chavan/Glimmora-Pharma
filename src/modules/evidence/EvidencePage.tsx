@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { formatDocumentSource } from "@/lib/labels/documentSource";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
 import { DataTable, type DataColumn } from "@/components/table/DataTable";
@@ -41,7 +42,7 @@ function exportSelected(docs: EvidenceLibraryDoc[], format: "pdf" | "excel") {
   const rows = docs.map((d) => [
     d.title,
     d.category ?? "",
-    d.originLabel,
+    formatDocumentSource(d.originLabel),
     d.uploaderName,
     d.uploadedAt ? dayjs(d.uploadedAt).format("YYYY-MM-DD") : "",
     prettyStatus(d.status),
@@ -105,7 +106,7 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
 
   const originOptions = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const d of documents) if (!seen.has(d.origin)) seen.set(d.origin, d.originLabel);
+    for (const d of documents) if (!seen.has(d.origin)) seen.set(d.origin, formatDocumentSource(d.originLabel));
     return [...seen].map(([value, label]) => ({ value, label }));
   }, [documents]);
   const statusOptions = useMemo(() => {
@@ -199,14 +200,12 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
     </div>
   );
 
-  // Bulk-action toolbar — shown only when something is selected, right-aligned
-  // alongside the view toggle so it's consistent across Grid and Table and the
-  // layout doesn't shift when it appears/disappears.
+  // Bulk-action toolbar — shown only when something is selected. Export + Download
+  // moved to the right of the search/filter row (still selection-gated); the count +
+  // Clear Selection stay here.
   const bulkToolbar = selectedIds.length > 0 ? (
     <div className="flex items-center gap-2 flex-wrap">
       <span className="text-[12px] font-medium text-(--text-primary)">{selectedIds.length} Selected</span>
-      <Button variant="secondary" size="sm" icon={Download} onClick={() => setConfirmDownload(true)}>Download Selected</Button>
-      <Button variant="secondary" size="sm" icon={FileText} onClick={() => exportSelected(selectedDocs, "pdf")}>Export</Button>
       <Button variant="ghost" size="sm" icon={X} onClick={clearSel}>Clear Selection</Button>
     </div>
   ) : null;
@@ -261,7 +260,7 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
       ),
     },
     { key: "category", label: "Type", sortable: true, width: "w-[12%]", exportValue: (d) => d.category ?? "—", render: (d) => <span className="text-[12px] text-(--text-secondary)">{d.category ?? "—"}</span> },
-    { key: "origin", label: "Source", sortable: true, width: "w-[14%]", sortValue: (d) => d.originLabel, exportValue: (d) => d.originLabel, render: (d) => <Badge variant={ORIGIN_BADGE[d.origin]}>{d.originLabel}</Badge> },
+    { key: "origin", label: "Source", sortable: true, width: "w-[14%]", sortValue: (d) => formatDocumentSource(d.originLabel), exportValue: (d) => formatDocumentSource(d.originLabel), render: (d) => <Badge variant={ORIGIN_BADGE[d.origin]}>{formatDocumentSource(d.originLabel)}</Badge> },
     { key: "uploaderName", label: "Uploader", sortable: true, width: "w-[14%]", exportValue: (d) => d.uploaderName, render: (d) => <span className="text-[12px] text-(--text-secondary)">{d.uploaderName}</span> },
     { key: "status", label: "Status", sortable: true, width: "w-[11%]", exportValue: (d) => prettyStatus(d.status), render: (d) => statusBadge(d.status) },
     { key: "uploadedAt", label: "Uploaded", sortable: true, width: "w-[12%]", exportValue: (d) => (d.uploadedAt ? dayjs(d.uploadedAt).format("YYYY-MM-DD") : ""), render: (d) => <span className="text-[12px] text-(--text-secondary)">{d.uploadedAt ? dayjs(d.uploadedAt).format("DD MMM YYYY") : "—"}</span> },
@@ -286,6 +285,14 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
         <Dropdown value={fOrigin} onChange={setFOrigin} width="w-44" placeholder="All sources" options={[{ value: "", label: "All sources" }, ...originOptions]} />
         <Dropdown value={fStatus} onChange={setFStatus} width="w-40" placeholder="All statuses" options={[{ value: "", label: "All statuses" }, ...statusOptions]} />
         {hasFilter && <Button variant="ghost" size="sm" icon={X} onClick={clearFilters}>Clear</Button>}
+        {/* Bulk Export + Download — right-aligned on this row, shown only when
+            documents are selected (same gating + handlers as before; only moved). */}
+        {selectedIds.length > 0 && (
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <Button variant="secondary" size="sm" icon={FileText} onClick={() => exportSelected(selectedDocs, "pdf")}>Export</Button>
+            <Button variant="secondary" size="sm" icon={Download} onClick={() => setConfirmDownload(true)}>Download Selected</Button>
+          </div>
+        )}
       </div>
 
       {/* ── GRID view ── */}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, MapPin, Users, BookOpen, Bot, Shield, CreditCard, Info, Settings, Bell } from "lucide-react";
+import { Building2, MapPin, Users, BookOpen, Bot, Shield, CreditCard, Settings } from "lucide-react";
 import { OrgTab } from "./tabs/OrgTab";
 import { SitesTab } from "./tabs/SitesTab";
 import { UsersTab } from "./tabs/UsersTab";
@@ -9,8 +9,6 @@ import { FrameworksTab } from "./tabs/FrameworksTab";
 import { AGIPolicyTab } from "./tabs/AGIPolicyTab";
 import { PermissionsTab } from "./tabs/PermissionsTab";
 import { SubscriptionTab } from "./tabs/SubscriptionTab";
-import { NotificationsPage } from "@/modules/notifications/NotificationsPage";
-import type { NotificationRow, NotificationFilterOptions, NotificationStats } from "@/lib/queries/notifications";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PageLayout } from "@/components/layout/PageLayout";
 
@@ -23,20 +21,10 @@ const ALL_TABS = [
   { id: "subscription", label: "Subscription", icon: CreditCard },
   { id: "frameworks", label: "Frameworks", icon: BookOpen },
   { id: "agi", label: "AGI Policy", icon: Bot },
-  // Notifications moved here from a standalone sidebar entry (navigation only) —
-  // per-user, so visible to every role; the server route seeds its data.
-  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "permissions", label: "Permissions", icon: Shield },
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
-
-interface NotificationsTabData {
-  initialData: { rows: NotificationRow[]; total: number };
-  options: NotificationFilterOptions;
-  initialUnread: number;
-  stats: NotificationStats;
-}
 
 // sites/users are accepted for the server route's call (consumed in a later
 // phase — the page still reads them from Redux today) and intentionally ignored.
@@ -44,10 +32,9 @@ interface SettingsPageProps {
   sites?: unknown;
   users?: unknown;
   initialTab?: string;
-  notifications?: NotificationsTabData;
 }
 
-export function SettingsPage({ initialTab, notifications }: SettingsPageProps = {}) {
+export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
   const initialActive: TabId =
     initialTab && ALL_TABS.some((t) => t.id === initialTab) ? (initialTab as TabId) : "org";
   const [active, setActive] = useState<TabId>(initialActive);
@@ -83,16 +70,6 @@ export function SettingsPage({ initialTab, notifications }: SettingsPageProps = 
       contentPadding={true}
       fillHeight
     >
-      {/* Read-only banner for non-admin roles */}
-      {readOnly && (
-        <div className="flex items-start gap-2 px-5 py-3 border-b" style={{ background: "var(--brand-muted)", borderColor: "var(--brand-border)" }}>
-          <Info className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />
-          <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-            Settings can only be modified by <strong style={{ color: "var(--brand)" }}>Customer Admin</strong>.
-          </p>
-        </div>
-      )}
-
       {/* Tab bar */}
       <div
         role="tablist"
@@ -146,11 +123,6 @@ export function SettingsPage({ initialTab, notifications }: SettingsPageProps = 
             {tab.id === "subscription" && canManageSettings && <SubscriptionTab />}
             {tab.id === "frameworks" && <FrameworksTab readOnly={readOnly} />}
             {tab.id === "agi" && <AGIPolicyTab readOnly={readOnly && role !== "it_cdo"} />}
-            {/* Notifications — the existing module component, rendered from the
-                server-seeded props. Per-user (not gated by settings-admin rights),
-                so no readOnly. Lazy-rendered only when active so its table doesn't
-                mount behind the other tabs. */}
-            {tab.id === "notifications" && active === "notifications" && notifications && <NotificationsPage {...notifications} />}
             {tab.id === "permissions" && <PermissionsTab />}
           </section>
         ))}

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker, DateRangePicker } from "@/components/ui/DatePicker";
+import { useRole } from "@/hooks/useRole";
+import { canCreateAcrossSites } from "@/lib/permissions/roleSets";
 import {
   deriveAgency,
   computeResponseDeadline,
@@ -30,7 +32,10 @@ const eventSchema = z.object({
   ]),
   // Optional — auto-generated server-side when left blank.
   referenceNumber: z.string().optional(),
-  siteId: z.string().min(1, "Site required"),
+  // Optional — a site-bound creator has this field hidden (the server
+  // auto-assigns their site); only canCreateAcrossSites roles pick one, and the
+  // server enforces it via resolveCreateSiteId.
+  siteId: z.string().optional(),
   inspectionDate: z.string().min(1, "Inspection start date required"),
   inspectionEndDate: z.string().optional(),
   responseDeadline: z.string().min(1, "Deadline required"),
@@ -71,7 +76,6 @@ export interface AddEventModalProps {
   /** Internal owner assigned to the event. Not rendered — the field was removed
    *  from the form, so this is the sole source of the value. */
   defaultOwnerId?: string;
-  lockedSiteId?: string | null;
 }
 
 /* ── Local date-input helpers — keep all working-day math in LOCAL time so
@@ -94,14 +98,17 @@ export function AddEventModal({
   onSave,
   sites,
   defaultOwnerId,
-  lockedSiteId,
 }: AddEventModalProps) {
+  // Gate the Site field on the same signal the server uses: site-bound creators
+  // never see it (their site is auto-assigned); only cross-site roles pick one.
+  const { role } = useRole();
+  const showSite = canCreateAcrossSites(role);
   const form = useForm<EventFormData>({
     resolver: zodResolver(eventSchema),
     defaultValues: {
       type: "FDA 483",
       referenceNumber: "",
-      siteId: lockedSiteId ?? "",
+      siteId: "",
       inspectionDate: "",
       inspectionEndDate: "",
       responseDeadline: "",
@@ -164,7 +171,26 @@ export function AddEventModal({
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title="Register Regulatory Event">
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title="Register Regulatory Event"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" type="button" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            type="button"
+            loading={form.formState.isSubmitting}
+            onClick={form.handleSubmit(handleSubmit)}
+          >
+            Register Event
+          </Button>
+        </div>
+      }
+    >
       <form
         onSubmit={form.handleSubmit(handleSubmit)}
         noValidate
@@ -255,8 +281,9 @@ export function AddEventModal({
             )}
           </div>
 
-          {/* Site — hidden for non-admin (auto-assigned), visible for admin */}
-          {!lockedSiteId && (
+          {/* Site — hidden for site-bound creators (auto-assigned server-side),
+              shown only for canCreateAcrossSites roles who must pick one. */}
+          {showSite && (
             <div className="col-span-2">
               <label
                 className="text-[11px] font-semibold uppercase tracking-wider block mb-1"
@@ -379,19 +406,6 @@ export function AddEventModal({
               The investigator named on the inspection form
             </p>
           </div>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" type="button" onClick={handleClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            type="submit"
-            loading={form.formState.isSubmitting}
-          >
-            Register Event
-          </Button>
         </div>
       </form>
     </Modal>

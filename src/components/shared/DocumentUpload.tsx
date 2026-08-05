@@ -220,7 +220,10 @@ export function DocumentUpload({
       newValue: selectedFile.name,
     });
 
-    setSuccessMsg(`${selectedFile.name} → ${recordId}`);
+    // Show the human file NAME in the "Document attached" popup — never the raw
+    // recordId (a CUID), which is meaningless to the user. Display only; the
+    // audit entry above still records the full name → recordId linkage.
+    setSuccessMsg(selectedFile.name);
     setModalOpen(false);
     setSelectedFile(null);
     setSuccessPopup(true);

@@ -257,7 +257,7 @@ export function GovernancePage({
 
     const res = editingRisk
       ? await updateRiskAction(editingRisk.id, { ...payload, status: values.status as never })
-      : await createRiskAction(payload);
+      : await createRiskAction({ ...payload, status: values.status as never });
 
     if (!res.success) return { success: false, error: res.error };
 

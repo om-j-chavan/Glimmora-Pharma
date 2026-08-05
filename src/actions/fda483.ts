@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
+import { requireAuth, resolveUserFk, requireGxPAuthor, resolveCreateSiteId } from "@/lib/auth";
 import { FDA483_SIGN_ROLES, FDA483_DELETE_ROLES, INSPECTION_CREATE_ROLES, canWriteFDA483 } from "@/lib/permissions/roleSets";
 import {
   canonicalizeFDA483ResponseContent,
@@ -56,7 +56,10 @@ const CreateEventSchema = z.object({
   // Optional — the server auto-generates a unique code when blank (see below).
   referenceNumber: z.string().optional(),
   eventType: z.string().min(1),
-  siteId: z.string().min(1),
+  // Optional — the site is resolved server-side via resolveCreateSiteId: a
+  // site-bound creator is auto-scoped to their own site (the modal hides the
+  // field); only canCreateAcrossSites roles send an explicit pick.
+  siteId: z.string().optional().nullable(),
   inspectionDate: z.string().min(1),
   inspectionEndDate: z.string().optional(),
   responseDeadline: z.string().min(1),
@@ -119,6 +122,12 @@ export async function createFDA483Event(
       return { success: false, error: "Only QA Head or Regulatory Affairs can create an inspection event." };
     }
     const d = parsed.data;
+    // Site is server-authoritative: a site-bound creator is auto-scoped to their
+    // own site (the modal hides the field); a cross-site admin must have picked
+    // one. Never null — resolveCreateSiteId rejects a site-less non-admin.
+    const siteRes = await resolveCreateSiteId(session, d.siteId);
+    if (!siteRes.ok) return { success: false, error: siteRes.error };
+    const resolvedSiteId = siteRes.siteId;
     // Resolve the internal owner's name for the audit trail (best-effort).
     const owner = await prisma.user.findUnique({
       where: { id: d.internalOwnerId },
@@ -132,7 +141,7 @@ export async function createFDA483Event(
     let referenceNumber = (d.referenceNumber ?? "").trim();
     if (!referenceNumber) {
       const site = await prisma.site.findUnique({
-        where: { id: d.siteId },
+        where: { id: resolvedSiteId },
         select: { code: true },
       });
       const prefix = buildReferencePrefix(
@@ -158,7 +167,7 @@ export async function createFDA483Event(
         referenceNumber,
         eventType: d.eventType,
         agency: deriveAgencyServer(d.eventType),
-        siteId: d.siteId,
+        siteId: resolvedSiteId,
         inspectionDate: new Date(d.inspectionDate),
         inspectionEndDate: d.inspectionEndDate ? new Date(d.inspectionEndDate) : null,
         responseDeadline: new Date(d.responseDeadline),
@@ -1994,7 +2003,10 @@ const RaiseCAPASchema = z.object({
   observationSeverity: z.enum(GENERIC_SEVERITY),
   referenceNumber: z.string().optional(),
   siteId: z.string().optional(),
-  owner: z.string().min(1),
+  // Optional/ignored — the owner picker was removed from the modal. createCAPA
+  // assigns the CAPA owner server-side to the authenticated QA creator
+  // (actor.userId, never null: CAPA_CREATE_ROLES is qa_head-only, a seat user).
+  owner: z.string().optional(),
   dueDate: z.string().min(1),
   rootCause: z.string().optional(),
   rcaMethod: z.string().optional(),
@@ -2043,7 +2055,8 @@ export async function raiseCAPAFromObservation(
       title: description.slice(0, 120),
       description,
       risk,
-      owner: d.owner,
+      // Owner intentionally not passed — createCAPA assigns it to the QA creator
+      // (actor.userId) server-side and ignores any client-supplied owner.
       siteId: d.siteId ?? undefined,
       dueDate: d.dueDate,
       rca: d.rootCause ?? undefined,

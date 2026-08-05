@@ -449,13 +449,13 @@ export async function createCAPA(
         // Item 19 adds assignedAt / targetDate / severity — the three facts the
         // assignment carry is decided on, read here with the rest so the tx has
         // them without a second query.
-        select: { id: true, reference: true, requirement: true, framework: true, owner: true, createdById: true, rootCause: true, completionNotes: true, assignedAt: true, targetDate: true, severity: true },
+        select: { id: true, reference: true, requirement: true, framework: true, owner: true, createdById: true, rootCause: true, rcaMethod: true, completionNotes: true, assignedAt: true, targetDate: true, severity: true },
       })
     : null;
   const sourceDev = rawDeviationId
     ? await prisma.deviation.findFirst({
         where: { id: rawDeviationId, tenantId: session.user.tenantId },
-        select: { id: true, reference: true, title: true, description: true, severity: true, area: true, rootCause: true, immediateAction: true },
+        select: { id: true, reference: true, title: true, description: true, severity: true, area: true, rootCause: true, rcaMethod: true, immediateAction: true },
       })
     : null;
   // The description that will be STORED: enriched on a linked raise; the client's
@@ -592,6 +592,17 @@ export async function createCAPA(
               return row?.reference ?? null;
             },
           );
+          // A CAPA raised from a source that ALREADY carries an RCA (the deviation/
+          // finding rootCause carried into `rca` below) is past the "author enters
+          // RCA" phase, so it starts in_progress — mirroring the direct-CAPA rule
+          // (rca present ⇒ in_progress, applied via the Edit-modal auto-advance). A
+          // source with NO carried RCA — and every DIRECT create — stays "open".
+          const carriedRca = sourceDev
+            ? (sourceDev.rootCause ?? rest.rca)
+            : sourceFinding
+              ? (sourceFinding.rootCause ?? rest.rca)
+              : null;
+          const capaStatus: "open" | "in_progress" = carriedRca?.trim() ? "in_progress" : "open";
           const created = await tx.cAPA.create({
             data: {
               ...rest,
@@ -603,19 +614,19 @@ export async function createCAPA(
               owner: ownerName,
               // Authoritative assignee FK (null when unresolvable).
               ownerId,
-              // Deviation→CAPA carryover (req 2): carry the deviation's root-cause
-              // TEXT into rca + a contextual description. Structured RCA method/
-              // detail are NOT copied (deviation rcaData JSON ≠ CAPA rcaDetail).
-              // description was resolved + validated up front (flows in via ...rest);
-              // here we only carry the source's root-cause text into rca.
+              // Deviation→CAPA carryover (req 2): carry the source's root-cause TEXT
+              // into rca + the RCA METHOD LABEL (so the method badge shows on the now-
+              // reviewable RCA) + a contextual description. The STRUCTURED detail
+              // (deviation rcaData JSON) is still NOT copied — it ≠ CAPA rcaDetail.
+              // description was resolved + validated up front (flows in via ...rest).
               ...(sourceDev
-                ? { rca: sourceDev.rootCause ?? rest.rca ?? null }
+                ? { rca: sourceDev.rootCause ?? rest.rca ?? null, ...(sourceDev.rcaMethod ? { rcaMethod: sourceDev.rcaMethod } : {}) }
                 : sourceFinding
-                  ? { rca: sourceFinding.rootCause ?? rest.rca ?? null }
+                  ? { rca: sourceFinding.rootCause ?? rest.rca ?? null, ...(sourceFinding.rcaMethod ? { rcaMethod: sourceFinding.rcaMethod } : {}) }
                   : {}),
               reference,
               tenantId: session.user.tenantId,
-              status: "open",
+              status: capaStatus,
               createdBy: session.user.name,
               // Authoritative creator FK for SoD guards. Null for admin
               // actors with no User row (resolveUserFk returns null); those
@@ -632,6 +643,25 @@ export async function createCAPA(
               diGateStatus: diGateRequired ? "pending" : null,
             },
           });
+          // When the carried RCA started the CAPA straight at in_progress, record the
+          // SAME open→in_progress transition startCAPAProgress emits — INSIDE this
+          // transaction, so the lifecycle step is traceable (GxP) and atomic with the
+          // create. No-op (stays "open") when nothing was carried.
+          if (capaStatus === "in_progress") {
+            await tx.auditLog.create({
+              data: {
+                tenantId: session.user.tenantId,
+                userId: actor.userId,
+                userName: actor.displayName,
+                userRole: actor.role,
+                module: "CAPA",
+                action: "CAPA_PROGRESS_STARTED",
+                recordId: created.id,
+                oldValue: "open",
+                newValue: "in_progress",
+              },
+            });
+          }
           // Link-side updates moved INSIDE the transaction (SME Stage 2
           // FULL): the previous post-create updates ran outside the
           // transaction, so a Deviation.update failure left the CAPA

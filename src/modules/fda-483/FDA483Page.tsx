@@ -472,7 +472,6 @@ export function FDA483Page({
   const agiMode = useAppSelector((s) => s.settings.agi.mode);
   const agiAgent = useAppSelector((s) => s.settings.agi.agents.fda483);
   const user = useAppSelector((s) => s.auth.user);
-  const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const { role, canSign } = useRole();
   const { isCustomerAdmin } = usePermissions();
   // Capability mirror of the server (excludes super_admin from authoring).
@@ -1001,7 +1000,8 @@ export function FDA483Page({
                         ) ?? obs.severity,
                       referenceNumber: liveEvent.referenceNumber,
                       siteId: liveEvent.siteId,
-                      owner: formData.ownerId || user?.id || user?.name || "system",
+                      // No owner sent — createCAPA assigns the CAPA owner to the
+                      // authenticated QA creator (actor.userId) server-side.
                       dueDate: formData.dueDate || liveEvent.responseDeadline,
                       rootCause: formData.description || obs.rootCause,
                       rcaMethod: obs.rcaMethod,
@@ -1025,17 +1025,21 @@ export function FDA483Page({
 
               {urlState.tab === "response" && (
                 <div className="space-y-4">
-                  {/* Feature 3 — Document Summarizing (the 483 response can run many pages) */}
-                  <DocumentSummaryPanel
-                    title={`FDA-483 ${liveEvent.referenceNumber ?? liveEvent.id.slice(0, 8)} response`}
-                    recordId={liveEvent.id}
-                    module="fda483"
-                    content={[
-                      liveEvent.responseDraft ? `Response draft:\n${liveEvent.responseDraft}` : "",
-                      ...liveEvent.observations.map((o, i) => `Observation ${i + 1}: ${o.text}${o.rootCause ? `\nRoot cause: ${o.rootCause}` : ""}`),
-                    ].filter(Boolean).join("\n\n")}
-                  />
+                  {/* Feature 3 — Document Summarizing (the 483 response can run
+                      many pages) now shares the export toolbar row (left) via
+                      ResponseDetailTab's leadingActions slot. */}
                   <ResponseDetailTab
+                    leadingActions={
+                      <DocumentSummaryPanel
+                        title={`FDA-483 ${liveEvent.referenceNumber ?? liveEvent.id.slice(0, 8)} response`}
+                        recordId={liveEvent.id}
+                        module="fda483"
+                        content={[
+                          liveEvent.responseDraft ? `Response draft:\n${liveEvent.responseDraft}` : "",
+                          ...liveEvent.observations.map((o, i) => `Observation ${i + 1}: ${o.text}${o.rootCause ? `\nRoot cause: ${o.rootCause}` : ""}`),
+                        ].filter(Boolean).join("\n\n")}
+                      />
+                    }
                     liveEvent={liveEvent}
                     capas={capas} role={role}
                   canSign={(isCustomerAdmin ? false : canSign) && fda.canSign}
@@ -1153,7 +1157,6 @@ export function FDA483Page({
         defaultOwnerId={
           complianceUsers.some((u) => u.id === user?.id) ? user?.id : undefined
         }
-        lockedSiteId={selectedSiteId}
       />
       <AddObservationModal
         open={addObsOpen}
