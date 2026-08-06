@@ -7,7 +7,7 @@ jobs:
     kind: PRE_DEPLOY
     github:
       repo: baarez-technology/Glimmora-Pharma
-      branch: devAI
+      branch: main
       deploy_on_push: true
     source_dir: /
     build_command: NODE_OPTIONS="--max-old-space-size=1024" npm ci && npx prisma generate
@@ -96,7 +96,7 @@ services:
   - name: web
     github:
       repo: baarez-technology/Glimmora-Pharma
-      branch: devAI
+      branch: main
       deploy_on_push: true
     source_dir: /
     build_command: npm ci && npx prisma generate && NODE_OPTIONS="--max-old-space-size=2048" npm run build

@@ -7,7 +7,7 @@ services:
     name: glimmora-pharma-web
     runtime: node
     plan: starter            # persistent disks require a paid instance (free tier has none)
-    branch: devAI
+    branch: main
     buildCommand: npm install && npx prisma generate && npm run build
     # `prisma db push` runs every boot (idempotent) so the schema on the
     # mounted disk is always in sync. Seed once manually via the Shell.
