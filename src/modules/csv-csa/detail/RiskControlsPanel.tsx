@@ -4,8 +4,16 @@ import { ShieldAlert, AlertTriangle, CheckCircle2, Info, Pencil, X, Save } from 
 import type { GxPSystem, RiskLevel } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Dropdown } from "@/components/ui/Dropdown";
 
 /* ── Helpers ── */
+
+/** Same three values, same order, as the native <option> list this replaced. */
+const RISK_LEVEL_OPTIONS = [
+  { value: "HIGH", label: "HIGH" },
+  { value: "MEDIUM", label: "MEDIUM" },
+  { value: "LOW", label: "LOW" },
+];
 
 import type { ComplianceStatus, GAMP5Category } from "@/types/csv-csa";
 
@@ -121,17 +129,13 @@ export function RiskControlsPanel({
             <div key={r.key} className={clsx("flex justify-between items-center py-3", i < arr.length - 1 && "border-b")} style={{ borderColor: "var(--bg-border)" }}>
               <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>{r.label}</span>
               {editingRiskClass ? (
-                <select
+                <Dropdown
                   value={riskForm[r.key]}
-                  onChange={(e) => setRiskForm((prev) => ({ ...prev, [r.key]: e.target.value as RiskLevel }))}
-                  className="select text-[11px]"
-                  style={{ minWidth: "7rem" }}
-                  aria-label={r.label}
-                >
-                  <option value="HIGH">HIGH</option>
-                  <option value="MEDIUM">MEDIUM</option>
-                  <option value="LOW">LOW</option>
-                </select>
+                  onChange={(v) => setRiskForm((prev) => ({ ...prev, [r.key]: v as RiskLevel }))}
+                  options={RISK_LEVEL_OPTIONS}
+                  size="sm"
+                  width="w-28"
+                />
               ) : (
                 <Badge variant={r.level === "HIGH" ? "red" : r.level === "MEDIUM" ? "amber" : "green"}>{r.level}</Badge>
               )}

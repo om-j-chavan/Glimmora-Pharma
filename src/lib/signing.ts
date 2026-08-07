@@ -433,8 +433,89 @@ export interface CSVValidationSignOffCanonicalInput {
   signatureMeaning: string;
   signerEmail: string;
   signedAtIso: string;
+  /** OPTIONAL — set ONLY when the sign-off used the RTM-coverage override
+   *  (signed without full requirements traceability, under a documented QA
+   *  reason). Omit for every fully-traced sign-off. See the versioning note
+   *  on canonicalizeCSVValidationSignOffContent below. */
+  rtmOverrideReason?: string | null;
+  /** OPTIONAL — the stage-evidence manifest (audit finding C3). Binds WHICH
+   *  documents backed the validation, so substituting or removing evidence
+   *  behind an approved/skipped stage changes the hash. Omit (or pass an empty
+   *  array) to reproduce the pre-manifest byte shape — see the versioning note
+   *  below, and buildCSVDocumentManifest for the ordering contract. */
+  documentManifest?: CSVSignOffDocumentManifestEntry[] | null;
 }
 
+/** One stage-evidence document, as bound into the sign-off hash. `contentHash`
+ *  is StageDocument.contentHashSha256 — the SHA-256 of the bytes at upload. */
+export interface CSVSignOffDocumentManifestEntry {
+  stageKey: string;
+  documentId: string;
+  contentHash: string;
+}
+
+/**
+ * Build the deterministic stage-evidence manifest for a sign-off.
+ *
+ * Shared by signValidation and verifyCSVSignOff so the ordering can never
+ * diverge between what was signed and what is re-checked. Sorted by stageKey
+ * then documentId — both immutable, so the order is stable across calls and
+ * independent of query order. Callers pass ACTIVE (non-soft-deleted) documents
+ * only; a soft-deleted document is absent from the manifest, which is what
+ * makes a post-sign-off removal detectable.
+ */
+export function buildCSVDocumentManifest(
+  docs: { stageName: string; id: string; contentHashSha256: string }[],
+): CSVSignOffDocumentManifestEntry[] {
+  return docs
+    .map((d) => ({ stageKey: d.stageName, documentId: d.id, contentHash: d.contentHashSha256 }))
+    .sort((a, b) =>
+      a.stageKey === b.stageKey
+        ? a.documentId.localeCompare(b.documentId)
+        : a.stageKey.localeCompare(b.stageKey),
+    );
+}
+
+/**
+ * CSV/CSA validation sign-off canonicaliser.
+ *
+ * ── CONTENT VERSIONING (recordType "CSV_VALIDATION_SIGNOFF") ────────────────
+ * Affects ONLY this record type. Three content shapes now exist under the SAME
+ * recordType string, distinguished structurally by which optional keys appear:
+ *
+ *   BASE ("V1") — 13 keys. Every sign-off taken before the RTM-coverage gate,
+ *                 and every fully-traced sign-off with no stage evidence.
+ *   + rtmCoverageOverrideReason — sign-offs taken under the RTM-coverage
+ *                 override (audit finding C1).
+ *   + documentManifest          — sign-offs that bound stage evidence
+ *                 (audit finding C3).
+ *
+ * The two extra keys are INDEPENDENT: a record may carry neither, either, or
+ * both. Both are ADDITIVE and CONDITIONAL — spread in only when actually
+ * present and non-empty — so a call supplying neither emits a string that is
+ * BYTE-IDENTICAL to what the original 13-key version produced. Historical
+ * hashes stay reproducible.
+ *
+ * `documentManifest` treats an EMPTY array exactly like absent. That is
+ * deliberate: a signed system with no stage documents must hash the same as a
+ * pre-manifest record, so the empty case can never be a spurious drift.
+ *
+ * RECONSTRUCTING A STORED RECORD (verifyCSVSignOff): presence is recorded per
+ * record on GxPSystem —
+ *   signedOffRtmOverrideReason   NULL ⇒ omit rtmCoverageOverrideReason
+ *   signedOffDocManifestSha256   NULL ⇒ omit documentManifest (a pre-C3
+ *                                       record; do NOT synthesise one from
+ *                                       current documents or it reads as drift)
+ *
+ * Both keys MUST stay conditionally spread rather than always present:
+ * canonicalJson walks Object.keys(), which includes keys explicitly set to
+ * `undefined`, and would serialise them as the bare token `undefined` —
+ * silently changing every historical hash.
+ *
+ * As with every canonicaliser here, treat the output as a wire format: to change
+ * the BASE field set, bump the recordType (…_V2) rather than mutating in place.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
 export function canonicalizeCSVValidationSignOffContent(
   input: CSVValidationSignOffCanonicalInput,
 ): string {
@@ -446,6 +527,14 @@ export function canonicalizeCSVValidationSignOffContent(
     part11Compliant: input.part11Compliant,
     reference: input.reference,
     rtmCoverage: input.rtmCoverage,
+    // Conditional spreads — see the versioning note above. Both absent ⇒ the
+    // original 13-key bytes. Empty manifest is treated as absent by design.
+    ...(input.rtmOverrideReason
+      ? { rtmCoverageOverrideReason: input.rtmOverrideReason }
+      : {}),
+    ...(input.documentManifest && input.documentManifest.length > 0
+      ? { documentManifest: input.documentManifest }
+      : {}),
     signatureMeaning: input.signatureMeaning,
     signedAt: input.signedAtIso,
     signerEmail: input.signerEmail,

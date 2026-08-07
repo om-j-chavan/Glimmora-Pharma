@@ -192,6 +192,11 @@ export interface GxPSystem {
   signedOffRtmCoverage?: number | null;
   signedOffStagesApproved?: number | null;
   signedOffStagesTotal?: number | null;
+  // Gate-4 exception — true when the sign-off was taken without full RTM
+  // traceability under a documented QA reason (both null on legacy sign-offs
+  // predating the gate, which read the same as "no override").
+  signedOffRtmOverride?: boolean | null;
+  signedOffRtmOverrideReason?: string | null;
   reference?: string;
   // RUNG 2 — real FK-hydrated linked findings/CAPAs (system detail page).
   findings?: SystemFinding[];
@@ -361,6 +366,8 @@ export function adaptPrismaSystem(s: SystemFromPrisma): GxPSystem {
     signedOffRtmCoverage: s.signedOffRtmCoverage,
     signedOffStagesApproved: s.signedOffStagesApproved,
     signedOffStagesTotal: s.signedOffStagesTotal,
+    signedOffRtmOverride: s.signedOffRtmOverride,
+    signedOffRtmOverrideReason: s.signedOffRtmOverrideReason,
     reference: s.reference ?? undefined,
     // RUNG 2 — FK-hydrated linked findings / CAPAs.
     findings: s.findings.map((f) => ({

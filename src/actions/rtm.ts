@@ -7,6 +7,7 @@ import { requireAuth, resolveUserFk, requireGxPAuthor } from "@/lib/auth";
 import { assertTenantOwnsParent } from "@/lib/tenantScope";
 import { canWriteCSV } from "@/lib/permissions/roleSets";
 import { deriveSiteCode, isReferenceConflict } from "@/lib/reference";
+import { signOffLockError, signOffLockErrorForRtmEntry } from "@/lib/csv-signoff-lock";
 
 type ActionResult<T = unknown> =
   | { success: true; data: T }
@@ -117,6 +118,13 @@ export async function createRTMEntry(
   if (!canWriteCSV(session.user.role)) {
     return { success: false, error: "Your role does not permit this action." };
   }
+  // C2 — post-sign-off lock. Adding a requirement changes the DENOMINATOR of
+  // rtmCoverage, a hashed input: a new entry starts "broken", so appending one
+  // to a signed system drops its attested coverage below 100%.
+  {
+    const locked = await signOffLockError(parsed.data.systemId);
+    if (locked) return { success: false, error: locked };
+  }
   try {
     // RUNG 2.8 — allocate a per-site URS-<SITE_CODE>-<NNNN> reference. Site.code
     // is canonical (same source as SYS references); name-derived fallback for a
@@ -191,6 +199,12 @@ export async function updateRTMEntry(
     select: { fsReference: true, iqTestId: true, iqResult: true, oqTestId: true, oqResult: true, pqTestId: true, pqResult: true },
   });
   if (!current) return { success: false, error: "FORBIDDEN" };
+  // C2 — post-sign-off lock. Editing FS/IQ/OQ/PQ re-derives traceabilityStatus,
+  // which moves rtmCoverage — a hashed input.
+  {
+    const locked = await signOffLockErrorForRtmEntry(id);
+    if (locked) return { success: false, error: locked };
+  }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);

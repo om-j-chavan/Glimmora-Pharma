@@ -1344,6 +1344,22 @@ model GxPSystem {
   signedOffRtmCoverage      Float?
   signedOffStagesApproved   Int?
   signedOffStagesTotal      Int?
+  // RTM-coverage gate override (sign-off gate 4). Full requirements traceability
+  // — every RTMEntry at traceabilityStatus "complete", and at least one entry —
+  // is required to sign off. A QA Head may still sign a system that falls short,
+  // but only with a documented reason (≥20 chars), which is persisted here AND
+  // bound into the sign-off contentHash so the exception is part of the signed
+  // record. false/null = the sign-off met full traceability with no exception.
+  // Cleared by unsignValidation alongside the rest of the snapshot.
+  signedOffRtmOverride       Boolean?
+  signedOffRtmOverrideReason String?
+  // Stage-evidence manifest digest (audit finding C3). SHA-256 of the canonical
+  // manifest bound into signedOffContentHash at signing. Doubles as the CONTENT
+  // VERSION MARKER that verifyCSVSignOff reads: NULL means this sign-off predates
+  // the manifest, so verification must reconstruct WITHOUT one — synthesising a
+  // manifest from current documents would make every legacy record read as drift.
+  // Cleared by unsignValidation alongside the rest of the snapshot.
+  signedOffDocManifestSha256 String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
