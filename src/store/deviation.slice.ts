@@ -2,6 +2,9 @@ import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type { LinkedDocument } from "@/components/shared/DocumentUpload";
 import type { WorklistDoc } from "@/lib/queries/worklist";
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
+// Type-only: used solely in a `typeof` query, so this import is fully erased —
+// no runtime dependency from the store on the taxonomy module.
+import type { DEVIATION_STATUS_VALUES } from "@/constants/statusTaxonomy";
 
 export type DeviationType = "planned" | "unplanned";
 export type DeviationCategory = "process" | "equipment" | "material" | "environmental" | "personnel" | "documentation" | "system" | "other";
@@ -13,7 +16,10 @@ export type DeviationCategory = "process" | "equipment" | "material" | "environm
 export type DeviationSeverity = "critical" | "major" | "minor" | "Critical" | "Major" | "Minor";
 // "capa_pending" (Stage 1, deviation redesign): a CAPA was raised for a high/med
 // deviation; it stays OPEN + linked until the CAPA closes, then QA sign-closes.
-export type DeviationStatus = "open" | "under_investigation" | "pending_qa_review" | "capa_pending" | "closed" | "rejected";
+// Derived from the canonical DEVIATION_STATUS_VALUES array — the values live in
+// src/constants/statusTaxonomy.ts, which the display map derives from too, so
+// the union and the badge/label maps can no longer drift apart.
+export type DeviationStatus = (typeof DEVIATION_STATUS_VALUES)[number];
 // Phase 1.5 — unified to canonical spaced values via the shared constant.
 export type DeviationRCAMethod = InvestigationRCAMethod;
 

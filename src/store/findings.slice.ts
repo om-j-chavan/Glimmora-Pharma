@@ -1,7 +1,15 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
+// Type-only: used solely in a `typeof` query, so this import is fully erased —
+// no runtime dependency from the store on the taxonomy module.
+import type { FINDING_STATUS_VALUES } from "@/constants/statusTaxonomy";
 
 export type FindingSeverity = "Critical" | "High" | "Medium" | "Low";
-export type FindingStatus = "Open" | "In Progress" | "Submitted" | "Rework" | "Closed";
+// Derived from the canonical FINDING_STATUS_VALUES array — the values live in
+// src/constants/statusTaxonomy.ts, which the display map and the user-editable
+// zod subset derive from too, so the four representations cannot drift apart.
+// 🔴 Those literals feed a HASHED count (openFindings); see the note on the
+// canonical array before changing anything.
+export type FindingStatus = (typeof FINDING_STATUS_VALUES)[number];
 
 export interface EditHistoryEntry {
   editedBy: string;

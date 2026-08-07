@@ -33,6 +33,7 @@ import { sanitizeFilename } from "@/lib/sanitize";
 import { buildReferencePrefix, generateReference, isReferenceConflict } from "@/lib/reference";
 import { sanitizeServerError } from "@/lib/errors";
 import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
+import { FINDING_STATUS_USER_EDITABLE } from "@/constants/statusTaxonomy";
 
 // Shared with the create form (AddFindingModal) — keep this the single source
 // of truth for the minimum requirement length so client and server never
@@ -69,7 +70,13 @@ const UpdateFindingSchema = z.object({
   purpose: z.string().optional(),
   area: z.string().min(1).optional(),
   severity: z.enum(["Critical", "High", "Medium", "Low"]).optional(),
-  status: z.enum(["Open", "In Progress", "Closed"]).optional(),
+  // The USER-EDITABLE subset (3 of the 5 finding statuses), derived from the
+  // canonical vocabulary in @/constants/statusTaxonomy. "Submitted"/"Rework"
+  // are deliberately excluded: they are set only by submitFinding/reworkFinding
+  // below, which carry the assignee check, source-status precondition, audit row
+  // and (rework) required reason + notification that this edit form must not
+  // bypass. Do NOT widen this to FINDING_STATUS_VALUES.
+  status: z.enum(FINDING_STATUS_USER_EDITABLE).optional(),
   // Item 18 — `owner` is deliberately NOT editable here. assignFinding is the ONLY
   // door to changing it, so that every owner change carries its actor + timestamp
   // (Finding.assignedAt/assignedById) and emits FINDING_ASSIGNED. This action
