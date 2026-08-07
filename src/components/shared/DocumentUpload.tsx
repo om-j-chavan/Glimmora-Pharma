@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
 import { useToast } from "@/components/ui/Toast";
+import { formatBytes } from "@/lib/format/bytes";
 
 /* ── Document interface — used across all modules ── */
 
@@ -73,12 +74,6 @@ export function fileTypeFromName(name: string): DocFileType {
   if (ext === "png") return "png";
   if (ext === "txt") return "txt";
   return "txt";
-}
-
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function fileIcon(type: DocFileType) {
@@ -192,7 +187,7 @@ export function DocumentUpload({
       id: `DOC-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
       fileName: selectedFile.name,
       fileType: selectedFile.type,
-      fileSize: formatSize(selectedFile.size),
+      fileSize: formatBytes(selectedFile.size),
       uploadedBy: user.name,
       uploadedByRole: user.role,
       version,
@@ -375,7 +370,7 @@ export function DocumentUpload({
                 {(() => { const Icon = fileIcon(selectedFile.type); return <Icon className="w-5 h-5 shrink-0" style={{ color: "var(--brand)" }} aria-hidden="true" />; })()}
                 <div className="flex-1 min-w-0">
                   <p className="text-[12px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{selectedFile.name}</p>
-                  <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{formatSize(selectedFile.size)} · {selectedFile.type.toUpperCase()}</p>
+                  <p className="text-[10px]" style={{ color: "var(--text-muted)" }}>{formatBytes(selectedFile.size)} · {selectedFile.type.toUpperCase()}</p>
                 </div>
                 <Button type="button" variant="ghost" size="sm" icon={X} onClick={() => setSelectedFile(null)} style={{ color: "var(--text-muted)" }} aria-label="Remove selected file" />
               </div>

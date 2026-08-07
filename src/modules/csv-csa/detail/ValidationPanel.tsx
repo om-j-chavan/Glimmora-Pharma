@@ -44,6 +44,7 @@ import { getDocumentReview, type DocumentReviewResult, type DocumentReviewSeveri
 import { AIButton } from "@/components/ai";
 import { StageReworkTasks } from "./StageReworkTasks";
 import { friendlyAiError } from "@/lib/friendlyError";
+import { formatBytes } from "@/lib/format/bytes";
 
 /* ── Helpers ── */
 
@@ -91,12 +92,6 @@ function stageBorderColor(status: ValidationStage["status"]): string {
   if (status === "rejected") return "#ef4444";
   if (status === "draft" || status === "in_progress") return "#f59e0b";
   return "var(--bg-border)";
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /* ── AI Document Review (Feature D) — inline soft-gate sub-panel ── */
@@ -711,7 +706,7 @@ export function ValidationPanel({
                           {d.originalFileName}
                         </a>
                         <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                          {formatFileSize(d.fileSize)}
+                          {formatBytes(d.fileSize)}
                         </span>
                         <span
                           className="font-mono text-[10px]"
