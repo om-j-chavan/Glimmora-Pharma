@@ -15,7 +15,7 @@ import {
   monitoringByCapa, monitoringStatus, monitoringCheck, type ActionProgressUpdate,
   effectivenessByCapa, effectivenessStatus, effectivenessCheck, type EvidenceItem, type TrendData,
   closureByCapa, closureStatus, closureInitiate,
-  selectAiToken, selectAiCustomerId,
+  selectAiCustomerId,
   AiBackendError,
 } from "@/lib/aiBackend";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -41,7 +41,6 @@ type Refresh = () => Promise<void>;
 
 export function AiCapaPage({ capaId }: Props) {
   const router = useRouter();
-  const token = useAppSelector(selectAiToken);
   const customerId = useAppSelector(selectAiCustomerId);
   const userRole = useAppSelector((s) => s.auth.user?.role ?? "");
   const isCustomerAdmin = userRole === "customer_admin" || userRole === "super_admin";
@@ -91,7 +90,7 @@ export function AiCapaPage({ capaId }: Props) {
   const [registerError, setRegisterError] = useState<string | null>(null);
 
   async function registerWithAiBackend() {
-    if (!token || !customerId || !localCapa) return;
+    if (!customerId || !localCapa) return;
     setRegistering(true);
     setRegisterError(null);
     try {
@@ -111,7 +110,6 @@ export function AiCapaPage({ capaId }: Props) {
           equipment_product: equipMatch?.[1]?.trim() || "—",
           initial_severity: localCapa.risk ?? "Medium",
         },
-        token,
       );
       // Optimistically render StageCards from the create response so the
       // user immediately sees the RCA "Submit RCA" action; don't navigate
@@ -128,15 +126,10 @@ export function AiCapaPage({ capaId }: Props) {
   }
 
   const refresh: Refresh = useCallback(async () => {
-    if (!token) {
-      setError("AI session is missing. Sign out and sign in again to refresh your token.");
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
-      const c = await capaStatus(effectiveCapaId, token).then(
+      const c = await capaStatus(effectiveCapaId).then(
         (v) => ({ status: "fulfilled" as const, value: v }),
         (reason) => ({ status: "rejected" as const, reason }),
       );
@@ -169,11 +162,11 @@ export function AiCapaPage({ capaId }: Props) {
       const wantEff = !isOpen;
       const wantClosure = !isOpen;
       const [r, p, m, e, cl] = await Promise.allSettled([
-        wantRca ? rcaByCapa(effectiveCapaId, token) : Promise.resolve(null),
-        wantPlan ? actionPlanByCapa(effectiveCapaId, token) : Promise.resolve(null),
-        wantMon ? monitoringByCapa(effectiveCapaId, token) : Promise.resolve(null),
-        wantEff ? effectivenessByCapa(effectiveCapaId, token) : Promise.resolve(null),
-        wantClosure ? closureByCapa(effectiveCapaId, token) : Promise.resolve(null),
+        wantRca ? rcaByCapa(effectiveCapaId) : Promise.resolve(null),
+        wantPlan ? actionPlanByCapa(effectiveCapaId) : Promise.resolve(null),
+        wantMon ? monitoringByCapa(effectiveCapaId) : Promise.resolve(null),
+        wantEff ? effectivenessByCapa(effectiveCapaId) : Promise.resolve(null),
+        wantClosure ? closureByCapa(effectiveCapaId) : Promise.resolve(null),
       ]);
       const rcaRec = extractRecord(r);
       const planRec = extractRecord(p);
@@ -191,11 +184,11 @@ export function AiCapaPage({ capaId }: Props) {
       const clId = recordIdFrom(closeRec, "closure_id", "closures");
 
       const [rDetail, pDetail, mDetail, eDetail, clDetail] = await Promise.allSettled([
-        rId ? rcaStatus(rId, token) : Promise.resolve(null),
-        apId ? actionPlanStatus(apId, token) : Promise.resolve(null),
-        mId ? monitoringStatus(mId, token) : Promise.resolve(null),
-        effId ? effectivenessStatus(effId, token) : Promise.resolve(null),
-        clId ? closureStatus(clId, token) : Promise.resolve(null),
+        rId ? rcaStatus(rId) : Promise.resolve(null),
+        apId ? actionPlanStatus(apId) : Promise.resolve(null),
+        mId ? monitoringStatus(mId) : Promise.resolve(null),
+        effId ? effectivenessStatus(effId) : Promise.resolve(null),
+        clId ? closureStatus(clId) : Promise.resolve(null),
       ]);
       setRca(rDetail.status === "fulfilled" && rDetail.value ? rDetail.value : rcaRec);
       setPlan(pDetail.status === "fulfilled" && pDetail.value ? pDetail.value : planRec);
@@ -205,22 +198,11 @@ export function AiCapaPage({ capaId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [effectiveCapaId, token, aiCapaId, setAiCapaId]);
+  }, [effectiveCapaId, aiCapaId, setAiCapaId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  if (!token) {
-    return (
-      <main className="p-6">
-        <BackLink onClick={() => router.push("/capa")} />
-        <p className="text-[13px] mt-4" style={{ color: "var(--danger)" }}>
-          AI session is missing. Sign out and sign in again to refresh your token.
-        </p>
-      </main>
-    );
-  }
 
   const recurring = isRecurring(capa);
   const riskScore = getRiskScore(capa);
@@ -402,7 +384,6 @@ export function AiCapaPage({ capaId }: Props) {
         onSubmitted={refresh}
         capaId={effectiveCapaId}
         customerId={customerId ?? ""}
-        token={token}
       />
       <ActionPlanModal
         open={openModal === "plan"}
@@ -411,7 +392,6 @@ export function AiCapaPage({ capaId }: Props) {
         capaId={effectiveCapaId}
         customerId={customerId ?? ""}
         rcaId={rcaId(rca) ?? ""}
-        token={token}
       />
       <MonitoringModal
         open={openModal === "monitoring"}
@@ -421,7 +401,6 @@ export function AiCapaPage({ capaId }: Props) {
         customerId={customerId ?? ""}
         actionPlanId={planId(plan) ?? ""}
         defaultActions={planActions(plan)}
-        token={token}
       />
       <EffectivenessModal
         open={openModal === "effectiveness"}
@@ -436,7 +415,6 @@ export function AiCapaPage({ capaId }: Props) {
           evidence_attached: true,
           evidence_note: "",
         }))}
-        token={token}
       />
       <ClosureModal
         open={openModal === "closure"}
@@ -445,7 +423,6 @@ export function AiCapaPage({ capaId }: Props) {
         capaId={effectiveCapaId}
         customerId={customerId ?? ""}
         effectivenessId={effectivenessId(effectiveness) ?? ""}
-        token={token}
       />
     </main>
   );
@@ -985,7 +962,6 @@ interface BaseModalProps {
   onSubmitted: () => Promise<void>;
   capaId: string;
   customerId: string;
-  token: string;
 }
 
 function ModalShell({ title, open, onClose, busy, error, onSubmit, submitLabel, children }: {
@@ -1029,7 +1005,7 @@ function FieldRow({ label, required, children }: { label: string; required?: boo
 
 /* — RCA — */
 
-function RcaModal({ open, onClose, onSubmitted, capaId, customerId, token }: BaseModalProps) {
+function RcaModal({ open, onClose, onSubmitted, capaId, customerId }: BaseModalProps) {
   const [method, setMethod] = useState("5 Why");
   const [evidence, setEvidence] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1040,7 +1016,7 @@ function RcaModal({ open, onClose, onSubmitted, capaId, customerId, token }: Bas
   async function submit() {
     setBusy(true); setError(null);
     try {
-      await rcaSubmit({ capa_id: capaId, customer_id: customerId, rca_method: method, evidence: evidence || null }, token);
+      await rcaSubmit({ capa_id: capaId, customer_id: customerId, rca_method: method, evidence: evidence || null });
       await onSubmitted();
       onClose();
     } catch (e) {
@@ -1068,7 +1044,7 @@ function RcaModal({ open, onClose, onSubmitted, capaId, customerId, token }: Bas
 
 interface ActionPlanProps extends BaseModalProps { rcaId: string }
 
-function ActionPlanModal({ open, onClose, onSubmitted, capaId, customerId, rcaId, token }: ActionPlanProps) {
+function ActionPlanModal({ open, onClose, onSubmitted, capaId, customerId, rcaId }: ActionPlanProps) {
   const [actions, setActions] = useState<ActionItem[]>([{ action_description: "", responsible_person: "", due_date: "" }]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1085,7 +1061,7 @@ function ActionPlanModal({ open, onClose, onSubmitted, capaId, customerId, rcaId
     }
     setBusy(true); setError(null);
     try {
-      await actionPlanSubmit({ capa_id: capaId, customer_id: customerId, rca_id: rcaId, actions }, token);
+      await actionPlanSubmit({ capa_id: capaId, customer_id: customerId, rca_id: rcaId, actions });
       await onSubmitted();
       onClose();
     } catch (e) {
@@ -1120,7 +1096,7 @@ interface MonitoringProps extends BaseModalProps {
   defaultActions: ActionItem[];
 }
 
-function MonitoringModal({ open, onClose, onSubmitted, capaId, customerId, actionPlanId, defaultActions, token }: MonitoringProps) {
+function MonitoringModal({ open, onClose, onSubmitted, capaId, customerId, actionPlanId, defaultActions }: MonitoringProps) {
   const [updates, setUpdates] = useState<ActionProgressUpdate[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1142,7 +1118,7 @@ function MonitoringModal({ open, onClose, onSubmitted, capaId, customerId, actio
   async function submit() {
     setBusy(true); setError(null);
     try {
-      await monitoringCheck({ capa_id: capaId, customer_id: customerId, action_plan_id: actionPlanId, action_updates: updates }, token);
+      await monitoringCheck({ capa_id: capaId, customer_id: customerId, action_plan_id: actionPlanId, action_updates: updates });
       await onSubmitted();
       onClose();
     } catch (e) {
@@ -1179,7 +1155,7 @@ interface EffectivenessProps extends BaseModalProps {
   defaultEvidence: EvidenceItem[];
 }
 
-function EffectivenessModal({ open, onClose, onSubmitted, capaId, customerId, actionPlanId, defaultEvidence, token }: EffectivenessProps) {
+function EffectivenessModal({ open, onClose, onSubmitted, capaId, customerId, actionPlanId, defaultEvidence }: EffectivenessProps) {
   const [days, setDays] = useState(90);
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [trend, setTrend] = useState<TrendData[]>([{ metric_name: "", before_capa: 0, after_capa: 0, unit: "" }]);
@@ -1211,7 +1187,7 @@ function EffectivenessModal({ open, onClose, onSubmitted, capaId, customerId, ac
         trend_data: trend,
         new_issues_reported: newIssues,
         new_issue_details: issueDetails || null,
-      }, token);
+      });
       await onSubmitted();
       onClose();
     } catch (e) {
@@ -1275,7 +1251,7 @@ function EffectivenessModal({ open, onClose, onSubmitted, capaId, customerId, ac
 
 interface ClosureProps extends BaseModalProps { effectivenessId: string }
 
-function ClosureModal({ open, onClose, onSubmitted, capaId, customerId, effectivenessId: effId, token }: ClosureProps) {
+function ClosureModal({ open, onClose, onSubmitted, capaId, customerId, effectivenessId: effId }: ClosureProps) {
   const [approvedBy, setApprovedBy] = useState("");
   const [designation, setDesignation] = useState("");
   const [signature, setSignature] = useState("");
@@ -1305,7 +1281,7 @@ function ClosureModal({ open, onClose, onSubmitted, capaId, customerId, effectiv
         closure_rationale: rationale,
         related_capas_reviewed: relatedReviewed,
         document_changes_approved: docsApproved,
-      }, token);
+      });
       await onSubmitted();
       onClose();
     } catch (e) {

@@ -51,7 +51,7 @@ export const customerAdminDashboard: DashboardConfig = {
   ],
 
   ai: {
-    title: "AI Organisation Summary",
+    title: "Organisation Signals",
     streams: ["organisation", "quality", "validation"],
     limit: 5,
   },

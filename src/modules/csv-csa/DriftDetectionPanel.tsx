@@ -61,7 +61,7 @@ export interface DriftDetectionState {
   /** Whether the AGI `drift` agent is active — the whole surface hides when false. */
   agentActive: boolean;
   alerts: DriftAlert[];
-  /** Provenance of the current alerts: "backend" = real scan, "mock" = the
+  /** Provenance of the current alerts: "backend" = real scan, "fallback" = the
    *  gateway's fallback fixture (backend unreachable). null before the first
    *  scan resolves. Surfaced as a badge so fixture alerts are never read as a
    *  live finding about the tenant's systems. */

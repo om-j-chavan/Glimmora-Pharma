@@ -7,8 +7,6 @@ import { Button } from "@/components/ui/Button";
 import { AIButton } from "@/components/ai";
 import { Modal } from "@/components/ui/Modal";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
-import { updateTenantUser } from "@/store/auth.slice";
 import { capaCreate, AiBackendError } from "@/lib/aiBackend";
 import { friendlyAiError } from "@/lib/friendlyError";
 
@@ -50,26 +48,16 @@ interface AIGenerateCAPAModalProps {
   onAccepted?: (response: AICapaResponse, form: AICapaForm) => void;
 }
 
-const TOKEN_KEY = "glimmora-ai-token";
-
-function getStoredToken(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return sessionStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function setStoredToken(t: string | null) {
-  if (typeof window === "undefined") return;
-  try {
-    if (t) sessionStorage.setItem(TOKEN_KEY, t);
-    else sessionStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // ignore
-  }
-}
+/* REMOVED — the client-side AI token cache (`glimmora-ai-token` in
+ * sessionStorage) and the Redux token read that fed it.
+ *
+ * This modal used to juggle two copies of the AI service's bearer token: one on
+ * the Redux user record, one in sessionStorage, with a 401 handler that cleared
+ * both and told the user to sign out and back in. All of that existed because
+ * the browser was the credential holder. It no longer is — /api/ai-proxy mints
+ * the token per request from the caller's session — so there is nothing to
+ * cache, refresh, or invalidate here.
+ */
 
 export function AIGenerateCAPAModal({
   isOpen,
@@ -77,25 +65,6 @@ export function AIGenerateCAPAModal({
   defaultCustomerId,
   onAccepted,
 }: AIGenerateCAPAModalProps) {
-  const dispatch = useAppDispatch();
-  // Pull the AI backend access token straight off the logged-in user's
-  // tenant-user record (set by the login flow). Avoids prompting for
-  // a second username/password — re-login refreshes the token.
-  // AI backend permissive since 2026-05-15 — fall back to a placeholder so
-  // the "Generate CAPA" button isn't stuck on "Connecting to AI..." for
-  // users who never received a real aiAccessToken at login.
-  const { authUserId, tenantId, storedAiToken } = useAppSelector((s) => {
-    const u = s.auth.user;
-    if (!u) return { authUserId: null, tenantId: null, storedAiToken: "anonymous" };
-    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
-    const tu = tenant?.config?.users?.find((x) => x.id === u.id);
-    return {
-      authUserId: u.id,
-      tenantId: u.tenantId,
-      storedAiToken: tu?.aiAccessToken ?? u.aiAccessToken ?? "anonymous",
-    };
-  });
-
   const {
     register,
     handleSubmit,
@@ -139,16 +108,6 @@ export function AIGenerateCAPAModal({
   async function onSubmit(data: AICapaForm) {
     setError(null);
     setResult(null);
-    // Prefer the token attached to the logged-in user record (refreshed on
-    // every login). Fall back to a session-scoped token from the legacy
-    // login prompt if it's set. If neither exists, surface a clear error
-    // and ask the user to log out and log back in — that path automatically
-    // calls /api/v1/auth/login and stores the token.
-    const token = storedAiToken ?? getStoredToken();
-    if (!token) {
-      setError("AI is still connecting. This usually takes 5-10 seconds on first sign-in. Please try again in a moment.");
-      return;
-    }
     try {
       const json = await capaCreate(
         {
@@ -160,19 +119,15 @@ export function AIGenerateCAPAModal({
           initial_severity: data.initial_severity,
           document: file,
         },
-        token,
       );
       setResult(json);
       setLastForm(data);
     } catch (err) {
       if (err instanceof AiBackendError && err.status === 401) {
-        // Token expired/invalid — clear from both stores and tell the user
-        // to re-login (which refreshes via /api/v1/auth/login).
-        setStoredToken(null);
-        if (authUserId && tenantId) {
-          dispatch(updateTenantUser({ tenantId, userId: authUserId, patch: { aiAccessToken: undefined } }));
-        }
-        setError("AI backend rejected the cached token (401). Please sign out and sign in again to refresh it.");
+        // The proxy rejected the app session (expired / signed out elsewhere).
+        // There is no cached AI token to clear any more — signing in again is
+        // the whole fix.
+        setError("Your session has expired. Please sign in again.");
         return;
       }
       console.error("[capa] generate CAPA failed", err);
@@ -415,13 +370,8 @@ export function AIGenerateCAPAModal({
             <Button variant="ghost" type="button" onClick={handleClose}>
               Cancel
             </Button>
-            <AIButton
-              type="submit"
-              loading={isSubmitting}
-              loadingLabel="Analyzing..."
-              disabled={!storedAiToken}
-            >
-              {!storedAiToken ? "Connecting to AI..." : "Generate CAPA"}
+            <AIButton type="submit" loading={isSubmitting} loadingLabel="Analyzing...">
+              Generate CAPA
             </AIButton>
           </div>
         </form>
@@ -619,10 +569,9 @@ function Section({
 
 /* ── Dismiss-alert control ───────────────────────────────────── */
 
-import { capaDismissAlert, selectAiToken } from "@/lib/aiBackend";
+import { capaDismissAlert } from "@/lib/aiBackend";
 
 function DismissAlertControl({ capaId, alertType }: { capaId: string; alertType: string }) {
-  const token = useAppSelector(selectAiToken);
   const userName = useAppSelector((s) => s.auth.user?.name ?? "Operator");
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -644,10 +593,6 @@ function DismissAlertControl({ capaId, alertType }: { capaId: string; alertType:
       setError("Reason ≥ 5 chars and signature are required.");
       return;
     }
-    if (!token) {
-      setError("AI session is missing. Sign out and sign in again.");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
@@ -657,7 +602,7 @@ function DismissAlertControl({ capaId, alertType }: { capaId: string; alertType:
         dismissal_reason: reason,
         electronic_signature: signature,
         dismissed_by: userName,
-      }, token);
+      });
       setDone(true);
     } catch (e) {
       console.error("[capa] dismiss alert failed", e); setError(friendlyAiError(e, "Couldn't dismiss the alert. Please try again."));

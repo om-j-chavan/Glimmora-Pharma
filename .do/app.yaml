@@ -7,7 +7,7 @@ jobs:
     kind: PRE_DEPLOY
     github:
       repo: baarez-technology/Glimmora-Pharma
-      branch: devAI
+      branch: main
       deploy_on_push: true
     source_dir: /
     build_command: NODE_OPTIONS="--max-old-space-size=1024" npm ci && npx prisma generate
@@ -96,7 +96,7 @@ services:
   - name: web
     github:
       repo: baarez-technology/Glimmora-Pharma
-      branch: devAI
+      branch: main
       deploy_on_push: true
     source_dir: /
     build_command: npm ci && npx prisma generate && NODE_OPTIONS="--max-old-space-size=2048" npm run build
@@ -140,6 +140,23 @@ services:
       - key: BACKEND_URL
         scope: RUN_AND_BUILD_TIME
         value: ${api.PRIVATE_URL}
+
+      # ── AI access token signing ────────────────────────────────────────
+      # The web service is the AI service's Backend-For-Frontend: it
+      # authenticates the user (NextAuth) and then mints the short-lived HS256
+      # token the AI service verifies (src/lib/aiToken.server.ts →
+      # app/routers/auth_router.py). Browsers no longer hold an AI credential
+      # at all, so this MUST match the api service's SECRET_KEY above.
+      #
+      # NOT NEXT_PUBLIC_ — a public copy would put the signing key in the
+      # browser bundle and let anyone forge a token for any tenant.
+      #
+      # If unset, the proxy sends no auth header: the api service runs with
+      # ENV=production above, so every AI call answers 401. That is the
+      # intended visible failure, not a silent degradation.
+      - key: AI_JWT_SECRET
+        scope: RUN_AND_BUILD_TIME
+        type: SECRET
 
       # ── Build optimization ─────────────────────────────────────────────
       # Prevent npm from pruning devDependencies during buildpack phase

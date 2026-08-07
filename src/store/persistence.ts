@@ -11,7 +11,12 @@ const VERSION_KEY = "glimmora-version";
 // (Notification Center consolidation). Bumping evicts the orphaned
 // `notifications` blob — which held finding IDs + requirement text — from every
 // existing browser (audit finding NTF-015).
-const CURRENT_VERSION = "47";
+// 48 — purges any persisted `aiAccessToken`. The AI service bearer token used
+// to live in the auth slice, so it was written into this localStorage blob and
+// survived sign-out. Nothing reads it any more (the server mints a token per
+// request), but a stale credential must not be left sitting in browser storage,
+// so this bump clears the blob for every existing session on next load.
+const CURRENT_VERSION = "48";
 
 /**
  * Slices to persist to localStorage.

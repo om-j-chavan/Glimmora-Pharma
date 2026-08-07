@@ -191,7 +191,7 @@ export type AIInsightStream =
   | "operations";    // Manufacturing-area + change-control signals
 
 export interface AIPanelConfig extends GuardedElement {
-  /** Panel heading — role-specific ("AI Quality Insights"). */
+  /** Panel heading — role-specific ("Quality Signals"). */
   title: string;
   /** Streams contributing insights, in priority order. */
   streams: readonly AIInsightStream[];

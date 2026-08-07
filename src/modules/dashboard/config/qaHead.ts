@@ -57,7 +57,7 @@ export const qaHeadDashboard: DashboardConfig = {
   ],
 
   ai: {
-    title: "AI Quality Insights",
+    title: "Quality Signals",
     streams: ["quality", "regulatory", "validation"],
     limit: 6,
   },

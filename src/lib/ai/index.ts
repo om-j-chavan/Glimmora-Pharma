@@ -1,33 +1,28 @@
 /**
- * AI feature gateway. Mocks now; real backend later
- * (OpenAI / Anthropic / existing Python service).
+ * AI feature gateway — the type contract every AI surface in the app codes
+ * against, and a thin pass-through to the backend that implements it.
  *
- * When wiring real backend:
- *   1. Set MOCK_AI_RESPONSES = false
- *   2. Implement the real fetch in each function below
- *   3. The function signatures and return shapes MUST
- *      remain identical
+ * ── What changed, and why ──────────────────────────────────────────
+ * This module used to be mock-first. It shipped ~1,750 lines of fixture data
+ * (src/lib/ai/mockData.ts: root-cause pools, a GxP validation rubric, a
+ * regulatory watchlist, drift alerts, triage rules, sample 483 observations) to
+ * every browser, and each function wrapped its backend call in a try/catch that
+ * silently substituted that fixture on any failure.
  *
- * The mocks intentionally produce deterministic,
- * observation-aware data so demos feel responsive
- * without being random.
+ * Two problems with that. First, it put AI business logic and GxP domain
+ * content in client code. Second — and worse in a regulated tool — the CLIENT
+ * decided when an answer was real: a backend outage produced confident-looking
+ * compliance content with no server-side record that anything had degraded.
+ *
+ * All of it now lives in the AI service (app/fallbacks/). Each backend route
+ * degrades deterministically on its own and stamps `source` so the UI can badge
+ * a non-live answer. This file no longer decides anything: it calls, types the
+ * result, and lets errors reach the caller's existing error state.
+ *
+ * Function signatures and return shapes are unchanged, so no calling surface
+ * had to move.
  */
 
-import {
-  mockRcaSuggestions,
-  mockCapaPrefill,
-  mockResponseDraft,
-  mockDocumentReview,
-  mockRegulatoryIntelligence,
-  buildRegulatoryUpdates,
-  mockDeviationIntelligence,
-  mockDeviationRcaAnalysis,
-  mockDriftDetection,
-  mockFindingTriage,
-  mockApprovalBrief,
-  mockReadinessGuidance,
-  mockFda483Extraction,
-} from "./mockData";
 import {
   scanStageDocument,
   fetchRegulatoryIntelligence,
@@ -40,75 +35,19 @@ import {
   fetchFindingTriage,
   fetchApprovalBrief,
   fetchReadinessGuidance,
+  fetchReworkTasks,
   scanFda483Document,
-  selectAiToken,
 } from "../aiBackend";
-import { store } from "@/store";
 import type { DriftAlert } from "@/types/agi";
-
-/**
- * Best-effort read of the signed-in user's AI backend access token from the
- * Redux store (client-side). Attached to every real backend call so the
- * now auth-gated AGI endpoints authenticate as the current user. Falls back to
- * "anonymous" — dev backends accept it; strict/prod backends reply 401, and the
- * caller's try/catch then degrades that surface to the deterministic mock.
- * Never throws (safe during SSR / before the store hydrates).
- */
-function currentAiToken(): string {
-  try {
-    return selectAiToken(store.getState());
-  } catch {
-    return "anonymous";
-  }
-}
 import type { InvestigationRCAMethod } from "@/constants/rcaMethods";
 
 /**
- * Per-feature mock switches. A feature serves real backend data when its flag
- * is `false`. All features (A–K, M) are wired to the FastAPI backend (see
- * src/lib/aiBackend.ts + the matching routers); every flag below is `false`
- * (real). The deterministic mocks remain only as the crash-safety fallback.
- *
- * Robustness contract: each real branch falls back to the deterministic mock
- * if the backend call throws, so an advisory AGI surface never crashes its
- * page — it degrades to the stable demo data and logs a warning. (The mock's
- * `source: "mock"` badge then tells you the data is not live.)
+ * Provenance of an AI result, as reported by the backend.
+ *   "backend"  → a live model call produced it.
+ *   "fallback" → the backend's deterministic result; its model call failed.
+ * Pass straight to <AIBadge source={…}> — it greys out anything non-live.
  */
-export const AI_MOCK = {
-  rcaSuggestions: false, // Feature A — POST /api/v1/rca-suggestions/generate
-  capaPrefill: false, // Feature B — POST /api/v1/capa-prefill/generate
-  responseDraft: false, // Feature C — POST /api/v1/response-draft/generate
-  documentReview: false, // Feature D — POST /api/v1/document-review/scan
-  regulatoryIntelligence: false, // Feature E — GET  /api/v1/regulatory-intelligence/scan
-  deviationIntelligence: false, // Feature F — POST /api/v1/deviation-intelligence/analyze
-  deviationRca: false, // Feature N — POST /api/v1/deviation-rca/analyze (per-deviation RCA assist)
-  driftDetection: false, // Feature H — GET  /api/v1/drift-detection/scan
-  findingTriage: false, // Feature I — POST /api/v1/finding-triage/classify
-  approvalBrief: false, // Feature J — POST /api/v1/capa-approval-brief/generate
-  readinessGuidance: false, // Feature K — POST /api/v1/capa-readiness-guidance/generate
-  fda483Extraction: false, // Feature M — POST /api/v1/fda483-extraction/scan (real gpt-4o verbatim extraction; digital PDFs only, scanned→empty+note; mock fallback on hard error)
-} as const;
-
-/**
- * @deprecated Legacy global switch. Retained only because external docs/tests
- * still reference it; new code reads the per-feature flags in {@link AI_MOCK}.
- * Kept `true` so any straggler still reading it stays safely mocked.
- */
-export const MOCK_AI_RESPONSES = true;
-
-function logMockUsage(featureName: string) {
-  if (process.env.NODE_ENV !== "production") {
-    console.warn(
-      `[mock-ai] ${featureName} served from mock. ` +
-        `Set MOCK_AI_RESPONSES=false to use real backend.`,
-    );
-  }
-}
-
-/** Small latency shim so the demo's loading states are actually visible. */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+export type AiSource = "backend" | "fallback";
 
 /* ── Feature A — RCA suggestions (method-shaped) ─────────────────── */
 
@@ -118,6 +57,9 @@ export type RcaMethod = InvestigationRCAMethod;
 /** 5 Why: 5 progressive Why answers leading to root cause. */
 export interface FiveWhySuggestion {
   method: "5 Why";
+  /** Provenance — see {@link AiSource}. Stamped per item because this feature's
+   *  response is a bare list with no envelope to carry it. */
+  source: AiSource;
   whys: [string, string, string, string, string]; // exactly 5 entries
   rootCause: string;
   confidence: number;
@@ -127,6 +69,8 @@ export interface FiveWhySuggestion {
 /** Fishbone: 6 category candidates + root cause. */
 export interface FishboneSuggestion {
   method: "Fishbone";
+  /** Provenance — see {@link AiSource}. */
+  source: AiSource;
   categories: {
     people: string;
     process: string;
@@ -143,6 +87,8 @@ export interface FishboneSuggestion {
 /** Fault Tree + Barrier Analysis: freeform root cause only. */
 export interface FreeformSuggestion {
   method: "Fault Tree" | "Barrier Analysis";
+  /** Provenance — see {@link AiSource}. */
+  source: AiSource;
   rootCause: string;
   confidence: number;
   supportingFindings: Array<{ ref: string; similarity: number }>;
@@ -159,27 +105,12 @@ export async function getRcaSuggestions(
   observationSeverity: string,
   siteContext: string,
 ): Promise<RcaSuggestion[]> {
-  if (AI_MOCK.rcaSuggestions) {
-    logMockUsage("getRcaSuggestions");
-    // Modest latency so the LOADING panel state is demoable.
-    await delay(750);
-    return mockRcaSuggestions(method, observationText);
-  }
-  try {
-    return await fetchRcaSuggestions(
-      method,
-      observationText,
-      observationSeverity,
-      siteContext,
-      currentAiToken(),
-    );
-  } catch (err) {
-    console.error(
-      "[ai] getRcaSuggestions: backend failed, falling back to mock.",
-      err,
-    );
-    return mockRcaSuggestions(method, observationText);
-  }
+  return fetchRcaSuggestions(
+    method,
+    observationText,
+    observationSeverity,
+    siteContext,
+  );
 }
 
 /* ── Feature B — CAPA pre-fill ───────────────────────────────────── */
@@ -190,6 +121,7 @@ export interface CAPAPrefill {
   suggestedOwnerHint: string;
   suggestedDueDate: string; // ISO date
   reasoning: string;
+  source: AiSource;
 }
 
 export async function getCapaPrefill(
@@ -197,25 +129,7 @@ export async function getCapaPrefill(
   rcaRootCause: string,
   observationSeverity: string,
 ): Promise<CAPAPrefill> {
-  if (AI_MOCK.capaPrefill) {
-    logMockUsage("getCapaPrefill");
-    await delay(600);
-    return mockCapaPrefill(observationText, rcaRootCause, observationSeverity);
-  }
-  try {
-    return await fetchCapaPrefill(
-      observationText,
-      rcaRootCause,
-      observationSeverity,
-      currentAiToken(),
-    );
-  } catch (err) {
-    console.error(
-      "[ai] getCapaPrefill: backend failed, falling back to mock.",
-      err,
-    );
-    return mockCapaPrefill(observationText, rcaRootCause, observationSeverity);
-  }
+  return fetchCapaPrefill(observationText, rcaRootCause, observationSeverity);
 }
 
 /* ── Feature C — Response draft ──────────────────────────────────── */
@@ -241,24 +155,16 @@ export interface ResponseDraftEvent {
   observations: ResponseDraftObservation[];
 }
 
+export interface ResponseDraftResult {
+  draft: string;
+  characterCount: number;
+  source: AiSource;
+}
+
 export async function getResponseDraft(
   event: ResponseDraftEvent,
-): Promise<{ draft: string; characterCount: number }> {
-  if (AI_MOCK.responseDraft) {
-    logMockUsage("getResponseDraft");
-    // Artificial 1.5s delay mirrors real LLM latency (~1-3s).
-    await delay(1500);
-    return mockResponseDraft(event);
-  }
-  try {
-    return await fetchResponseDraft(event, currentAiToken());
-  } catch (err) {
-    console.error(
-      "[ai] getResponseDraft: backend failed, falling back to mock.",
-      err,
-    );
-    return mockResponseDraft(event);
-  }
+): Promise<ResponseDraftResult> {
+  return fetchResponseDraft(event);
 }
 
 /* ── Feature D — CSV validation Document Review ──────────────────── */
@@ -301,8 +207,8 @@ export interface DocumentReviewResult {
    *  type, parse error). `findings` is then empty because the rubric scan never
    *  ran — this is NOT a clean pass, and the UI must not render it as one. */
   note?: string;
-  /** Provenance so the UI can badge mock vs real-backend results. */
-  source: "mock" | "backend";
+  /** Provenance so the UI can badge a non-live result. */
+  source: AiSource;
 }
 
 export interface DocumentReviewInput {
@@ -313,9 +219,7 @@ export interface DocumentReviewInput {
   fileType?: string;
   fileSize?: number;
   /**
-   * The freshly-uploaded File. Required for the real backend (it extracts
-   * text server-side); the mock ignores the bytes and derives findings
-   * deterministically from the filename + stage.
+   * The freshly-uploaded File. The backend extracts its text server-side.
    */
   file?: File | null;
   /**
@@ -324,8 +228,6 @@ export interface DocumentReviewInput {
    * upload itself) to pull the bytes back down from the download route.
    */
   documentId?: string | null;
-  /** AI access token for the real backend; ignored by the mock. */
-  token?: string | null;
 }
 
 function mapBackendSeverity(s: string): DocumentReviewSeverity {
@@ -333,6 +235,11 @@ function mapBackendSeverity(s: string): DocumentReviewSeverity {
   if (v === "high" || v === "critical" || v === "major") return "high";
   if (v === "low" || v === "minor" || v === "info") return "low";
   return "medium";
+}
+
+/** Normalise the backend's `source` field; anything unrecognised is not live. */
+function readSource(value: unknown): AiSource {
+  return value === "backend" ? "backend" : "fallback";
 }
 
 /**
@@ -368,17 +275,6 @@ async function fetchStoredStageDocument(
 export async function getDocumentReview(
   input: DocumentReviewInput,
 ): Promise<DocumentReviewResult> {
-  if (AI_MOCK.documentReview) {
-    logMockUsage("getDocumentReview");
-    // ~1.1s shim so the "Scanning…" state is visible. The *reported*
-    // scan duration in the result is a separate, larger number for copy.
-    await delay(1100);
-    return mockDocumentReview(input);
-  }
-
-  // Real backend: extract text server-side + score against the rubric.
-  // Identical return shape to the mock so flipping MOCK_AI_RESPONSES is
-  // the only change required.
   // Bytes come from the freshly-picked File on the upload path; a scan started
   // from the stored document list has no File and is re-fetched by id.
   const file =
@@ -393,15 +289,12 @@ export async function getDocumentReview(
   if (!file) {
     throw new Error("Document Review requires the uploaded file to scan.");
   }
-  const dto = await scanStageDocument(
-    {
-      file,
-      stageKey: input.stageKey,
-      stageLabel: input.stageLabel,
-      systemName: input.systemName,
-    },
-    input.token ?? "",
-  );
+  const dto = await scanStageDocument({
+    file,
+    stageKey: input.stageKey,
+    stageLabel: input.stageLabel,
+    systemName: input.systemName,
+  });
   return {
     stageKey: dto.stage_key ?? input.stageKey,
     fileName: dto.file_name ?? input.fileName,
@@ -410,7 +303,7 @@ export async function getDocumentReview(
       typeof dto.scan_duration_seconds === "number" ? dto.scan_duration_seconds : 0,
     rubricVersion: dto.rubric_version ?? "unknown",
     note: dto.note ?? undefined,
-    source: "backend",
+    source: readSource(dto.source),
     findings: (dto.findings ?? []).map((f, i) => ({
       id: `${input.stageKey}-be-${i}`,
       severity: mapBackendSeverity(f.severity),
@@ -426,12 +319,7 @@ export async function getDocumentReview(
  * FDA/EMA guidance monitoring + change alerts. The agent watches external
  * regulatory publications, flags NEW requirements, and SUGGESTS compliance
  * alignment — it never interprets requirements or makes determinations
- * (that stays with Regulatory Affairs; see the AGI policy CANNOT-DO list).
- *
- * To wire a real backend later: set MOCK_AI_RESPONSES=false and implement
- * the fetch (e.g. an RSS/agency-feed scraper + LLM summariser) inside
- * getRegulatoryIntelligence. The return shape MUST stay identical so the
- * module page + dashboard alert keep working unchanged. */
+ * (that stays with Regulatory Affairs; see the AGI policy CANNOT-DO list). */
 
 export type RegulatorySource = "FDA" | "EMA" | "ICH" | "MHRA" | "WHO";
 export type RegulatoryImpact = "high" | "medium" | "low";
@@ -466,46 +354,28 @@ export interface RegulatoryIntelligenceResult {
   updates: RegulatoryGuidanceUpdate[];
   /** ISO timestamp of when the scan completed. */
   scannedAt: string;
-  /** Provenance so the UI can badge mock vs real-backend results. */
-  source: "mock" | "backend";
+  /** Provenance so the UI can badge a non-live result. */
+  source: AiSource;
 }
 
 export async function getRegulatoryIntelligence(): Promise<RegulatoryIntelligenceResult> {
-  if (AI_MOCK.regulatoryIntelligence) {
-    logMockUsage("getRegulatoryIntelligence");
-    // ~1.4s shim so the "Scanning agency feeds…" state is visible.
-    await delay(1400);
-    return mockRegulatoryIntelligence();
-  }
-  try {
-    return await fetchRegulatoryIntelligence(currentAiToken());
-  } catch (err) {
-    console.error(
-      "[ai] getRegulatoryIntelligence: backend failed, falling back to mock.",
-      err,
-    );
-    return mockRegulatoryIntelligence();
-  }
+  return fetchRegulatoryIntelligence();
 }
 
-/**
- * Synchronous, deterministic snapshot for surfaces that cannot await — the
- * Dashboard AGI Insights computes its alert counts inline during render.
- * Returns the same underlying data as getRegulatoryIntelligence(), minus the
- * latency shim and the timestamp.
+/* REMOVED — regulatoryAlertSummary().
+ *
+ * It returned counts over a hardcoded six-item guidance list, synchronously, and
+ * the Dashboard AGI rail rendered them as "N new FDA/EMA regulatory requirements
+ * flagged" — presenting a fixture as the result of a live agency scan, for every
+ * tenant, forever.
+ *
+ * driftAlertSummary() was removed earlier for exactly this defect; this is the
+ * twin the note in that comment pointed at. A real regulatory scan is
+ * asynchronous (it reads agency guidance through an LLM), so it cannot be served
+ * from a sync helper — use getRegulatoryIntelligence() from an effect, as the
+ * Regulatory Intelligence page does. Do not reintroduce a sync fixture-backed
+ * summary here.
  */
-export function regulatoryAlertSummary(): {
-  total: number;
-  newRequirements: number;
-  highImpact: number;
-} {
-  const updates = buildRegulatoryUpdates();
-  return {
-    total: updates.length,
-    newRequirements: updates.filter((u) => u.isNewRequirement).length,
-    highImpact: updates.filter((u) => u.impact === "high").length,
-  };
-}
 
 /* ── Feature F — Deviation Intelligence ──────────────────────────────
  * Analyses the tenant's OWN deviation history and clusters recurring
@@ -514,11 +384,7 @@ export function regulatoryAlertSummary(): {
  * causes, flag high-frequency areas. CANNOT DO: close deviations, approve
  * investigations, or make risk decisions (those stay with QA — see the AGI
  * policy). Unlike the other agents, this one takes the live deviation list
- * as input rather than producing external data.
- *
- * To wire a real backend later: set MOCK_AI_RESPONSES=false and implement
- * the clustering (e.g. embeddings + density clustering + an LLM root-cause
- * summariser). The return shape MUST stay identical. */
+ * as input rather than producing external data. */
 
 export interface DeviationClusterInput {
   id: string;
@@ -526,7 +392,7 @@ export interface DeviationClusterInput {
   title: string;
   category: string;
   area: string;
-  /** Accepts either casing ("Critical"/"critical"); the mock normalises. */
+  /** Accepts either casing ("Critical"/"critical"); the backend normalises. */
   severity: string;
   status: string;
 }
@@ -570,27 +436,13 @@ export interface DeviationIntelligenceResult {
   /** Number of recurring-pattern clusters surfaced. */
   patternCount: number;
   scannedAt: string;
-  source: "mock" | "backend";
+  source: AiSource;
 }
 
 export async function getDeviationIntelligence(
   deviations: DeviationClusterInput[],
 ): Promise<DeviationIntelligenceResult> {
-  if (AI_MOCK.deviationIntelligence) {
-    logMockUsage("getDeviationIntelligence");
-    // ~0.9s shim so the "Analysing deviation history…" state is visible.
-    await delay(900);
-    return mockDeviationIntelligence(deviations);
-  }
-  try {
-    return await fetchDeviationClusters(deviations, currentAiToken());
-  } catch (err) {
-    console.error(
-      "[ai] getDeviationIntelligence: backend failed, falling back to mock.",
-      err,
-    );
-    return mockDeviationIntelligence(deviations);
-  }
+  return fetchDeviationClusters(deviations);
 }
 
 /* ── Feature N — Deviation RCA Intelligence (per deviation) ──────────
@@ -681,26 +533,13 @@ export interface DeviationRcaAnalysis {
   method: RcaMethod;
   analyzedHistoryCount: number;
   scannedAt: string;
-  source: "mock" | "backend";
+  source: AiSource;
 }
 
 export async function getDeviationRcaAnalysis(
   input: DeviationRcaInput,
 ): Promise<DeviationRcaAnalysis> {
-  if (AI_MOCK.deviationRca) {
-    logMockUsage("getDeviationRcaAnalysis");
-    await delay(900);
-    return mockDeviationRcaAnalysis(input);
-  }
-  try {
-    return await fetchDeviationRcaAnalysis(input, currentAiToken());
-  } catch (err) {
-    console.error(
-      "[ai] getDeviationRcaAnalysis: backend failed, falling back to mock.",
-      err,
-    );
-    return mockDeviationRcaAnalysis(input);
-  }
+  return fetchDeviationRcaAnalysis(input);
 }
 
 /* ── Feature H — Drift Detection ─────────────────────────────────────
@@ -709,54 +548,35 @@ export async function getDeviationRcaAnalysis(
  * detect access changes, flag audit-trail coverage drops, alert on system
  * changes. CANNOT DO: change configurations, restore access, or make IT
  * security decisions (those stay human — see the AGI policy). Alerts are
- * read-only signals; a human investigates and acts.
- *
- * Reuses the existing DriftAlert shape (@/types/agi). To wire a real backend:
- * set MOCK_AI_RESPONSES=false and stream alerts from a config/access/audit
- * monitor (e.g. diff validated baselines, watch IAM + audit-trail flags) —
- * the return shape MUST stay identical so the UI needs no changes. */
+ * read-only signals; a human investigates and acts. */
 
 export interface DriftDetectionResult {
   alerts: DriftAlert[];
   scannedAt: string;
-  source: "mock" | "backend";
+  /** Set when the scan could not run. `alerts` is then empty because nothing
+   *  was assessed — this is NOT a clean result, and the UI must not render it
+   *  as one. A drift alert is a claim about the tenant's own validated systems,
+   *  so the backend reports an outage rather than substituting a fixture. */
+  note?: string;
+  source: AiSource;
 }
 
 export async function getDriftDetection(): Promise<DriftDetectionResult> {
-  if (AI_MOCK.driftDetection) {
-    logMockUsage("getDriftDetection");
-    // ~1.0s shim so the "Scanning systems for drift…" state is visible.
-    await delay(1000);
-    return mockDriftDetection();
-  }
-  try {
-    return await fetchDriftDetection(currentAiToken());
-  } catch (err) {
-    console.error(
-      "[ai] getDriftDetection: backend failed, falling back to mock.",
-      err,
-    );
-    return mockDriftDetection();
-  }
+  return fetchDriftDetection();
 }
 
 /* REMOVED — driftAlertSummary().
  *
- * It counted the STATIC DRIFT_ALERTS fixture and returned it synchronously,
- * ignoring AI_MOCK.driftDetection and never calling the backend. Its only
- * caller (the Dashboard AGI Insights rail) therefore told every tenant
- * "N critical system drift alerts detected" from a hardcoded array — a
- * fabricated claim about their validated systems.
+ * It counted a STATIC DRIFT_ALERTS fixture and returned it synchronously,
+ * never calling the backend. Its only caller (the Dashboard AGI Insights rail)
+ * therefore told every tenant "N critical system drift alerts detected" from a
+ * hardcoded array — a fabricated claim about their validated systems.
  *
  * The Dashboard now derives that insight from the tenant's real system records
  * via isValidationDrift (@/lib/kpi). Real drift analysis is asynchronous by
  * nature (it reads the audit trail through an LLM), so it cannot be served from
  * a sync helper — use getDriftDetection() from an effect, as the CSV/CSA page
  * does. Do not reintroduce a sync fixture-backed summary here.
- *
- * NOTE: regulatoryAlertSummary() above has the SAME defect (static fixture,
- * rendered on the Dashboard as if live). It belongs to Feature E and was left
- * untouched by this Drift audit — see the report.
  */
 
 /* ── Feature I — Finding Triage (Gap Assessment) ─────────────────────
@@ -770,12 +590,7 @@ export async function getDriftDetection(): Promise<DriftDetectionResult> {
  * suggest a CAPA title. CANNOT DO: create the finding, lock a classification,
  * or raise the CAPA — every field is a suggestion the human reviews and edits
  * before saving (severity/area/framework lock only AFTER human-confirmed
- * create, so the suggestion is pre-commitment by design).
- *
- * Real backend: POST /api/v1/finding-triage/classify (LLM picks framework +
- * clause from the tenant's active frameworks; Python coerces the enums). On any
- * backend error this falls back to the deterministic mock so the modal never
- * breaks — the `source: "mock"` badge then signals the data is not live. */
+ * create, so the suggestion is pre-commitment by design). */
 
 export type FindingTriageSeverity = "Critical" | "High" | "Low";
 
@@ -797,7 +612,7 @@ export interface FindingTriageResult {
   suggestedCapaTitle: string;
   /** 0–100 heuristic confidence. */
   confidence: number;
-  source: "mock" | "backend";
+  source: AiSource;
 }
 
 export async function classifyFinding(
@@ -806,27 +621,7 @@ export async function classifyFinding(
   purpose: string,
   activeFrameworks: string[],
 ): Promise<FindingTriageResult> {
-  if (AI_MOCK.findingTriage) {
-    logMockUsage("classifyFinding");
-    // ~0.9s shim so the "Analysing…" state is visible.
-    await delay(900);
-    return mockFindingTriage(requirement, area, purpose, activeFrameworks);
-  }
-  try {
-    return await fetchFindingTriage(
-      requirement,
-      area,
-      purpose,
-      activeFrameworks,
-      currentAiToken(),
-    );
-  } catch (err) {
-    console.error(
-      "[ai] classifyFinding: backend failed, falling back to mock.",
-      err,
-    );
-    return mockFindingTriage(requirement, area, purpose, activeFrameworks);
-  }
+  return fetchFindingTriage(requirement, area, purpose, activeFrameworks);
 }
 
 /* ── Feature J — CAPA Approval Brief (reviewer assist) ────────────────
@@ -837,12 +632,7 @@ export async function classifyFinding(
  * CAN DO: summarise the CAPA, surface strengths, flag what to verify. CANNOT
  * DO: approve/reject, recommend a verdict, change status, or replace the QA
  * Head sign-off (see the AGI policy). Read-only support — every output is
- * advisory and the e-signed decision stays with the human.
- *
- * Real backend: POST /api/v1/capa-approval-brief/generate (LLM writes the
- * prose; Python appends the exact gate facts — unresolved concerns, missing
- * approvals — so those are never hallucinated). On any backend error this falls
- * back to the deterministic mock, badged `source: "mock"`. */
+ * advisory and the e-signed decision stays with the human. */
 
 export interface ApprovalBriefInput {
   reference: string;
@@ -870,27 +660,13 @@ export interface ApprovalBriefResult {
   watchOuts: string[];
   /** ISO timestamp of when the brief was generated. */
   generatedAt: string;
-  source: "mock" | "backend";
+  source: AiSource;
 }
 
 export async function getApprovalBrief(
   input: ApprovalBriefInput,
 ): Promise<ApprovalBriefResult> {
-  if (AI_MOCK.approvalBrief) {
-    logMockUsage("getApprovalBrief");
-    // ~0.9s shim so the "Preparing brief…" state is visible.
-    await delay(900);
-    return mockApprovalBrief(input);
-  }
-  try {
-    return await fetchApprovalBrief(input, currentAiToken());
-  } catch (err) {
-    console.error(
-      "[ai] getApprovalBrief: backend failed, falling back to mock.",
-      err,
-    );
-    return mockApprovalBrief(input);
-  }
+  return fetchApprovalBrief(input);
 }
 
 /* ── Feature K — CAPA Readiness Pre-flight Copilot ────────────────────
@@ -904,10 +680,9 @@ export async function getApprovalBrief(
  * Only REAL user actions flip readiness flags, and submitForReview re-enforces
  * getCAPAReadiness() server-side — the copilot can coach but never bypass it.
  *
- * Grounded by design: the unmet list is COMPUTED and sent in, so the LLM writes
- * prose only for the exact keys that are genuinely unmet — it can't invent or
- * omit a blocker. On any backend error this falls back to the deterministic
- * mock, badged `source: "mock"`. */
+ * Grounded by design: the unmet list is COMPUTED and sent in, so the model
+ * writes prose only for the exact keys that are genuinely unmet — it can't
+ * invent or omit a blocker. */
 
 export interface ReadinessUnmetCondition {
   /** ReadinessKey: rca | alignment | diGate | actions | evidence | criteria. */
@@ -941,27 +716,13 @@ export interface ReadinessGuidanceResult {
   priorityOrder: string[];
   items: ReadinessGuidanceItem[];
   generatedAt: string;
-  source: "mock" | "backend";
+  source: AiSource;
 }
 
 export async function getReadinessGuidance(
   input: ReadinessGuidanceInput,
 ): Promise<ReadinessGuidanceResult> {
-  if (AI_MOCK.readinessGuidance) {
-    logMockUsage("getReadinessGuidance");
-    // ~0.8s shim so the "Reviewing your CAPA…" state is visible.
-    await delay(800);
-    return mockReadinessGuidance(input);
-  }
-  try {
-    return await fetchReadinessGuidance(input, currentAiToken());
-  } catch (err) {
-    console.error(
-      "[ai] getReadinessGuidance: backend failed, falling back to mock.",
-      err,
-    );
-    return mockReadinessGuidance(input);
-  }
+  return fetchReadinessGuidance(input);
 }
 
 /* ── Feature M — FDA 483 PDF Auto-Extraction ─────────────────────────
@@ -974,10 +735,10 @@ export async function getReadinessGuidance(
  * severity, or raise a CAPA — every field is a suggestion the human reviews and
  * edits before the human-confirmed bulk create (which is Part 11 audited).
  *
- * Real backend: POST /api/v1/fda483-extraction/scan (pypdf text → gpt-4o). On
- * any backend error this falls back to the deterministic mock, badged
- * `source: "mock"`. Scanned/image PDFs yield no text in Phase 1 → empty list +
- * a `note` (OCR is a Phase-2 addition). */
+ * Scanned/image PDFs yield no text in Phase 1 → empty list + a `note` (OCR is a
+ * Phase-2 addition). An extraction that could not run returns the same shape:
+ * the backend never substitutes sample observations, because they would be
+ * attributed to the user's own Form 483 and are one click from a Part 11 record. */
 
 /** Severity the extraction UI + CreateObservationSchema accept. */
 export type ExtractedSeverity = "Critical" | "High" | "Medium" | "Low";
@@ -1000,21 +761,19 @@ export interface Fda483ExtractionResult {
   observations: ExtractedObservation[];
   fileName: string;
   pageCount: number;
-  /** Non-null when nothing extractable was found (e.g. a scanned PDF). */
+  /** Non-null when nothing extractable was found (scanned PDF, or the
+   *  extraction service was unavailable). */
   note: string | null;
   extractedAt: string;
-  source: "mock" | "backend";
+  source: AiSource;
 }
 
 export interface Fda483ExtractionInput {
-  /** The uploaded PDF. Required for the real backend (it extracts text); the
-   *  mock ignores the bytes and returns deterministic sample observations. */
+  /** The uploaded PDF. The backend extracts its text server-side. */
   file?: File | null;
   fileName: string;
   inspectionReference: string;
   facility: string;
-  /** AI access token for the real backend; ignored by the mock. */
-  token?: string | null;
 }
 
 function normalizeExtractedSeverity(s: string | null | undefined): ExtractedSeverity {
@@ -1028,51 +787,75 @@ function normalizeExtractedSeverity(s: string | null | undefined): ExtractedSeve
 export async function getFda483Extraction(
   input: Fda483ExtractionInput,
 ): Promise<Fda483ExtractionResult> {
-  if (AI_MOCK.fda483Extraction) {
-    logMockUsage("getFda483Extraction");
-    // ~1.6s shim so the "Extracting observations…" state is visible.
-    await delay(1600);
-    return mockFda483Extraction(input.fileName);
-  }
-
-  // Real backend: extract text server-side + structure with the LLM. Identical
-  // return shape to the mock so flipping AI_MOCK.fda483Extraction is the only
-  // change required.
   if (!input.file) {
     throw new Error("FDA 483 extraction requires the uploaded file to scan.");
   }
-  try {
-    const dto = await scanFda483Document(
-      {
-        file: input.file,
-        inspectionReference: input.inspectionReference,
-        facility: input.facility,
-      },
-      input.token ?? "",
-    );
-    return {
-      fileName: dto.file_name ?? input.fileName,
-      pageCount: typeof dto.page_count === "number" ? dto.page_count : 0,
-      note: dto.note ?? null,
-      extractedAt: dto.extracted_at ?? new Date().toISOString(),
-      source: "backend",
-      observations: (dto.observations ?? []).map((o, i) => ({
-        number: typeof o.number === "number" && o.number > 0 ? o.number : i + 1,
-        text: o.text ?? "",
-        regulation: o.regulation ?? "",
-        area: o.area ?? "",
-        severity: normalizeExtractedSeverity(o.severity),
-        sourcePage:
-          typeof o.source_page === "number" && o.source_page > 0 ? o.source_page : 0,
-        confidence:
-          typeof o.confidence === "number" ? Math.max(0, Math.min(100, o.confidence)) : 0,
-      })),
-    };
-  } catch (err) {
-    console.error(
-      "[ai] getFda483Extraction: backend failed, falling back to mock.",
-      err,
-    );
-    return mockFda483Extraction(input.fileName);
-  }
+  const dto = await scanFda483Document({
+    file: input.file,
+    inspectionReference: input.inspectionReference,
+    facility: input.facility,
+  });
+  return {
+    fileName: dto.file_name ?? input.fileName,
+    pageCount: typeof dto.page_count === "number" ? dto.page_count : 0,
+    note: dto.note ?? null,
+    extractedAt: dto.extracted_at ?? new Date().toISOString(),
+    source: readSource(dto.source),
+    observations: (dto.observations ?? []).map((o, i) => ({
+      number: typeof o.number === "number" && o.number > 0 ? o.number : i + 1,
+      text: o.text ?? "",
+      regulation: o.regulation ?? "",
+      area: o.area ?? "",
+      severity: normalizeExtractedSeverity(o.severity),
+      sourcePage:
+        typeof o.source_page === "number" && o.source_page > 0 ? o.source_page : 0,
+      confidence:
+        typeof o.confidence === "number" ? Math.max(0, Math.min(100, o.confidence)) : 0,
+    })),
+  };
+}
+
+/* ── Feature O — Rework Task Suggestions (CSV/CSA validation) ─────────
+ * QA rejects a validation stage document; this turns their free-text feedback
+ * (plus any Document Review findings already on the stage) into discrete,
+ * assignable rework tasks, each traced back to the rubric item it came from.
+ *
+ * CAN DO: propose one instruction per issue and name its rubric trace. CANNOT
+ * DO: create, assign, or close a task — the Validation Lead edits every
+ * suggestion and assigns it explicitly.
+ *
+ * This used to run in the browser: `src/lib/ai/reworkTasks.ts` was a 10-entry
+ * keyword regex table sitting behind a Sparkles button labelled "Suggest tasks
+ * (AI)" with a spinner state. It is now a real model call, and that keyword
+ * table is the backend's fallback (app/fallbacks/rework.py). */
+
+/** One Document Review finding the suggester can lift directly into a task. */
+export interface ReworkReviewFinding {
+  title: string;
+  rubricItem?: string;
+}
+
+export interface ReworkTasksInput {
+  rejectionReason: string;
+  stageLabel?: string;
+  systemName?: string;
+  findings?: ReworkReviewFinding[];
+}
+
+export interface ReworkTaskSuggestion {
+  /** The instruction shown to (and editable by) the Lead before assigning. */
+  message: string;
+  /** Rubric item / rejection point this task traces back to. */
+  findingRef?: string | null;
+}
+
+export interface ReworkTasksResult {
+  suggestions: ReworkTaskSuggestion[];
+  source: AiSource;
+}
+
+export async function getReworkTaskSuggestions(
+  input: ReworkTasksInput,
+): Promise<ReworkTasksResult> {
+  return fetchReworkTasks(input);
 }

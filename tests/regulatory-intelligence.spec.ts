@@ -13,8 +13,11 @@ import { test, expect } from "@playwright/test";
  *   3. "Mark reviewed" acknowledges an update.
  *   4. "Scan for updates" re-runs the scan (deterministic — same list).
  *
- * Data is the deterministic mock in src/lib/ai/mockData.ts (2 new
- * requirements, 3 high-impact, 6 updates total). Login: QA Head.
+ * Data comes from GET /api/v1/regulatory-intelligence/scan. With no
+ * OPENAI_API_KEY (or on a model error) the AI service serves its curated
+ * deterministic watchlist (app/fallbacks/intelligence.py: 2 new requirements,
+ * 3 high-impact, 6 updates total) — which is what these counts assert against.
+ * Login: QA Head. Requires the AI service running.
  */
 
 const QA_HEAD = { email: "qa@pharmaglimmora.com", password: "Demo@123" };

@@ -1,5 +1,34 @@
 # Pharma Glimmora — AI / API Integration Re-Implementation Guide
 
+> ## ⚠️ SUPERSEDED IN PART — read this first
+>
+> The AI architecture was reworked so that **all AI execution happens in the
+> backend** and **the browser never holds an AI credential**. Sections of this
+> guide that describe client-side token plumbing are historical. What is true now:
+>
+> | Then | Now |
+> |---|---|
+> | Browser called `aiSignup`/`aiLogin` and cached `access_token` in Redux → `localStorage` | `provisionAiAccount` **server action** → `src/lib/aiAccount.server.ts`. No token returns to the browser. |
+> | Every client sent `auth: <aiAccessToken>` (usually the literal `"anonymous"`) | `app/api/ai-proxy/[...path]` mints a short-lived HS256 JWT per request from the NextAuth session (`src/lib/aiToken.server.ts`) and attaches it. Client-supplied `auth` headers are dropped. |
+> | `NEXT_PUBLIC_AI_API_URL` could point the browser straight at the AI service | Removed. In the browser `AI_API_BASE` is always `/api/ai-proxy`. |
+> | `src/lib/ai/mockData.ts` (~1,750 lines) decided client-side when to substitute fixture data | Deleted. Each backend route degrades on its own (`app/fallbacks/`) and stamps `source: "backend" \| "fallback"`. |
+> | Chatbot routing (small talk / live data / grounded) ran in `AIChatbot.tsx` | `POST /api/ai/assistant` (FastAPI `app/assistant_service.py`), reached via the Next BFF route `app/api/ai/assistant/route.ts`, which supplies the tenant snapshot. |
+> | `regulatoryAssistant.ts` held the prompt builder + clause knowledge base | `POST /api/ai/regulatory-assistant` (FastAPI `app/regulatory_assistant_service.py`). |
+>
+> | Chatbot routing (small talk / live data / grounded) ran in `AIChatbot.tsx` | `POST /api/ai/assistant` — see row above. |
+> | `reworkTasks.ts` keyword table behind a "Suggest tasks (AI)" button | `POST /api/v1/rework-tasks/suggest` (FastAPI `rework_tasks_router.py`). |
+> | Dashboard "AI … Insights" panels (client rule engine) | Renamed to "… Signals", de-branded, decoupled from AGI policy. Not AI. |
+> | `support-triage/classify` was the one OPEN endpoint | Authenticated. **No AI endpoint is public.** |
+> | Backend accepted a missing token as `anonymous` outside production | Removed entirely. 401 in every environment. |
+>
+> **New required env var:** `AI_JWT_SECRET` on the web service, equal to the AI
+> service's `SECRET_KEY`. Never `NEXT_PUBLIC_`. Without it the proxy, the
+> assistant BFF and `suggestTriage` all return 503 rather than forwarding an
+> unidentified request.
+>
+> Canonical flow: `Next.js UI → Next.js route (session + context) → FastAPI → LLM / Vector DB → back`.
+
+
 > Single-source rebuild doc. Hand this to one engineer. After running through it once, the app talks to the deployed FastAPI AI backend end-to-end (auth, chat, voice, CAPA lifecycle, audit, users) with **zero console errors** in dev. No other doc is required.
 >
 > Scope: this is a frontend (Next.js 16 App Router + React 19 + Redux Toolkit) integration. The backend is already deployed and is **not** modified here.

@@ -6,6 +6,8 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveUserFk, type AuthSession } from "@/lib/auth";
+import { aiUpstreamBase } from "@/lib/aiAuth";
+import { mintAiToken, canMintAiToken } from "@/lib/aiToken.server";
 import { notify, notifyMany } from "@/lib/notify";
 import {
   generateReference,
@@ -337,29 +339,28 @@ export interface TriageSuggestion {
 
 type TicketCategory = (typeof TICKET_CATEGORIES)[number];
 
-/** Resolve the AI backend base URL — mirrors app/api/ai-proxy resolution. */
-function aiBackendBase(): string {
-  return (
-    process.env.BACKEND_URL ??
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/api$/, "") ??
-    "http://localhost:8000"
-  );
-}
-
 export async function suggestTriage(
   input: z.input<typeof TriageInputSchema>,
 ): Promise<ActionResult<TriageSuggestion>> {
-  await requireAuth();
+  const session = await requireAuth();
   const parsed = TriageInputSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Invalid input" };
   const { subject = "", description = "" } = parsed.data;
   if (!subject.trim() && !description.trim()) {
     return { success: false, error: "Nothing to analyse yet." };
   }
+  // Triage is now an authenticated AI endpoint like every other one. This call
+  // used to go out unauthenticated because the AI token lived in client Redux
+  // and a server action could not reach it; the server mints its own now.
+  const token = canMintAiToken() ? mintAiToken(session) : null;
+  if (!token) {
+    console.error("[action] suggestTriage: AI_JWT_SECRET is not configured.");
+    return { success: false, error: "Triage is not configured on this deployment." };
+  }
   try {
-    const res = await fetch(`${aiBackendBase()}/api/v1/support-triage/classify`, {
+    const res = await fetch(`${aiUpstreamBase()}/api/v1/support-triage/classify`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", auth: token },
       body: JSON.stringify({ subject, description }),
       // Triage must never hang the modal — bail fast and let the user pick.
       signal: AbortSignal.timeout(15_000),

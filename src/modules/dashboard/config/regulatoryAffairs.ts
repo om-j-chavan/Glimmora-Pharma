@@ -53,7 +53,7 @@ export const regulatoryAffairsDashboard: DashboardConfig = {
   ],
 
   ai: {
-    title: "AI Regulatory Summary",
+    title: "Regulatory Signals",
     streams: ["regulatory", "quality"],
     limit: 6,
   },

@@ -19,7 +19,6 @@ import { Sparkles, Copy, Check, ThumbsUp, ThumbsDown, AlertTriangle, ChevronDown
 import { Button } from "@/components/ui/Button";
 import { AIButton } from "@/components/ai";
 import { Modal } from "@/components/ui/Modal";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { aiSummarizeSend, AiChatError, type SummaryResponse } from "@/lib/aiChat";
 import { friendlyAiError } from "@/lib/friendlyError";
 
@@ -49,13 +48,8 @@ interface Props {
 }
 
 export function DocumentSummaryPanel({ content, title = "", recordId = "-", module = "-", className, buttonLabel = "Summarize" }: Props) {
-  const aiToken = useAppSelector((s) => {
-    const u = s.auth.user;
-    if (!u) return "anonymous";
-    if (u.aiAccessToken) return u.aiAccessToken;
-    const tenant = s.auth.tenants.find((t) => t.id === u.tenantId);
-    return tenant?.config?.users?.find((x) => x.id === u.id)?.aiAccessToken ?? "anonymous";
-  });
+  // No AI credential is read here: calls go to the same-origin proxy, which
+  // authenticates the session and attaches the upstream token server-side.
 
   const [open, setOpen] = useState(false);          // has a summary been requested?
   const [busy, setBusy] = useState(false);
@@ -73,7 +67,7 @@ export function DocumentSummaryPanel({ content, title = "", recordId = "-", modu
     setOpen(true);
     setVote(null);
     try {
-      const res = await aiSummarizeSend(content, { title, length: nextLength, lens: nextLens, recordId, module }, aiToken);
+      const res = await aiSummarizeSend(content, { title, length: nextLength, lens: nextLens, recordId, module });
       setResult(res);
     } catch (e) {
       console.error("[summary] failed", e);

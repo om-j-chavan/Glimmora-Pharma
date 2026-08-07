@@ -7,7 +7,7 @@ services:
     name: glimmora-pharma-web
     runtime: node
     plan: starter            # persistent disks require a paid instance (free tier has none)
-    branch: devAI
+    branch: main
     buildCommand: npm install && npx prisma generate && npm run build
     # `prisma db push` runs every boot (idempotent) so the schema on the
     # mounted disk is always in sync. Seed once manually via the Shell.
@@ -31,6 +31,11 @@ services:
       - key: NEXTAUTH_URL
         sync: false
       - key: BACKEND_URL
+        sync: false
+      # Must equal the AI backend's SECRET_KEY. The Next server mints the AI
+      # access token with it (src/lib/aiToken.server.ts); the browser never
+      # sees a credential. Deliberately not NEXT_PUBLIC_.
+      - key: AI_JWT_SECRET
         sync: false
       - key: GMAIL_USER
         sync: false

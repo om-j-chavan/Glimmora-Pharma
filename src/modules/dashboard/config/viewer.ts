@@ -47,7 +47,7 @@ export const viewerDashboard: DashboardConfig = {
   quickActions: [],
 
   ai: {
-    title: "AI Compliance Overview",
+    title: "Compliance Signals",
     streams: ["quality"],
     limit: 4,
   },

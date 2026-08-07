@@ -58,7 +58,7 @@ export const qcLabDirectorDashboard: DashboardConfig = {
   ],
 
   ai: {
-    title: "AI Laboratory Insights",
+    title: "Laboratory Signals",
     streams: ["laboratory", "quality"],
     limit: 5,
   },

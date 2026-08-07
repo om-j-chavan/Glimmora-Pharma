@@ -12,7 +12,6 @@ import { DataTable, type DataColumn } from "@/components/table/DataTable";
 import {
   capaListAll,
   capaListByCustomer,
-  selectAiToken,
   selectAiCustomerId,
 } from "@/lib/aiBackend";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -42,7 +41,6 @@ interface AiCapaRow {
 }
 
 export function AiCapaIndex() {
-  const token = useAppSelector(selectAiToken);
   const customerId = useAppSelector(selectAiCustomerId);
   const userRole = useAppSelector((s) => s.auth.user?.role ?? "");
   const isSuperAdmin = userRole === "super_admin";
@@ -55,18 +53,13 @@ export function AiCapaIndex() {
   const [search, setSearch] = useState("");
 
   const refresh = useCallback(async () => {
-    if (!token) {
-      setError("AI session is missing. Sign out and sign in again to refresh your token.");
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
       const res =
         scope === "all" && isSuperAdmin
-          ? await capaListAll(token)
-          : await capaListByCustomer(customerId ?? "", token);
+          ? await capaListAll()
+          : await capaListByCustomer(customerId ?? "");
       const list = (res && typeof res === "object" && "capas" in res && Array.isArray((res as { capas?: unknown }).capas))
         ? (res as { capas: AiCapaRow[] }).capas
         : [];
@@ -76,7 +69,7 @@ export function AiCapaIndex() {
     } finally {
       setLoading(false);
     }
-  }, [token, customerId, scope, isSuperAdmin]);
+  }, [customerId, scope, isSuperAdmin]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -98,16 +91,6 @@ export function AiCapaIndex() {
     recurring: rows.filter((r) => r.is_recurring).length,
     highRisk: rows.filter((r) => r.risk_score >= 0.75).length,
   };
-
-  if (!token) {
-    return (
-      <div className="p-6">
-        <p className="text-[13px]" style={{ color: "var(--danger)" }}>
-          AI session is missing. Sign out and sign in again to refresh your token.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <PageLayout

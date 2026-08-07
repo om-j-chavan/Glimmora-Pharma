@@ -43,7 +43,6 @@ import { displayUserName } from "@/lib/identity-display";
 import { getDocumentReview, type DocumentReviewResult, type DocumentReviewSeverity } from "@/lib/ai";
 import { AIButton } from "@/components/ai";
 import { StageReworkTasks } from "./StageReworkTasks";
-import { selectAiToken } from "@/lib/aiBackend";
 import { friendlyAiError } from "@/lib/friendlyError";
 
 /* ── Helpers ── */
@@ -384,7 +383,6 @@ export function ValidationPanel({
   // before QA sees it. State is keyed by document id; several docs can be
   // scanning at once (reviewingDocs is a set). reviewAcks records the
   // recorded reason when the lead chooses "Submit anyway".
-  const token = useAppSelector(selectAiToken);
   const [reviews, setReviews] = useState<Record<string, DocumentReviewResult>>({});
   const [reviewingDocs, setReviewingDocs] = useState<Set<string>>(new Set());
   const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({});
@@ -408,7 +406,6 @@ export function ValidationPanel({
         // Upload path passes the live File; a re-scan from the document list
         // has none, so the gateway re-fetches the bytes by StageDocument id.
         documentId: docId,
-        token,
       });
       setReviews((p) => ({ ...p, [docId]: res }));
     } catch (e) {

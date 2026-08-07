@@ -7,11 +7,13 @@
  *   1. Mark AI-generated output consistently ("AI Generated").
  *   2. Make a DEMO-DATA fallback visually distinct from a real AI result.
  *
- * Every AI gateway in this app degrades to a deterministic fixture when the
- * backend errors. Those fixtures render identically to real output unless the
- * surface says otherwise — which is how fabricated CAPA references and
- * fabricated drift alerts reached users. So `source="mock"` deliberately drops
- * the indigo accent and renders grey: demo data must never wear the AI colour.
+ * Each AI feature degrades to a deterministic result when its model call fails.
+ * That degradation now happens on the SERVER (the AI service's app/fallbacks/),
+ * and the response says so via its `source` field. A degraded result renders
+ * identically to a real one unless the surface says otherwise — which is how
+ * fabricated CAPA references and fabricated drift alerts once reached users. So
+ * a non-live source deliberately drops the indigo accent and renders grey:
+ * demo data must never wear the AI colour.
  *
  * Styling lives in index.css (.ai-badge / .ai-badge-demo) — never inline.
  */
@@ -22,17 +24,19 @@ import clsx from "clsx";
 export interface AIBadgeProps {
   /**
    * Provenance of the content this badge annotates.
-   *   "backend" → a real AI call produced it.
-   *   "mock"    → the deterministic demo fixture produced it (backend failed).
+   *   "backend"  → a real AI call produced it.
+   *   "fallback" → the backend's deterministic result (its model call failed).
+   *   "mock"     → legacy alias for "fallback", kept so older call sites still
+   *                render correctly.
    */
-  source?: "backend" | "mock";
+  source?: "backend" | "fallback" | "mock";
   /** Override the label. Defaults to "AI Generated" / "Demo data". */
   label?: string;
   className?: string;
 }
 
 export function AIBadge({ source = "backend", label, className }: AIBadgeProps) {
-  const isMock = source === "mock";
+  const isMock = source !== "backend";
   const Icon = isMock ? FlaskConical : Sparkles;
   const text = label ?? (isMock ? "Demo data" : "AI Generated");
 

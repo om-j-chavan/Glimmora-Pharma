@@ -1,15 +1,18 @@
 /**
- * Client for the AI Assistant + AI Voice endpoints on the deployed backend.
+ * Browser client for the AI Assistant + AI Voice endpoints.
  *
+ *   POST /api/ai/assistant         { message, chat_history? } → routed answer
  *   POST /api/ai/chat              { message, chat_history? } → { reply, intent, customer_id }
  *   GET  /api/ai/health
- *   POST /api/ai/voice/transcribe  multipart audio  → { text } (best effort, response shape inferred)
+ *   POST /api/ai/voice/transcribe  multipart audio  → { text }
  *   POST /api/ai/voice/speak       { text, voice }  → audio bytes (audio/mpeg)
  *   POST /api/ai/voice/chat        multipart audio  → audio bytes (one-shot voice round-trip)
  *   GET  /api/ai/voice/health
  *
- * All protected endpoints take an `auth: <access_token>` header. The token
- * is the logged-in user's aiAccessToken (refreshed on every login).
+ * Every call goes to the same-origin /api/ai-proxy route, which authenticates
+ * the caller's session and attaches the upstream access token server-side.
+ * NOTHING here handles a credential — these functions used to take a `token`
+ * argument that the browser read out of Redux; that parameter is gone.
  */
 
 export { AI_API_BASE } from "./aiAuth";
@@ -43,16 +46,16 @@ function flattenDetail(parsed: unknown, status: number): string {
   return `Request failed (${status})`;
 }
 
-async function authedFetch(path: string, init: RequestInit, token: string | null): Promise<Response> {
-  if (!token) throw new AiChatError(401, "Not signed in to AI backend", null);
+async function authedFetch(path: string, init: RequestInit): Promise<Response> {
+  // No auth header is set here. The proxy mints and attaches it; a session-less
+  // caller gets a 401 from the proxy itself.
   const headers = new Headers(init.headers);
-  headers.set("auth", token);
   const tag = `[aiChat] ${(init.method ?? "GET")} ${path}`;
   const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
   console.info(`${tag} → sending`);
   let res: Response;
   try {
-    res = await fetch(`${AI_API_BASE}${path}`, { ...init, headers });
+    res = await fetch(`${AI_API_BASE}${path}`, { ...init, headers, credentials: "same-origin" });
   } catch (err) {
     console.error(`${tag} ✗ network error`, err);
     throw err;
@@ -118,7 +121,6 @@ export interface HelpResponse {
 export async function aiChatSend(
   message: string,
   history: ChatMessage[],
-  token: string | null,
 ): Promise<ChatResponse> {
   const res = await authedFetch(
     "/api/ai/chat",
@@ -127,7 +129,6 @@ export async function aiChatSend(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, chat_history: history }),
     },
-    token,
   );
   return (await res.json()) as ChatResponse;
 }
@@ -162,7 +163,6 @@ export interface SearchResultResponse {
  */
 export async function aiSearchSend(
   message: string,
-  token: string | null,
   module = "capa",
 ): Promise<SearchResultResponse> {
   const res = await authedFetch(
@@ -172,7 +172,6 @@ export async function aiSearchSend(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, module }),
     },
-    token,
   );
   return (await res.json()) as SearchResultResponse;
 }
@@ -208,7 +207,6 @@ export interface DraftOptions {
 export async function aiDraftSend(
   context: string,
   opts: DraftOptions,
-  token: string | null,
 ): Promise<DraftResponse> {
   const res = await authedFetch(
     "/api/ai/draft",
@@ -223,7 +221,6 @@ export async function aiDraftSend(
         module: opts.module ?? "-",
       }),
     },
-    token,
   );
   return (await res.json()) as DraftResponse;
 }
@@ -257,7 +254,6 @@ export interface SummaryOptions {
 export async function aiSummarizeSend(
   content: string,
   opts: SummaryOptions,
-  token: string | null,
 ): Promise<SummaryResponse> {
   const res = await authedFetch(
     "/api/ai/summarize",
@@ -273,32 +269,54 @@ export async function aiSummarizeSend(
         module: opts.module ?? "-",
       }),
     },
-    token,
   );
   return (await res.json()) as SummaryResponse;
 }
 
+/** Which path answered the message. Surfaced for debugging/telemetry only —
+ *  the UI renders all three identically. */
+export type AssistantRoute = "small_talk" | "live_data" | "grounded";
+
+export interface AssistantResponse extends HelpResponse {
+  route: AssistantRoute;
+}
+
 /**
- * Send a question to the GxP Compliance Help Assistant. Unlike aiChatSend,
- * the reply carries cited sources, a confidence band, and (on low confidence)
- * a structured ticket suggestion. A 503 here means the assistant service is
- * unavailable ("I'm broken"), distinct from a confident "I don't know".
+ * Send a message to the Compliance Assistant.
+ *
+ * The assistant decides SERVER-SIDE whether this is small talk, a live-data
+ * question, or a knowledge question, and answers accordingly. The browser used
+ * to make that call itself — regex intent matching, a canned-reply table, and
+ * the live-figures formatter all lived in the bundle — and only then chose which
+ * endpoint to hit. Now it just asks.
+ *
+ * Goes to the Next.js route (not the proxy) because the live-data path needs
+ * the caller's tenant figures, which only this app's database has; the route
+ * reads them under the caller's session and forwards them.
+ *
+ * A 503 means the assistant service is unavailable ("I'm broken"), distinct
+ * from a confident "I don't know" (which comes back 200 with a handoff).
  */
-export async function aiHelpSend(
+export async function aiAssistantSend(
   message: string,
   history: ChatMessage[],
-  token: string | null,
-): Promise<HelpResponse> {
-  const res = await authedFetch(
-    "/api/ai/help",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, chat_history: history }),
-    },
-    token,
-  );
-  return (await res.json()) as HelpResponse;
+): Promise<AssistantResponse> {
+  const tag = "[aiChat] POST /api/ai/assistant";
+  const res = await fetch("/api/ai/assistant", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, chat_history: history }),
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let parsed: unknown = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+    const detail = flattenDetail(parsed, res.status);
+    console.error(`${tag} ✗ ${res.status} — ${detail}`, parsed);
+    throw new AiChatError(res.status, detail, parsed);
+  }
+  return (await res.json()) as AssistantResponse;
 }
 
 /**
@@ -316,13 +334,12 @@ export interface VoiceChatResult {
 
 export async function aiVoiceChat(
   audio: Blob,
-  token: string | null,
   history: ChatMessage[] = [],
 ): Promise<VoiceChatResult> {
   const fd = new FormData();
   fd.append("audio", audio, audio instanceof File ? audio.name : "speech.webm");
   if (history.length > 0) fd.append("chat_history", JSON.stringify(history));
-  const res = await authedFetch("/api/ai/voice/chat", { method: "POST", body: fd }, token);
+  const res = await authedFetch("/api/ai/voice/chat", { method: "POST", body: fd });
   // Some browsers / proxies decode header values; the backend escapes them
   // server-side. Try both raw and URI-decoded.
   const decode = (v: string | null) => {
@@ -337,14 +354,14 @@ export async function aiVoiceChat(
   };
 }
 
-export async function aiVoiceTranscribe(audio: Blob, token: string | null): Promise<{ text: string }> {
+export async function aiVoiceTranscribe(audio: Blob): Promise<{ text: string }> {
   const fd = new FormData();
   fd.append("audio", audio, audio instanceof File ? audio.name : "speech.webm");
-  const res = await authedFetch("/api/ai/voice/transcribe", { method: "POST", body: fd }, token);
+  const res = await authedFetch("/api/ai/voice/transcribe", { method: "POST", body: fd });
   return (await res.json()) as { text: string };
 }
 
-export async function aiVoiceSpeak(text: string, voice: string, token: string | null): Promise<Blob> {
+export async function aiVoiceSpeak(text: string, voice: string): Promise<Blob> {
   const res = await authedFetch(
     "/api/ai/voice/speak",
     {
@@ -352,7 +369,6 @@ export async function aiVoiceSpeak(text: string, voice: string, token: string | 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, voice }),
     },
-    token,
   );
   return await res.blob();
 }
