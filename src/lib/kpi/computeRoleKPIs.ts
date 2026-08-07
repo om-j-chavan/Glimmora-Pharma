@@ -19,6 +19,10 @@
  */
 
 import { normalizeSeverityForDisplay } from "@/lib/severity";
+// The canonical change-control vocabulary, in lifecycle order — it drives the
+// status chart's x-axis below. This file used to carry a byte-identical local
+// copy under the same name; it now derives from the single source of truth.
+import { CHANGE_CONTROL_STATUSES } from "@/lib/change-control-constants";
 import {
   isOpenCapa, isCapaOverdue, isCriticalOpen, isOpenFinding,
   isCsvHighRisk, isValidationDrift, isDIException, pct,
@@ -356,8 +360,21 @@ export interface ValidationKPIs {
   byStatus: { status: string; count: number }[];
 }
 
-/** The canonical CSV lifecycle order — drives the funnel chart's x-axis. */
-export const VALIDATION_STATUSES = ["Not Started", "In Progress", "Validated", "Overdue"] as const;
+/**
+ * KPI-SPECIFIC validation status set — drives the funnel chart's x-axis.
+ *
+ * Deliberately NOT the canonical validation vocabulary. The canonical set lives
+ * in src/constants/statusTaxonomy.ts (VALIDATION_STATUSES, a Record<string,
+ * StatusDef>) and carries six values; this one is a four-value CHART AXIS that
+ * intentionally omits "Under Review" and "Validation Failed", then pads with any
+ * unrecognised value discovered at runtime (see `extra` below) so nothing is
+ * silently dropped from the chart.
+ *
+ * Do NOT "unify" this with the canonical set — widening it changes the chart's
+ * fixed columns. Renamed from VALIDATION_STATUSES to end the name collision
+ * with the canonical export.
+ */
+export const VALIDATION_KPI_STATUSES = ["Not Started", "In Progress", "Validated", "Overdue"] as const;
 
 export function computeValidationKPIs(systems: ValidationSystem[], now: number): ValidationKPIs {
   const count = (s: string) => systems.filter((x) => x.validationStatus === s).length;
@@ -374,7 +391,7 @@ export function computeValidationKPIs(systems: ValidationSystem[], now: number):
 
   // Any status outside the canonical four still gets a bar, so a legacy or
   // newly-added lifecycle value can never be silently dropped from the chart.
-  const known = new Set<string>(VALIDATION_STATUSES);
+  const known = new Set<string>(VALIDATION_KPI_STATUSES);
   const extra = [...new Set(systems.map((s) => s.validationStatus ?? "Not Started").filter((s) => !known.has(s)))];
 
   return {
@@ -394,7 +411,7 @@ export function computeValidationKPIs(systems: ValidationSystem[], now: number):
     stagesApproved,
     stagesTotal,
     qualificationProgress: pct(stagesApproved, stagesTotal),
-    byStatus: [...VALIDATION_STATUSES, ...extra].map((status) => ({
+    byStatus: [...VALIDATION_KPI_STATUSES, ...extra].map((status) => ({
       status,
       count: systems.filter((s) => (s.validationStatus ?? "Not Started") === status).length,
     })),
@@ -500,11 +517,6 @@ export interface OperationsKPIs {
   /** Status mix, chart-ready in lifecycle order. */
   byStatus: { status: string; count: number }[];
 }
-
-/** Change-control lifecycle order — drives the status chart's x-axis. */
-export const CHANGE_CONTROL_STATUSES = [
-  "Draft", "In Review", "Approved", "In Implementation", "Implemented", "Closed", "Rejected",
-] as const;
 
 export function computeOperationsKPIs(changeControls: KPIChangeControl[], now: number): OperationsKPIs {
   const inFlight = changeControls.filter(isChangeControlInFlight);
