@@ -14,6 +14,7 @@ import {
 } from "@/lib/permissions/roleSets";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
+import type { GAMP5Category } from "@/constants/gamp5";
 import { assertTenantOwnsParent, scopedWhere } from "@/lib/tenantScope";
 import { createCAPA } from "@/actions/capas/lifecycle";
 import { deriveSiteCode, isReferenceConflict } from "@/lib/reference";
@@ -132,12 +133,24 @@ const STANDARD_STAGES = ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"] as const;
 // still created — so the full V-model stays on record for an inspector — but
 // auto-set to "skipped" with a documented rationale, so only the applicable
 // stages need work. Tune a category's scope by editing its list here.
-const STAGE_TEMPLATES: Record<string, readonly string[]> = {
+// The KEYS are type-checked against the canonical GAMP 5 category set
+// (src/constants/gamp5.ts) via `satisfies`, so a category can never be added to
+// the vocabulary without also getting a stage template here. The stage LISTS
+// below are the behaviour and are deliberately owned by this file, not by the
+// constants module — they scope validation work and feed the stage tallies that
+// a sign-off signature binds. Tune a category's scope by editing its list here.
+//
+// The exported annotation stays Record<string, …> because applicableStagesFor
+// indexes it with an arbitrary string (an unrecognised category falls back to
+// the Category-5 full V-model rather than throwing).
+const STAGE_TEMPLATE_DEFS = {
   "1": ["IQ"],                                        // Infrastructure — install verification only
   "3": ["URS", "IQ", "OQ"],                           // Non-configured COTS — leverage supplier FS/DS
   "4": ["URS", "FS", "IQ", "OQ", "PQ"],               // Configured — DS via vendor config (auto-skipped)
   "5": ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"],  // Custom/bespoke — full V-model
-};
+} satisfies Record<GAMP5Category, readonly string[]>;
+
+const STAGE_TEMPLATES: Record<string, readonly string[]> = STAGE_TEMPLATE_DEFS;
 // Unknown/missing category falls back to the full set (never under-scope by
 // accident — over-validating is safe, under-validating is a compliance gap).
 function applicableStagesFor(gamp5Category: string | undefined): ReadonlySet<string> {

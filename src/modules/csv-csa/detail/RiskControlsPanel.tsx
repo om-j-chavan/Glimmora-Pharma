@@ -16,6 +16,7 @@ const RISK_LEVEL_OPTIONS = [
 ];
 
 import type { ComplianceStatus, GAMP5Category } from "@/types/csv-csa";
+import { GAMP5_DESCRIPTION, GAMP5_DESCRIPTION_FALLBACK } from "@/constants/gamp5";
 
 function complianceBadge(s: ComplianceStatus) {
   const m: Record<ComplianceStatus, "green" | "red" | "amber" | "gray"> = { Compliant: "green", "Non-Compliant": "red", Partial: "amber", "In Progress": "amber", "N/A": "gray" };
@@ -213,7 +214,10 @@ export function RiskControlsPanel({
               <div className={clsx("rounded-lg p-3 border", "bg-(--bg-surface) border-(--bg-border)")}>
                 <span className="text-[11px] font-semibold uppercase tracking-wider block mb-2" style={{ color: "var(--text-muted)" }}>GAMP 5 Category</span>
                 {gampBadge(system.gamp5Category)}
-                <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>{system.gamp5Category === "5" ? "Custom software \u2014 full IQ/OQ/PQ required" : system.gamp5Category === "4" ? "Configured software \u2014 configured items tested" : system.gamp5Category === "3" ? "Non-configured \u2014 standard testing applies" : "Infrastructure \u2014 minimal testing required"}</p>
+                {/* Descriptions come from the canonical GAMP 5 vocabulary. The
+                    fallback preserves the original ternary's final `else`: an
+                    unrecognised category renders the Infrastructure text. */}
+                <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>{GAMP5_DESCRIPTION[system.gamp5Category] ?? GAMP5_DESCRIPTION_FALLBACK}</p>
               </div>
             )}
           </div>
