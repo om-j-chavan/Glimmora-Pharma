@@ -469,6 +469,17 @@ export async function submitStageForReview(stageId: string): Promise<ActionResul
   if (!SUBMITTABLE_STAGE_STATUSES.includes(stage0.status)) {
     return { success: false, error: "This stage cannot be submitted — it is already under review or completed." };
   }
+  // C2 — post-sign-off lock (defense in depth). Unreachable today: sign-off
+  // requires every stage approved|skipped, and neither is in
+  // SUBMITTABLE_STAGE_STATUSES, so the precondition above already refuses on a
+  // signed system. That safety is an EMERGENT property of the status machine,
+  // invisible here — and stagesApproved/stagesTotal are hashed inputs. Stated
+  // explicitly so widening the submittable set can never silently unlock a
+  // signed record.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
+  }
   // Resubmit guard (stage rework tasks) — a stage with open rework tasks
   // delegated to staff cannot go back to QA until every task is closed. Half-
   // finished rework must not reach the QA reviewer.
@@ -541,6 +552,14 @@ export async function approveStage(stageId: string): Promise<ActionResult> {
   if (stage0.status !== "in_review") {
     return { success: false, error: "This stage is not under review — it must be submitted for QA review before it can be approved." };
   }
+  // C2 — post-sign-off lock (defense in depth). Unreachable today: a signed
+  // system has every stage approved|skipped, so the in_review precondition
+  // above already refuses. Stated explicitly because stagesApproved is a hashed
+  // input — an approval on a signed record would desync the signature.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
+  }
   // RUNG 2.8 — bright-line SoD: the user who submitted a stage may NOT approve
   // it. Compared on session.user.id (a Tenant id for admins, a User id
   // otherwise) — NOT resolveUserFk, which would null out admin identities and
@@ -601,6 +620,14 @@ export async function rejectStage(stageId: string, reason: string): Promise<Acti
   // RUNG 2.8-verify — only a stage Under Review can be rejected.
   if (stage0.status !== "in_review") {
     return { success: false, error: "This stage is not under review — only a stage submitted for QA review can be rejected." };
+  }
+  // C2 — post-sign-off lock (defense in depth). Unreachable today for the same
+  // reason as approveStage: a signed system has no in_review stage. Stated
+  // explicitly because reject moves a stage OUT of approved-equivalent state,
+  // which would move stagesApproved — a hashed input.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
