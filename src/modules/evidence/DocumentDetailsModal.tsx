@@ -11,6 +11,8 @@ import { useToast } from "@/components/ui/Toast";
 import { deleteDocument } from "@/actions/documents";
 import { formatDocumentSource } from "@/lib/labels/documentSource";
 import type { EvidenceLibraryDoc } from "@/lib/queries/evidenceLibrary";
+import { prettyStatus } from "@/lib/format/text";
+import { fileTypeLabel } from "./_shared";
 
 /**
  * Read-only-aware Document Details (shared Modal). Shows humanised metadata, a
@@ -166,28 +168,6 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
       <dd className="text-[13px] text-(--text-primary)">{value}</dd>
     </div>
   );
-}
-
-function prettyStatus(s: string): string {
-  return s.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-}
-
-/** Raw mime/extension → a readable label (item 5). */
-function fileTypeLabel(ft: string | null, hasFile: boolean, hasLink: boolean): string {
-  if (!ft) return hasFile ? "File" : hasLink ? "Web link" : "—";
-  const t = ft.toLowerCase();
-  const rules: [RegExp, string][] = [
-    [/pdf/, "PDF Document"],
-    [/wordprocessingml|msword|(^|\.)docx?$/, "Word Document"],
-    [/spreadsheetml|ms-?excel|(^|\.)xlsx?$/, "Excel Spreadsheet"],
-    [/csv/, "CSV Spreadsheet"],
-    [/png/, "Image (PNG)"],
-    [/jpe?g/, "Image (JPEG)"],
-    [/gif/, "Image (GIF)"],
-    [/text\/plain|(^|\.)txt$/, "Text File"],
-  ];
-  for (const [re, label] of rules) if (re.test(t)) return label;
-  return ft.replace(/^\./, "").toUpperCase();
 }
 
 /* ── Description formatting (item 7): a legacy JSON dump renders as labelled

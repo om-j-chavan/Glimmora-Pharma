@@ -19,7 +19,6 @@ import { DataTable, type DataColumn } from "@/components/table/DataTable";
 import { StatCard } from "@/components/shared/StatCard";
 import { DocumentCard } from "@/components/shared/DocumentCard";
 import { evidenceDocToCardView } from "@/components/shared/documentCardAdapters";
-import { downloadPDF, downloadExcel } from "@/lib/exportTable";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import {
@@ -27,52 +26,14 @@ import {
   setEvidenceSelection,
   clearEvidenceSelection,
 } from "@/store/evidence.slice";
-import type { EvidenceLibraryResult, EvidenceLibraryDoc, DocOrigin } from "@/lib/queries/evidenceLibrary";
+import type { EvidenceLibraryResult, EvidenceLibraryDoc } from "@/lib/queries/evidenceLibrary";
+import { prettyStatus } from "@/lib/format/text";
 import { DocumentFormModal } from "./DocumentFormModal";
 import { DocumentDetailsModal } from "./DocumentDetailsModal";
+import { ORIGIN_BADGE, statusBadge } from "./_shared";
+import { exportSelected } from "./export";
 
 const GRID_PAGE = 9; // 3 rows × 3 columns per "Show more"
-
-/* ── Bulk metadata export (PDF / Excel) — the selected docs' info as a report.
-   NOTE: a metadata REPORT, not the raw files (mixed types + link-only docs
-   can't merge into one PDF/Excel; bundling raw files would be a ZIP). ── */
-const EXPORT_HEADERS = ["Name", "Type", "Source", "Uploader", "Date", "Status", "Linked URL"];
-function exportSelected(docs: EvidenceLibraryDoc[], format: "pdf" | "excel") {
-  if (!docs.length) return;
-  const rows = docs.map((d) => [
-    d.title,
-    d.category ?? "",
-    formatDocumentSource(d.originLabel),
-    d.uploaderName,
-    d.uploadedAt ? dayjs(d.uploadedAt).format("YYYY-MM-DD") : "",
-    prettyStatus(d.status),
-    d.linkUrl ?? "",
-  ]);
-  const filename = `evidence-selected-${dayjs().format("YYYY-MM-DD")}`;
-  if (format === "pdf") {
-    downloadPDF(filename, EXPORT_HEADERS, rows, { title: "Selected documents", subtitle: `${docs.length} document${docs.length === 1 ? "" : "s"}` });
-  } else {
-    downloadExcel(filename, EXPORT_HEADERS, rows);
-  }
-}
-
-const ORIGIN_BADGE: Record<DocOrigin, "blue" | "purple" | "amber" | "red"> = {
-  evidence: "blue",
-  capa: "purple",
-  csv: "amber",
-  fda483: "red",
-};
-
-function statusBadge(status: string) {
-  if (status === "approved") return <Badge variant="green">Approved</Badge>;
-  if (status === "under_review") return <Badge variant="amber">Under Review</Badge>;
-  if (status === "rejected") return <Badge variant="red">Rejected</Badge>;
-  if (status === "draft") return <Badge variant="gray">Draft</Badge>;
-  return <Badge variant="blue">Current</Badge>;
-}
-function prettyStatus(s: string): string {
-  return s.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-}
 
 export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
   const router = useRouter();
