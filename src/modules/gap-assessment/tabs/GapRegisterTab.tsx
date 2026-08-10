@@ -24,7 +24,7 @@ import {
   loadFindingDocuments as loadFindingDocumentsAction,
   loadFindingHistory as loadFindingHistoryAction,
 } from "@/actions/findings";
-import type { FindingAuditEntry } from "@/lib/queries/findings";
+import type { FindingAuditEntry, FindingCloseSodReveal } from "@/lib/queries/findings";
 import { DocumentCard } from "@/components/shared/DocumentCard";
 import { RaisedFromRiskBanner } from "@/components/shared/RaisedFromRiskBanner";
 import { worklistDocToCardView } from "@/components/shared/documentCardAdapters";
@@ -39,6 +39,8 @@ import { MotionList, MotionListItem } from "@/components/motion/Motion";
 import { DataTable, type Column } from "@/components/shared";
 import { tableCard } from "@/components/table/tableTokens";
 import { Modal } from "@/components/ui/Modal";
+import { FindingCloseModal } from "@/modules/gap-assessment/modals/FindingCloseModal";
+
 import { Popup } from "@/components/ui/Popup";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/badgeVariants";
@@ -49,7 +51,7 @@ import { RcaMethodFields, parseRcaDetail, rcaDetailToText, type RcaDetail } from
 import { CAPA_RCA_METHODS, rcaMethodOptions, type CapaRCAMethod } from "@/constants/rcaMethods";
 // Item 16 — the ONE floor the server enforces too (updateFinding). Imported, not
 // re-declared: a second copy is how client/server validation drifts.
-import { FINDING_EDIT_REASON_MIN } from "@/constants/capaValidation";
+import { FINDING_EDIT_REASON_MIN, FINDING_CLOSURE_NOTES_MIN } from "@/constants/capaValidation";
 // Item 17 — the ONE close gate the three server paths enforce. Same reason.
 import { findingCloseBlockers } from "@/lib/finding-close";
 import { DocumentSummaryPanel } from "@/components/search/DocumentSummaryPanel";
@@ -312,7 +314,7 @@ export function GapRegisterTab({
   // Gap Step 4 — QA review (accept / rework). Loaded separately (the store
   // Finding doesn't carry completion notes). `messages` was dropped with the
   // conversation thread — nothing rendered or gated on it any more.
-  type FindingReview = { status: string; completionNotes: string | null; reworkReason: string | null };
+  type FindingReview = { status: string; completionNotes: string | null; reworkReason: string | null; sodReveal?: FindingCloseSodReveal };
   const [review, setReview] = useState<FindingReview | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reworkOpen, setReworkOpen] = useState(false);
@@ -394,12 +396,21 @@ export function GapRegisterTab({
     const res = await loadFindingReviewAction(selectedFinding.id);
     if (res.success) setReview(res.data as FindingReview);
   }
-  async function handleReviewAccept() {
+  /** Accept & close now routes through the close modal so QA supplies a closing
+   *  message + password re-auth, mirroring the deviation close. The modal is the
+   *  ONLY caller of reviewFinding — one close path, one confirmation. */
+  async function handleConfirmClose(input: {
+    password: string;
+    closureNotes: string;
+    sodOverrideReasonCode?: string;
+    sodOverrideJustification?: string;
+  }) {
     if (!selectedFinding) return;
     setReviewBusy(true); setReviewError(null);
-    const res = await reviewFindingAction(selectedFinding.id);
+    const res = await reviewFindingAction(selectedFinding.id, input);
     setReviewBusy(false);
-    if (!res.success) { setReviewError(res.error || "Failed to accept."); return; }
+    if (!res.success) { setReviewError(res.error || "Failed to close the gap."); return; }
+    setCloseModalOpen(false);
     // Refresh the SEPARATE review state too (not just the store via router.refresh)
     // so the block reflects the new status (Closed) immediately — the Accept/rework
     // buttons are gated on review.status === "Submitted", so they clear at once.
@@ -476,6 +487,46 @@ export function GapRegisterTab({
   // three server close paths enforce. Predicting the refusal here rather than
   // restating it means the button and the server can never tell different stories.
   const closeBlockers = selectedFinding ? findingCloseBlockers(selectedFinding, user?.id ?? null) : [];
+
+  /**
+   * THE single source of truth for "can this user close this finding, and if not
+   * why". Both close affordances read it — the Disposition button and the QA
+   * review card — so the two can never disagree with each other or with the
+   * server.
+   *
+   * It composes the EXACT conditions that already gated the review card
+   * (isQAHead + qaReview.status === "Submitted" + !gapLocked as render
+   * conditions, closeBlockers as the disabled predicate) — nothing is
+   * re-derived and no rule is added or relaxed. The only change is that a
+   * blocked close now renders as a DISABLED button carrying the reason, instead
+   * of no button at all.
+   *
+   * Reason precedence mirrors the server's own gate order in reviewFinding
+   * (CAPA lock → status → SoD/RCA blockers), so the first thing the user is told
+   * is the first thing the server would refuse on.
+   */
+  const closeGate: { visible: boolean; canClose: boolean; reason: string | null } = (() => {
+    // Only a QA Head can ever close, so nobody else is shown a control they
+    // could never use. Same check the review card renders on.
+    if (!selectedFinding || isViewOnly || !isQAHead) {
+      return { visible: false, canClose: false, reason: null };
+    }
+    if (selectedFinding.status === "Closed") {
+      return { visible: false, canClose: false, reason: null };
+    }
+    if (gapLocked) {
+      return { visible: true, canClose: false, reason: "A CAPA raised from this gap is still open — work continues in the CAPA." };
+    }
+    if (qaReview?.status !== "Submitted") {
+      return { visible: true, canClose: false, reason: "Finding must be submitted for review before it can be closed." };
+    }
+    if (closeBlockers.length > 0) {
+      // The SAME message findingCloseBlockers returns and the server replies
+      // with — rca_missing or rca_self_close, verbatim.
+      return { visible: true, canClose: false, reason: closeBlockers[0].message };
+    }
+    return { visible: true, canClose: true, reason: null };
+  })();
   // Anchors the pointer at the RCA section that already exists, instead of opening a
   // close-flow modal that would become rootCause's third writer.
   const rcaSectionRef = useRef<HTMLDivElement | null>(null);
@@ -503,6 +554,12 @@ export function GapRegisterTab({
   const [rcaReason, setRcaReason] = useState("");
   const [rcaBusy, setRcaBusy] = useState(false);
   const [rcaError, setRcaError] = useState("");
+  // RCA editing moved from inline to a modal: the panel now shows a read-only
+  // summary and an "Edit RCA" button. Local state only (no storage) — same
+  // lifetime as the other modal flags in this component.
+  const [rcaModalOpen, setRcaModalOpen] = useState(false);
+  // QA close confirmation (closing message + password re-auth). Audited, NOT signed.
+  const [closeModalOpen, setCloseModalOpen] = useState(false);
 
   // Reset form when selected finding changes
   useEffect(() => {
@@ -523,6 +580,8 @@ export function GapRegisterTab({
     setSaveError("");
     setRcaReason("");
     setRcaError("");
+    setRcaModalOpen(false);
+    setCloseModalOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFinding?.id]);
 
@@ -657,9 +716,35 @@ export function GapRegisterTab({
       setRcaError(result.error || "Failed to save the analysis. Please try again.");
       return;
     }
+    // A revision reason is CONSUMED by the save it justifies — cleared here so the
+    // next revision must state its own. Matches the sibling `editReason` field
+    // (onSaveEdit + the Edit modal's Cancel), which clears on the same events under
+    // the same FINDING_EDIT_REASON_MIN rule; the two revision-reason fields behave
+    // identically. Carrying the text over would let a second save re-submit the
+    // first save's justification, putting a reason in the audit trail that doesn't
+    // describe the change it's attached to.
+    //
+    // The modal then closes; router.refresh() below re-reads the saved record so the
+    // panel's read-only summary shows the new analysis. `detail` / `rcaMethodInput`
+    // are re-seeded from that record whenever the modal is re-opened via Cancel or a
+    // finding switch (see closeRcaModal + the selectedFinding.id reset effect).
     setRcaReason("");
+    setRcaModalOpen(false);
     setSavedPopup(true);
     router.refresh();
+  }
+
+  /** Discard an in-flight RCA edit: re-seed the inputs from the saved record so a
+   *  cancelled edit leaves nothing behind, and clear the reason + error. Mirrors the
+   *  general Edit modal's Cancel (form.reset() + setEditReason("") + setSaveError("")). */
+  function closeRcaModal() {
+    setRcaModalOpen(false);
+    if (selectedFinding) {
+      setDetail(seedRcaDetail(selectedFinding));
+      setRcaMethodInput(selectedFinding.rcaMethod ?? "");
+    }
+    setRcaReason("");
+    setRcaError("");
   }
 
   const isOverdue = selectedFinding ? selectedFinding.status !== "Closed" && dayjs.utc(selectedFinding.targetDate).isBefore(dayjs()) : false;
@@ -1147,62 +1232,26 @@ export function GapRegisterTab({
                 // Item 17 — the anchor the close blocker points at. The section is
                 // the ONLY writer of rootCause; the close flow directs here rather
                 // than opening a modal of its own.
+                // The section stays the scroll anchor (scrollToRca) even though the
+                // form now lives in a modal — the close blocker still points HERE,
+                // at the summary + its Edit button, which is the entry point.
                 <div ref={rcaSectionRef} className="pt-4 border-t border-(--bg-border)">
-                  <h3 className={LABEL}>
-                    Root cause analysis {selectedFinding.rcaMethod && <Badge variant="gray">{selectedFinding.rcaMethod}</Badge>}
-                  </h3>
-                  {!hasRca && (
-                    <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
-                      No root cause analysis recorded yet. Pick a method to record one.
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className={LABEL}>
+                      Root cause analysis {selectedFinding.rcaMethod && <Badge variant="gray">{selectedFinding.rcaMethod}</Badge>}
+                    </h3>
+                    <Button variant="secondary" size="sm" icon={Pencil} onClick={() => setRcaModalOpen(true)}>
+                      {hasRca ? "Edit RCA" : "Add RCA"}
+                    </Button>
+                  </div>
+                  {hasRca ? (
+                    <p className="text-[12px] whitespace-pre-wrap" style={{ color: "var(--text-secondary)" }}>
+                      {selectedFinding.rootCause}
                     </p>
-                  )}
-                  <Dropdown
-                    value={rcaMethodInput}
-                    onChange={(v) => { setRcaMethodInput(v); if (!v) setDetail({}); }}
-                    placeholder="Select method..."
-                    width="w-full"
-                    options={[{ value: "", label: "— None" }, ...rcaMethodOptions(CAPA_RCA_METHODS)]}
-                  />
-                  {rcaMethodInput && (
-                    <>
-                      <div className="mt-2">
-                        <RcaMethodFields
-                          method={(rcaMethodInput || undefined) as CapaRCAMethod | undefined}
-                          detail={detail}
-                          onChange={setDetail}
-                          recordId={selectedFinding.id}
-                          draftContext={[selectedFinding.requirement, selectedFinding.purpose].filter(Boolean).join("\n\n")}
-                        />
-                      </div>
-                      {/* Reason ONLY on a revision. A first analysis is the assessment
-                          being performed — there is nothing recorded to explain a change
-                          to, and demanding one here would just harvest "adding RCA".
-                          saveFindingRCA enforces the same rule; this mirrors it. */}
-                      {hasRca && (
-                        <div className="mt-2">
-                          <label className={LABEL} htmlFor="rca-reason">Reason for revision <span className="text-[#ef4444]">*</span></label>
-                          <input
-                            id="rca-reason"
-                            type="text"
-                            value={rcaReason}
-                            onChange={(e) => setRcaReason(e.target.value)}
-                            maxLength={2000}
-                            aria-describedby="rca-reason-hint"
-                            className="w-full rounded-lg px-3 py-2 text-[13px] outline-none transition-all duration-150 bg-(--bg-elevated) border border-(--bg-border) text-(--text-primary) placeholder:text-(--text-muted) focus:border-(--brand) focus:ring-[3px] focus:ring-(--brand-muted)"
-                            placeholder="Why is the analysis being changed?"
-                          />
-                          <p id="rca-reason-hint" className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
-                            Recorded in this finding&apos;s audit trail. At least {FINDING_EDIT_REASON_MIN} characters.
-                          </p>
-                        </div>
-                      )}
-                      {rcaError && <p role="alert" className="text-[11px] mt-1" style={{ color: "var(--danger)" }}>{rcaError}</p>}
-                      <div className="flex justify-end mt-2">
-                        <Button variant="primary" size="sm" icon={Save} disabled={rcaBusy} loading={rcaBusy} onClick={() => void onSaveRca()}>
-                          {hasRca ? "Update analysis" : "Save analysis"}
-                        </Button>
-                      </div>
-                    </>
+                  ) : (
+                    <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                      No root cause analysis recorded yet. Add one to record the assessment.
+                    </p>
                   )}
                 </div>
               );
@@ -1362,6 +1411,31 @@ export function GapRegisterTab({
                         <Button variant="secondary" icon={Plus} fullWidth onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button>
                       ) : null
                     )}
+                    {/* Accept & close — the third disposition option, sitting with the
+                        other two (assign / raise CAPA) rather than only inside the QA
+                        review card. ALWAYS rendered for a QA Head on an open finding
+                        and DISABLED with the reason when it isn't closeable, so the
+                        control never silently disappears.
+
+                        Gating comes from `closeGate` — the single source both this
+                        button and the review card read. Nothing is re-derived here. */}
+                    {closeGate.visible && (
+                      <div className="mt-2">
+                        <Button
+                          variant="primary"
+                          icon={CheckCircle2}
+                          fullWidth
+                          disabled={reviewBusy || !closeGate.canClose}
+                          title={closeGate.reason ?? undefined}
+                          onClick={() => { setReviewError(null); setCloseModalOpen(true); }}
+                        >
+                          Accept &amp; close
+                        </Button>
+                        {closeGate.reason && (
+                          <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>{closeGate.reason}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               );
@@ -1427,9 +1501,17 @@ export function GapRegisterTab({
                         </div>
                       </div>
                     )}
-                    <div className="flex gap-2">
-                      <Button variant="primary" size="sm" icon={CheckCircle2} disabled={reviewBusy || closeBlockers.length > 0} loading={reviewBusy} onClick={() => void handleReviewAccept()}>Accept &amp; close</Button>
+                    {/* Accept & close MOVED to the Disposition block above, where it
+                        now sits with the other two dispositions (assign / raise CAPA)
+                        and renders disabled-with-reason when the close is blocked.
+                        Both read the same `closeGate`, so there is one rule and one
+                        button. Rework stays here: it is a verdict on THIS submission
+                        (the notes + evidence directly above), not a disposition. */}
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Button variant="secondary" size="sm" icon={Wrench} disabled={reviewBusy} onClick={() => { setReviewError(null); setReworkReasonInput(""); setReworkOpen(true); }}>Send for rework</Button>
+                      <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                        To accept, use <strong style={{ color: "var(--text-secondary)" }}>Accept &amp; close</strong> in Disposition above.
+                      </span>
                     </div>
                   </div>
                 )}
@@ -1485,6 +1567,118 @@ export function GapRegisterTab({
            OWNER as the creator, which is the same bug Item 18 fixed on the
            "Assigned to" label, in a second place. The audit rows carry the real
            actor; the derived ones were guesses. ── */}
+      {/* ── RCA edit modal — the SAME fields that used to render inline in the detail
+           panel, moved behind an "Edit RCA" button so the panel reads as a summary.
+           Nothing about the save changed: onSaveRca owns the guards, the payload and
+           the reason rule exactly as before; this is only the container. ── */}
+      {rcaModalOpen && selectedFinding && (() => {
+        const hasRca = !!selectedFinding.rootCause?.trim();
+        // Past RCA revisions, newest first. READ-ONLY: derived from the audit trail
+        // already loaded for this finding (loadFindingHistory → getFindingAuditTrail,
+        // which is tenant- AND findingVisibilityWhere-scoped and already ordered
+        // createdAt desc). FINDING_RCA_UPDATED is the revision event; the first entry
+        // is FINDING_RCA_RECORDED and carries no reason by design, so it is correctly
+        // absent here. Reason is parsed by the SAME findingHistoryDetail the History
+        // modal uses — no second parser, no new query.
+        const rcaRevisions = history
+          .filter((e) => e.action === "FINDING_RCA_UPDATED")
+          .map((e) => ({ entry: e, reason: findingHistoryDetail(e.action, e.newValue).reason }))
+          .filter((r) => !!r.reason);
+        return (
+          <Modal
+            open
+            onClose={() => { if (!rcaBusy) closeRcaModal(); }}
+            title={hasRca ? "Edit root cause analysis" : "Add root cause analysis"}
+            footer={
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" size="sm" disabled={rcaBusy} onClick={closeRcaModal}>Cancel</Button>
+                <Button variant="primary" size="sm" icon={Save} disabled={rcaBusy || !rcaMethodInput} loading={rcaBusy} onClick={() => void onSaveRca()}>
+                  {hasRca ? "Update analysis" : "Save analysis"}
+                </Button>
+              </div>
+            }
+          >
+            <div className="space-y-3">
+              <div>
+                <label className={LABEL}>Method</label>
+                <Dropdown
+                  value={rcaMethodInput}
+                  onChange={(v) => { setRcaMethodInput(v); if (!v) setDetail({}); }}
+                  placeholder="Select method..."
+                  width="w-full"
+                  options={[{ value: "", label: "— None" }, ...rcaMethodOptions(CAPA_RCA_METHODS)]}
+                />
+              </div>
+              {rcaMethodInput && (
+                <>
+                  {/* Carries the AI Draft affordance with its field. */}
+                  <RcaMethodFields
+                    method={(rcaMethodInput || undefined) as CapaRCAMethod | undefined}
+                    detail={detail}
+                    onChange={setDetail}
+                    recordId={selectedFinding.id}
+                    draftContext={[selectedFinding.requirement, selectedFinding.purpose].filter(Boolean).join("\n\n")}
+                  />
+                  {/* Reason ONLY on a revision. A first analysis is the assessment
+                      being performed — there is nothing recorded to explain a change
+                      to, and demanding one here would just harvest "adding RCA".
+                      saveFindingRCA enforces the same rule; this mirrors it. */}
+                  {hasRca && (
+                    <div>
+                      <label className={LABEL} htmlFor="rca-reason">Reason for revision <span className="text-[#ef4444]">*</span></label>
+                      <input
+                        id="rca-reason"
+                        type="text"
+                        value={rcaReason}
+                        onChange={(e) => setRcaReason(e.target.value)}
+                        maxLength={2000}
+                        aria-describedby="rca-reason-hint"
+                        className="w-full rounded-lg px-3 py-2 text-[13px] outline-none transition-all duration-150 bg-(--bg-elevated) border border-(--bg-border) text-(--text-primary) placeholder:text-(--text-muted) focus:border-(--brand) focus:ring-[3px] focus:ring-(--brand-muted)"
+                        placeholder="Why is the analysis being changed?"
+                      />
+                      <p id="rca-reason-hint" className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+                        Recorded in this finding&apos;s audit trail. At least {FINDING_EDIT_REASON_MIN} characters.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+              {rcaError && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{rcaError}</p>}
+
+              {/* ── Revision history — why this analysis changed, newest first.
+                   Hidden entirely when there are no prior revisions (a first-time
+                   RCA has none by design). Display only: nothing here writes. ── */}
+              {rcaRevisions.length > 0 && (() => {
+                // Only the MOST RECENT revision — enough context for the edit in
+                // hand. rcaRevisions is newest-first (getFindingAuditTrail orders
+                // createdAt desc), so [0] is the latest. The complete list stays in
+                // the dedicated History view (the header Clock).
+                const latest = rcaRevisions[0];
+                return (
+                  <div className="pt-3 border-t border-(--bg-border)">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "var(--text-muted)" }}>
+                      Last revision
+                      {rcaRevisions.length > 1 && (
+                        <span className="normal-case font-normal"> · {rcaRevisions.length} in total — see History for the rest</span>
+                      )}
+                    </p>
+                    <div className="flex items-start gap-2 text-[11px]">
+                      <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background: "var(--text-muted)" }} />
+                      <div className="min-w-0">
+                        <p style={{ color: "var(--text-muted)" }}>
+                          {displayName({ name: latest.entry.userName })}{latest.entry.userRole ? ` (${roleLabel(latest.entry.userRole)})` : ""} &mdash; {dayjs.utc(latest.entry.createdAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}
+                        </p>
+                        <p className="italic mt-0.5 whitespace-pre-wrap break-words" style={{ color: "var(--text-secondary)" }}>&ldquo;{latest.reason}&rdquo;</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </Modal>
+        );
+      })()}
+
       {auditModalOpen && selectedFinding && (
         <Modal open onClose={() => setAuditModalOpen(false)} title={`History — ${findingRef(selectedFinding)}`}>
           <div className="max-h-[60vh] overflow-y-auto space-y-4 pr-1">
@@ -1524,9 +1718,19 @@ export function GapRegisterTab({
                         <p className="font-medium" style={{ color: "var(--text-primary)" }}>Edited by {displayName({ name: edit.editedBy })}</p>
                         <p style={{ color: "var(--text-muted)" }}>{dayjs.utc(edit.editedAt).tz(timezone).format("DD/MM/YYYY hh:mm A")}</p>
                         {edit.reason && <p className="italic" style={{ color: "var(--text-secondary)" }}>&ldquo;{edit.reason}&rdquo;</p>}
-                        {edit.changes.map((c, ci) => (
-                          <p key={ci} style={{ color: "var(--text-secondary)" }}>{c.field}: <span style={{ color: "#ef4444" }}>{String(c.oldValue)}</span>{" → "}<span style={{ color: "#10b981" }}>{String(c.newValue)}</span></p>
-                        ))}
+                        {edit.changes.map((c, ci) => {
+                          // "Owner" stores raw user IDs (assignFinding writes
+                          // { field: "Owner", oldValue: <userId>, newValue: <userId> }),
+                          // so render them through the shared resolver instead of the
+                          // bare cuid. displayUserName falls back to "Unknown user" for
+                          // an id that no longer resolves — it never leaks the id. Every
+                          // other field holds a literal value and passes through as-is.
+                          const fmt = (v: unknown) =>
+                            c.field === "Owner" ? ownerName(String(v ?? "")) : String(v);
+                          return (
+                            <p key={ci} style={{ color: "var(--text-secondary)" }}>{c.field}: <span style={{ color: "#ef4444" }}>{fmt(c.oldValue)}</span>{" → "}<span style={{ color: "#10b981" }}>{fmt(c.newValue)}</span></p>
+                          );
+                        })}
                       </div>
                     </div>
                   ))
@@ -1537,6 +1741,28 @@ export function GapRegisterTab({
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* QA close — closing message + identity re-auth. Audited, NOT e-signed. */}
+      {selectedFinding && (
+        <FindingCloseModal
+          open={closeModalOpen}
+          onClose={() => { setCloseModalOpen(false); setReviewError(null); }}
+          onConfirm={handleConfirmClose}
+          busy={reviewBusy}
+          error={reviewError}
+          reference={findingRef(selectedFinding)}
+          notesMin={FINDING_CLOSURE_NOTES_MIN}
+          // Server-computed reveal — the client never evaluates the severity
+          // ceiling. Flag on + non-Critical + a self-check tripped ⇒ a waiver is
+          // required in addition to the signature.
+          overrideNeeded={Boolean(
+            review?.sodReveal &&
+            review.sodReveal.flagOn &&
+            !review.sodReveal.ceiling &&
+            (review.sodReveal.assignee || review.sodReveal.rcaAuthor),
+          )}
+        />
       )}
 
       {/* Save success popup */}

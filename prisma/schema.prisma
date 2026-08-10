@@ -83,6 +83,9 @@ model Tenant {
   capaSodOverrides      CAPASODOverride[]
   // Same org flag, deviation-closure waivers (DeviationSODOverride).
   deviationSodOverrides DeviationSODOverride[]
+  // Same org flag, finding-closure waivers (FindingSODOverride).
+  // ⚠️ UNVERIFIED — built without DB access.
+  findingSodOverrides   FindingSODOverride[]
 }
 
 // Tenant ↔ regulatory region link (multi-region). A tenant operates under one OR
@@ -515,6 +518,24 @@ model Finding {
   // RUNG 2 — real FK to the GxP system this finding is raised against
   // (replaces the former Redux-only linkedSystemId soft reference).
   systemId       String?
+  // ── QA closure metadata (mirrors Deviation.closedBy/closedDate/closureNotes) ──
+  // Written by the QA close path in src/actions/findings.ts. Null on findings
+  // closed before this existed, and on the CAPA-cascade close (capas/closure.ts),
+  // which sets status only.
+  //
+  closedBy      String?
+  closedDate    DateTime?
+  closureNotes  String?
+  // ⚠️ UNVERIFIED — finding-closure signing built without DB access. MUST be
+  // verified against Postgres before deploy: mint a FINDING_CLOSURE signature,
+  // mutate an input, confirm verifyFindingClosure detects drift, and confirm all
+  // existing recordTypes still verify unchanged. Do NOT deploy until this passes.
+  //
+  // Part 11 e-signature link for the finding closure event (mirrors
+  // Deviation.closureSignatureId). NULL until the signed close path writes it —
+  // and NOTHING writes it yet: the live close (reviewFinding) is still
+  // AUDITED-NOT-SIGNED. Wiring is Part 2. Legacy closures keep NULL forever.
+  closureSignatureId String?  @unique
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAComment).
@@ -533,8 +554,12 @@ model Finding {
   // recurrence this Finding represents.
   previousCAPA CAPA? @relation("FindingRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
   raisedFromRisk Risk? @relation("FindingRaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
+  // ⚠️ UNVERIFIED (see closureSignatureId above). Mirrors Deviation.closureSignature.
+  closureSignature SignedRecord? @relation("FindingClosureSignature", fields: [closureSignatureId], references: [id])
   edits  FindingEdit[]
   messages FindingMessage[]
+  // ⚠️ UNVERIFIED — single-QA SoD override built without DB access.
+  sodOverrides FindingSODOverride[]
 
   @@index([deletedAt])
 }
@@ -861,6 +886,39 @@ model DeviationSODOverride {
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([deviationId])
+  @@index([tenantId])
+}
+
+// ⚠️ UNVERIFIED — single-QA SoD override for FINDING closure, built without DB
+// access. MUST be verified against Postgres before deploy: apply the migration,
+// close a finding under a waiver, confirm the row + audit land in the SAME
+// transaction as the closure signature, and confirm a Critical finding is still
+// refused. Do NOT deploy until this passes.
+//
+// 1:1 mirror of DeviationSODOverride, scoped to a Finding. One row per waived
+// identity check — a closer tripping both controls gets two rows.
+model FindingSODOverride {
+  id             String   @id @default(cuid())
+  tenantId       String
+  findingId      String
+  control        String
+  actorUserId    String
+  actorName      String
+  actorRole      String
+  reasonCode     String
+  justification  String
+  // Link to the closure SignedRecord. NON-NULL, unlike the CAPA/Deviation
+  // siblings: a finding closure is ALWAYS signed (reviewFinding mints the
+  // FINDING_CLOSURE record before writing this row), so there is no unsigned
+  // waiver case to model. Plain FK string (no relation) — the deliberate
+  // convention shared with CAPASODOverride / DeviationSODOverride.
+  signedRecordId String
+  createdAt      DateTime @default(now())
+
+  finding Finding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
   @@index([tenantId])
 }
 
@@ -2133,7 +2191,8 @@ model SignedRecord {
   tenantId            String
 
   // What was signed
-  recordType          String    // "CAPA_APPROVAL" | "CAPA_APPROVAL_REVOCATION" | "CAPA_CLOSURE" | "FDA483_RESPONSE" | …
+  // "FINDING_CLOSURE" is ⚠️ UNVERIFIED + NOT YET MINTED — see Finding.closureSignatureId.
+  recordType          String    // "CAPA_APPROVAL" | "CAPA_APPROVAL_REVOCATION" | "CAPA_CLOSURE" | "FDA483_RESPONSE" | "FINDING_CLOSURE" | …
   recordId            String    // FK target id — polymorphic, no formal FK constraint
 
   // Who signed
@@ -2171,6 +2230,8 @@ model SignedRecord {
   fda483Response            FDA483Event?     @relation("FDA483ResponseSignature")
   documentApproval          Document?        @relation("DocumentApprovalSignature")
   deviationClosure          Deviation?       @relation("DeviationClosureSignature")
+  // ⚠️ UNVERIFIED — finding-closure signing built without DB access (see Finding).
+  findingClosure            Finding?         @relation("FindingClosureSignature")
   changeControlTransition   ChangeControl[]  @relation("ChangeControlTransitionSignature")
 
   @@index([recordType, recordId])

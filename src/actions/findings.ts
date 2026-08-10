@@ -22,10 +22,25 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, resolveCreateSiteId, resolveUserFk, requireGxPAuthor, COMPLIANCE_AUTHOR_ROLES, ADMIN_DELETE_ROLES } from "@/lib/auth";
 import { DEVIATION_QA_ROLES, GAP_CREATE_ROLES, QA_AUTHORITY_ROLES, isAssignedToTask, canEditFindingRecord, canWriteFindingRCA } from "@/lib/permissions/roleSets";
-import { FINDING_EDIT_REASON_MIN } from "@/constants/capaValidation";
+import { FINDING_EDIT_REASON_MIN, FINDING_CLOSURE_NOTES_MIN } from "@/constants/capaValidation";
+// Identity re-authentication only. Imported FROM the signing module; this file
+// mints no SignedRecord and calls no canonicaliser (see reviewFinding's header).
+import {
+  verifyPasswordForSigning,
+  computeContentHash,
+  canonicalizeFindingClosureContent,
+} from "@/lib/signing";
+import { readSigningProvenance } from "@/actions/capas/_shared";
+import { SIGNING_AUDIT_MODULE } from "@/actions/capas/_types";
+import {
+  tenantSodOverrideOn,
+  evaluateFindingSodOverride,
+  writeFindingSodOverride,
+  type FindingSodControl,
+} from "@/actions/capas/sod-override";
 // Item 17 — the ONE close gate; the client renders the same blockers.
 import { findingCloseBlockers } from "@/lib/finding-close";
-import { findingVisibilityWhere, getFindingAuditTrail } from "@/lib/queries/findings";
+import { findingVisibilityWhere, getFindingAuditTrail, type FindingCloseSodReveal } from "@/lib/queries/findings";
 import { EVIDENCE_CATEGORIES } from "@/lib/queries/evidence";
 import { notify } from "@/lib/notify";
 import { fileStorage } from "@/lib/fileStorage";
@@ -33,6 +48,7 @@ import { sanitizeFilename } from "@/lib/sanitize";
 import { buildReferencePrefix, generateReference, isReferenceConflict } from "@/lib/reference";
 import { sanitizeServerError } from "@/lib/errors";
 import { CAPA_RCA_METHODS } from "@/constants/rcaMethods";
+import { normalizeSeverityForDisplay } from "@/lib/severity";
 import { FINDING_STATUS_USER_EDITABLE } from "@/constants/statusTaxonomy";
 
 // Shared with the create form (AddFindingModal) — keep this the single source
@@ -1323,16 +1339,53 @@ export async function submitFinding(
   }
 }
 
-/** REVIEW → COMPLETE — QA accepts a submitted finding (→ Closed). QA-gated + SoD
- *  (the reviewer must NOT be the assignee/owner). */
-export async function reviewFinding(findingId: string): Promise<ActionResult> {
+const ReviewFindingCloseSchema = z.object({
+  // Identity re-authentication ONLY. verifyPasswordForSigning re-checks the
+  // actor's credential; it hashes no record content and mints no signature.
+  password: z.string().min(1, "Password is required to confirm your identity"),
+  // Mirrors CloseDeviationSchema.notes (min 5 / max 2000) — the closure message.
+  closureNotes: z
+    .string()
+    .min(FINDING_CLOSURE_NOTES_MIN, `A closure message (at least ${FINDING_CLOSURE_NOTES_MIN} characters) is required`)
+    .max(2000),
+  // Single-QA SoD override (Part 3) — supplied ONLY when a close identity
+  // self-check fires with Tenant.sodSingleQAOverride ON and the finding is
+  // non-Critical. Mirrors CloseDeviationSchema. Never removes the e-signature;
+  // recorded as a FindingSODOverride waiver bound to that signature.
+  sodOverrideReasonCode: z.string().optional(),
+  sodOverrideJustification: z.string().optional(),
+});
+
+/**
+ * REVIEW → COMPLETE — QA accepts a submitted finding (→ Closed). QA-gated + SoD
+ * (the reviewer must NOT be the assignee/owner).
+ *
+ * ⚠️ AUDITED, NOT ELECTRONICALLY SIGNED.
+ * This mirrors closeDeviation's shape — role gate, SoD self-checks, password
+ * re-authentication, closure metadata, one in-transaction audit row — MINUS the
+ * cryptography. It mints NO SignedRecord, computes NO content hash, and calls NO
+ * canonicaliser, so a closed finding carries no 21 CFR Part 11 electronic
+ * signature. The password proves WHO acted; it does not attest WHAT was closed.
+ * Do not describe this closure as "signed" anywhere until the deferred signature
+ * work lands (see the seam marked inside the transaction below).
+ */
+export async function reviewFinding(
+  findingId: string,
+  input: z.input<typeof ReviewFindingCloseSchema>,
+): Promise<ActionResult> {
   const session = await requireAuth();
   if (!DEVIATION_QA_ROLES.includes(session.user.role)) {
     return { success: false, error: "Only QA Head can review findings." };
   }
+  const parsed = ReviewFindingCloseSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: "Validation failed", fieldErrors: parsed.error.flatten().fieldErrors };
+  }
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, deletedAt: null },
-    select: { id: true, reference: true, owner: true, status: true, linkedCAPAId: true, rootCause: true, rcaRecordedById: true },
+    // requirement + severity are selected for the SIGNATURE's canonical content
+    // (canonicalizeFindingClosureContent binds both) — not for any gate.
+    select: { id: true, reference: true, requirement: true, severity: true, owner: true, status: true, linkedCAPAId: true, rootCause: true, rcaRecordedById: true },
   });
   if (!finding) return { success: false, error: "Finding not found" };
   if (await findingLockedByCapa(finding.linkedCAPAId, session.user.tenantId)) {
@@ -1342,23 +1395,145 @@ export async function reviewFinding(findingId: string): Promise<ActionResult> {
     return { success: false, error: "Only a submitted finding can be reviewed." };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
-  if (finding.owner && finding.owner === actor.userId) {
-    return { success: false, error: "Separation of duties: you cannot review a finding assigned to you. A different QA Head must review it." };
+
+  // ── Single-QA SoD override (Part 3) ⚠️ UNVERIFIED — built without DB access.
+  //    Each identity self-check below still FIRES exactly as before. The override
+  //    is the RECORDED, JUSTIFIED EXCEPTION to it, never a silent bypass: with the
+  //    tenant flag OFF the caller sees the ORIGINAL block message verbatim and
+  //    never learns the feature exists; on a Critical finding the ceiling refuses
+  //    regardless. A waived check is written to FindingSODOverride + the audit
+  //    trail, inside the same transaction as the closure signature.
+  //
+  //    The flag is read ONCE and only if a check actually fired, so the
+  //    no-self-check path adds no query and stays byte-for-byte as it was.
+  const sodInput = {
+    sodOverrideReasonCode: parsed.data.sodOverrideReasonCode,
+    sodOverrideJustification: parsed.data.sodOverrideJustification,
+  };
+  const assigneeSelf = !!finding.owner && finding.owner === actor.userId;
+  const rcaAuthorSelf = !!actor.userId && !!finding.rcaRecordedById && finding.rcaRecordedById === actor.userId;
+  const sodFlagOn =
+    assigneeSelf || rcaAuthorSelf ? await tenantSodOverrideOn(session.user.tenantId) : false;
+  const waivedControls: Array<{ control: FindingSodControl; reasonCode: string; justification: string }> = [];
+
+  if (assigneeSelf) {
+    const decision = evaluateFindingSodOverride({
+      severity: finding.severity,
+      flagOn: sodFlagOn,
+      existingBlockError:
+        "Separation of duties: you cannot review a finding assigned to you. A different QA Head must review it.",
+      input: sodInput,
+    });
+    if (!decision.proceed) return { success: false, error: decision.error };
+    waivedControls.push({ control: "FINDING_REVIEW_ASSIGNEE", reasonCode: decision.reasonCode, justification: decision.justification });
   }
+
   // Item 17 — RCA gate. NOT redundant with the SoD above: that one is reviewer !=
   // ASSIGNEE, which says nothing about who wrote the analysis. Accepting the work
   // closes the finding, so the same rule the direct paths use applies here.
+  //
+  // rca_missing is NEVER waivable — it is a COMPLETENESS rule, not an identity
+  // rule, and there is no control code for it. Only rca_self_close (an identity
+  // rule) can be excused, and only under the flag + ceiling + justification.
   const reviewBlockers = findingCloseBlockers(finding, actor.userId);
+  const selfCloseOnly =
+    reviewBlockers.length === 1 && reviewBlockers[0].key === "rca_self_close";
   if (reviewBlockers.length > 0) {
-    return { success: false, error: reviewBlockers[0].message };
+    if (!selfCloseOnly) {
+      // rca_missing (alone or with anything else) — hard block, no waiver path.
+      return { success: false, error: reviewBlockers[0].message };
+    }
+    const decision = evaluateFindingSodOverride({
+      severity: finding.severity,
+      flagOn: sodFlagOn,
+      existingBlockError: reviewBlockers[0].message,
+      input: sodInput,
+    });
+    if (!decision.proceed) return { success: false, error: decision.error };
+    waivedControls.push({ control: "FINDING_CLOSE_RCA_AUTHOR", reasonCode: decision.reasonCode, justification: decision.justification });
   }
+  // Part 11 §11.200 identity re-authentication, AFTER every gate above so a caller
+  // who cannot close is never asked for a credential. Its success timestamp is
+  // recorded as the signature's passwordVerifiedAt below.
+  const passwordOk = await verifyPasswordForSigning(session.user.id, parsed.data.password);
+  if (!passwordOk) {
+    return {
+      success: false,
+      error: "Password verification failed. The finding was not closed.",
+      fieldErrors: { password: ["Incorrect password"] },
+    };
+  }
+  const closedAt = new Date();
+  const closureNotes = parsed.data.closureNotes.trim();
+
+  // ── ⚠️ UNVERIFIED: signature minted but never verified against Postgres.
+  //    verifyFindingClosure (src/lib/signing.ts) must pass on a Neon branch —
+  //    mint, mutate an input, confirm drift is detected, and confirm every
+  //    existing recordType still verifies — before this ships. The Postgres
+  //    migrations (20260809120000, 20260809140000) are also still UNAPPLIED, so
+  //    this path cannot run in prod until a credential holder deploys them.
+  //
+  //    Hash + provenance are computed OUTSIDE the transaction, exactly as
+  //    closeDeviation does (deviations.ts) — canonicalisation is pure and a
+  //    provenance read must not hold the tx open.
+  const contentHash = computeContentHash(
+    canonicalizeFindingClosureContent({
+      findingId: finding.id,
+      reference: finding.reference,
+      requirement: finding.requirement,
+      severity: finding.severity,
+      rootCause: finding.rootCause,
+      // The notes being SAVED in this same transaction — the signature must bind
+      // what is written, not the stale column value.
+      closingComment: closureNotes,
+      closedAt,
+    }),
+  );
+  const contentSummary = `Finding ${finding.reference ?? finding.id.slice(0, 8)} (${finding.severity}) closed by ${session.user.name} (${session.user.role})`;
+  const provenance = await readSigningProvenance();
+
   try {
-    // Mutation + audit in ONE transaction (ALCOA+); notify after (side-effect).
+    // Mutation + signature + audit in ONE transaction (ALCOA+); notify after.
     const updated = await prisma.$transaction(async (tx) => {
+      // ① Mint the Part 11 signature FIRST so the finding row can point at it —
+      //    deviation's order (deviations.ts). The signature is ADDED to the close;
+      //    it replaces no guard above and bypasses nothing.
+      const sig = await tx.signedRecord.create({
+        data: {
+          tenantId: session.user.tenantId,
+          recordType: "FINDING_CLOSURE",
+          recordId: findingId,
+          signerId: session.user.id,
+          signerName: session.user.name,
+          signerRole: session.user.role,
+          signerEmail: session.user.email,
+          signatureMeaning: "Closed",
+          contentHash,
+          contentSummary,
+          passwordVerifiedAt: closedAt,
+          ipAddress: provenance.ipAddress,
+          userAgent: provenance.userAgent,
+        },
+      });
+      // ② The close itself.
       const result = await tx.finding.update({
         where: { id: findingId, tenantId: session.user.tenantId },
-        data: { status: "Closed" },
+        // status: "Closed" is UNCHANGED in effect — the same literal, written on
+        // the same condition. The metadata + signature columns are additive; they
+        // do not alter WHETHER or WHEN a finding closes (the CSV openFindings
+        // tally that reads `status !== "Closed"` moves exactly as it did before).
+        data: {
+          status: "Closed",
+          closedBy: session.user.name,
+          closedDate: closedAt,
+          closureNotes,
+          closureSignatureId: sig.id,
+        },
       });
+      // ③ Two audit rows — deviation's pattern (one on the record, one on the
+      //    signature). Deviation writes both AFTER its transaction; these stay
+      //    INSIDE it, keeping this module's ALCOA+ invariant that a mutation can
+      //    never commit without its paired audit row.
       await tx.auditLog.create({
         data: {
           tenantId: session.user.tenantId,
@@ -1367,6 +1542,40 @@ export async function reviewFinding(findingId: string): Promise<ActionResult> {
           recordId: findingId, recordTitle: finding.reference ?? undefined,
         },
       });
+      await tx.auditLog.create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: actor.userId, userName: actor.displayName, userRole: actor.role,
+          module: SIGNING_AUDIT_MODULE,
+          action: "FINDING_CLOSED_AND_SIGNED",
+          recordId: sig.id,
+          recordTitle: (finding.reference ?? finding.requirement).slice(0, 80),
+          newValue: JSON.stringify({
+            signerId: session.user.id,
+            contentHashPrefix: contentHash.slice(0, 16),
+            findingId,
+          }),
+        },
+      });
+      // ④ Single-QA SoD waivers — one row + audit per waived identity check,
+      //    linked to THIS closure signature, atomic with the close. Empty on the
+      //    normal path (no query, no rows). The signature above is never
+      //    conditional on the waiver: identity-independence is waived, the
+      //    e-signature is not. signedRecordId is non-null by construction.
+      for (const w of waivedControls) {
+        await writeFindingSodOverride(tx, {
+          tenantId: session.user.tenantId,
+          findingId,
+          control: w.control,
+          actorUserId: session.user.id,
+          actorName: session.user.name,
+          actorRole: session.user.role,
+          reasonCode: w.reasonCode,
+          justification: w.justification,
+          recordTitle: finding.reference ?? finding.requirement,
+          signedRecordId: sig.id,
+        });
+      }
       return result;
     });
     await notify({
@@ -1493,15 +1702,39 @@ export async function loadFindingReview(findingId: string): Promise<ActionResult
   // nor owner gets "not found" here, before any message is loaded.
   const finding = await prisma.finding.findFirst({
     where: { id: findingId, tenantId: session.user.tenantId, ...findingVisibilityWhere(session) },
-    select: { id: true, status: true, completionNotes: true, reworkReason: true },
+    select: {
+      id: true, status: true, completionNotes: true, reworkReason: true,
+      // Inputs to the SoD reveal below.
+      severity: true, owner: true, rcaRecordedById: true,
+    },
   });
   if (!finding) return { success: false, error: "Finding not found" };
+
+  // ⚠️ UNVERIFIED — single-QA SoD reveal, built without DB access.
+  //
+  // Server-computed so the CLIENT never re-implements the rule. `ceiling` ships as
+  // a resolved boolean (deviation's pattern, DeviationCloseSodReveal) rather than
+  // a raw severity, so the Critical rule cannot drift client-side. The UI reveals
+  // the override inputs only when the server would actually accept one; the server
+  // re-validates regardless, so this is guidance, not the gate.
+  const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
+  const assigneeSelf = !!finding.owner && finding.owner === actor.userId;
+  const rcaAuthorSelf = !!actor.userId && !!finding.rcaRecordedById && finding.rcaRecordedById === actor.userId;
+  const sodReveal: FindingCloseSodReveal = {
+    flagOn: assigneeSelf || rcaAuthorSelf ? await tenantSodOverrideOn(session.user.tenantId) : false,
+    // severity === "Critical" (generic taxonomy) — never waivable.
+    ceiling: normalizeSeverityForDisplay(finding.severity, "generic") === "Critical",
+    assignee: assigneeSelf,
+    rcaAuthor: rcaAuthorSelf,
+  };
+
   return {
     success: true,
     data: {
       status: finding.status,
       completionNotes: finding.completionNotes,
       reworkReason: finding.reworkReason,
+      sodReveal,
     },
   };
 }

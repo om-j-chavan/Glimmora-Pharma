@@ -11,7 +11,10 @@
  * `sodOverrideReasonCode` / `sodOverrideJustification` params.
  */
 
+import { useId } from "react";
 import { ShieldAlert } from "lucide-react";
+import { Dropdown } from "@/components/ui/Dropdown";
+import { Textarea } from "@/components/ui/Textarea";
 
 /** Kept in lockstep with SOD_REASON_CODES in src/actions/capas/sod-override.ts. */
 export const SOD_REASON_OPTIONS: { value: string; label: string }[] = [
@@ -52,6 +55,10 @@ const DEFAULT_DESCRIPTION =
 export function SodOverrideInputs({ reasonCode, justification, onReasonCode, onJustification, disabled, className, description }: Props) {
   const len = justification.trim().length;
   const tooShort = len > 0 && len < SOD_JUSTIFICATION_MIN;
+  // Per-instance id so the justification label/field association stays unique.
+  // RcaReviewSection renders TWO of these (approve-waiver + override-waived,
+  // separate state), so a hardcoded id could collide in the DOM.
+  const justificationId = `sod-justification-${useId()}`;
   return (
     <div
       className={`rounded-md p-2.5 ${className ?? ""}`}
@@ -65,20 +72,26 @@ export function SodOverrideInputs({ reasonCode, justification, onReasonCode, onJ
         {description ?? DEFAULT_DESCRIPTION}
       </p>
       <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason code</label>
-      <select
-        className="input text-[12px] w-full mb-2"
+      {/* The empty entry is a real OPTION, not a placeholder prop, so the user
+          can still clear the choice back to "" exactly as the native <select>
+          allowed. Passing it via `placeholder` would make the field
+          unclearable once a reason is picked. */}
+      <Dropdown
         value={reasonCode}
+        onChange={onReasonCode}
+        options={[
+          { value: "", label: "Select a reason…" },
+          ...SOD_REASON_OPTIONS,
+        ]}
         disabled={disabled}
-        onChange={(e) => onReasonCode(e.target.value)}
-      >
-        <option value="">Select a reason…</option>
-        {SOD_REASON_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-      <label className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Justification</label>
-      <textarea
-        className="input text-[12px] w-full min-h-16"
+        size="sm"
+        width="w-full"
+        className="mb-2"
+      />
+      <label htmlFor={justificationId} className="block text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Justification</label>
+      <Textarea
+        id={justificationId}
+        rows={3}
         placeholder={`Why is a single-QA override warranted? (≥ ${SOD_JUSTIFICATION_MIN} characters)`}
         value={justification}
         disabled={disabled}
