@@ -561,7 +561,7 @@ export function ReadinessPage({ inspections: prismaInspections, playbooks }: Rea
       {/* ═══ OVERVIEW ═══ */}
       {activeTab === "overview" && (
         selectedPrismaInspection ? (
-          <OverviewTab inspection={selectedPrismaInspection} isAdmin={isAdmin} onNavigate={(t) => setActiveTab(t as TabId)} />
+          <OverviewTab inspection={selectedPrismaInspection} isAdmin={isAdmin} users={users} onNavigate={(t) => setActiveTab(t as TabId)} />
         ) : (
           <div
             className="text-center py-10 rounded-2xl border"

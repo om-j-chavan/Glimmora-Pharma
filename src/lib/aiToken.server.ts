@@ -26,8 +26,16 @@ import type { AuthSession } from "@/lib/auth";
  *
  * Claims match what the FastAPI dependency reads (app/routers/auth_router.py):
  *   sub          → the acting user (audit-trail attribution)
- *   customer_id  → the tenant, used for every tenant-scoped query upstream
+ *   customer_id  → the tenant; the ONLY tenant the backend will act on. Any
+ *                  customer_id in a request body is validated against this and
+ *                  rejected with 403 on mismatch (resolve_tenant).
+ *   role         → drives backend RBAC (require_roles)
+ *   user_id      → stable actor id for attribution
  *   exp          → short-lived; a fresh token is minted per request
+ *
+ * The backend verifies this independently: HS256 pinned, `exp`/`sub`/
+ * `customer_id` required, no anonymous path. It does not trust this app — it
+ * trusts the signature.
  */
 
 /** Token lifetime. Minted per request, so this only has to cover one call. */
@@ -88,7 +96,12 @@ export function mintAiToken(session: AuthSession): string | null {
       // the app uses; fall back to the user id when it is absent.
       sub: session.user.email || session.user.id,
       customer_id: session.user.tenantId,
+      // The AI service authorises on `role` and attributes on `user_id`. Both
+      // are inside the SIGNED payload, so a caller cannot escalate by editing a
+      // request body — which is exactly why the backend reads identity from the
+      // token and never from the payload.
       role: session.user.role,
+      user_id: session.user.id,
       iat: now,
       exp: now + TTL_SECONDS,
     }),

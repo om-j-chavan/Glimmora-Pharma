@@ -8,6 +8,8 @@ import { AIButton } from "@/components/ai";
 import { StatusBadge } from "@/components/shared";
 import { READINESS_STATUSES } from "@/constants/statusTaxonomy";
 import { openAssistant } from "@/lib/assistant";
+import { displayName, displayUserName } from "@/lib/identity-display";
+import type { TenantUserConfig } from "@/store/auth.slice";
 
 type FullInspection = Inspection & {
   actions: ReadinessAction[];
@@ -18,6 +20,17 @@ type FullInspection = Inspection & {
 export interface OverviewTabProps {
   inspection: FullInspection;
   isAdmin: boolean;
+  /**
+   * Tenant user roster, for resolving person fields to names.
+   *
+   * `Inspection.inspectionLead` is a free-text column with TWO historical
+   * shapes: the seed writes a display name, while the create form writes the
+   * selected User.id — so the Overview card was rendering a raw cuid for every
+   * inspection raised through the UI. displayUserName() handles both and never
+   * echoes an unresolved id. Passed down from ReadinessPage's useTenantConfig()
+   * (already tenant-scoped) rather than re-fetched here.
+   */
+  users: ReadonlyArray<Pick<TenantUserConfig, "id" | "name">>;
   /** Jump to another workspace tab (e.g. from the Next-Best-Action card). */
   onNavigate: (tab: string) => void;
 }
@@ -58,7 +71,7 @@ const INSIGHT_TONE: Record<string, string> = {
   info: "var(--brand)",
 };
 
-export function OverviewTab({ inspection, onNavigate }: OverviewTabProps) {
+export function OverviewTab({ inspection, users, onNavigate }: OverviewTabProps) {
   const actions = inspection.actions;
   const total = actions.length;
   const completed = actions.filter((a) => a.status === "Complete").length;
@@ -257,9 +270,14 @@ export function OverviewTab({ inspection, onNavigate }: OverviewTabProps) {
             { label: "Agency", value: inspection.agency },
             { label: "Type", value: inspection.type },
             { label: "Site", value: inspection.siteName },
-            { label: "Lead", value: inspection.inspectionLead || "—" },
+            // Lead may be a User.id (create form) or a name (seed/legacy);
+            // displayUserName resolves the former and preserves the latter.
+            { label: "Lead", value: inspection.inspectionLead ? displayUserName(inspection.inspectionLead, users) : "—" },
             { label: "Status", value: inspection.status },
-            { label: "Created by", value: inspection.createdBy },
+            // createdBy is a denormalised name column with a createdById FK —
+            // displayName() is the canonical reader for that pair and, unlike a
+            // bare field read, can never echo an id if one is ever written here.
+            { label: "Created by", value: displayName({ userId: inspection.createdById, name: inspection.createdBy }) },
           ].map((f) => (
             <div key={f.label}>
               <p style={{ color: "var(--text-muted)" }}>{f.label}</p>
