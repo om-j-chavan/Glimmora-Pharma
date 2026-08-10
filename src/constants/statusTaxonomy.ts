@@ -26,14 +26,68 @@ export interface StatusDef {
 // FindingStatus type. The former lowercase duplicate keys (open/in_progress/
 // closed) and the unreachable lowercase-only states (pending_verification,
 // risk_accepted — never written by any finding action) were removed.
-export const FINDING_STATUSES: Record<string, StatusDef> = {
+/**
+ * THE canonical finding-status vocabulary — one `as const` array that the TS
+ * union, the display map, and the user-editable zod subset all derive from.
+ *
+ * 🔴 HASHED — DO NOT CHANGE ANY LITERAL, ESPECIALLY "Closed".
+ * `openFindings` is computed as
+ *   `findings.filter((f) => f.status !== "Closed").length`
+ * (src/actions/systems.ts:1936, :2020, :2380) and that COUNT is bound into the
+ * CSV/CSA sign-off hash (src/lib/signing.ts:526), supplied at signing
+ * (systems.ts:2119) and re-derived at verification (systems.ts:2414). Renaming
+ * "Closed" — even its casing — silently changes the count on every signed
+ * system and breaks verifyCSVSignOff for every existing CSV signature. It is
+ * also a hard sign-off gate (systems.ts:2020). Members may be added or removed
+ * only deliberately, with a data migration; the strings themselves are frozen.
+ */
+export const FINDING_STATUS_VALUES = [
+  "Open",
+  "In Progress",
+  "Submitted",
+  "Rework",
+  "Closed",
+] as const;
+
+export type FindingStatusValue = (typeof FINDING_STATUS_VALUES)[number];
+
+/**
+ * The subset a user may set DIRECTLY by editing a finding (UpdateFindingSchema
+ * in src/actions/findings.ts). Deliberately NARROWER than the full vocabulary —
+ * this is a guard, not drift.
+ *
+ * "Submitted" and "Rework" are written ONLY by submitFinding
+ * (src/actions/findings.ts:1264) and reworkFinding (:1388). Those actions carry
+ * an assignee-only check, a lock check, source-status preconditions, an audit
+ * row (FINDING_SUBMITTED / FINDING_REWORK), and — for rework — a required
+ * reason plus a notify() to the assignee. Widening the edit form to accept them
+ * would let a client set "Rework" with no reason, no audit entry and no
+ * notification: a Part 11 attributability hole. DO NOT add them here.
+ *
+ * `satisfies readonly FindingStatusValue[]` machine-checks that every editable
+ * value is a real finding status, so this subset can never drift from the
+ * canonical list above.
+ */
+export const FINDING_STATUS_USER_EDITABLE = [
+  "Open",
+  "In Progress",
+  "Closed",
+] as const satisfies readonly FindingStatusValue[];
+
+// `satisfies` gives compile-time completeness against the canonical array while
+// the exported annotation stays Record<string, StatusDef> — consumers index this
+// map with a plain `string` and pass it where a Record<string, StatusDef> is
+// expected (ALL_TAXONOMIES, getStatusDef).
+const FINDING_STATUS_DEFS = {
   Open: { value: "Open", label: "Open", color: "#1D4ED8", bg: "#EFF6FF", description: "Finding identified, no action taken yet", nextActions: ["Raise CAPA", "Assign owner"] },
   "In Progress": { value: "In Progress", label: "In Progress", color: "#B45309", bg: "#FEF9EC", description: "Assigned to an owner (or CAPA raised) — corrective work ongoing", nextActions: ["Assign owner", "Raise CAPA", "Monitor progress"] },
   // Gap Step 4 — submit → QA review → rework loop states (mirror the deviation task).
   Submitted: { value: "Submitted", label: "Submitted", color: "#6D28D9", bg: "#F5F3FF", description: "Assignee submitted the work for QA review", nextActions: ["Accept & close", "Send for rework"] },
   Rework: { value: "Rework", label: "Rework", color: "#B91C1C", bg: "#FEF2F2", description: "QA returned the finding for rework", nextActions: ["Address feedback", "Resubmit"] },
   Closed: { value: "Closed", label: "Closed", color: "#0F6E56", bg: "#E8F5F1", description: "Finding resolved and verified by QA Head", nextActions: [] },
-};
+} satisfies Record<FindingStatusValue, StatusDef>;
+
+export const FINDING_STATUSES: Record<string, StatusDef> = FINDING_STATUS_DEFS;
 
 /* ── CAPA TRACKER — CAPA statuses ── */
 
@@ -87,14 +141,50 @@ export const VALIDATION_STATUSES: Record<string, StatusDef> = {
 
 /* ── DEVIATION — Deviation statuses ── */
 
-export const DEVIATION_STATUSES: Record<string, StatusDef> = {
+/**
+ * THE canonical deviation-status vocabulary — one `as const` array that the
+ * TS union and the display map below both derive from.
+ *
+ * Pattern (Cat 2 rung): define the values ONCE here; everything else derives.
+ *   • TS union  — `DeviationStatus` in src/store/deviation.slice.ts is
+ *                 `(typeof DEVIATION_STATUS_VALUES)[number]`.
+ *   • Display   — DEVIATION_STATUSES below is checked against this array via
+ *                 `satisfies`, so adding a value here fails the build until a
+ *                 StatusDef exists for it.
+ *   • Zod       — deliberately none. Deviation status is never accepted from a
+ *                 client; it is set server-side by the transition actions
+ *                 (src/actions/deviations.ts). Do NOT add an input enum here —
+ *                 that would introduce validation where none exists today.
+ *
+ * These string values are PERSISTED (Deviation.status, default "open") and
+ * compared inline throughout src/actions/deviations.ts. Never change a literal —
+ * only ever add or remove members deliberately, with a data migration.
+ */
+export const DEVIATION_STATUS_VALUES = [
+  "open",
+  "under_investigation",
+  "pending_qa_review",
+  "capa_pending",
+  "closed",
+  "rejected",
+] as const;
+
+export type DeviationStatusValue = (typeof DEVIATION_STATUS_VALUES)[number];
+
+// `satisfies` gives compile-time completeness against the canonical array while
+// the exported annotation stays Record<string, StatusDef> — consumers index this
+// map with a plain `string` (src/lib/searchSources.tsx:73) and pass it where a
+// Record<string, StatusDef> is expected (ALL_TAXONOMIES, getStatusDef).
+const DEVIATION_STATUS_DEFS = {
   open: { value: "open", label: "Open", color: "#1D4ED8", bg: "#EFF6FF", description: "Deviation reported, investigation not started", nextActions: ["Start investigation"] },
   under_investigation: { value: "under_investigation", label: "Under Investigation", color: "#B45309", bg: "#FEF9EC", description: "RCA in progress, impact being assessed", nextActions: ["Complete RCA", "Submit for QA review"] },
   pending_qa_review: { value: "pending_qa_review", label: "Pending QA Review", color: "#6D28D9", bg: "#F5F3FF", description: "Investigation complete, QA Head reviewing", nextActions: ["QA Head to close or reject"] },
   capa_pending: { value: "capa_pending", label: "CAPA Pending", color: "#0E7490", bg: "#ECFEFF", description: "CAPA raised; deviation stays open and linked until the CAPA closes", nextActions: ["Close the linked CAPA", "QA Head to sign-close the deviation"] },
   closed: { value: "closed", label: "Closed", color: "#0F6E56", bg: "#E8F5F1", description: "QA Head satisfied. CAPA raised if required.", nextActions: [] },
   rejected: { value: "rejected", label: "Rejected", color: "#A32D2D", bg: "#FEF2F2", description: "QA Head rejected. Additional investigation needed.", nextActions: ["Rework investigation"] },
-};
+} satisfies Record<DeviationStatusValue, StatusDef>;
+
+export const DEVIATION_STATUSES: Record<string, StatusDef> = DEVIATION_STATUS_DEFS;
 
 /* ── TRAINING & AWARENESS — Action statuses ── */
 

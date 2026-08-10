@@ -249,3 +249,133 @@ export async function writeDeviationSodOverride(
     },
   });
 }
+
+/* ── Gap Assessment finding-closure single-QA SoD override (Part 3) ───────────
+ *
+ * ⚠️ UNVERIFIED — built without DB access. MUST be verified against Postgres
+ * before deploy: close a finding under a waiver and confirm the
+ * FindingSODOverride row + FINDING_SOD_OVERRIDE_USED audit land in the SAME
+ * transaction as the FINDING_CLOSURE signature; confirm a Critical finding is
+ * still refused; confirm the flag-OFF path returns the ORIGINAL block message.
+ * Do NOT deploy until this passes.
+ *
+ * The FINDING analogue of the two transforms above — same block→justified-proceed
+ * shape, reusing the shared reason codes / input / decision types / tenant read.
+ * Three differences from deviation: (1) the ceiling is severity === "Critical" on
+ * the GENERIC taxonomy (findings are Critical/High/Medium/Low — there is no Major
+ * tier, so deviation's Critical+Major does not map; this matches CAPA, which uses
+ * the same taxonomy); (2) it writes FindingSODOverride + FINDING_SOD_OVERRIDE_USED;
+ * (3) finding close is ALWAYS signed, so signedRecordId is never null.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The finding-close identity checks a waiver may excuse.
+ *
+ * DELIBERATELY EXCLUDED: `rca_missing`. That blocker is a COMPLETENESS rule
+ * ("was the assessment performed?"), not an identity rule — nothing about
+ * single-QA staffing makes a missing root cause analysis acceptable, and
+ * src/lib/finding-close.ts is explicit that a missing RCA must never be
+ * retro-fitted. There is no control code for it here, so evaluate/write cannot
+ * express it and the hard block in findingCloseBlockers always stands.
+ */
+export type FindingSodControl =
+  | "FINDING_CLOSE_RCA_AUTHOR"
+  | "FINDING_REVIEW_ASSIGNEE";
+
+/** The identity rule each finding-close control waives — recorded for inspectors. */
+export const FINDING_SOD_WAIVED_RULE: Record<FindingSodControl, string> = {
+  FINDING_CLOSE_RCA_AUTHOR: "rcaAuthor!=closer",
+  FINDING_REVIEW_ASSIGNEE: "assignee!=reviewer",
+};
+
+export const FINDING_SOD_OVERRIDE_CEILING_BLOCK =
+  "Critical findings require independent QA review; the single-QA override does not apply.";
+
+/**
+ * Decide block vs justified-proceed at ONE finding-close identity check. Gate
+ * order is IDENTICAL to evaluateSodOverride / evaluateDeviationSodOverride:
+ * flag OFF first ⇒ the check's ORIGINAL message (a tenant without the override
+ * never sees override wording, even for Critical); flag ON + Critical ⇒ ceiling
+ * block; otherwise require a reason code + justification.
+ *
+ * CEILING DECISION: "Critical" only, GENERIC taxonomy. Finding severity is
+ * Critical/High/Medium/Low — the same scale CAPA uses, so CAPA's ceiling is the
+ * one that maps. Deviation's Critical+Major is expressed on the FDA taxonomy
+ * (Critical/Major/Minor) where Major IS the High tier; findings have no Major, so
+ * copying that string would silently waive nothing extra while reading as
+ * stricter. Normalised via normalizeSeverityForDisplay so a legacy lowercase
+ * "critical" row is caught too.
+ */
+export function evaluateFindingSodOverride(opts: {
+  severity: string | null;
+  flagOn: boolean;
+  existingBlockError: string;
+  input: SodOverrideInput;
+}): SodDecision {
+  if (!opts.flagOn) return { proceed: false, error: opts.existingBlockError };
+  if (normalizeSeverityForDisplay(opts.severity, "generic") === "Critical") {
+    return { proceed: false, error: FINDING_SOD_OVERRIDE_CEILING_BLOCK };
+  }
+  const reasonCode = opts.input.sodOverrideReasonCode;
+  const justification = (opts.input.sodOverrideJustification ?? "").trim();
+  if (!reasonCode || !(SOD_REASON_CODES as readonly string[]).includes(reasonCode)) {
+    return { proceed: false, error: "A reason code is required to proceed under single-QA override." };
+  }
+  if (justification.length < 20) {
+    return { proceed: false, error: "A justification (min 20 chars) is required under single-QA override." };
+  }
+  return { proceed: true, reasonCode, justification };
+}
+
+/** Write the FindingSODOverride record + FINDING_SOD_OVERRIDE_USED audit inside
+ *  the caller's transaction (atomic with the signed close). signedRecordId is the
+ *  closure SignedRecord id — never null (finding close is always signed). One row
+ *  per waived control; a closer who trips both checks gets two rows. */
+export async function writeFindingSodOverride(
+  tx: Prisma.TransactionClient,
+  opts: {
+    tenantId: string;
+    findingId: string;
+    control: FindingSodControl;
+    actorUserId: string;
+    actorName: string;
+    actorRole: string;
+    reasonCode: string;
+    justification: string;
+    recordTitle: string;
+    signedRecordId: string;
+  },
+): Promise<void> {
+  await tx.findingSODOverride.create({
+    data: {
+      tenantId: opts.tenantId,
+      findingId: opts.findingId,
+      control: opts.control,
+      actorUserId: opts.actorUserId,
+      actorName: opts.actorName,
+      actorRole: opts.actorRole,
+      reasonCode: opts.reasonCode,
+      justification: opts.justification,
+      signedRecordId: opts.signedRecordId,
+    },
+  });
+  await tx.auditLog.create({
+    data: {
+      tenantId: opts.tenantId,
+      userId: opts.actorUserId,
+      userName: opts.actorName,
+      userRole: opts.actorRole,
+      module: "Gap Assessment / SoD Override",
+      action: "FINDING_SOD_OVERRIDE_USED",
+      recordId: opts.findingId,
+      recordTitle: opts.recordTitle.slice(0, 80),
+      newValue: JSON.stringify({
+        control: opts.control,
+        waivedRule: FINDING_SOD_WAIVED_RULE[opts.control],
+        reasonCode: opts.reasonCode,
+        justification: opts.justification,
+        signedRecordId: opts.signedRecordId,
+      }),
+    },
+  });
+}

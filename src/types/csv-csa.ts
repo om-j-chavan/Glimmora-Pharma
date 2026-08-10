@@ -18,6 +18,8 @@ import type {
   StageDocument as PrismaStageDocument,
   ValidationStageTask as PrismaValidationStageTask,
 } from "@prisma/client";
+import type { GAMP5Category } from "@/constants/gamp5";
+import { GAMP5_CATEGORIES } from "@/constants/gamp5";
 
 /* ══════════════════════════════════════
  * SYSTEMS — enums + constants
@@ -38,17 +40,12 @@ export type ValidationStatus =
 // partial-compliance value, formerly "Gaps Identified", backfilled to
 // "Partial"). Server-side enforced via a zod enum in src/actions/systems.ts.
 export type ComplianceStatus = "Compliant" | "Non-Compliant" | "Partial" | "In Progress" | "N/A";
-export type GAMP5Category = "1" | "3" | "4" | "5";
-
-// RUNG 3K — single source of truth for GAMP 5 category dropdown options
-// (was duplicated verbatim in AddSystemModal + EditSystemModal). Labels are
-// the exact strings those modals used.
-export const GAMP5_CATEGORIES = [
-  { value: "1", label: "Cat 1 — Infrastructure" },
-  { value: "3", label: "Cat 3 — Non-configured" },
-  { value: "4", label: "Cat 4 — Configured software" },
-  { value: "5", label: "Cat 5 — Custom software" },
-] as const;
+// RUNG 3K — the category set + dropdown labels were defined here; they now live
+// in src/constants/gamp5.ts alongside the descriptions the detail panel renders,
+// so the vocabulary has one home. Re-exported so existing importers of
+// "@/types/csv-csa" are unchanged.
+export type { GAMP5Category };
+export { GAMP5_CATEGORIES };
 export type RiskLevel = "HIGH" | "MEDIUM" | "LOW";
 
 export type ValidationStageKey = "URS" | "FS" | "DS" | "IQ" | "OQ" | "PQ" | "RTR";
@@ -192,6 +189,11 @@ export interface GxPSystem {
   signedOffRtmCoverage?: number | null;
   signedOffStagesApproved?: number | null;
   signedOffStagesTotal?: number | null;
+  // Gate-4 exception — true when the sign-off was taken without full RTM
+  // traceability under a documented QA reason (both null on legacy sign-offs
+  // predating the gate, which read the same as "no override").
+  signedOffRtmOverride?: boolean | null;
+  signedOffRtmOverrideReason?: string | null;
   reference?: string;
   // RUNG 2 — real FK-hydrated linked findings/CAPAs (system detail page).
   findings?: SystemFinding[];
@@ -361,6 +363,8 @@ export function adaptPrismaSystem(s: SystemFromPrisma): GxPSystem {
     signedOffRtmCoverage: s.signedOffRtmCoverage,
     signedOffStagesApproved: s.signedOffStagesApproved,
     signedOffStagesTotal: s.signedOffStagesTotal,
+    signedOffRtmOverride: s.signedOffRtmOverride,
+    signedOffRtmOverrideReason: s.signedOffRtmOverrideReason,
     reference: s.reference ?? undefined,
     // RUNG 2 — FK-hydrated linked findings / CAPAs.
     findings: s.findings.map((f) => ({

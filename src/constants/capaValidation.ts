@@ -31,3 +31,10 @@ export const DI_CLEARANCE_MIN = 20;    // "what did you verify?" — now require
 // is a JUSTIFICATION for a change, the same shape as REJECT_REASON_MIN / CONCERN_MIN
 // and the reassign/skip reasons in action-items.ts.
 export const FINDING_EDIT_REASON_MIN = 10;
+// reviewFinding (QA close) — the closure MESSAGE. Mirrors CloseDeviationSchema's
+// `notes` floor in actions/deviations.ts so the two closures demand the same
+// substance. NOT the 20 tier: that is for an attestation bound into a signature
+// (CLOSING_NOTES_MIN above), and a finding closure is AUDITED, NOT E-SIGNED —
+// nothing here is hashed. Lives in this module, not in actions/findings.ts,
+// because that file is "use server" and may export only async functions.
+export const FINDING_CLOSURE_NOTES_MIN = 5;

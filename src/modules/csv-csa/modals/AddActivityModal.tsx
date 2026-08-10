@@ -7,6 +7,8 @@ import type { GxPSystem } from "@/types/csv-csa";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker } from "@/components/ui/DatePicker";
+import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { roleLabel } from "@/lib/labels/roles";
 
@@ -78,7 +80,7 @@ export function AddActivityModal({ open, systems, users, onSave, onClose }: AddA
           </div>
           <div className="col-span-2">
             <label htmlFor="act-title" className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Activity title <span aria-hidden="true">*</span></label>
-            <input id="act-title" className="input text-[12px]" placeholder="e.g. LIMS IQ protocol execution" {...form.register("title")} />
+            <Input id="act-title" placeholder="e.g. LIMS IQ protocol execution" {...form.register("title")} />
             {form.formState.errors.title && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{form.formState.errors.title.message}</p>}
           </div>
           <div>
@@ -105,12 +107,18 @@ export function AddActivityModal({ open, systems, users, onSave, onClose }: AddA
           </div>
           <div>
             <label htmlFor="act-start" className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>Start date *</label>
-            <input id="act-start" type="date" className="input text-[12px]" {...form.register("startDate")} />
+            {/* Controller, not register: DatePicker is a value/onChange component,
+                not a ref-forwarding native input. Same field, same zod validation. */}
+            <Controller name="startDate" control={form.control} render={({ field }) => (
+              <DatePicker id="act-start" value={field.value ?? ""} onChange={field.onChange} />
+            )} />
             {form.formState.errors.startDate && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{form.formState.errors.startDate.message}</p>}
           </div>
           <div>
             <label htmlFor="act-end" className="text-[11px] font-semibold uppercase tracking-wider block mb-1" style={{ color: "var(--text-muted)" }}>End date *</label>
-            <input id="act-end" type="date" className="input text-[12px]" {...form.register("endDate")} />
+            <Controller name="endDate" control={form.control} render={({ field }) => (
+              <DatePicker id="act-end" value={field.value ?? ""} onChange={field.onChange} />
+            )} />
             {form.formState.errors.endDate && <p role="alert" className="text-[11px] text-[#ef4444] mt-1">{form.formState.errors.endDate.message}</p>}
           </div>
           <div className="col-span-2">

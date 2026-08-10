@@ -1,0 +1,21 @@
+-- CSV/CSA sign-off — stage-evidence manifest digest (audit finding C3).
+--
+-- ADDITIVE ONLY + idempotent. Adds one nullable GxPSystem column holding the
+-- SHA-256 of the canonical stage-document manifest bound into
+-- signedOffContentHash at signing. Nothing existing is altered or dropped.
+--
+-- The column doubles as the CONTENT VERSION MARKER for verifyCSVSignOff:
+--
+--   NULL     the sign-off predates the manifest (or the system is unsigned).
+--            Verification reconstructs the canonical content WITHOUT a
+--            documentManifest key, reproducing the original byte shape.
+--            Synthesising a manifest from current documents for these records
+--            would make every legacy sign-off report false drift.
+--   NOT NULL the sign-off bound a manifest. Verification rebuilds the manifest
+--            from CURRENT active documents; any add / remove / byte-substitution
+--            changes the hash and surfaces as drift.
+--
+-- Legacy rows keep NULL and continue to verify as MATCHING. See the versioning
+-- block on canonicalizeCSVValidationSignOffContent in src/lib/signing.ts.
+
+ALTER TABLE "GxPSystem" ADD COLUMN IF NOT EXISTS "signedOffDocManifestSha256" TEXT;

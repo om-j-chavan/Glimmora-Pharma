@@ -11,6 +11,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { updateRTMEntry, createRTMEntry } from "@/actions/rtm";
 import { Modal } from "@/components/ui/Modal";
 import { DataTable, type Column } from "@/components/shared";
+import { truncate } from "@/lib/format/text";
 
 const TR_VARIANT: Record<TraceabilityStatus, "green" | "amber" | "red"> = { complete: "green", partial: "amber", broken: "red" };
 const TR_LABEL: Record<TraceabilityStatus, string> = { complete: "Traced", partial: "Partial", broken: "Broken" };
@@ -20,8 +21,6 @@ const RESULT_OPTS = [
   { value: "fail", label: "FAIL" },
   { value: "na", label: "N/A" },
 ];
-
-function truncate(s: string, n: number) { return s.length > n ? `${s.slice(0, n)}…` : s; }
 
 export interface SystemRTMTabProps {
   systemId: string;

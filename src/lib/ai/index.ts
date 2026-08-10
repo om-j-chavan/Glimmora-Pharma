@@ -1,27 +1,4 @@
-/**
- * AI feature gateway — the type contract every AI surface in the app codes
- * against, and a thin pass-through to the backend that implements it.
- *
- * ── What changed, and why ──────────────────────────────────────────
- * This module used to be mock-first. It shipped ~1,750 lines of fixture data
- * (src/lib/ai/mockData.ts: root-cause pools, a GxP validation rubric, a
- * regulatory watchlist, drift alerts, triage rules, sample 483 observations) to
- * every browser, and each function wrapped its backend call in a try/catch that
- * silently substituted that fixture on any failure.
- *
- * Two problems with that. First, it put AI business logic and GxP domain
- * content in client code. Second — and worse in a regulated tool — the CLIENT
- * decided when an answer was real: a backend outage produced confident-looking
- * compliance content with no server-side record that anything had degraded.
- *
- * All of it now lives in the AI service (app/fallbacks/). Each backend route
- * degrades deterministically on its own and stamps `source` so the UI can badge
- * a non-live answer. This file no longer decides anything: it calls, types the
- * result, and lets errors reach the caller's existing error state.
- *
- * Function signatures and return shapes are unchanged, so no calling surface
- * had to move.
- */
+
 
 import {
   scanStageDocument,
@@ -147,10 +124,7 @@ export interface ResponseDraftEvent {
   agency: string;
   site: string;
   inspectionDate: string;
-  /** The responding company's legal name (the tenant's own name, NOT the
-   *  vendor's). Omitted/blank → the draft carries a visible "[Company Name]"
-   *  placeholder, because a letter addressed to a regulator must never be
-   *  signed with a guessed company. */
+
   companyName?: string;
   observations: ResponseDraftObservation[];
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutDashboard, Sparkles } from "lucide-react";
+import { LayoutDashboard } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -213,7 +213,7 @@ export function DashboardPage({
   );
 
   const headerActions: PageAction[] = useMemo(
-    () => [{ label: "Ask AI", variant: "secondary", icon: Sparkles, onClick: () => setAskAiOpen(true) }],
+    () => [{ label: "Ask AI", variant: "ai", onClick: () => setAskAiOpen(true) }],
     [],
   );
 

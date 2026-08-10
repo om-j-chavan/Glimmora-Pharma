@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { roleLabel } from "@/lib/labels/roles";
+import { truncate } from "@/lib/format/text";
 
 // Internal form shape. linkType drives which (optional) source id applies;
 // the refinements make the matching id required.
@@ -67,10 +68,6 @@ export interface AddCommitmentModalProps {
   observations: CommitObservationOption[];
   /** CAPAs linked to this event (for the "from CAPA" sub-dropdown). */
   capas: CommitCapaOption[];
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
 export function AddCommitmentModal({ open, onClose, onSave, users, observations, capas }: AddCommitmentModalProps) {

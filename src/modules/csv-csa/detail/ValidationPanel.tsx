@@ -35,14 +35,23 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Popup } from "@/components/ui/Popup";
+import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker } from "@/components/ui/DatePicker";
+import { Textarea } from "@/components/ui/Textarea";
 import { DataTable, type Column } from "@/components/shared";
 import { displayUserName } from "@/lib/identity-display";
 import { getDocumentReview, type DocumentReviewResult, type DocumentReviewSeverity } from "@/lib/ai";
 import { AIButton } from "@/components/ai";
 import { StageReworkTasks } from "./StageReworkTasks";
 import { friendlyAiError } from "@/lib/friendlyError";
+import { formatBytes } from "@/lib/format/bytes";
 
 /* ── Helpers ── */
+
+/** Same six values, same order, as the native <option> list this replaced. */
+const ATTEST_STATUS_OPTIONS = (
+  ["Validated", "In Progress", "Overdue", "Not Started", "Under Review", "Validation Failed"] as const
+).map((s) => ({ value: s, label: s }));
 
 function validationBadge(s: ValidationStatus) {
   const m: Record<ValidationStatus, "green" | "amber" | "red" | "gray"> = { Validated: "green", "In Progress": "amber", Overdue: "red", "Not Started": "gray", "Under Review": "amber", "Validation Failed": "red" };
@@ -83,12 +92,6 @@ function stageBorderColor(status: ValidationStage["status"]): string {
   if (status === "rejected") return "#ef4444";
   if (status === "draft" || status === "in_progress") return "#f59e0b";
   return "var(--bg-border)";
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /* ── AI Document Review (Feature D) — inline soft-gate sub-panel ── */
@@ -703,7 +706,7 @@ export function ValidationPanel({
                           {d.originalFileName}
                         </a>
                         <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                          {formatFileSize(d.fileSize)}
+                          {formatBytes(d.fileSize)}
                         </span>
                         <span
                           className="font-mono text-[10px]"
@@ -810,7 +813,7 @@ export function ValidationPanel({
               )}
               {canSubmitStages && editingNotes === s.key ? (
                 <div className="space-y-1.5">
-                  <textarea rows={2} className="input w-full resize-none text-[11px]" value={notesText} onChange={(e) => setNotesText(e.target.value)} placeholder="Stage notes..." />
+                  <Textarea id={`stage-notes-${s.key}`} rows={2} value={notesText} onChange={(e) => setNotesText(e.target.value)} placeholder="Stage notes..." />
                   <div className="flex gap-1.5 justify-end">
                     <Button variant="ghost" size="xs" onClick={() => setEditingNotes(null)}>Cancel</Button>
                     <Button variant="primary" size="xs" icon={Save} onClick={() => handleSaveNotes(s.key)}>Save</Button>
@@ -929,14 +932,17 @@ export function ValidationPanel({
             <div className="flex items-end gap-2 flex-wrap">
               <div>
                 <label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Attest status</label>
-                <select value={attestStatus} onChange={(e) => setAttestStatus(e.target.value as ValidationStatus)} className="input text-[11px]">
-                  {["Validated", "In Progress", "Overdue", "Not Started", "Under Review", "Validation Failed"].map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <Dropdown
+                  value={attestStatus}
+                  onChange={(v) => setAttestStatus(v as ValidationStatus)}
+                  options={ATTEST_STATUS_OPTIONS}
+                  size="sm"
+                />
               </div>
             </div>
             <div>
               <label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Reason (required)</label>
-              <textarea rows={2} value={attestReason} onChange={(e) => setAttestReason(e.target.value)} className="input text-[11px] resize-none w-full" placeholder="e.g. Legacy paper validation, see scanned binder" />
+              <Textarea id="attest-reason" rows={2} value={attestReason} onChange={(e) => setAttestReason(e.target.value)} placeholder="e.g. Legacy paper validation, see scanned binder" />
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" size="xs" onClick={() => { setEditingAttest(false); setAttestReason(""); }}>Cancel</Button>
@@ -948,7 +954,7 @@ export function ValidationPanel({
           <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Last validated: {system.lastValidated ? dayjs.utc(system.lastValidated).tz(timezone).format(dateFormat) : "Not yet"}</span>
           {editingNextReview ? (
             <div className="flex items-end gap-2">
-              <div><label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Next review</label><input type="date" value={draftNextReview} onChange={(e) => setDraftNextReview(e.target.value)} className="input text-[11px]" /></div>
+              <div><label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Next review</label><DatePicker id="draft-next-review" value={draftNextReview} onChange={setDraftNextReview} /></div>
               <Button variant="ghost" size="xs" icon={X} onClick={() => setEditingNextReview(false)}>Cancel</Button>
               <Button variant="primary" size="xs" icon={Save} onClick={() => { if (draftNextReview.trim()) onSaveNextReview(dayjs(draftNextReview).utc().toISOString()); setEditingNextReview(false); }}>Save</Button>
             </div>
@@ -967,7 +973,7 @@ export function ValidationPanel({
       </div><div className="card-body">
         {editingActions ? (
           <div className="space-y-3">
-            <textarea rows={4} className="input resize-none w-full text-[12px]" value={actionsText} onChange={(e) => setActionsText(e.target.value)} placeholder="IQ/OQ/PQ plan..." />
+            <Textarea id="planned-actions" rows={4} value={actionsText} onChange={(e) => setActionsText(e.target.value)} placeholder="IQ/OQ/PQ plan..." />
             <div className="flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={() => { setActionsText(system.plannedActions ?? ""); setEditingActions(false); }}>Cancel</Button><Button variant="primary" size="sm" icon={Save} onClick={() => { onSavePlannedActions(actionsText.trim()); setEditingActions(false); }}>Save</Button></div>
           </div>
         ) : system.plannedActions?.trim() ? <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{system.plannedActions}</p> : <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>No planned actions documented.</p>}
@@ -1051,7 +1057,7 @@ export function ValidationPanel({
         <div className="space-y-4">
           <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Stage will be returned to Draft for correction.</p>
           <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason for rejection *</p>
-            <textarea rows={3} className="input w-full resize-none" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="What needs to be corrected?" /></div>
+            <Textarea id="stage-reject-reason" rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="What needs to be corrected?" /></div>
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
             <Button variant="secondary" onClick={() => setRejectModal(null)}>Cancel</Button>
             <Button variant="primary" disabled={!rejectReason.trim()} onClick={handleReject}>Reject Stage</Button>
@@ -1064,7 +1070,7 @@ export function ValidationPanel({
         <div className="space-y-4">
           <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Only DS stage can be skipped for Category 4 systems. QA Head approval required.</p>
           <div><p className="text-[11px] font-medium mb-1" style={{ color: "var(--text-secondary)" }}>Reason *</p>
-            <textarea rows={2} className="input w-full resize-none" value={skipReason} onChange={(e) => setSkipReason(e.target.value)} placeholder="e.g. Category 4 system — DS not required" /></div>
+            <Textarea id="stage-skip-reason" rows={2} value={skipReason} onChange={(e) => setSkipReason(e.target.value)} placeholder="e.g. Category 4 system — DS not required" /></div>
           <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: isDark ? "#1e3a5a" : "#e2e8f0" }}>
             <Button variant="secondary" onClick={() => setSkipModal(null)}>Cancel</Button>
             <Button variant="primary" disabled={!skipReason.trim()} icon={SkipForward} onClick={handleSkip}>Confirm Skip</Button>
@@ -1091,8 +1097,9 @@ export function ValidationPanel({
             <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>
               <strong>File:</strong> {deletingDoc.fileName}
             </p>
-            <textarea
-              className="input text-[12px] min-h-[80px]"
+            <Textarea
+              id="doc-delete-reason"
+              style={{ minHeight: "80px" }}
               value={deleteReason}
               onChange={(e) => setDeleteReason(e.target.value)}
               placeholder="Why is this document being removed?"
@@ -1146,8 +1153,9 @@ export function ValidationPanel({
               The Document Review flagged issues on <strong>{overrideDoc.fileName}</strong>. This does not block
               submission — record why you are proceeding so QA has the context. Minimum 3 characters.
             </p>
-            <textarea
-              className="input text-[12px] min-h-[80px] w-full resize-none"
+            <Textarea
+              id="doc-review-override-reason"
+              style={{ minHeight: "80px" }}
               value={overrideReason}
               onChange={(e) => setOverrideReason(e.target.value)}
               placeholder="e.g. SOP reference is a false positive — v1.0 still effective per change control CC-2026-014"

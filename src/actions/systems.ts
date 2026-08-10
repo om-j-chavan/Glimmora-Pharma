@@ -14,6 +14,7 @@ import {
 } from "@/lib/permissions/roleSets";
 import { fileStorage } from "@/lib/fileStorage";
 import { sanitizeFilename } from "@/lib/sanitize";
+import type { GAMP5Category } from "@/constants/gamp5";
 import { assertTenantOwnsParent, scopedWhere } from "@/lib/tenantScope";
 import { createCAPA } from "@/actions/capas/lifecycle";
 import { deriveSiteCode, isReferenceConflict } from "@/lib/reference";
@@ -21,8 +22,14 @@ import {
   verifyPasswordForSigning,
   computeContentHash,
   canonicalizeCSVValidationSignOffContent,
+  buildCSVDocumentManifest,
 } from "@/lib/signing";
 import { readSigningProvenance } from "@/actions/capas/_shared";
+import {
+  signOffLockError,
+  signOffLockErrorForStage,
+  SIGNED_OFF_LOCK_MESSAGE,
+} from "@/lib/csv-signoff-lock";
 
 type ActionResult<T = unknown> =
   | { success: true; data: T }
@@ -126,12 +133,24 @@ const STANDARD_STAGES = ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"] as const;
 // still created — so the full V-model stays on record for an inspector — but
 // auto-set to "skipped" with a documented rationale, so only the applicable
 // stages need work. Tune a category's scope by editing its list here.
-const STAGE_TEMPLATES: Record<string, readonly string[]> = {
+// The KEYS are type-checked against the canonical GAMP 5 category set
+// (src/constants/gamp5.ts) via `satisfies`, so a category can never be added to
+// the vocabulary without also getting a stage template here. The stage LISTS
+// below are the behaviour and are deliberately owned by this file, not by the
+// constants module — they scope validation work and feed the stage tallies that
+// a sign-off signature binds. Tune a category's scope by editing its list here.
+//
+// The exported annotation stays Record<string, …> because applicableStagesFor
+// indexes it with an arbitrary string (an unrecognised category falls back to
+// the Category-5 full V-model rather than throwing).
+const STAGE_TEMPLATE_DEFS = {
   "1": ["IQ"],                                        // Infrastructure — install verification only
   "3": ["URS", "IQ", "OQ"],                           // Non-configured COTS — leverage supplier FS/DS
   "4": ["URS", "FS", "IQ", "OQ", "PQ"],               // Configured — DS via vendor config (auto-skipped)
   "5": ["URS", "FS", "DS", "IQ", "OQ", "PQ", "RTR"],  // Custom/bespoke — full V-model
-};
+} satisfies Record<GAMP5Category, readonly string[]>;
+
+const STAGE_TEMPLATES: Record<string, readonly string[]> = STAGE_TEMPLATE_DEFS;
 // Unknown/missing category falls back to the full set (never under-scope by
 // accident — over-validating is safe, under-validating is a compliance gap).
 function applicableStagesFor(gamp5Category: string | undefined): ReadonlySet<string> {
@@ -402,6 +421,16 @@ export async function updateSystem(
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : "Not authorized to author GxP records." };
   }
+  // C2 — post-sign-off lock. This action writes THREE hashed inputs
+  // (part11Status + annex11Status → the compliance booleans, and nextReview),
+  // plus the system's validated identity (name / version / gamp5Category /
+  // vendor) and its risk classification. Locked whole rather than per-field:
+  // splitting it would let an edit silently drop the hashed keys while claiming
+  // success, which is harder to reason about than "revoke, then edit".
+  {
+    const locked = await signOffLockError(id);
+    if (locked) return { success: false, error: locked };
+  }
   try {
     const system = await prisma.gxPSystem.update({
       where: { id, tenantId: session.user.tenantId },
@@ -452,6 +481,17 @@ export async function submitStageForReview(stageId: string): Promise<ActionResul
   // blocks re-submitting one that is already under review or approved/skipped.
   if (!SUBMITTABLE_STAGE_STATUSES.includes(stage0.status)) {
     return { success: false, error: "This stage cannot be submitted — it is already under review or completed." };
+  }
+  // C2 — post-sign-off lock (defense in depth). Unreachable today: sign-off
+  // requires every stage approved|skipped, and neither is in
+  // SUBMITTABLE_STAGE_STATUSES, so the precondition above already refuses on a
+  // signed system. That safety is an EMERGENT property of the status machine,
+  // invisible here — and stagesApproved/stagesTotal are hashed inputs. Stated
+  // explicitly so widening the submittable set can never silently unlock a
+  // signed record.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
   }
   // Resubmit guard (stage rework tasks) — a stage with open rework tasks
   // delegated to staff cannot go back to QA until every task is closed. Half-
@@ -525,6 +565,14 @@ export async function approveStage(stageId: string): Promise<ActionResult> {
   if (stage0.status !== "in_review") {
     return { success: false, error: "This stage is not under review — it must be submitted for QA review before it can be approved." };
   }
+  // C2 — post-sign-off lock (defense in depth). Unreachable today: a signed
+  // system has every stage approved|skipped, so the in_review precondition
+  // above already refuses. Stated explicitly because stagesApproved is a hashed
+  // input — an approval on a signed record would desync the signature.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
+  }
   // RUNG 2.8 — bright-line SoD: the user who submitted a stage may NOT approve
   // it. Compared on session.user.id (a Tenant id for admins, a User id
   // otherwise) — NOT resolveUserFk, which would null out admin identities and
@@ -585,6 +633,14 @@ export async function rejectStage(stageId: string, reason: string): Promise<Acti
   // RUNG 2.8-verify — only a stage Under Review can be rejected.
   if (stage0.status !== "in_review") {
     return { success: false, error: "This stage is not under review — only a stage submitted for QA review can be rejected." };
+  }
+  // C2 — post-sign-off lock (defense in depth). Unreachable today for the same
+  // reason as approveStage: a signed system has no in_review stage. Stated
+  // explicitly because reject moves a stage OUT of approved-equivalent state,
+  // which would move stagesApproved — a hashed input.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
   }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
@@ -778,6 +834,14 @@ export async function skipStage(stageId: string, reason: string): Promise<Action
   if (stage0.stageName !== "DS") {
     return { success: false, error: "Only the DS (Design Specification) stage can be skipped." };
   }
+  // C2 — post-sign-off lock. Unlike submit/approve/reject, skipStage has NO
+  // source-status precondition, so an already-"approved" DS stage on a SIGNED
+  // system can still be re-skipped — which moves stagesApproved, a hashed
+  // input. This is the one stage transition genuinely reachable post-sign-off.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
+  }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);
@@ -839,6 +903,14 @@ export async function updateStageNotes(stageId: string, notes: string): Promise<
   // system-write roles (was requireGxPAuthor-only, which let viewer/any role in).
   if (!SYSTEM_WRITE_ROLES.includes(session.user.role)) {
     return { success: false, error: "Your role does not permit this action." };
+  }
+  // C2 — post-sign-off lock. Stage notes are not hashed directly, but they are
+  // the narrative record behind an approved stage on a system attested as
+  // validated; rewriting them after signing changes what the signature appears
+  // to cover. Locked as signed stage content.
+  {
+    const locked = await signOffLockErrorForStage(stageId);
+    if (locked) return { success: false, error: locked };
   }
   try {
     const stage = await prisma.validationStage.update({
@@ -1008,7 +1080,8 @@ async function loadStageScoped(stageId: string) {
   const stage = await prisma.validationStage.findUnique({
     where: { id: stageId },
     include: {
-      system: { select: { id: true, name: true, tenantId: true } },
+      // signedOffAt drives the C3 evidence lock (stageEvidenceLockError).
+      system: { select: { id: true, name: true, tenantId: true, signedOffAt: true } },
     },
   });
   if (!stage) return { session, stage: null as null };
@@ -1022,7 +1095,29 @@ async function loadStageScoped(stageId: string) {
 }
 
 const STAGE_LOCKED_MESSAGE =
-  "This stage is locked — documents cannot be added once approved.";
+  "This stage is locked — documents cannot be changed once the stage is approved or skipped.";
+
+/**
+ * C3 — evidence lock for a single stage. Returns an error message, or null.
+ *
+ * TWO doors, both previously open:
+ *   1. The original guard tested only `status === "approved"`, so a SKIPPED
+ *      stage accepted uploads and soft-deletes indefinitely. Under the CSA
+ *      template that is not an edge case: a GAMP Category 3 system is created
+ *      with 4 of its 7 stages pre-skipped (STAGE_TEMPLATES above), each one an
+ *      open evidence door. The test is now COMPLETE_STAGE_STATUSES —
+ *      approved OR skipped.
+ *   2. Even an in-progress stage must freeze once the parent system is signed
+ *      off, because the sign-off now binds a manifest of every active document.
+ */
+function stageEvidenceLockError(
+  stageStatus: string,
+  systemSignedOffAt: Date | null,
+): string | null {
+  if (systemSignedOffAt) return SIGNED_OFF_LOCK_MESSAGE;
+  if (COMPLETE_STAGE_STATUSES.has(stageStatus)) return STAGE_LOCKED_MESSAGE;
+  return null;
+}
 
 /**
  * Upload a document attached to a single ValidationStage. Accepts FormData
@@ -1069,8 +1164,9 @@ export async function addStageDocument(
 
   const { session, stage } = await loadStageScoped(stageId);
   if (!stage) return { success: false, error: "Stage not found" };
-  if (stage.status === "approved") {
-    return { success: false, error: STAGE_LOCKED_MESSAGE };
+  {
+    const locked = stageEvidenceLockError(stage.status, stage.system.signedOffAt);
+    if (locked) return { success: false, error: locked };
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -1180,7 +1276,8 @@ export async function removeStageDocument(
     include: {
       validationStage: {
         include: {
-          system: { select: { id: true, name: true, tenantId: true } },
+          // signedOffAt drives the C3 evidence lock (stageEvidenceLockError).
+          system: { select: { id: true, name: true, tenantId: true, signedOffAt: true } },
         },
       },
     },
@@ -1195,8 +1292,12 @@ export async function removeStageDocument(
   if (doc.deletedAt !== null) {
     return { success: false, error: "Document is already removed" };
   }
-  if (doc.validationStage.status === "approved") {
-    return { success: false, error: STAGE_LOCKED_MESSAGE };
+  {
+    const locked = stageEvidenceLockError(
+      doc.validationStage.status,
+      doc.validationStage.system.signedOffAt,
+    );
+    if (locked) return { success: false, error: locked };
   }
 
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
@@ -1371,6 +1472,15 @@ export async function saveNextReview(
   }
   if (!SYSTEM_WRITE_ROLES.includes(session.user.role)) {
     return { success: false, error: "Your role does not permit this action." };
+  }
+  // C2 — post-sign-off lock. NOT the "harmless scheduling field" it looks like:
+  // `nextReview` IS a hashed input (canonicaliser key `nextReview`, fed from the
+  // signer's attested next-requalification date), and signValidation writes the
+  // same value onto the system. Rescheduling it post-sign-off silently desyncs
+  // the signature, so this is locked despite writing no compliance status.
+  {
+    const locked = await signOffLockError(systemId);
+    if (locked) return { success: false, error: locked };
   }
   try {
     const system = await prisma.gxPSystem.update({
@@ -1584,6 +1694,16 @@ export async function linkFindingToSystem(systemId: string, findingId: string): 
   // Scope the finding to the caller's tenant too (IDOR guard on both sides).
   const finding = await prisma.finding.findFirst({ where: { id: findingId, tenantId: session.user.tenantId }, select: { id: true, reference: true } });
   if (!finding) return { success: false, error: "FORBIDDEN" };
+  // C2 — post-sign-off lock. Linking a finding changes the system's OPEN-FINDINGS
+  // COUNT, which the canonicaliser binds as `openFindings` (a signed system was
+  // attested at zero). Attaching an open finding post-signature would desync the
+  // hash. Note raiseCAPAFromSystem is deliberately NOT locked — CAPAs are not
+  // bound into the hash, and raising one is the legitimate response to a problem
+  // found after validation.
+  {
+    const locked = await signOffLockError(systemId);
+    if (locked) return { success: false, error: locked };
+  }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);
@@ -1619,6 +1739,12 @@ export async function unlinkFindingFromSystem(systemId: string, findingId: strin
   }
   const finding = await prisma.finding.findFirst({ where: { id: findingId, tenantId: session.user.tenantId, systemId }, select: { id: true, reference: true } });
   if (!finding) return { success: false, error: "FORBIDDEN" };
+  // C2 — same hashed input as linkFindingToSystem: unlinking also moves the
+  // `openFindings` count the signature attested to.
+  {
+    const locked = await signOffLockError(systemId);
+    if (locked) return { success: false, error: locked };
+  }
   const actor = await resolveUserFk(session.user.id, session.user.tenantId, session.user.role);
   try {
     requireGxPAuthor(actor);
@@ -1736,12 +1862,47 @@ function isCompliantStatus(s: string | null | undefined): boolean {
   return (s ?? "").trim().toLowerCase() === "compliant";
 }
 
+/** THE single definition of a fully-traced requirement. Shared by the displayed
+ *  coverage percentage and by the sign-off gate, so the number a QA Head reads
+ *  and the rule the server enforces can never diverge. An RTMEntry reaches
+ *  "complete" only when deriveRtmCoverage (src/actions/rtm.ts) sees FS present
+ *  plus IQ/OQ/PQ each carrying a test id AND a pass result. */
+function isFullyTraced(entry: { traceabilityStatus: string }): boolean {
+  return entry.traceabilityStatus.toLowerCase() === "complete";
+}
+
 // RTM coverage = share of requirements whose FS/IQ/OQ/PQ trace is complete.
 // RTMEntry carries the derived `traceabilityStatus` ("complete"|"partial"|
 // "missing"/"broken") written by deriveRtmCoverage in src/actions/rtm.ts.
+// DISPLAY ONLY — the sign-off gate counts untraced rows instead (see below).
 function rtmCoverageOf(entries: { traceabilityStatus: string }[]): number {
-  const done = entries.filter((e) => e.traceabilityStatus.toLowerCase() === "complete").length;
+  const done = entries.filter(isFullyTraced).length;
   return entries.length === 0 ? 0 : Math.round((done / entries.length) * 100);
+}
+
+/** Requirements not yet fully traced. The sign-off gate counts these rather than
+ *  testing `rtmCoverageOf(...) === 100`, because that percentage is rounded:
+ *  199 of 200 traced rounds UP to 100 and would slip an untraced requirement
+ *  through the gate. Same `isFullyTraced` predicate, no rounding. */
+function untracedRtmCount(entries: { traceabilityStatus: string }[]): number {
+  return entries.filter((e) => !isFullyTraced(e)).length;
+}
+
+/**
+ * Sign-off gate 4 — FULL requirements traceability.
+ *
+ * Sufficient ⇔ at least one RTM entry exists AND every entry is "complete".
+ * A system with an EMPTY matrix is insufficient by design: zero requirements
+ * captured is the absence of traceability, not the satisfaction of it (and
+ * rtmCoverageOf returns 0 for that case, not 100).
+ *
+ * Traceability is the substance of CSV, so this blocks — but it is the one
+ * OVERRIDABLE gate: a QA Head may sign a shortfall with a documented reason,
+ * which is persisted and bound into the signed content hash. Gates 1-3
+ * (stages / findings / CAPAs) remain absolute.
+ */
+function rtmCoverageSufficient(entries: { traceabilityStatus: string }[]): boolean {
+  return entries.length > 0 && untracedRtmCount(entries) === 0;
 }
 
 interface SignOffReadiness {
@@ -1754,9 +1915,20 @@ interface SignOffReadiness {
   approvedCount: number;
   stagesTotal: number;
   currentRtmCoverage: number;
+  // Gate 4 inputs — total requirements, how many are not yet fully traced, and
+  // the resulting pass/fail. The tab renders these as a real blocker card.
+  rtmEntriesTotal: number;
+  rtmUntraced: number;
+  rtmCoverageSufficient: boolean;
   openFindings: number;
   openCriticalCAPAs: number;
+  /** All FOUR gates clear — a clean sign-off needing no exception. */
   readyToSign: boolean;
+  /** Gates 1-3 (the ABSOLUTE ones) clear. Gate 4 may still fail. The Sign Off
+   *  tab opens the signing form on this, so a QA Head whose only outstanding
+   *  blocker is RTM coverage can reach the documented-override path; the server
+   *  still refuses without an override reason. */
+  hardBlockersClear: boolean;
 }
 
 async function computeReadiness(systemId: string, tenantId: string): Promise<SignOffReadiness | null> {
@@ -1778,6 +1950,10 @@ async function computeReadiness(systemId: string, tenantId: string): Promise<Sig
   const openCriticalCAPAs = system.capas.filter(
     (c) => c.status.toLowerCase() !== "closed" && ["critical", "high"].includes((c.risk ?? "").toLowerCase()),
   ).length;
+  // Gate 4 — computed from the SAME helpers signValidation uses, so the tab's
+  // readiness view and the server's enforcement cannot drift.
+  const rtmSufficient = rtmCoverageSufficient(system.rtmEntries);
+  const hardBlockersClear = allStagesComplete && openFindings === 0 && openCriticalCAPAs === 0;
   return {
     allStagesComplete,
     outstandingStages,
@@ -1785,9 +1961,13 @@ async function computeReadiness(systemId: string, tenantId: string): Promise<Sig
     approvedCount: system.validationStages.filter((s) => s.status === "approved").length,
     stagesTotal: system.validationStages.length,
     currentRtmCoverage: rtmCoverageOf(system.rtmEntries),
+    rtmEntriesTotal: system.rtmEntries.length,
+    rtmUntraced: untracedRtmCount(system.rtmEntries),
+    rtmCoverageSufficient: rtmSufficient,
     openFindings,
     openCriticalCAPAs,
-    readyToSign: allStagesComplete && openFindings === 0 && openCriticalCAPAs === 0,
+    readyToSign: hardBlockersClear && rtmSufficient,
+    hardBlockersClear,
   };
 }
 
@@ -1802,6 +1982,16 @@ const SignValidationSchema = z.object({
   nextReviewDate: z.string().min(1, "Next review date is required"),
   reason: z.string().min(10, "Sign-off meaning must be at least 10 characters"),
   password: z.string().min(1, "Password is required to sign"),
+  // Gate-4 exception. Required ONLY when requirements traceability is short of
+  // full; ignored (and never recorded) when coverage is already sufficient, so
+  // a stale client sending it cannot fabricate an exception on a clean system.
+  // Held to a higher bar than `reason` (20 vs 10): waiving traceability is the
+  // heavier attestation of the two.
+  rtmOverrideReason: z
+    .string()
+    .min(20, "RTM coverage override reason must be at least 20 characters")
+    .max(2000, "RTM coverage override reason must be 2000 characters or fewer")
+    .optional(),
 });
 
 export async function signValidation(
@@ -1852,6 +2042,41 @@ export async function signValidation(
     return { success: false, error: `Cannot sign off — ${openCriticalCAPAs} open critical/high CAPA(s) must be closed first.` };
   }
 
+  // ── Gate 4 — FULL requirements traceability (RTM coverage) ──
+  // Traceability from requirement → test → evidence is what a CSV sign-off
+  // actually attests, so an incomplete matrix blocks. Unlike gates 1-3 this one
+  // is OVERRIDABLE: a QA Head may sign a documented shortfall (e.g. a
+  // legacy system whose matrix is being reconstructed), but the reason is
+  // persisted on the system AND bound into the signed contentHash, so the
+  // exception is part of the signature rather than a silent bypass.
+  //
+  // Enforced HERE, on the server. getSignOffReadiness computes the same
+  // predicate for the UI, but the tab is presentation only — a client that
+  // never renders the blocker still cannot sign without an override reason.
+  const rtmEntriesTotal = system.rtmEntries.length;
+  const rtmUntraced = untracedRtmCount(system.rtmEntries);
+  const rtmSufficient = rtmCoverageSufficient(system.rtmEntries);
+  // Trim first: a whitespace-only string must not read as a justification.
+  const suppliedOverride = parsed.data.rtmOverrideReason?.trim() || null;
+  if (!rtmSufficient && !suppliedOverride) {
+    const detail = rtmEntriesTotal === 0
+      ? "no requirements have been captured in the RTM"
+      : `${rtmUntraced} of ${rtmEntriesTotal} requirement(s) are not fully traced`;
+    return {
+      success: false,
+      error:
+        `Cannot sign off — incomplete RTM coverage: ${detail}. ` +
+        `Complete the FS/IQ/OQ/PQ trace for every requirement, or record a documented ` +
+        `override reason (min 20 characters) to sign with a traceability exception.`,
+      fieldErrors: { rtmOverrideReason: ["A documented reason is required to sign with incomplete RTM coverage"] },
+    };
+  }
+  // Only a REAL shortfall counts as an override. If coverage is sufficient, any
+  // supplied reason is discarded — it is neither persisted nor hashed, so two
+  // identical fully-traced sign-offs always produce the same contentHash.
+  const rtmOverrideUsed = !rtmSufficient && !!suppliedOverride;
+  const rtmOverrideReason = rtmOverrideUsed ? suppliedOverride : null;
+
   // Part 11 §11.200 — re-authenticate the signer's password.
   const passwordOk = await verifyPasswordForSigning(session.user.id, parsed.data.password);
   if (!passwordOk) {
@@ -1872,6 +2097,29 @@ export async function signValidation(
   const signedAt = new Date();
   const reference = system.reference ?? system.id.slice(0, 8);
 
+  // C3 — stage-evidence manifest. Every ACTIVE stage document across the whole
+  // system, bound into the hash so evidence cannot be swapped, added or removed
+  // behind an approved/skipped stage without the signature failing verification.
+  // Soft-deleted rows are excluded, which is exactly what makes a later removal
+  // detectable. An empty manifest is treated as absent by the canonicaliser.
+  const stageDocs = await prisma.stageDocument.findMany({
+    where: { validationStage: { systemId: system.id }, deletedAt: null },
+    select: { id: true, contentHashSha256: true, validationStage: { select: { stageName: true } } },
+  });
+  const documentManifest = buildCSVDocumentManifest(
+    stageDocs.map((d) => ({
+      stageName: d.validationStage.stageName,
+      id: d.id,
+      contentHashSha256: d.contentHashSha256,
+    })),
+  );
+  // Digest doubles as the per-record CONTENT VERSION MARKER (see the migration
+  // and the versioning block in signing.ts). Null when there is no evidence, so
+  // a no-document sign-off stays byte-identical to a pre-manifest record.
+  const docManifestSha256 = documentManifest.length
+    ? computeContentHash(JSON.stringify(documentManifest))
+    : null;
+
   const contentHash = computeContentHash(
     canonicalizeCSVValidationSignOffContent({
       systemId: system.id,
@@ -1886,6 +2134,10 @@ export async function signValidation(
       signatureMeaning: parsed.data.reason,
       signerEmail: session.user.email,
       signedAtIso: signedAt.toISOString(),
+      // Both optional. Null/empty → the canonicaliser omits the key and emits
+      // the unchanged base byte shape. See the versioning note in signing.ts.
+      rtmOverrideReason: rtmOverrideReason,
+      documentManifest,
     }),
   );
   const provenance = await readSigningProvenance();
@@ -1933,6 +2185,11 @@ export async function signValidation(
           signedOffRtmCoverage: rtmCoverage,
           signedOffStagesApproved: stagesApproved,
           signedOffStagesTotal: stagesTotal,
+          // Gate-4 exception snapshot (false + null on a fully-traced sign-off).
+          signedOffRtmOverride: rtmOverrideUsed,
+          signedOffRtmOverrideReason: rtmOverrideReason,
+          // C3 manifest digest + content-version marker (null ⇒ no evidence bound).
+          signedOffDocManifestSha256: docManifestSha256,
           // A sign-off supersedes any manual attestation; signedOffAt is now
           // the status authority (syncValidationStatus bails while it's set).
           statusManuallySet: false,
@@ -1954,6 +2211,11 @@ export async function signValidation(
           newValue: JSON.stringify({
             stagesApproved, stagesTotal, rtmCoverage, part11Compliant, annex11Compliant,
             nextReview: nextReviewDate.toISOString(), contentHashPrefix: contentHash.slice(0, 16), signatureId: signed.id,
+            // Gate-4 outcome — an inspector reading the trail sees whether this
+            // sign-off waived full traceability, by how much, and on what stated
+            // grounds, without having to join back to the system row.
+            rtmEntriesTotal, rtmUntraced, rtmOverrideUsed,
+            ...(rtmOverrideUsed ? { rtmOverrideReason } : {}),
           }),
         },
       });
@@ -2008,6 +2270,12 @@ export async function unsignValidation(
           signedOffRtmCoverage: null,
           signedOffStagesApproved: null,
           signedOffStagesTotal: null,
+          // Clear the gate-4 exception with the rest of the snapshot — a revoked
+          // sign-off must not leave a stale "signed under RTM override" flag on
+          // the system. The SignedRecord ledger row keeps the original reason.
+          signedOffRtmOverride: null,
+          signedOffRtmOverrideReason: null,
+          signedOffDocManifestSha256: null,
         },
       });
       await tx.auditLog.create({
@@ -2033,4 +2301,184 @@ export async function unsignValidation(
     console.error("[action] unsignValidation failed:", err);
     return { success: false, error: "Failed to revoke sign-off" };
   }
+}
+
+/* ══════════════════════════════════════
+ * C2 — SIGNED-STATE VERIFICATION
+ *
+ * The reader that makes drift detectable. Until this existed,
+ * signedOffContentHash was written once and only ever DISPLAYED, so the
+ * canonicaliser's promise ("any later drift in these inputs changes the hash,
+ * so an inspector can detect whether the signed-off state still holds") had
+ * nothing to fulfil it.
+ *
+ * Recomputes the canonical content from CURRENT state and compares. Read-only
+ * and non-remediating BY DESIGN: on a mismatch it reports, it never re-signs,
+ * never clears the sign-off, and never mutates the system. Deciding what to do
+ * about drift is a human QA judgement.
+ * ══════════════════════════════════════ */
+
+export interface CSVSignOffVerification {
+  /** false when the system carries no sign-off — nothing to verify. */
+  signed: boolean;
+  /** Recomputed hash equals the stored one. */
+  matches: boolean;
+  storedHash: string | null;
+  recomputedHash: string | null;
+  /** Which optional keys the STORED record was built with. */
+  boundOverrideReason: boolean;
+  boundDocumentManifest: boolean;
+  /** Stage-evidence documents currently active on the system. */
+  currentDocumentCount: number;
+  /** Present only on a mismatch: hashed inputs whose value now differs from the
+   *  snapshot columns captured at signing. The hash is the authority — this is a
+   *  best-effort hint at WHERE the drift is, not an exhaustive diff (the
+   *  canonicaliser binds fields this cannot compare, e.g. reference/signerEmail). */
+  changedInputs: string[];
+}
+
+export async function verifyCSVSignOff(
+  systemId: string,
+): Promise<ActionResult<CSVSignOffVerification>> {
+  const session = await requireAuth();
+  const system = await prisma.gxPSystem.findFirst({
+    where: { id: systemId, tenantId: session.user.tenantId },
+    select: {
+      id: true, reference: true, nextReview: true,
+      part11Status: true, annex11Status: true,
+      signedOffAt: true, signedOffReason: true, signedOffContentHash: true,
+      signedOffSignatureId: true, signedOffRtmOverrideReason: true,
+      signedOffDocManifestSha256: true,
+      signedOffPart11Compliant: true, signedOffAnnex11Compliant: true,
+      signedOffRtmCoverage: true, signedOffStagesApproved: true, signedOffStagesTotal: true,
+      validationStages: { select: { stageName: true, status: true } },
+      rtmEntries: { select: { traceabilityStatus: true } },
+      findings: { select: { status: true } },
+    },
+  });
+  if (!system) return { success: false, error: "System not found" };
+
+  if (!system.signedOffAt || !system.signedOffContentHash) {
+    return {
+      success: true,
+      data: {
+        signed: false, matches: false, storedHash: null, recomputedHash: null,
+        boundOverrideReason: false, boundDocumentManifest: false,
+        currentDocumentCount: 0, changedInputs: [],
+      },
+    };
+  }
+
+  // signerEmail is bound into the hash but is NOT denormalised onto GxPSystem —
+  // it lives on the SignedRecord (captured at signing, immutable there).
+  const signature = system.signedOffSignatureId
+    ? await prisma.signedRecord.findUnique({
+        where: { id: system.signedOffSignatureId },
+        select: { signerEmail: true },
+      })
+    : null;
+  if (!signature) {
+    return {
+      success: false,
+      error: "Cannot verify — the signature ledger row for this sign-off is missing.",
+    };
+  }
+
+  // Recompute every hashed input from CURRENT state.
+  const stagesApproved = system.validationStages.filter((s) => s.status === "approved").length;
+  const stagesTotal = system.validationStages.length;
+  const rtmCoverage = rtmCoverageOf(system.rtmEntries);
+  const part11Compliant = isCompliantStatus(system.part11Status);
+  const annex11Compliant = isCompliantStatus(system.annex11Status);
+  const openFindings = system.findings.filter((f) => f.status !== "Closed").length;
+
+  // ── CONTENT VERSIONING ──
+  // Reconstruct the shape the record was ACTUALLY signed with, never today's.
+  //   signedOffRtmOverrideReason NULL ⇒ omit the override key
+  //   signedOffDocManifestSha256 NULL ⇒ omit the manifest key. A pre-C3 record
+  //     must NOT have a manifest synthesised from current documents, or every
+  //     legacy sign-off would report false drift.
+  const boundDocumentManifest = system.signedOffDocManifestSha256 !== null;
+  const stageDocs = boundDocumentManifest
+    ? await prisma.stageDocument.findMany({
+        where: { validationStage: { systemId: system.id }, deletedAt: null },
+        select: { id: true, contentHashSha256: true, validationStage: { select: { stageName: true } } },
+      })
+    : [];
+  const documentManifest = boundDocumentManifest
+    ? buildCSVDocumentManifest(
+        stageDocs.map((d) => ({
+          stageName: d.validationStage.stageName,
+          id: d.id,
+          contentHashSha256: d.contentHashSha256,
+        })),
+      )
+    : null;
+
+  const recomputedHash = computeContentHash(
+    canonicalizeCSVValidationSignOffContent({
+      systemId: system.id,
+      reference: system.reference ?? system.id.slice(0, 8),
+      stagesApproved,
+      stagesTotal,
+      rtmCoverage,
+      part11Compliant,
+      annex11Compliant,
+      openFindings,
+      nextReviewIso: (system.nextReview ?? system.signedOffAt).toISOString(),
+      signatureMeaning: system.signedOffReason ?? "",
+      signerEmail: signature.signerEmail,
+      signedAtIso: system.signedOffAt.toISOString(),
+      rtmOverrideReason: system.signedOffRtmOverrideReason,
+      documentManifest,
+    }),
+  );
+
+  const matches = recomputedHash === system.signedOffContentHash;
+
+  // Best-effort localisation of the drift, by comparing today's recomputed
+  // values against the snapshot columns frozen at signing.
+  const changedInputs: string[] = [];
+  if (!matches) {
+    if (system.signedOffStagesApproved !== null && system.signedOffStagesApproved !== stagesApproved) {
+      changedInputs.push(`stagesApproved ${system.signedOffStagesApproved} → ${stagesApproved}`);
+    }
+    if (system.signedOffStagesTotal !== null && system.signedOffStagesTotal !== stagesTotal) {
+      changedInputs.push(`stagesTotal ${system.signedOffStagesTotal} → ${stagesTotal}`);
+    }
+    if (system.signedOffRtmCoverage !== null && system.signedOffRtmCoverage !== rtmCoverage) {
+      changedInputs.push(`rtmCoverage ${system.signedOffRtmCoverage}% → ${rtmCoverage}%`);
+    }
+    if (system.signedOffPart11Compliant !== null && system.signedOffPart11Compliant !== part11Compliant) {
+      changedInputs.push(`part11Compliant ${system.signedOffPart11Compliant} → ${part11Compliant}`);
+    }
+    if (system.signedOffAnnex11Compliant !== null && system.signedOffAnnex11Compliant !== annex11Compliant) {
+      changedInputs.push(`annex11Compliant ${system.signedOffAnnex11Compliant} → ${annex11Compliant}`);
+    }
+    if (boundDocumentManifest && documentManifest) {
+      const currentDigest = documentManifest.length
+        ? computeContentHash(JSON.stringify(documentManifest))
+        : null;
+      if (currentDigest !== system.signedOffDocManifestSha256) {
+        changedInputs.push("stage evidence (documents added, removed or replaced)");
+      }
+    }
+    if (changedInputs.length === 0) {
+      changedInputs.push("an input not covered by the snapshot columns (e.g. nextReview or open findings)");
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      signed: true,
+      matches,
+      storedHash: system.signedOffContentHash,
+      recomputedHash,
+      boundOverrideReason: system.signedOffRtmOverrideReason !== null,
+      boundDocumentManifest,
+      currentDocumentCount: stageDocs.length,
+      changedInputs,
+    },
+  };
 }

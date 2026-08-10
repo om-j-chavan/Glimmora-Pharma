@@ -4,10 +4,19 @@ import { ShieldAlert, AlertTriangle, CheckCircle2, Info, Pencil, X, Save } from 
 import type { GxPSystem, RiskLevel } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Dropdown } from "@/components/ui/Dropdown";
 
 /* ── Helpers ── */
 
+/** Same three values, same order, as the native <option> list this replaced. */
+const RISK_LEVEL_OPTIONS = [
+  { value: "HIGH", label: "HIGH" },
+  { value: "MEDIUM", label: "MEDIUM" },
+  { value: "LOW", label: "LOW" },
+];
+
 import type { ComplianceStatus, GAMP5Category } from "@/types/csv-csa";
+import { GAMP5_DESCRIPTION, GAMP5_DESCRIPTION_FALLBACK } from "@/constants/gamp5";
 
 function complianceBadge(s: ComplianceStatus) {
   const m: Record<ComplianceStatus, "green" | "red" | "amber" | "gray"> = { Compliant: "green", "Non-Compliant": "red", Partial: "amber", "In Progress": "amber", "N/A": "gray" };
@@ -121,17 +130,13 @@ export function RiskControlsPanel({
             <div key={r.key} className={clsx("flex justify-between items-center py-3", i < arr.length - 1 && "border-b")} style={{ borderColor: "var(--bg-border)" }}>
               <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>{r.label}</span>
               {editingRiskClass ? (
-                <select
+                <Dropdown
                   value={riskForm[r.key]}
-                  onChange={(e) => setRiskForm((prev) => ({ ...prev, [r.key]: e.target.value as RiskLevel }))}
-                  className="select text-[11px]"
-                  style={{ minWidth: "7rem" }}
-                  aria-label={r.label}
-                >
-                  <option value="HIGH">HIGH</option>
-                  <option value="MEDIUM">MEDIUM</option>
-                  <option value="LOW">LOW</option>
-                </select>
+                  onChange={(v) => setRiskForm((prev) => ({ ...prev, [r.key]: v as RiskLevel }))}
+                  options={RISK_LEVEL_OPTIONS}
+                  size="sm"
+                  width="w-28"
+                />
               ) : (
                 <Badge variant={r.level === "HIGH" ? "red" : r.level === "MEDIUM" ? "amber" : "green"}>{r.level}</Badge>
               )}
@@ -209,7 +214,10 @@ export function RiskControlsPanel({
               <div className={clsx("rounded-lg p-3 border", "bg-(--bg-surface) border-(--bg-border)")}>
                 <span className="text-[11px] font-semibold uppercase tracking-wider block mb-2" style={{ color: "var(--text-muted)" }}>GAMP 5 Category</span>
                 {gampBadge(system.gamp5Category)}
-                <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>{system.gamp5Category === "5" ? "Custom software \u2014 full IQ/OQ/PQ required" : system.gamp5Category === "4" ? "Configured software \u2014 configured items tested" : system.gamp5Category === "3" ? "Non-configured \u2014 standard testing applies" : "Infrastructure \u2014 minimal testing required"}</p>
+                {/* Descriptions come from the canonical GAMP 5 vocabulary. The
+                    fallback preserves the original ternary's final `else`: an
+                    unrecognised category renders the Infrastructure text. */}
+                <p className="text-[10px] mt-2" style={{ color: "var(--text-muted)" }}>{GAMP5_DESCRIPTION[system.gamp5Category] ?? GAMP5_DESCRIPTION_FALLBACK}</p>
               </div>
             )}
           </div>

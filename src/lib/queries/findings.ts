@@ -177,3 +177,20 @@ export const getFindingStats = cache(async (tenantId: string) => {
     closed: findings.filter((f) => f.status === "Closed").length,
   };
 });
+
+/**
+ * ⚠️ UNVERIFIED — single-QA SoD reveal for finding closure, built without DB access.
+ *
+ * Server-computed self-check flags for the CURRENT user, shipped to the close
+ * modal so it reveals the override inputs only when the server would accept one.
+ * `ceiling` is a RESOLVED boolean (severity === "Critical", generic taxonomy) —
+ * deviation's pattern — so the client can never re-implement or drift from the
+ * severity rule.
+ */
+export interface FindingCloseSodReveal {
+  flagOn: boolean;
+  /** severity === "Critical" (generic taxonomy) — never waivable. */
+  ceiling: boolean;
+  assignee: boolean;
+  rcaAuthor: boolean;
+}

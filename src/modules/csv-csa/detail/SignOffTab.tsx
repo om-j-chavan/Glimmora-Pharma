@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Lock, AlertTriangle, CheckCircle2, Circle, Hash, RotateCcw } from "lucide-react";
+import { ShieldCheck, Lock, AlertTriangle, CheckCircle2, Circle, Hash, RotateCcw, ShieldAlert } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { GxPSystem } from "@/types/csv-csa";
 import { VALIDATION_STAGE_KEYS } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
-import { getSignOffReadiness, signValidation, unsignValidation } from "@/actions/systems";
+import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
+import { DatePicker } from "@/components/ui/DatePicker";
+import { getSignOffReadiness, signValidation, unsignValidation, verifyCSVSignOff } from "@/actions/systems";
 import type { WorkflowTab } from "@/modules/csv-csa/detail/workflow";
 
 interface Readiness {
@@ -17,9 +20,25 @@ interface Readiness {
   approvedCount: number;
   stagesTotal: number;
   currentRtmCoverage: number;
+  rtmEntriesTotal: number;
+  rtmUntraced: number;
+  rtmCoverageSufficient: boolean;
   openFindings: number;
   openCriticalCAPAs: number;
   readyToSign: boolean;
+  hardBlockersClear: boolean;
+}
+
+/** Gate-4 blocker text — mirrors the wording signValidation returns so the tab
+ *  and the server describe the same shortfall. */
+function rtmBlockerText(r: Readiness): string {
+  if (r.rtmCoverageSufficient) {
+    return `All ${r.rtmEntriesTotal} requirement(s) fully traced (100% RTM coverage)`;
+  }
+  if (r.rtmEntriesTotal === 0) {
+    return "No requirements captured in the RTM — traceability cannot be demonstrated";
+  }
+  return `${r.rtmUntraced} of ${r.rtmEntriesTotal} requirement(s) not fully traced (${r.currentRtmCoverage}% RTM coverage)`;
 }
 
 // Stage status label — identical vocabulary to ValidationPanel's stageLabel
@@ -77,11 +96,32 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
   const [password, setPassword] = useState("");
   const [pwError, setPwError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Gate-4 exception. Only collected (and only sent) when RTM coverage is short
+  // of full — matching the server contract, which discards it otherwise.
+  const [rtmOverride, setRtmOverride] = useState("");
 
   // Revoke (state C).
   const [revoking, setRevoking] = useState(false);
   const [revokeReason, setRevokeReason] = useState("");
   const [revokeBusy, setRevokeBusy] = useState(false);
+
+  // C2 — signed-state integrity. Recomputed server-side from current state and
+  // compared to the stored hash. Surfaced only; never auto-remediated.
+  const [integrity, setIntegrity] = useState<
+    { matches: boolean; changedInputs: string[]; boundDocumentManifest: boolean; currentDocumentCount: number } | null
+  >(null);
+  const [integrityError, setIntegrityError] = useState(false);
+
+  useEffect(() => {
+    if (!isSigned) { setIntegrity(null); setIntegrityError(false); return; }
+    let active = true;
+    verifyCSVSignOff(system.id).then((r) => {
+      if (!active) return;
+      if (r.success) { setIntegrity(r.data); setIntegrityError(false); }
+      else { setIntegrity(null); setIntegrityError(true); }
+    });
+    return () => { active = false; };
+  }, [system.id, isSigned]);
 
   useEffect(() => {
     let active = true;
@@ -100,9 +140,21 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
   async function onSign() {
     setPwError(null);
     if (reason.trim().length < 10) { onError("Add the sign-off meaning (at least 10 characters)."); return; }
+    // Gate 4 — an RTM shortfall needs a documented reason. The server enforces
+    // this independently; this check only spares a round-trip.
+    const needsRtmOverride = readiness ? !readiness.rtmCoverageSufficient : false;
+    if (needsRtmOverride && rtmOverride.trim().length < 20) {
+      onError("RTM coverage is incomplete — record an override reason (at least 20 characters) to sign with a traceability exception.");
+      return;
+    }
     if (!password) { setPwError("Password is required to sign."); return; }
     setBusy(true);
-    const r = await signValidation(system.id, { nextReviewDate, reason, password });
+    const r = await signValidation(system.id, {
+      nextReviewDate,
+      reason,
+      password,
+      ...(needsRtmOverride ? { rtmOverrideReason: rtmOverride } : {}),
+    });
     setBusy(false);
     if (!r.success) {
       if (r.fieldErrors?.password) setPwError(r.fieldErrors.password[0] ?? "Incorrect password");
@@ -161,6 +213,60 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
                 </div>
               ))}
             </div>
+            {/* Gate-4 exception — a sign-off taken without full traceability must
+                say so on the record, not only in the audit trail. Legacy sign-offs
+                predating the gate have this null and render nothing. */}
+            {system.signedOffRtmOverride && (
+              <div className="flex items-start gap-2 p-3 rounded-lg" style={{ background: "#f59e0b1a" }}>
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#f59e0b" }} aria-hidden="true" />
+                <div className="text-[12px]">
+                  <p className="font-semibold" style={{ color: "var(--text-primary)" }}>Signed with a traceability exception</p>
+                  <p className="mt-1" style={{ color: "var(--text-secondary)" }}>
+                    RTM coverage was {system.signedOffRtmCoverage ?? 0}% at signing — below full requirements traceability.
+                  </p>
+                  {system.signedOffRtmOverrideReason && (
+                    <p className="mt-1" style={{ color: "var(--text-secondary)" }}>Reason: {system.signedOffRtmOverrideReason}</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* C2 — signed-state integrity. The reader that makes drift visible:
+                the stored hash is recomputed from CURRENT state on every view.
+                Reports only; remediation is a QA decision, not an automatic one. */}
+            {integrityError ? (
+              <div className="flex items-start gap-2 p-2.5 rounded-lg text-[12px]" style={{ background: "var(--bg-surface)" }}>
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#f59e0b" }} aria-hidden="true" />
+                <span style={{ color: "var(--text-secondary)" }}>Signed state integrity: could not be checked.</span>
+              </div>
+            ) : integrity === null ? (
+              <p className="text-[11px] italic" style={{ color: "var(--text-muted)" }}>Checking signed state integrity…</p>
+            ) : integrity.matches ? (
+              <div className="flex items-start gap-2 p-2.5 rounded-lg text-[12px]" style={{ background: "#10b9811a" }}>
+                <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#10b981" }} aria-hidden="true" />
+                <span style={{ color: "var(--text-secondary)" }}>
+                  Signed state integrity: <strong>verified</strong> — the record still hashes to its signature
+                  {integrity.boundDocumentManifest
+                    ? `, including all ${integrity.currentDocumentCount} evidence document(s)`
+                    : ""}.
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 p-3 rounded-lg" style={{ background: "#ef44441a" }}>
+                <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#ef4444" }} aria-hidden="true" />
+                <div className="text-[12px]">
+                  <p className="font-semibold" style={{ color: "#ef4444" }}>Signed state integrity: DRIFT DETECTED</p>
+                  <p className="mt-1" style={{ color: "var(--text-secondary)" }}>
+                    This system no longer hashes to the state that was signed. The signature below attests to a
+                    record that has since changed. Investigate before relying on this validation.
+                  </p>
+                  {integrity.changedInputs.length > 0 && (
+                    <ul className="mt-1.5 list-disc pl-4" style={{ color: "var(--text-secondary)" }}>
+                      {integrity.changedInputs.map((c) => <li key={c}>{c}</li>)}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
             {system.signedOffContentHash && (
               <div className="flex items-center gap-1.5 text-[11px] font-mono break-all" style={{ color: "var(--text-muted)" }}>
                 <Hash className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -182,7 +288,7 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
                 <Button variant="ghost" size="sm" icon={RotateCcw} onClick={() => setRevoking(true)}>Revoke sign-off</Button>
               ) : (
                 <div className="space-y-2">
-                  <textarea rows={2} className="input text-[12px] resize-none w-full" value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} placeholder="Reason for revoking (min 10 characters)…" />
+                  <Textarea id="signoff-revoke-reason" rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} placeholder="Reason for revoking (min 10 characters)…" />
                   <div className="flex justify-end gap-2">
                     <Button variant="ghost" size="sm" onClick={() => { setRevoking(false); setRevokeReason(""); }}>Cancel</Button>
                     <Button variant="danger" size="sm" loading={revokeBusy} disabled={revokeBusy || revokeReason.trim().length < 10} onClick={onRevoke}>Confirm revoke</Button>
@@ -200,8 +306,12 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
     return <div className="card"><div className="card-body"><p className="text-[12px] italic" style={{ color: "var(--text-muted)" }}>Checking sign-off readiness…</p></div></div>;
   }
 
-  /* ── STATE A — not ready ──────────────────────────────────────── */
-  if (!readiness?.readyToSign) {
+  /* ── STATE A — not ready ──────────────────────────────────────────
+   * Gated on hardBlockersClear (gates 1-3), NOT readyToSign (all four).
+   * An RTM-coverage shortfall is the one OVERRIDABLE gate, so it must not
+   * strand the QA Head here — it falls through to state B, which requires a
+   * documented override reason. Gates 1-3 remain absolute. */
+  if (!readiness?.hardBlockersClear) {
     const blockers = [
       {
         ok: readiness?.allStagesComplete ?? false,
@@ -217,6 +327,14 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
         ok: (readiness?.openCriticalCAPAs ?? 0) === 0,
         text: (readiness?.openCriticalCAPAs ?? 0) === 0 ? "No open critical/high CAPAs" : `${readiness?.openCriticalCAPAs} open critical/high CAPA(s) must be closed`,
         tab: "inspect" as WorkflowTab,
+      },
+      // Gate 4 — a real blocker, no longer an informational footnote. Shown
+      // alongside the other three; resolvable on the Plan tab (which hosts the
+      // RTM) or, failing that, by a documented override at signing time.
+      {
+        ok: readiness?.rtmCoverageSufficient ?? false,
+        text: readiness ? rtmBlockerText(readiness) : "RTM coverage unknown",
+        tab: "plan" as WorkflowTab,
       },
     ];
     return (
@@ -260,7 +378,6 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
             </div>
           </div>
 
-          <p className="text-[11px] pt-1" style={{ color: "var(--text-muted)" }}>RTM coverage: {readiness?.currentRtmCoverage ?? 0}% (informational)</p>
         </div>
       </div>
     );
@@ -273,8 +390,24 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
       <div className="card-body space-y-3">
         <div className="flex items-start gap-2 p-2.5 rounded-lg text-[12px]" style={{ background: "#10b9811a" }}>
           <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#10b981" }} aria-hidden="true" />
-          <span style={{ color: "var(--text-secondary)" }}>All stages resolved, no open findings, no open critical CAPAs. RTM coverage {readiness.currentRtmCoverage}%.</span>
+          <span style={{ color: "var(--text-secondary)" }}>All stages resolved, no open findings, no open critical CAPAs.</span>
         </div>
+
+        {/* Gate 4 — RTM coverage short of full. The signing form stays open (this
+            is the one overridable gate) but the server refuses without a
+            documented reason, so surface the shortfall prominently here. */}
+        {!readiness.rtmCoverageSufficient && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg text-[12px]" style={{ background: "#f59e0b1a" }}>
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: "#f59e0b" }} aria-hidden="true" />
+            <div className="flex-1">
+              <span style={{ color: "var(--text-primary)" }}>{rtmBlockerText(readiness)}</span>
+              <button type="button" onClick={() => onNavigateTab("plan")} className="ml-2 text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0">→ Complete the RTM</button>
+              <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                Signing now records a traceability exception against this validation. It requires a documented reason and is bound into the signature hash.
+              </p>
+            </div>
+          </div>
+        )}
 
         {!canSign ? (
           <p className="text-[12px] italic" style={{ color: "var(--text-muted)" }}>You do not have permission to sign off validation. A QA Head must complete this step.</p>
@@ -286,20 +419,61 @@ export function SignOffTab({ system, role, timezone, dateFormat, onError, onOk, 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className={lbl} style={{ color: "var(--text-muted)" }}>Next requalification review *</label>
-                <input type="date" className="input text-[12px]" value={nextReviewDate} onChange={(e) => setNextReviewDate(e.target.value)} />
+                <DatePicker id="signoff-next-review" value={nextReviewDate} onChange={setNextReviewDate} />
               </div>
             </div>
             <div>
               <label className={lbl} style={{ color: "var(--text-muted)" }}>Signature meaning *</label>
-              <textarea rows={2} className="input text-[12px] resize-none w-full" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. I certify this system is validated and fit for intended use (min 10 characters)." />
+              <Textarea id="signoff-meaning" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. I certify this system is validated and fit for intended use (min 10 characters)." />
             </div>
+            {/* Rendered ONLY on an RTM shortfall — mirrors the server, which
+                discards this field when coverage is already sufficient. */}
+            {!readiness.rtmCoverageSufficient && (
+              <div>
+                <label className={lbl} style={{ color: "var(--text-muted)" }}>RTM coverage override reason *</label>
+                <Textarea
+                  id="signoff-rtm-override"
+                  rows={3}
+                  value={rtmOverride}
+                  onChange={(e) => setRtmOverride(e.target.value)}
+                  maxLength={2000}
+                  aria-label="RTM coverage override reason"
+                  placeholder="Why is this system being signed off without full requirements traceability? (min 20 characters)"
+                />
+                <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
+                  Recorded on the system and hashed into the signed record as a documented traceability exception.
+                </p>
+              </div>
+            )}
             <div>
               <label className={lbl} style={{ color: "var(--text-muted)" }}>Password *</label>
-              <input type="password" autoComplete="current-password" className="input text-[12px]" value={password} onChange={(e) => { setPassword(e.target.value); setPwError(null); }} placeholder="Re-enter your password to sign" />
-              {pwError && <p className="text-[11px] mt-1" style={{ color: "#ef4444" }}>{pwError}</p>}
+              {/* pwError moves onto the component's own `error` prop — same
+                  text, same 11px/mt-1 treatment, plus aria-invalid + role="alert".
+                  The manual <p> is removed so the message renders once. */}
+              <Input
+                id="signoff-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setPwError(null); }}
+                placeholder="Re-enter your password to sign"
+                error={pwError ?? undefined}
+              />
             </div>
             <div className="flex justify-end">
-              <Button variant="primary" size="sm" icon={ShieldCheck} loading={busy} disabled={busy || reason.trim().length < 10 || !password || !nextReviewDate} onClick={onSign}>Sign off validation</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={ShieldCheck}
+                loading={busy}
+                disabled={
+                  busy || reason.trim().length < 10 || !password || !nextReviewDate ||
+                  (!readiness.rtmCoverageSufficient && rtmOverride.trim().length < 20)
+                }
+                onClick={onSign}
+              >
+                {readiness.rtmCoverageSufficient ? "Sign off validation" : "Sign off with RTM exception"}
+              </Button>
             </div>
           </>
         )}

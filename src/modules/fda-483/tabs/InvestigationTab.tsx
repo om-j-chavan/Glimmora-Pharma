@@ -59,6 +59,7 @@ import { DatePicker } from "@/components/ui/DatePicker";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { normalizeSeverityForDisplay } from "@/lib/severity";
+import { truncate } from "@/lib/format/text";
 import dayjs from "@/lib/dayjs";
 import {
   getRcaSuggestions,
@@ -160,10 +161,6 @@ const RCA_METHODS: readonly RCAMethod[] = [
   "Fault Tree",
   "Barrier Analysis",
 ];
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s;
-}
 
 function formatTime(d: Date): string {
   const hh = String(d.getHours()).padStart(2, "0");

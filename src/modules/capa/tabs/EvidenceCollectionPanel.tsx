@@ -28,6 +28,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Toast";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { roleLabel } from "@/lib/labels/roles";
+import { formatBytes } from "@/lib/format/bytes";
 import {
   addEvidenceFile,
   addEvidenceFileToCategory,
@@ -108,12 +109,6 @@ const ALLOWED_MIME_PREFIXES = [
 ];
 
 const MAX_MB = 10;
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export function EvidenceCollectionPanel({ capaId, readOnly = false, onCountsChange, capaStatus, canRejectEvidence = false, assigneeMode = false }: EvidenceCollectionPanelProps) {
   const [items, setItems] = useState<EvidenceItemSummary[] | null>(null);
@@ -796,7 +791,7 @@ function FileList({ item, disabled, assigneeMode = false, onChange }: FileListPr
             downloadHref: `/api/evidence/files/${f.id}`,
             uploadedBy: uploaderLabel,
             badge: { label: CATEGORY_LABEL[item.category] },
-            size: formatSize(f.fileSize),
+            size: formatBytes(f.fileSize),
             // Phase 6 — correct field, correct format: "SHA-256: <first8>…<last4>",
             // full 64-char hash on hover via the DocList title.
             meta: `${dayjs(f.createdAt).fromNow()} · SHA-256: ${f.contentHashSha256.slice(0, 8)}…${f.contentHashSha256.slice(-4)}`,

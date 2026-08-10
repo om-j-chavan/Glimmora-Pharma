@@ -16,6 +16,10 @@ import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { Dropdown } from "@/components/ui/Dropdown";
+import { DatePicker } from "@/components/ui/DatePicker";
+import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
 import { getReworkTaskSuggestions, type ReworkTaskSuggestion } from "@/lib/ai";
 import { AIBadge } from "@/components/ai";
 import { friendlyAiError } from "@/lib/friendlyError";
@@ -239,23 +243,32 @@ export function StageReworkTasks({ stage, users, role, sessionUserId, isDark }: 
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Assignee</label>
-              <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="input text-[11px] w-full">
-                <option value="">Select worker…</option>
-                {assigneeOptions.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
+              {/* The empty entry is a real OPTION, not a placeholder prop, so the
+                  user can still clear the choice back to "" exactly as the native
+                  <select> allowed. */}
+              <Dropdown
+                value={assigneeId}
+                onChange={setAssigneeId}
+                options={[
+                  { value: "", label: "Select worker…" },
+                  ...assigneeOptions.map((u) => ({ value: u.id, label: u.name })),
+                ]}
+                size="sm"
+                width="w-full"
+              />
             </div>
             <div>
               <label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Due date (optional)</label>
-              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input text-[11px] w-full" />
+              <DatePicker id="rework-due-date" value={dueDate} onChange={setDueDate} />
             </div>
           </div>
           <div>
             <label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Instruction</label>
-            <textarea rows={2} value={message} onChange={(e) => setMessage(e.target.value)} className="input text-[11px] resize-none w-full" placeholder="What needs to be fixed?" />
+            <Textarea id="rework-message" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What needs to be fixed?" />
           </div>
           <div>
             <label className="text-[10px] block mb-0.5" style={{ color: "var(--text-muted)" }}>Linked finding / rubric (optional)</label>
-            <input value={findingRef} onChange={(e) => setFindingRef(e.target.value)} className="input text-[11px] w-full" placeholder="e.g. Approval signature block present" />
+            <Input id="rework-finding-ref" value={findingRef} onChange={(e) => setFindingRef(e.target.value)} placeholder="e.g. Approval signature block present" />
           </div>
           {assignErr && <p role="alert" className="text-[11px]" style={{ color: "var(--danger)" }}>{assignErr}</p>}
           <div className="flex justify-end gap-2">
@@ -340,7 +353,7 @@ export function StageReworkTasks({ stage, users, role, sessionUserId, isDark }: 
       <Modal open={!!submitTaskId} onClose={() => setSubmitTaskId(null)} title="Submit rework for review">
         <div className="space-y-3">
           <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Describe what you fixed (min 5 chars). The Validation Lead will review it.</p>
-          <textarea rows={3} value={completionNotes} onChange={(e) => setCompletionNotes(e.target.value)} className="input text-[12px] w-full resize-none" placeholder="e.g. Updated Section 4.2 SOP reference to v2.0 and added the signature block." />
+          <Textarea id="rework-completion-notes" rows={3} value={completionNotes} onChange={(e) => setCompletionNotes(e.target.value)} placeholder="e.g. Updated Section 4.2 SOP reference to v2.0 and added the signature block." />
           <div className="flex justify-end gap-2 pt-2" style={{ borderTop: "1px solid var(--bg-border)" }}>
             <Button variant="secondary" size="sm" onClick={() => setSubmitTaskId(null)}>Cancel</Button>
             <Button variant="primary" size="sm" icon={Send} disabled={completionNotes.trim().length < 5} onClick={handleSubmit}>Submit</Button>
@@ -356,7 +369,7 @@ export function StageReworkTasks({ stage, users, role, sessionUserId, isDark }: 
           ) : (
             <>
               <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>Tell the worker what still needs fixing (min 5 chars).</p>
-              <textarea rows={3} value={reworkReason} onChange={(e) => setReworkReason(e.target.value)} className="input text-[12px] w-full resize-none" placeholder="What is still missing?" />
+              <Textarea id="rework-reason" rows={3} value={reworkReason} onChange={(e) => setReworkReason(e.target.value)} placeholder="What is still missing?" />
             </>
           )}
           <div className="flex justify-end gap-2 pt-2" style={{ borderTop: "1px solid var(--bg-border)" }}>

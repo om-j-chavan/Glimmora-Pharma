@@ -433,8 +433,89 @@ export interface CSVValidationSignOffCanonicalInput {
   signatureMeaning: string;
   signerEmail: string;
   signedAtIso: string;
+  /** OPTIONAL — set ONLY when the sign-off used the RTM-coverage override
+   *  (signed without full requirements traceability, under a documented QA
+   *  reason). Omit for every fully-traced sign-off. See the versioning note
+   *  on canonicalizeCSVValidationSignOffContent below. */
+  rtmOverrideReason?: string | null;
+  /** OPTIONAL — the stage-evidence manifest (audit finding C3). Binds WHICH
+   *  documents backed the validation, so substituting or removing evidence
+   *  behind an approved/skipped stage changes the hash. Omit (or pass an empty
+   *  array) to reproduce the pre-manifest byte shape — see the versioning note
+   *  below, and buildCSVDocumentManifest for the ordering contract. */
+  documentManifest?: CSVSignOffDocumentManifestEntry[] | null;
 }
 
+/** One stage-evidence document, as bound into the sign-off hash. `contentHash`
+ *  is StageDocument.contentHashSha256 — the SHA-256 of the bytes at upload. */
+export interface CSVSignOffDocumentManifestEntry {
+  stageKey: string;
+  documentId: string;
+  contentHash: string;
+}
+
+/**
+ * Build the deterministic stage-evidence manifest for a sign-off.
+ *
+ * Shared by signValidation and verifyCSVSignOff so the ordering can never
+ * diverge between what was signed and what is re-checked. Sorted by stageKey
+ * then documentId — both immutable, so the order is stable across calls and
+ * independent of query order. Callers pass ACTIVE (non-soft-deleted) documents
+ * only; a soft-deleted document is absent from the manifest, which is what
+ * makes a post-sign-off removal detectable.
+ */
+export function buildCSVDocumentManifest(
+  docs: { stageName: string; id: string; contentHashSha256: string }[],
+): CSVSignOffDocumentManifestEntry[] {
+  return docs
+    .map((d) => ({ stageKey: d.stageName, documentId: d.id, contentHash: d.contentHashSha256 }))
+    .sort((a, b) =>
+      a.stageKey === b.stageKey
+        ? a.documentId.localeCompare(b.documentId)
+        : a.stageKey.localeCompare(b.stageKey),
+    );
+}
+
+/**
+ * CSV/CSA validation sign-off canonicaliser.
+ *
+ * ── CONTENT VERSIONING (recordType "CSV_VALIDATION_SIGNOFF") ────────────────
+ * Affects ONLY this record type. Three content shapes now exist under the SAME
+ * recordType string, distinguished structurally by which optional keys appear:
+ *
+ *   BASE ("V1") — 13 keys. Every sign-off taken before the RTM-coverage gate,
+ *                 and every fully-traced sign-off with no stage evidence.
+ *   + rtmCoverageOverrideReason — sign-offs taken under the RTM-coverage
+ *                 override (audit finding C1).
+ *   + documentManifest          — sign-offs that bound stage evidence
+ *                 (audit finding C3).
+ *
+ * The two extra keys are INDEPENDENT: a record may carry neither, either, or
+ * both. Both are ADDITIVE and CONDITIONAL — spread in only when actually
+ * present and non-empty — so a call supplying neither emits a string that is
+ * BYTE-IDENTICAL to what the original 13-key version produced. Historical
+ * hashes stay reproducible.
+ *
+ * `documentManifest` treats an EMPTY array exactly like absent. That is
+ * deliberate: a signed system with no stage documents must hash the same as a
+ * pre-manifest record, so the empty case can never be a spurious drift.
+ *
+ * RECONSTRUCTING A STORED RECORD (verifyCSVSignOff): presence is recorded per
+ * record on GxPSystem —
+ *   signedOffRtmOverrideReason   NULL ⇒ omit rtmCoverageOverrideReason
+ *   signedOffDocManifestSha256   NULL ⇒ omit documentManifest (a pre-C3
+ *                                       record; do NOT synthesise one from
+ *                                       current documents or it reads as drift)
+ *
+ * Both keys MUST stay conditionally spread rather than always present:
+ * canonicalJson walks Object.keys(), which includes keys explicitly set to
+ * `undefined`, and would serialise them as the bare token `undefined` —
+ * silently changing every historical hash.
+ *
+ * As with every canonicaliser here, treat the output as a wire format: to change
+ * the BASE field set, bump the recordType (…_V2) rather than mutating in place.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
 export function canonicalizeCSVValidationSignOffContent(
   input: CSVValidationSignOffCanonicalInput,
 ): string {
@@ -446,6 +527,14 @@ export function canonicalizeCSVValidationSignOffContent(
     part11Compliant: input.part11Compliant,
     reference: input.reference,
     rtmCoverage: input.rtmCoverage,
+    // Conditional spreads — see the versioning note above. Both absent ⇒ the
+    // original 13-key bytes. Empty manifest is treated as absent by design.
+    ...(input.rtmOverrideReason
+      ? { rtmCoverageOverrideReason: input.rtmOverrideReason }
+      : {}),
+    ...(input.documentManifest && input.documentManifest.length > 0
+      ? { documentManifest: input.documentManifest }
+      : {}),
     signatureMeaning: input.signatureMeaning,
     signedAt: input.signedAtIso,
     signerEmail: input.signerEmail,
@@ -453,6 +542,204 @@ export function canonicalizeCSVValidationSignOffContent(
     stagesTotal: input.stagesTotal,
     systemId: input.systemId,
   });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * FINDING CLOSURE (Gap Assessment) — recordType "FINDING_CLOSURE"
+ *
+ * ⚠️ UNVERIFIED — finding-closure signing built without DB access. MUST be
+ * verified against Postgres before deploy: mint a FINDING_CLOSURE signature,
+ * mutate an input, confirm verifyFindingClosure detects drift, and confirm all
+ * existing recordTypes still verify unchanged. Do NOT deploy until this passes.
+ *
+ * ⚠️ NOT WIRED. Nothing calls this yet. The live close (reviewFinding in
+ * src/actions/findings.ts) is still AUDITED-NOT-SIGNED; wiring is Part 2.
+ *
+ * Everything below is ADDITIVE. No existing canonicaliser, recordType or input
+ * shape was touched — the 14 pre-existing types serialise byte-for-byte as before.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** Input shape for canonicalising a Gap Assessment finding closure. Mirrors
+ *  DeviationClosureCanonicalInput, mapped onto Finding's own fields. */
+export interface FindingClosureCanonicalInput {
+  findingId: string;
+  /** Human reference (FND-<SITE>-<YEAR>-<NNNN>). Nullable — legacy findings
+   *  predate the allocator. See the versioning note below on why it is bound. */
+  reference: string | null;
+  /** Finding.requirement — the subject line. Deviation binds `title`; a Finding
+   *  has no title column, and `requirement` is the field the detail renders as
+   *  the record's identity, so it is the honest equivalent. */
+  requirement: string;
+  /** 🔴 Finding.severity. Binding it FREEZES the finding severity literals
+   *  ("Critical" | "High" | "Medium" | "Low") as HASHED values: once a closure is
+   *  signed, renaming or re-casing any of them changes the recomputed hash and
+   *  makes every prior signature fail verification. They are already constrained
+   *  by a z.enum at src/actions/findings.ts, so the practical risk is low — but
+   *  they move from "a filter value" to "a signed literal". Deliberate: deviation
+   *  binds severity too, and a closure that does not attest severity attests
+   *  little. */
+  severity: string;
+  /** Finding.rootCause — the readable RCA mirror. Nullable only for shape
+   *  symmetry with deviation; in practice findingCloseBlockers refuses to close a
+   *  finding without one. */
+  rootCause: string | null;
+  /** Finding.closureNotes, bound under deviation's `closingComment` key so the
+   *  two closure shapes read alike to an inspector. */
+  closingComment: string | null;
+  closedAt: Date;
+}
+
+/**
+ * Canonicalise a finding closure.
+ *
+ * ── CONTENT VERSIONING (recordType "FINDING_CLOSURE") ───────────────────────
+ * ONE shape, no optional keys. Unlike CSV_VALIDATION_SIGNOFF this has no
+ * conditional spreads, so there is no legacy byte-shape to preserve — this is a
+ * brand-new recordType with no records in existence yet.
+ *
+ * `reference` is bound DELIBERATELY and from the start. Per the convention on
+ * canonicalizeCSVValidationSignOffContent above, changing the BASE field set
+ * later requires bumping the recordType (…_V2) rather than mutating in place —
+ * so a field worth binding must be bound now, while zero signatures exist.
+ * Deviation omits it only because it predates that lesson.
+ *
+ * As with every canonicaliser here, treat the output as a wire format.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export function canonicalizeFindingClosureContent(
+  input: FindingClosureCanonicalInput,
+): string {
+  return canonicalJson({
+    recordType: "FINDING_CLOSURE",
+    closedAt: input.closedAt.toISOString(),
+    closingComment: input.closingComment ?? null,
+    findingId: input.findingId,
+    reference: input.reference,
+    requirement: input.requirement,
+    rootCause: input.rootCause ?? null,
+    severity: input.severity,
+  });
+}
+
+/** Result of re-checking a signed finding closure. Mirrors CSVSignOffVerification
+ *  (src/actions/systems.ts) — the only working verifier pattern in the codebase;
+ *  deviation closure has none. */
+export interface FindingClosureVerification {
+  /** false when the finding carries no closure signature — nothing to verify. */
+  signed: boolean;
+  /** Recomputed hash equals the stored one. */
+  matches: boolean;
+  storedHash: string | null;
+  recomputedHash: string | null;
+  /** Present only on a mismatch: a best-effort hint at WHERE the drift is. The
+   *  hash is the authority. */
+  changedInputs: string[];
+}
+
+/**
+ * Re-check a signed finding closure by recomputing its canonical content from
+ * CURRENT state and comparing to the stored hash.
+ *
+ * ⚠️ UNVERIFIED — see the banner at the top of this section.
+ *
+ * Read-only and non-remediating BY DESIGN: on a mismatch it reports, it never
+ * re-signs, never clears the signature, and never mutates the finding. Deciding
+ * what to do about drift is a human QA judgement.
+ *
+ * Tenant-scoped via the caller-supplied `tenantId` — this is a primitive, not a
+ * server action, so it does NOT read the session. Part 2 wraps it in an action
+ * that calls requireAuth and passes session.user.tenantId, exactly as
+ * verifyCSVSignOff does.
+ *
+ * LIMITATION (accepted for now): every hashed input is recomputed from LIVE
+ * columns. Unlike the CSV sign-off there are no snapshot columns
+ * (signedOffSeverity, …), so `changedInputs` can only report which live values
+ * differ from what the SignedRecord's own summary implies — it cannot diff
+ * field-by-field against the values frozen at signing. Adding snapshot columns
+ * would sharpen the forensics; it is deliberately out of scope for Part 1.
+ */
+export async function verifyFindingClosure(
+  findingId: string,
+  tenantId: string,
+): Promise<FindingClosureVerification | null> {
+  const finding = await prisma.finding.findFirst({
+    where: { id: findingId, tenantId },
+    select: {
+      id: true,
+      reference: true,
+      requirement: true,
+      severity: true,
+      rootCause: true,
+      closureNotes: true,
+      closedDate: true,
+      closureSignatureId: true,
+    },
+  });
+  if (!finding) return null;
+
+  if (!finding.closureSignatureId || !finding.closedDate) {
+    return {
+      signed: false,
+      matches: false,
+      storedHash: null,
+      recomputedHash: null,
+      changedInputs: [],
+    };
+  }
+
+  const signature = await prisma.signedRecord.findUnique({
+    where: { id: finding.closureSignatureId },
+    select: { contentHash: true, recordType: true },
+  });
+  if (!signature) {
+    return {
+      signed: true,
+      matches: false,
+      storedHash: null,
+      recomputedHash: null,
+      changedInputs: ["the signature ledger row for this closure is missing"],
+    };
+  }
+
+  const recomputedHash = computeContentHash(
+    canonicalizeFindingClosureContent({
+      findingId: finding.id,
+      reference: finding.reference,
+      requirement: finding.requirement,
+      severity: finding.severity,
+      rootCause: finding.rootCause,
+      closingComment: finding.closureNotes,
+      // The signed instant. closedDate is written in the same transaction as the
+      // signature, so it IS the value that was hashed.
+      closedAt: finding.closedDate,
+    }),
+  );
+
+  const matches = recomputedHash === signature.contentHash;
+  const changedInputs: string[] = [];
+  if (!matches) {
+    // A wrong recordType means this finding points at a signature minted for
+    // something else — worth naming, because the hash mismatch alone would not.
+    if (signature.recordType !== "FINDING_CLOSURE") {
+      changedInputs.push(
+        `linked signature is a ${signature.recordType}, not a FINDING_CLOSURE`,
+      );
+    } else {
+      // No snapshot columns to diff against (see LIMITATION above), so the honest
+      // report is the field SET that could have moved, not a false precision.
+      changedInputs.push(
+        "one or more hashed inputs changed after signing (requirement, severity, rootCause, closureNotes, reference or closedAt)",
+      );
+    }
+  }
+
+  return {
+    signed: true,
+    matches,
+    storedHash: signature.contentHash,
+    recomputedHash,
+    changedInputs,
+  };
 }
 
 /** Options for createSignedRecord — every field is required at the
