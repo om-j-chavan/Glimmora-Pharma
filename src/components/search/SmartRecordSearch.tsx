@@ -297,36 +297,6 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
       </div>
 
       <div className="p-4 space-y-3">
-        {/* Search bar + scope */}
-        <div className="flex items-center gap-2">
-          {crossOk && (
-            <select value={scope} onChange={(e) => { setScope(e.target.value); clearAll(); }} className="input text-[12px]" aria-label="Search scope" style={{ maxWidth: 150 }}>
-              <option value={SCOPE_ALL}>All modules</option>
-              {sources.map((s) => <option key={s.module} value={s.module}>{s.label}</option>)}
-            </select>
-          )}
-          <div className="relative flex-1">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" style={{ color: "var(--text-muted)" }} />
-            <input
-              type="text"
-              className="input text-[13px] w-full pl-9 pr-9"
-              placeholder="Ask in plain words…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runSearch(query); } }}
-              disabled={busy}
-              aria-label="Search records in plain English"
-            />
-            {(query || hasResults) && (
-              <button type="button" aria-label="Clear search" onClick={clearAll} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded border-0 cursor-pointer bg-transparent" style={{ color: "var(--text-muted)" }}><X className="w-3.5 h-3.5" aria-hidden="true" /></button>
-            )}
-          </div>
-          {/* The search itself is an AI call (NL → filter translation), so the
-              trigger wears the AI accent. Icon-only: the placeholder already
-              says "Ask in plain words…". */}
-          <AIButton iconOnly loading={busy} aria-label="Run search" onClick={() => runSearch(query)} disabled={!query.trim()} />
-        </div>
-
         {/* Resting state — example chips + saved searches */}
         {!hasResults && !busy && !error && (
           <div className="space-y-2">
@@ -362,6 +332,38 @@ export function SmartRecordSearch({ sources, title = "Search", defaultScope, all
             </div>
           </div>
         )}
+
+        {/* Search bar + scope — anchored at the bottom, chat-input style, so
+            typing and results both read top-to-bottom above it instead of
+            the input sitting above an empty resting state. */}
+        <div className="flex items-center gap-2">
+          {crossOk && (
+            <select value={scope} onChange={(e) => { setScope(e.target.value); clearAll(); }} className="input text-[12px]" aria-label="Search scope" style={{ maxWidth: 150 }}>
+              <option value={SCOPE_ALL}>All modules</option>
+              {sources.map((s) => <option key={s.module} value={s.module}>{s.label}</option>)}
+            </select>
+          )}
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" style={{ color: "var(--text-muted)" }} />
+            <input
+              type="text"
+              className="input text-[13px] w-full pl-9 pr-9"
+              placeholder="Ask in plain words…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void runSearch(query); } }}
+              disabled={busy}
+              aria-label="Search records in plain English"
+            />
+            {(query || hasResults) && (
+              <button type="button" aria-label="Clear search" onClick={clearAll} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded border-0 cursor-pointer bg-transparent" style={{ color: "var(--text-muted)" }}><X className="w-3.5 h-3.5" aria-hidden="true" /></button>
+            )}
+          </div>
+          {/* The search itself is an AI call (NL → filter translation), so the
+              trigger wears the AI accent. Icon-only: the placeholder already
+              says "Ask in plain words…". */}
+          <AIButton iconOnly loading={busy} aria-label="Run search" onClick={() => runSearch(query)} disabled={!query.trim()} />
+        </div>
       </div>
     </section>
   );
