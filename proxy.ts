@@ -60,8 +60,15 @@ export async function proxy(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const callbackUrl = pathname + req.nextUrl.search;
+    // 303, not the default 307: a Server Action POST (identified by the
+    // `next-action` header) that lands here mid-flight must have its method
+    // downgraded to GET on the follow-up request. A 307 preserves POST, so
+    // the browser re-POSTs to /login with the same next-action header —
+    // Next.js can't resolve that action id on /login and 404s instead of
+    // showing the login page.
     return NextResponse.redirect(
       new URL(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`, req.url),
+      303,
     );
   }
 

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDashboardStats } from "@/lib/queries";
+import { getAssistantCAPAs } from "@/lib/queries/capaQueries";
+import { getAssistantDeviations } from "@/lib/queries/deviationQueries";
+import { getAssistantFindings } from "@/lib/queries/findingQueries";
+import { getAssistantEvents } from "@/lib/queries/eventQueries";
 import { aiUpstreamBase } from "@/lib/aiAuth";
 import { mintAiToken, canMintAiToken, AI_TOKEN_MISCONFIGURED } from "@/lib/aiToken.server";
 
@@ -69,11 +73,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: "message is too long" }, { status: 413 });
   }
 
-  // Live tenant figures. Best-effort: a failure here must not take the whole
-  // assistant down, so we forward without them and let the backend decline
-  // data questions rather than answer them from nothing.
+  // Live tenant figures AND actual records for intelligent responses.
+  // CRITICAL: All queries use session.user.tenantId for tenant isolation.
+  // Best-effort: a failure here must not take the whole assistant down.
+
   let snapshot: Record<string, number> | null = null;
+  let records: Record<string, any[]> | null = null;
+
   try {
+    // Fetch aggregate stats
     const s = await getDashboardStats(session.user.tenantId);
     snapshot = {
       totalCAPAs: s.totalCAPAs,
@@ -90,8 +98,57 @@ export async function POST(req: NextRequest) {
       complianceScore: s.complianceScore,
       lowestReadiness: s.lowestReadiness,
     };
+
+    // Fetch actual records for ALL entities for intelligent list responses
+    // CRITICAL: tenantId from session ONLY, never from client
+    const [openCAPAs, overdueCAPAs, openDeviations, criticalDeviations,
+           openFindings, criticalFindings, overdueEvents] = await Promise.all([
+      // CAPAs
+      getAssistantCAPAs(session.user.tenantId, {
+        status: ["Open", "In Progress"],
+        limit: 20
+      }),
+      getAssistantCAPAs(session.user.tenantId, {
+        overdue: true,
+        limit: 20
+      }),
+      // Deviations
+      getAssistantDeviations(session.user.tenantId, {
+        status: ["Open", "Investigating"],
+        limit: 20
+      }),
+      getAssistantDeviations(session.user.tenantId, {
+        severity: ["Critical"],
+        limit: 20
+      }),
+      // Findings
+      getAssistantFindings(session.user.tenantId, {
+        status: ["Open", "In Progress"],
+        limit: 20
+      }),
+      getAssistantFindings(session.user.tenantId, {
+        severity: ["Critical"],
+        limit: 20
+      }),
+      // Events (FDA 483s)
+      getAssistantEvents(session.user.tenantId, {
+        overdue: true,
+        limit: 20
+      }),
+    ]);
+
+    records = {
+      capas: openCAPAs,
+      overdueCapas: overdueCAPAs,
+      deviations: openDeviations,
+      criticalDeviations: criticalDeviations,
+      findings: openFindings,
+      criticalFindings: criticalFindings,
+      events: overdueEvents,
+    };
+
   } catch (err) {
-    console.error("[api/ai/assistant] snapshot query failed", err);
+    console.error("[api/ai/assistant] data query failed", err);
   }
 
   // Fail closed, exactly like the proxy: never forward an unidentified request.
@@ -111,6 +168,7 @@ export async function POST(req: NextRequest) {
         message,
         chat_history: cleanHistory(body.chat_history),
         snapshot,
+        records, // ADDED: Actual records for intelligent responses
       }),
       cache: "no-store",
     });
