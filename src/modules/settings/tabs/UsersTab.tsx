@@ -1,4 +1,9 @@
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  CAPA_CLOSE_ROLES, DEVIATION_QA_ROLES, CSV_SIGNOFF_ROLES,
+  FDA483_SIGN_ROLES, DOCUMENT_APPROVE_ROLES,
+} from "@/lib/permissions/roleSets";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -100,6 +105,30 @@ const roleChip: Record<string, string> = {
     "bg-(--bg-elevated) text-(--text-secondary) border border-(--bg-border)",
 };
 
+/**
+ * Roles that can ever apply an e-signature, DERIVED from the five signing
+ * role-sets rather than hardcoded — if one of those sets gains a role, the pill
+ * and the edit-modal toggle follow automatically instead of drifting.
+ *
+ * Today the union is exactly { qa_head, regulatory_affairs }: qa_head is in all
+ * five sets; regulatory_affairs only in FDA483_SIGN_ROLES (roleSets.ts:246).
+ *
+ * DISPLAY/VISIBILITY ONLY. This decides where a pill or a toggle is shown; it
+ * grants nothing. Who may actually sign is unchanged, still enforced by those
+ * role-sets plus the server gates.
+ */
+const SIGN_CAPABLE_ROLES: readonly string[] = Array.from(
+  new Set([
+    ...CAPA_CLOSE_ROLES,
+    ...DEVIATION_QA_ROLES,
+    ...CSV_SIGNOFF_ROLES,
+    ...FDA483_SIGN_ROLES,
+    ...DOCUMENT_APPROVE_ROLES,
+  ]),
+);
+
+const isSignCapableRole = (role: string): boolean => SIGN_CAPABLE_ROLES.includes(role);
+
 // Matches the server min (CreateUserSchema/UpdateUserSchema password .min(6)).
 const PASSWORD_MIN = 6;
 
@@ -190,6 +219,7 @@ function UserForm({
   submitIcon,
   roleOptions,
   mode = "add",
+  onRequestGxpChange,
 }: {
   open: boolean;
   onClose: () => void;
@@ -200,6 +230,13 @@ function UserForm({
   submitIcon: typeof Plus;
   roleOptions: DropdownOption[];
   mode?: "add" | "edit";
+  /**
+   * EDIT mode only. Called instead of writing the field, so the change goes
+   * through the existing password gate + `setUserGxpSignatoryWithPassword`
+   * rather than the form's own submit. Absent in add mode, where the value is
+   * part of the create payload as before.
+   */
+  onRequestGxpChange?: (next: boolean) => void;
 }) {
   const { allSites: tenantSites } = useTenantConfig();
 
@@ -217,7 +254,7 @@ function UserForm({
     watch,
     setValue,
     setError,
-    formState: { errors, isSubmitting, isDirty, isValid },
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<UserFormValues>({
     resolver: zodResolver(makeUserSchema(mode)),
     defaultValues,
@@ -239,6 +276,13 @@ function UserForm({
   // 1:1 FK): one site, or none. No role gets an all-sites ASSIGNMENT here. Force
   // allSites=false so a freshly picked site is never nulled at write time (also
   // heals a legacy allSites=true row, e.g. a qa_head created under the old rule).
+  // A role that can never sign must not carry signatory authority. Forcing the
+  // field false keeps the submitted payload honest when the role is switched
+  // away from qa_head / regulatory_affairs mid-form (the toggle also hides).
+  useEffect(() => {
+    if (!isSignCapableRole(watchRole)) setValue("gxpSignatory", false);
+  }, [watchRole, setValue]);
+
   useEffect(() => {
     setValue("allSites", false);
   }, [watchRole, setValue]);
@@ -257,10 +301,26 @@ function UserForm({
 
   // Wrap the parent's onSubmit so a returned duplicate-email error is surfaced
   // inline on the email field instead of as a global popup (U4).
+  //
+  // The try/catch is the outer half of the "modal won't close" fix. The parent
+  // handlers do their close/reset on their LAST lines, so a rejection anywhere
+  // inside them (a server action throwing rather than returning
+  // `{success:false}`) skipped the close entirely — and react-hook-form does not
+  // surface a rejected submit handler anywhere in the UI, so the modal simply
+  // sat there with no feedback. Surfacing it as a form-level error means a
+  // failure is always visible and never silent.
   const submit = async (data: UserFormValues) => {
-    const res = await onSubmit(data);
-    if (res?.emailError) {
-      setError("email", { type: "server", message: res.emailError });
+    try {
+      const res = await onSubmit(data);
+      if (res?.emailError) {
+        setError("email", { type: "server", message: res.emailError });
+      }
+    } catch (err) {
+      console.error("[UserForm] submit failed:", err);
+      setError("root.submit", {
+        type: "server",
+        message: err instanceof Error ? err.message : "Something went wrong. Please try again.",
+      });
     }
   };
 
@@ -283,12 +343,19 @@ function UserForm({
           <Button type="button" variant="secondary" onClick={requestClose}>
             Cancel
           </Button>
+          {/* Only `isSubmitting` disables. Gating on `!isValid` too meant an
+              invalid form produced a DEAD button: the click never reached
+              handleSubmit, so react-hook-form never ran validation, and errors
+              for fields the user had not touched were never populated — no
+              message, no focus, no explanation. Letting the click through makes
+              handleSubmit validate the whole form, block the submit, and render
+              every message via the `errors` bindings already wired below. */}
           <Button
             icon={submitIcon}
             type="submit"
             form={formId}
             loading={isSubmitting}
-            disabled={!isValid || isSubmitting}
+            disabled={isSubmitting}
           >
             {submitLabel}
           </Button>
@@ -300,6 +367,13 @@ function UserForm({
         password into a fresh "Add user" form (the reported pre-fill bug — the
         React form state is already empty; the values came from browser autofill). */}
     <form id={formId} onSubmit={handleSubmit(submit)} noValidate autoComplete="off" className="space-y-4">
+      {/* Form-level failure (a rejected server action). Without this a throw
+          left the modal open with nothing rendered to explain why. */}
+      {errors.root?.submit && (
+        <p role="alert" className="text-[11px] text-(--danger)">
+          {errors.root.submit.message}
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-4">
         <Input
           id="user-name"
@@ -390,23 +464,37 @@ function UserForm({
         />
       </div>
 
-      {/* GxP Signatory toggle. In edit mode this is a Part 11 change that must
-          go through the password-gated table toggle (U3), so it is read-only
-          here; it is set at creation time in add mode. */}
-      <div className="py-3 border-t border-(--bg-border)">
-        <Toggle
-          id="form-gxp-sig"
-          checked={watch("gxpSignatory")}
-          onChange={(v) => setValue("gxpSignatory", v)}
-          label="GxP Signatory Authority"
-          description={
-            mode === "edit"
-              ? "Change this from the table — it requires your password (Part 11)"
-              : "Enables Sign & Approve buttons"
-          }
-          disabled={mode === "edit"}
-        />
-      </div>
+      {/* GxP Signatory — shown ONLY for roles that can ever sign; the field is
+          meaningless for the rest and is forced false for them (effect above).
+
+          EDIT mode: this is where grant/revoke now lives, moved from the table.
+          It is still a Part 11 change, so the toggle does NOT write here — it
+          calls `onRequestGxpChange`, which opens the same password dialog and
+          the same `setUserGxpSignatoryWithPassword` action the table toggle
+          used. The control relocated; the gate and its audit row did not.
+
+          ADD mode: unchanged — set at creation time as part of the payload. */}
+      {isSignCapableRole(watchRole) && (
+        <div className="py-3 border-t border-(--bg-border)">
+          <Toggle
+            id="form-gxp-sig"
+            checked={watch("gxpSignatory")}
+            onChange={(v) => {
+              if (mode === "edit") {
+                onRequestGxpChange?.(v);
+                return;
+              }
+              setValue("gxpSignatory", v);
+            }}
+            label="GxP Signatory Authority"
+            description={
+              mode === "edit"
+                ? "Requires your password (Part 11) — confirmed on the next step"
+                : "Enables Sign & Approve buttons"
+            }
+          />
+        </div>
+      )}
 
       {/* Site assignment — SINGLE site (User.siteId is a 1:1 FK) for EVERY role,
           QA Head included: one site, or none. No all-sites assignment path. */}
@@ -463,6 +551,7 @@ function UserForm({
 
 export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const dispatch = useAppDispatch();
+  const router = useRouter();
   const {
     users,
     tenantId,
@@ -502,6 +591,34 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
   const [deactivatePopup, setDeactivatePopup] = useState(false);
   const [userToDeactivate, setUserToDeactivate] = useState<string | null>(null);
   const [planLimitOpen, setPlanLimitOpen] = useState(false);
+  // Zero-sites block. A user is assigned to at most one site (User.siteId, a 1:1
+  // FK), so with no sites configured there is nothing to assign and the add-user
+  // form's site picker degrades to the "No sites configured yet" notice it
+  // already shows at line ~415. Blocking at the button turns that dead end into
+  // an instruction. `allSites` is the tenant's site list already read from
+  // `useTenantConfig()` above — no new query.
+  const [noSitesOpen, setNoSitesOpen] = useState(false);
+  const hasNoSites = allSites.length === 0;
+
+  /**
+   * The ONE way the add-user modal opens. Both entry points — the header
+   * "Add user" button and the empty table's "Add first user" CTA — go through
+   * here, so the zero-sites block cannot be walked around via the empty state
+   * (which is exactly what a brand-new tenant with no sites and no users sees).
+   * Guard order matches the button's previous inline logic: plan/account limit
+   * first, then sites.
+   */
+  const handleAddUserClick = () => {
+    if (atLimit) {
+      setPlanLimitOpen(true);
+      return;
+    }
+    if (hasNoSites) {
+      setNoSitesOpen(true);
+      return;
+    }
+    setAddModal(true);
+  };
   // Human-labelled message from a server-side cap block (hard enforcement).
   const [capError, setCapError] = useState<string | null>(null);
   // Server-side error for the signatory / status mutations (Part 11 controls).
@@ -767,19 +884,32 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
       const localPart = data.email.split("@")[0] ?? "";
       const username =
         localPart.length >= 3 ? localPart : `${localPart}_${editingUser.id.slice(-4)}`;
-      const provisioned = await provisionAiAccount({
-        userId: editingUser.id,
-        username,
-        email: data.email,
-        password: data.password ?? editingUser.password ?? "",
-        customerId,
-        role: data.role,
-      });
-      if (provisioned.success) {
-        patch.aiUserId = provisioned.data.aiUserId;
-        patch.username = username;
-      } else {
-        console.error("[UsersTab] AI provisioning retry on edit failed:", provisioned.error);
+      // BEST-EFFORT, and now genuinely so. The `provisioned.success === false`
+      // branch below already treated a failed retry as non-fatal, but a THROWN
+      // rejection was not caught anywhere in this handler — and the three
+      // close/reset statements at the end are the last lines of the function,
+      // so any rejection here skipped them and left the modal open with no
+      // error shown. `provisionAiAccount` self-catches its own body, but its
+      // `requireAuth()` sits OUTSIDE that try (aiAccount.ts:44), and a server
+      // action can also reject on transport. Catching here makes the AI retry
+      // unable to block the edit from completing.
+      try {
+        const provisioned = await provisionAiAccount({
+          userId: editingUser.id,
+          username,
+          email: data.email,
+          password: data.password ?? editingUser.password ?? "",
+          customerId,
+          role: data.role,
+        });
+        if (provisioned.success) {
+          patch.aiUserId = provisioned.data.aiUserId;
+          patch.username = username;
+        } else {
+          console.error("[UsersTab] AI provisioning retry on edit failed:", provisioned.error);
+        }
+      } catch (err) {
+        console.error("[UsersTab] AI provisioning retry on edit threw:", err);
       }
     }
 
@@ -817,13 +947,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             size="sm"
             className={clsx(atLimit && "opacity-70")}
             aria-disabled={atLimit}
-            onClick={() => {
-              if (atLimit) {
-                setPlanLimitOpen(true);
-                return;
-              }
-              setAddModal(true);
-            }}
+            onClick={handleAddUserClick}
           >
             {atLimit ? "Limit reached" : "Add user"}
           </Button>
@@ -985,7 +1109,7 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
               description="Users are assigned to findings, CAPAs, systems and 483 events as owners."
               hint="Without users, owner dropdowns in all modules will be empty."
               actionLabel="Add first user"
-              onAction={() => setAddModal(true)}
+              onAction={handleAddUserClick}
               readOnly={readOnly}
             />
           }
@@ -993,10 +1117,20 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             {
               key: "name",
               header: "Name",
-              width: "w-[20%]",
+              // +8% absorbing the removed GxP column, which the inline pill replaces.
+              width: "w-[28%]",
               render: (u) => (
-                <span className="text-[12px] font-semibold text-(--text-primary) truncate">
-                  {u.name}
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                  <span className="text-[12px] font-semibold text-(--text-primary) truncate">
+                    {u.name}
+                  </span>
+                  {/* READ-ONLY signatory indicator. Shown only for roles that can
+                      ever sign; green = holds the authority, red = does not.
+                      Purely an indicator — granting/revoking now lives in the
+                      Edit User modal behind the same password gate as before. */}
+                  {isSignCapableRole(u.role) && (
+                    <Badge variant={u.gxpSignatory ? "green" : "red"}>GxP</Badge>
+                  )}
                 </span>
               ),
             },
@@ -1029,23 +1163,10 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
                   </span>
                 ),
             },
-            {
-              key: "gxp",
-              header: "GxP Signatory",
-              width: "w-[13%]",
-              render: (u) => (
-                <Toggle
-                  id={`sig-${u.id}`}
-                  checked={u.gxpSignatory}
-                  // Part 11 change — opens the password gate instead of
-                  // persisting directly (U3).
-                  onChange={() => setGxpTarget({ user: u, value: !u.gxpSignatory })}
-                  label={`GxP Signatory for ${u.name}`}
-                  disabled={readOnly}
-                  hideLabel
-                />
-              ),
-            },
+            /* The interactive "GxP Signatory" toggle column was REMOVED. The
+               read-only pill beside the name reports the state, and the
+               grant/revoke control moved into the Edit User modal — same
+               password gate, same action, same audit row. */
             {
               key: "status",
               header: "Status",
@@ -1062,7 +1183,8 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             {
               key: "email",
               header: "Email",
-              width: "w-[16%]",
+              // +5%, the remainder of the removed GxP column's width.
+              width: "w-[21%]",
               render: (u) => (
                 <span className="text-[12px] text-(--text-secondary) truncate">
                   {u.email}
@@ -1156,6 +1278,12 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
             password: "",
             confirmPassword: "",
           }}
+          /* Grant/revoke relocated from the table toggle to this modal. It sets
+             the SAME `gxpTarget` state the table toggle set, which opens the
+             same PasswordConfirmModal → confirmGxpChange →
+             setUserGxpSignatoryWithPassword. Action, password gate and audit
+             row are untouched — only the control's location changed. */
+          onRequestGxpChange={(next) => setGxpTarget({ user: editingUser, value: next })}
           onSubmit={handleEdit}
           submitLabel="Save changes"
           submitIcon={Save}
@@ -1195,6 +1323,25 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
         plan={tenantPlan}
         limit={userLimit}
         count={userCount}
+      />
+      {/* Zero-sites block. "Go to Sites" deep-links to the Sites tab via the
+          route's existing `?tab=` param (app/(app)/settings/page.tsx:6-8 →
+          SettingsPage's initialTab). Dismissing just closes — either way the
+          add-user modal never opens. */}
+      <Popup
+        isOpen={noSitesOpen}
+        variant="warning"
+        title="Create a site before adding users"
+        description="Users must be assigned to a site, and this organisation has none yet. Add a site first, then come back to add users."
+        onDismiss={() => setNoSitesOpen(false)}
+        actions={[
+          { label: "Not now", style: "ghost", onClick: () => setNoSitesOpen(false) },
+          {
+            label: "Go to Sites",
+            style: "primary",
+            onClick: () => { setNoSitesOpen(false); router.push("/settings?tab=sites"); },
+          },
+        ]}
       />
       <Popup
         isOpen={!!capError}

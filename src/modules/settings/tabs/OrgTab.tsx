@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import type { LucideIcon } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Info, Save, Pencil } from "lucide-react";
+import {
+  Info, Save, Pencil, Building2, Briefcase, Globe, Clock, CalendarDays,
+} from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -46,10 +49,18 @@ const DATE_FORMATS = [
   { value: "YYYY-MM-DD", label: "YYYY-MM-DD" },
 ];
 
-function Field({ label, value }: { label: string; value: string }) {
+/**
+ * `icon` is DECORATIVE only — it labels the row visually and is `aria-hidden`,
+ * so the accessible name is still the text label alone. Optional, so any future
+ * caller without one renders exactly as before.
+ */
+function Field({ label, value, icon: Icon }: { label: string; value: string; icon?: LucideIcon }) {
   return (
     <div>
-      <p className="text-[11px] font-medium text-(--card-muted) mb-1">{label}</p>
+      <p className="flex items-center gap-1.5 text-[11px] font-medium text-(--card-muted) mb-1">
+        {Icon && <Icon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />}
+        {label}
+      </p>
       <p className="text-[13px] text-(--text-primary)">
         {value || <span className="text-(--text-muted) italic">—</span>}
       </p>
@@ -114,18 +125,24 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
 
       <div className="bg-(--card-bg) border border-(--card-border) rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-(--card-border)">
-          <span className="text-[13px] font-semibold text-(--text-primary)">Organisation</span>
+          {/* Icon + title, matching the card headers on the sibling settings
+              tabs (e.g. SubscriptionTab.tsx:97-100). Decorative only. */}
+          <span className="flex items-center gap-2 text-[13px] font-semibold text-(--text-primary)">
+            <Building2 className="w-4 h-4 text-(--brand)" aria-hidden="true" />
+            Organisation
+          </span>
           {!readOnly && <Button icon={Pencil} size="xs" variant="ghost" onClick={openEdit}>Edit</Button>}
         </div>
 
         <div className="p-5 grid grid-cols-2 gap-x-8 gap-y-5">
-          <Field label="Company Name" value={org.companyName} />
+          <Field label="Company Name" value={org.companyName} icon={Briefcase} />
           {/* Regulatory Regions are assigned by the platform Super Admin and are
               deliberately absent from the edit form below — a customer_admin sees
               them, never edits them. Rendered as chips because a tenant can hold
               several. */}
           <div>
-            <p className="text-[11px] font-medium text-(--card-muted) mb-1">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-(--card-muted) mb-1">
+              <Globe className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
               {org.regulatoryRegions.length === 1 ? "Regulatory Region" : "Regulatory Regions"}
             </p>
             <RegulatoryRegionBadges
@@ -134,8 +151,12 @@ export function OrgTab({ readOnly = false }: { readOnly?: boolean }) {
               emptyText="Not assigned"
             />
           </div>
-          <Field label="Timezone" value={tzLabel} />
-          <Field label="Organization Created Date" value={orgCreatedAt ? formatDate(orgCreatedAt) : "—"} />
+          <Field label="Timezone" value={tzLabel} icon={Clock} />
+          <Field
+            label="Organization Created Date"
+            value={orgCreatedAt ? formatDate(orgCreatedAt) : "—"}
+            icon={CalendarDays}
+          />
         </div>
 
         <div className="px-5 pb-4">

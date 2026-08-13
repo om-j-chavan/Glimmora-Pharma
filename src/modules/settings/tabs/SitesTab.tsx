@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, MapPin, Save, Lock, Eye, Power } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Save, Lock, Power, Building2, ShieldCheck } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import clsx from "clsx";
 import { titleCase } from "@/lib/strings";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -126,17 +127,57 @@ function SiteForm({
   );
 }
 
-/** Read-only "View site" detail row. */
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * Read-only "View site" detail primitives.
+ *
+ * Both follow the conventions the sibling settings tabs already use, so the
+ * modal reads as part of Settings rather than a one-off:
+ *   • section header = `flex items-center gap-2` + a `w-4 h-4 text-(--brand)`
+ *     icon + a 13px semibold title (SubscriptionTab.tsx:97-100),
+ *   • field label = 11px `--text-muted`, value 13px `--text-primary`,
+ *   • surfaces use `--card-bg` / `--card-border`, dividers `--bg-border`.
+ * Every icon is decorative and `aria-hidden`, so the accessible name of each
+ * field is still its text label alone.
+ */
+function DetailField({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border) last:border-b-0">
-      <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">
-        {label}
+    <div className="flex items-start gap-3 py-3">
+      <span className="mt-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-(--brand-muted)">
+        <Icon className="h-3.5 w-3.5 text-(--brand)" aria-hidden="true" />
       </span>
-      <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">
-        {children}
-      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium text-(--text-muted)">{label}</p>
+        <div className="mt-0.5 text-[13px] text-(--text-primary) break-words">{children}</div>
+      </div>
     </div>
+  );
+}
+
+function DetailSection({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-(--card-border) bg-(--card-bg) overflow-hidden">
+      <header className="flex items-center gap-2 px-4 py-2.5 border-b border-(--card-border)">
+        <Icon className="w-4 h-4 text-(--brand)" aria-hidden="true" />
+        <span className="text-[13px] font-semibold text-(--text-primary)">{title}</span>
+      </header>
+      <div className="px-4 py-0.5 divide-y divide-(--bg-border)">{children}</div>
+    </section>
   );
 }
 
@@ -352,6 +393,26 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
           caption="List of registered facilities with location, GMP scope and status"
           keyFn={(s) => s.id}
           data={sites}
+          /* Whole-row click replaces the former Eye button in the actions
+             column — SAME target, same handler (`setViewSiteId`). DataTableBase
+             adds `cursor-pointer` when `onRowClick` is set (DataTableBase.tsx:302)
+             and the `table-fixed` variant already carries the row hover state
+             (:300), so the affordance comes from the table itself. */
+          onRowClick={(s) => setViewSiteId(s.id)}
+          /* Keyboard parity with the button that was removed: the row is
+             focusable and Enter/Space opens the same detail modal, so viewing a
+             site never became mouse-only. No `role` override — the row stays a
+             table row for assistive tech. */
+          rowProps={(s) => ({
+            tabIndex: 0,
+            "aria-label": `View ${s.name}`,
+            onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setViewSiteId(s.id);
+              }
+            },
+          })}
           emptyState={
             <EmptyState
               icon={MapPin}
@@ -398,8 +459,13 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
               key: "status",
               header: "Status",
               width: "w-[14%]",
+              /* The status Toggle is interactive too — without
+                 `stopPropagation` flipping it would also open the detail modal. */
               render: (s) => (
-                <div className="flex items-center gap-2">
+                <div
+                  className="flex items-center gap-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Toggle
                     id={`site-status-${s.id}`}
                     checked={s.status === "Active"}
@@ -420,15 +486,14 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
               srOnly: true,
               width: "w-[18%]",
               align: "right" as const,
+              /* Edit + Delete remain; only the View (Eye) button moved to the
+                 row click. `stopPropagation` keeps these independent — clicking
+                 Edit or Delete must not also open the detail modal. */
               render: (s: TenantSiteConfig) => (
-                <div className="inline-flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    icon={Eye}
-                    aria-label={`View ${s.name}`}
-                    onClick={() => setViewSiteId(s.id)}
-                  />
+                <div
+                  className="inline-flex items-center gap-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   {!readOnly && (
                     <>
                       <Button
@@ -532,16 +597,44 @@ export function SitesTab({ readOnly = false }: { readOnly?: boolean }) {
           ) : undefined
         }
       >
+        {/*
+          Same FOUR fields as before — site name, status, location, GMP scope —
+          reorganised, not changed. Identity (name + status) is promoted to a
+          header block so the two things that identify a site read first; the two
+          descriptive fields follow in one titled section. Values, the empty-value
+          "—" fallback and the status Badge variant logic are all unchanged.
+        */}
         {viewSite && (
-          <div className="space-y-0">
-            <DetailRow label="Site name">{viewSite.name}</DetailRow>
-            <DetailRow label="Location">{viewSite.location || "—"}</DetailRow>
-            <DetailRow label="GMP scope">{viewSite.gmpScope || "—"}</DetailRow>
-            <DetailRow label="Status">
-              <Badge variant={viewSite.status === "Active" ? "green" : "gray"}>
-                {viewSite.status}
-              </Badge>
-            </DetailRow>
+          <div className="space-y-3">
+            {/* Identity — site name + status */}
+            <div className="flex items-start gap-3 rounded-xl border border-(--card-border) bg-(--card-bg) px-4 py-3.5">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--brand-muted)">
+                <Building2 className="h-5 w-5 text-(--brand)" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium text-(--text-muted)">Site name</p>
+                <p className="mt-0.5 text-[15px] font-semibold text-(--text-primary) break-words">
+                  {viewSite.name}
+                </p>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <Power className="h-3 w-3 text-(--text-muted)" aria-hidden="true" />
+                  <span className="text-[11px] text-(--text-muted)">Status</span>
+                  <Badge variant={viewSite.status === "Active" ? "green" : "gray"}>
+                    {viewSite.status}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+
+            {/* Location & scope */}
+            <DetailSection icon={MapPin} title="Location & scope">
+              <DetailField icon={MapPin} label="Location">
+                {viewSite.location || "—"}
+              </DetailField>
+              <DetailField icon={ShieldCheck} label="GMP scope">
+                {viewSite.gmpScope || "—"}
+              </DetailField>
+            </DetailSection>
           </div>
         )}
       </Modal>

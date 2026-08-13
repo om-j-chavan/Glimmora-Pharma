@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Building2, MapPin, Users, BookOpen, Bot, Shield, CreditCard, Settings } from "lucide-react";
 import { OrgTab } from "./tabs/OrgTab";
 import { SitesTab } from "./tabs/SitesTab";
@@ -38,13 +38,25 @@ export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
   const initialActive: TabId =
     initialTab && ALL_TABS.some((t) => t.id === initialTab) ? (initialTab as TabId) : "org";
   const [active, setActive] = useState<TabId>(initialActive);
+
+  // `initialTab` seeds the state above, which covers a cold load but NOT a
+  // same-route `?tab=` push: the server component re-renders and hands down a
+  // new prop, while `useState` keeps the first value. This syncs the two so a
+  // deep link from elsewhere in Settings actually lands on its tab (used by the
+  // Users tab's "Go to Sites" action). Fires only when the prop changes, so
+  // clicking a tab by hand is never overridden.
+  useEffect(() => {
+    if (initialTab && ALL_TABS.some((t) => t.id === initialTab)) setActive(initialTab as TabId);
+  }, [initialTab]);
   const { canManageSettings, role } = usePermissions();
   const readOnly = !canManageSettings;
   // Tab-level view gating. Both the tab bar and the panels below map over
   // visibleTabs, so excluding a tab here removes the tab button AND its rendered
   // panel (the data never reaches a denied role's DOM).
-  //  - Permissions: a READ-ONLY view of the effective role matrix, shown to the
-  //    two oversight identities (qa_head + customer_admin) plus super_admin.
+  //  - Permissions: a READ-ONLY view of the effective role matrix, now shown to
+  //    the TENANT ADMIN identity (customer_admin) plus super_admin. qa_head was
+  //    removed — reviewing the role matrix is an administration task, not a
+  //    quality-oversight one, so it no longer belongs on a QA Head's settings.
   //    Editing stays disabled for everyone except super_admin (PermissionsTab
   //    enforces that itself). It is deliberately NOT an editable control for
   //    customer_admin: the matrix is client-side state and is not what authorizes
@@ -52,10 +64,12 @@ export function SettingsPage({ initialTab }: SettingsPageProps = {}) {
   //    lib/permissions/roleSets.ts, the per-route requireRoleOrDeny gates, and
   //    the server action gates. Showing it read-only lets an admin AUDIT
   //    who-can-do-what without implying a control that would not be enforced.
+  //    Because that enforcement is elsewhere, dropping qa_head here changes what
+  //    a QA Head SEES, never what any role may do.
   //  - Subscription: plan / user-site limits / billing term / retention is
   //    admin-tier info → customer_admin / super_admin only.
   const canViewPermissionsTab =
-    role === "qa_head" || role === "customer_admin" || role === "super_admin";
+    role === "customer_admin" || role === "super_admin";
   const visibleTabs = ALL_TABS.filter((t) => {
     if (t.id === "permissions") return canViewPermissionsTab;
     if (t.id === "subscription" && !canManageSettings) return false;
