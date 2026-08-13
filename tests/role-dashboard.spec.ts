@@ -37,14 +37,14 @@ const CASES: RoleCase[] = [
     role: "qa_head",
     email: "qa@pharmaglimmora.com",
     expectKpis: ["Open deviations", "Open CAPAs", "CAPA overdue", "Audit findings", "Training compliance", "Risk score"],
-    expectWidgets: ["AI Quality Insights", "My pending tasks", "Quick actions", "Risk signals", "90-day action plan"],
+    expectWidgets: ["Quality Signals", "My pending tasks", "Quick actions", "Risk signals", "90-day action plan"],
     forbidHrefs: [],
   },
   {
     role: "regulatory_affairs",
     email: "ra@pharmaglimmora.com",
     expectKpis: ["Open 483 events", "Response deadlines", "Inspection readiness", "Open commitments", "Open observations"],
-    expectWidgets: ["Regulatory calendar", "AI Regulatory Summary", "Compliance status"],
+    expectWidgets: ["Regulatory calendar", "Regulatory Signals", "Compliance status"],
     forbidWidgets: ["Tenant health"],
     // regulatory_affairs is in neither CAPA_MODULE_VIEW_ROLES nor GOVERNANCE_VIEW_ROLES
     // nor AUDIT_TRAIL_VIEW_ROLES.
@@ -54,7 +54,7 @@ const CASES: RoleCase[] = [
     role: "csv_val_lead",
     email: "csv@pharmaglimmora.com",
     expectKpis: ["Validated systems", "Pending validation", "CSV high risk", "Qualification progress", "Validation drift"],
-    expectWidgets: ["Validation lifecycle", "AI Validation Recommendations", "Quick actions"],
+    expectWidgets: ["Validation lifecycle", "Validation Signals", "Quick actions"],
     forbidWidgets: ["Tenant health"],
     forbidHrefs: ["/capa", "/governance", "/audit-trail"],
   },
@@ -62,7 +62,7 @@ const CASES: RoleCase[] = [
     role: "qc_lab_director",
     email: "qc@pharmaglimmora.com",
     expectKpis: ["Lab deviations", "Lab investigations", "Lab findings", "Lab CAPAs overdue", "Lab readiness"],
-    expectWidgets: ["AI Laboratory Insights", "Risk signals"],
+    expectWidgets: ["Laboratory Signals", "Risk signals"],
     forbidWidgets: ["Tenant health", "Validation lifecycle"],
     forbidHrefs: ["/capa", "/governance", "/audit-trail"],
   },
@@ -70,7 +70,7 @@ const CASES: RoleCase[] = [
     role: "operations_head",
     email: "ops@pharmaglimmora.com",
     expectKpis: ["Manufacturing deviations", "Batch-impacting", "Equipment-related", "Investigations pending", "Operational readiness"],
-    expectWidgets: ["AI Operational Insights", "Risk signals"],
+    expectWidgets: ["Operational Signals", "Risk signals"],
     // Change Control is behind CHANGE_CONTROL_ENABLED (false) — its widget must NOT
     // render and nothing may link to the redirecting route.
     forbidWidgets: ["Change control status", "Tenant health"],
@@ -88,7 +88,7 @@ const CASES: RoleCase[] = [
     role: "qa",
     email: "qa.exec@pharmaglimmora.com",
     expectKpis: ["Open deviations", "Open CAPAs", "Audit findings", "Training compliance", "Overall readiness"],
-    expectWidgets: ["My pending tasks", "AI Quality Insights"],
+    expectWidgets: ["My pending tasks", "Quality Signals"],
     forbidWidgets: ["Tenant health"],
     forbidHrefs: ["/capa", "/governance", "/audit-trail"],
   },

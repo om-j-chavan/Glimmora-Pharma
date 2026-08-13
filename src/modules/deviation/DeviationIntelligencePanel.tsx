@@ -42,10 +42,10 @@ import {
   type DeviationClusterInput,
   type DeviationIntelligenceResult,
 } from "@/lib/ai";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { AIButton, AIBadge } from "@/components/ai";
+import { useAgentActive } from "@/hooks/useAgiPolicy";
 
 /** Overall risk level surfaced from the analysis (Low / Medium / High). */
 type RiskLevel = "Low" | "Medium" | "High";
@@ -96,9 +96,7 @@ const RISK_BADGE: Record<RiskLevel, "red" | "amber" | "green"> = {
 export function useDeviationIntelligence(
   deviations: DeviationClusterInput[],
 ): DeviationIntelligenceState {
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
-  const agiAgent = useAppSelector((s) => s.settings.agi.agents.deviation);
-  const agentActive = agiMode !== "manual" && agiAgent;
+  const agentActive = useAgentActive("deviation");
 
   const [result, setResult] = useState<DeviationIntelligenceResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -112,8 +110,8 @@ export function useDeviationIntelligence(
       setResult(next);
     } catch (err) {
       // Non-blocking: surface the failure inline, keep any prior result, and
-      // let the user retry. The gateway already falls back to mock on backend
-      // errors, so reaching here means an unexpected client-side failure.
+      // let the user retry. The backend degrades deterministically and stamps
+      // `source`, so reaching here means an unexpected client-side failure.
       console.error("[deviation-intelligence] analysis failed", err);
       setError("Couldn't analyse deviations right now. Please try again.");
     } finally {

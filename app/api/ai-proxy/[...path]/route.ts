@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { mintAiToken, canMintAiToken, AI_TOKEN_MISCONFIGURED } from "@/lib/aiToken.server";
+import { getAgiPolicyForTenant } from "@/actions/agi-policy";
+import { agentForPath } from "@/lib/permissions/agiPolicy";
 
 // In production (DO App Platform) this is the internal private URL of the api
 // service — never leaves DO's private network. In dev it falls back to localhost.
@@ -66,6 +68,28 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] 
     return NextResponse.json({ detail: "Not found" }, { status: 404 });
   }
 
+  // ── AI agent policy (tenant-scoped, server-enforced) ────────
+  // Settings → AGI Policy used to be a Redux slice persisted to localStorage.
+  // Panels read it to hide a button and nothing else did, so a "disabled" agent
+  // still answered anyone who called its endpoint — including the same user in
+  // a different browser. This is the single doorway every browser AI call goes
+  // through, so it is where the policy actually binds.
+  const agent = agentForPath(joined);
+  if (agent !== null) {
+    const policy = await getAgiPolicyForTenant(session.user.tenantId);
+    if (!policy.agents[agent]) {
+      return NextResponse.json(
+        {
+          detail:
+            "This AI agent is switched off for your organisation. " +
+            "A QA Head or organisation admin can re-enable it in Settings → AGI Policy.",
+          agent,
+        },
+        { status: 403 },
+      );
+    }
+  }
+
   const target = `${AI_BASE}/${joined}${req.nextUrl.search}`;
 
   // Build a minimal, explicit header set instead of copying req.headers wholesale.
@@ -105,16 +129,11 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] 
   const respHeaders = new Headers(res.headers);
   respHeaders.delete("content-encoding");
   respHeaders.delete("content-length");
-  // Lifecycle by-capa lookups (rca|action-plan|monitoring|effectiveness|closure)/capa/{id}
-  // 404 when the stage hasn't been submitted yet. Surface that as 204 No Content so the
-  // browser doesn't log it as an error in dev tools. The client treats both as "not started".
-  if (
-    res.status === 404 &&
-    req.method === "GET" &&
-    /^api\/v1\/(rca|action-plan|monitoring|effectiveness|closure)\/capa\//i.test(joined)
-  ) {
-    return new Response(null, { status: 204, headers: respHeaders });
-  }
+  // REMOVED — the 404→204 rewrite for
+  // `api/v1/(rca|action-plan|monitoring|effectiveness|closure)/capa/{id}`.
+  // Those endpoints served the AI service's parallel CAPA lifecycle, which no
+  // longer exists; the rewrite would now silently turn a genuine 404 into an
+  // empty success for any path that happened to match.
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: respHeaders });
 }
 

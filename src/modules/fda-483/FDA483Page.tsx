@@ -79,6 +79,7 @@ import { SignSubmitModal } from "./modals/SignSubmitModal";
 import { ImportObservationsModal, type ImportObservationsPayload } from "./modals/ImportObservationsModal";
 import { OutcomeModal, type OutcomePayload } from "./modals/OutcomeModal";
 import { DocumentSummaryPanel } from "@/components/search/DocumentSummaryPanel";
+import { useAgiPolicy } from "@/hooks/useAgiPolicy";
 
 /* ── Helpers ── */
 
@@ -469,8 +470,8 @@ export function FDA483Page({
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
   const isDark = useAppSelector((s) => s.theme.mode) === "dark";
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
-  const agiAgent = useAppSelector((s) => s.settings.agi.agents.fda483);
+  const { mode: agiMode, agents: agiAgents } = useAgiPolicy();
+  const agiAgent = agiAgents.fda483;
   const user = useAppSelector((s) => s.auth.user);
   const { role, canSign } = useRole();
   const { isCustomerAdmin } = usePermissions();

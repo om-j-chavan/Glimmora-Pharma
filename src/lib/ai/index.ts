@@ -178,9 +178,14 @@ export interface DocumentReviewResult {
   rubricVersion: string;
   findings: DocumentReviewFinding[];
   /** Set when the document yielded no reviewable text (scanned PDF, unsupported
-   *  type, parse error). `findings` is then empty because the rubric scan never
-   *  ran — this is NOT a clean pass, and the UI must not render it as one. */
+   *  type, parse error), OR when only part of it was read. `findings` is then
+   *  either empty (scan never ran) or partial — in neither case is this a clean
+   *  pass, and the UI must not render it as one. */
   note?: string;
+  /** True when the document exceeded the review budget and only its opening
+   *  section was scanned. A "no signature block found" finding means something
+   *  different when the signature block was never read. */
+  truncated?: boolean;
   /** Provenance so the UI can badge a non-live result. */
   source: AiSource;
 }
@@ -277,6 +282,7 @@ export async function getDocumentReview(
       typeof dto.scan_duration_seconds === "number" ? dto.scan_duration_seconds : 0,
     rubricVersion: dto.rubric_version ?? "unknown",
     note: dto.note ?? undefined,
+    truncated: dto.truncated === true,
     source: readSource(dto.source),
     findings: (dto.findings ?? []).map((f, i) => ({
       id: `${input.stageKey}-be-${i}`,
@@ -322,12 +328,26 @@ export interface RegulatoryGuidanceUpdate {
   suggestedAlignment: string;
   /** Internal QMS areas the update touches (drives the affected-area chips). */
   affectedAreas: string[];
+  /** Link to the agency's own published document. Present because every item
+   *  now originates in a real Federal Register record rather than model
+   *  recall — the reader can verify the citation. */
+  url?: string;
 }
 
 export interface RegulatoryIntelligenceResult {
   updates: RegulatoryGuidanceUpdate[];
   /** ISO timestamp of when the scan completed. */
   scannedAt: string;
+  /** Set when the agency feed could not be reached or the classifier failed.
+   *  `updates` is then empty because nothing was retrieved — this is NOT "no
+   *  new guidance", and the UI must not render it as a clean scan.
+   *
+   *  Previously there was no such state: with no feed connected at all, the
+   *  backend asked the model to produce a watchlist from its own knowledge, and
+   *  it returned document numbers and publication dates that do not exist. */
+  note?: string | null;
+  /** "ok" | "empty" | "unreachable" | "classifier_unavailable". */
+  feedStatus?: string;
   /** Provenance so the UI can badge a non-live result. */
   source: AiSource;
 }
@@ -584,8 +604,18 @@ export interface FindingTriageResult {
   evidenceGaps: string[];
   /** Proposed corrective-action title for a follow-on CAPA. */
   suggestedCapaTitle: string;
-  /** 0–100 heuristic confidence. */
-  confidence: number;
+  /** 0–100, as reported by the model — `null` when it did not supply one.
+   *
+   *  This used to be typed `number` and was ALWAYS exactly 70: the prompt never
+   *  asked for a confidence, so the backend's `_clamp_confidence(undefined, 70)`
+   *  returned its default on every call and the UI presented a constant as if it
+   *  were the model's certainty. The prompt now requests it, and an absent value
+   *  is `null` so the UI can omit the chip rather than invent a number. */
+  confidence: number | null;
+  /** Present when the requirement text contained instructions addressed to the
+   *  assistant. The AI classification is NOT used in that case — these values
+   *  come from the deterministic classifier — and the UI must show this. */
+  warning?: string;
   source: AiSource;
 }
 

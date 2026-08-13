@@ -7,6 +7,7 @@
  * controls "today" (and tests are deterministic); it defaults to Date.now().
  */
 
+import dayjs from "@/lib/dayjs";
 import { calculateReadiness } from "./readiness";
 import type { KPICapa, KPIFinding, KPISystem, KPISite } from "./types";
 
@@ -45,20 +46,136 @@ const monthKey = (iso: string | null | undefined, MONTHS: string[]) => {
 };
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * PERIOD-AWARE BUCKETING — the trend charts' x-axis
+ * ══════════════════════════════════════════════════════════════════════════
+ * The trend charts used to ALWAYS draw six calendar months while being handed
+ * arrays that the header's period filter had already narrowed to (by default)
+ * thirty days. Five of the six bars were therefore structurally zero and the
+ * deviation chart rendered its "nothing reported in this period" empty state over
+ * a tenant with real deviations.
+ *
+ * The window is now derived from the period itself, so the axis and the data
+ * always describe the same span, and the charts no longer need pre-filtered input
+ * — the buckets ARE the filter. Granularity follows the span so a short window
+ * still gets a readable number of bars:
+ *
+ *   ≤ 7 days   → one bar per DAY
+ *   ≤ 31 days  → one bar per WEEK
+ *   > 31 days  → one bar per calendar MONTH, spanning the window
+ *   "all"      → six calendar months (the previous default)
+ *
+ * Boundaries are computed in the TENANT'S timezone, not the browser's. Every
+ * other date on the dashboard renders as `dayjs.utc(x).tz(org.timezone)`, so
+ * bucketing on browser-local midnight was an off-by-one waiting to happen: a
+ * record stamped 20:00 UTC on the 31st belongs to the 1st in Asia/Kolkata and was
+ * being charted a day — and at a month boundary, a bar — early.
+ */
+
+export interface TrendBucket {
+  /** Axis label — "5 Aug" for day/week buckets, "Aug" for month buckets. */
+  label: string;
+  /** Inclusive start, epoch ms. */
+  start: number;
+  /** EXCLUSIVE end, epoch ms. */
+  end: number;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The buckets a given period maps to. `period` is the header filter's value:
+ * a day count as a string ("7" | "30" | "60" | "90") or "all".
+ */
+export function trendBuckets(
+  period: string,
+  now: number = Date.now(),
+  timezone = "UTC",
+): TrendBucket[] {
+  const days = period === "all" ? null : Number.parseInt(period, 10);
+
+  // "all" (or an unparseable period) keeps the original six-month view.
+  if (days === null || !Number.isFinite(days) || days <= 0) return monthBuckets(6, now, timezone);
+
+  // Tomorrow's midnight IN THE TENANT'S ZONE, so today is a complete bucket.
+  const endOfToday = dayjs(now).tz(timezone).endOf("day").valueOf() + 1;
+
+  if (days <= 7) {
+    const out: TrendBucket[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const end = endOfToday - i * DAY_MS;
+      const start = end - DAY_MS;
+      out.push({ label: dayjs(start).tz(timezone).format("D MMM"), start, end });
+    }
+    return out;
+  }
+
+  if (days <= 31) {
+    const weeks = Math.ceil(days / 7);
+    const out: TrendBucket[] = [];
+    for (let i = weeks - 1; i >= 0; i--) {
+      const end = endOfToday - i * 7 * DAY_MS;
+      const start = end - 7 * DAY_MS;
+      out.push({ label: dayjs(start).tz(timezone).format("D MMM"), start, end });
+    }
+    return out;
+  }
+
+  // Longer spans read better as calendar months. Count how many the window covers.
+  const first = dayjs(now - days * DAY_MS).tz(timezone);
+  const last = dayjs(now).tz(timezone);
+  const span = (last.year() - first.year()) * 12 + (last.month() - first.month()) + 1;
+  return monthBuckets(Math.max(2, Math.min(12, span)), now, timezone);
+}
+
+/** `count` calendar months ending with the one containing `now`, oldest first. */
+function monthBuckets(count: number, now: number, timezone: string): TrendBucket[] {
+  const out: TrendBucket[] = [];
+  const ref = dayjs(now).tz(timezone).startOf("month");
+  for (let i = count - 1; i >= 0; i--) {
+    const start = ref.subtract(i, "month");
+    out.push({
+      label: start.format("MMM"),
+      start: start.valueOf(),
+      end: start.add(1, "month").valueOf(),
+    });
+  }
+  return out;
+}
+
+/** True when `iso` falls inside `[bucket.start, bucket.end)`. */
+export function inBucket(iso: string | Date | null | undefined, bucket: TrendBucket): boolean {
+  if (!iso) return false;
+  const t = iso instanceof Date ? iso.getTime() : new Date(iso).getTime();
+  return !Number.isNaN(t) && t >= bucket.start && t < bucket.end;
+}
+
 export interface SeverityTrendPoint {
-  month: string;
+  /** Axis label. Named `bucket` (not `month`) since a bucket may be a day or week. */
+  bucket: string;
   Critical: number;
   High: number;
   Medium: number;
   Low: number;
 }
 
-/** Findings by severity per month — the Dashboard observation-volume chart. */
-export function severityTrend(findings: KPIFinding[], now: number = Date.now()): SeverityTrendPoint[] {
-  return lastMonths(6, now).map((b) => {
-    const mf = findings.filter((f) => monthKey(f.createdAt, MONTHS) === b.key);
+/**
+ * Findings by severity per bucket — the Dashboard observation-volume chart.
+ *
+ * Pass the SITE-SCOPED but otherwise UNFILTERED findings: the buckets apply the
+ * period window themselves, so pre-filtering would double-apply it and truncate
+ * the oldest bar.
+ */
+export function severityTrend(
+  findings: KPIFinding[],
+  now: number = Date.now(),
+  period = "all",
+  timezone = "UTC",
+): SeverityTrendPoint[] {
+  return trendBuckets(period, now, timezone).map((b) => {
+    const mf = findings.filter((f) => inBucket(f.createdAt, b));
     return {
-      month: b.label,
+      bucket: b.label,
       Critical: mf.filter((f) => f.severity === "Critical").length,
       High: mf.filter((f) => f.severity === "High").length,
       Medium: mf.filter((f) => f.severity === "Medium").length,

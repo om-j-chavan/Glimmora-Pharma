@@ -34,7 +34,7 @@ async function main() {
   // SUBSCRIPTION PLANS (Razorpay)
   // ══════════════════════════════════════════════════════════════════════════
 
-  const starterPlan = await prisma.subscriptionPlan.upsert({
+  await prisma.subscriptionPlan.upsert({
     where: { name: "starter" },
     update: {},
     create: {
@@ -89,7 +89,7 @@ async function main() {
     },
   });
 
-  const enterprisePlan = await prisma.subscriptionPlan.upsert({
+  await prisma.subscriptionPlan.upsert({
     where: { name: "enterprise" },
     update: {},
     create: {

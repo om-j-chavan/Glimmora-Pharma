@@ -118,7 +118,17 @@ export function ActionPlanTable({ items, ownerName, timezone, dateFormat, router
         Bounding it keeps every card in the same size class as its neighbours; no
         row is dropped, the remainder scrolls.
       */}
-      <div className="max-h-[520px] overflow-auto">
+      {/* `tabIndex={0}` + `role="region"` because this box scrolls on BOTH axes and a
+          scrollable region that cannot be focused cannot be scrolled from the keyboard
+          at all (WCAG 2.1.1). It is the only scroll container left inside a dashboard
+          card — the grid item's `.card-body` cap was removed, so this no longer nests
+          inside a shorter one. */}
+      <div
+        className="max-h-[520px] overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-(--brand)"
+        tabIndex={0}
+        role="region"
+        aria-label="90 day action plan, scrollable"
+      >
         <table
           aria-label="90 day action plan"
           style={{ width: "100%", minWidth: 640, borderCollapse: "separate", borderSpacing: "0 8px", tableLayout: "auto" }}

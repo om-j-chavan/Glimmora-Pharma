@@ -128,4 +128,17 @@ export interface DashboardDataset {
   /** Tenant-wide finding array in KPI shape (for area/heatmap recomputation). */
   kpiFindings: KPIFinding[];
   kpiCapas: KPICapa[];
+  /**
+   * The SEVERITY-INDEPENDENT findings the readiness/risk model and the area
+   * heatmap score. Distinct from `kpiFindings`, which answers the severity
+   * dropdown: a posture must not improve because the reader filtered out the
+   * severities that were dragging it down.
+   */
+  kpiScoredFindings: KPIFinding[];
+  /**
+   * The active period filter ("7" | "30" | "60" | "90" | "all"). Exposed ONLY so a
+   * period-scoped surface can label its own window. No current-state metric may
+   * read it — see the scope comments in `useDashboardData`.
+   */
+  period: string;
 }

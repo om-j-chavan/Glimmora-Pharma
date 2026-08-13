@@ -86,6 +86,7 @@ model Tenant {
   // Same org flag, finding-closure waivers (FindingSODOverride).
   // ⚠️ UNVERIFIED — built without DB access.
   findingSodOverrides   FindingSODOverride[]
+  agiPolicy           TenantAgiPolicy?
 }
 
 // Tenant ↔ regulatory region link (multi-region). A tenant operates under one OR
@@ -2750,5 +2751,42 @@ model TenantRoleLimit {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, role])
+  @@index([tenantId])
+}
+
+/// Tenant-scoped AI agent policy.
+///
+/// The AGI Policy screen used to write a Redux slice persisted to the browser's
+/// `glimmora-state` localStorage blob. That made it per-BROWSER, not per-tenant:
+/// two users in the same organisation saw different policies, any user could
+/// flip any switch for themselves, nothing was audited, and — the part that
+/// mattered — no server ever read it. "Disabling" an agent disabled nothing;
+/// the endpoint answered regardless. A governance control that does not govern
+/// is worse than none, because it is cited as evidence that one exists.
+///
+/// One row per tenant, edited only by customer_admin / qa_head, every change
+/// written to AuditLog, and ENFORCED in app/api/ai-proxy/[...path]/route.ts —
+/// the single doorway every browser AI call passes through.
+model TenantAgiPolicy {
+  id                String   @id @default(cuid())
+  tenantId          String   @unique
+  /// Per-agent enablement. Keys mirror AGI_AGENT_KEYS in
+  /// src/lib/permissions/agiPolicy.ts, which also maps each agent to the
+  /// upstream paths the proxy blocks when it is off.
+  capaEnabled       Boolean  @default(true)
+  deviationEnabled  Boolean  @default(true)
+  fda483Enabled     Boolean  @default(true)
+  driftEnabled      Boolean  @default(true)
+  regulatoryEnabled Boolean  @default(true)
+  supplierEnabled   Boolean  @default(true)
+  /// Advisory display threshold (0-100). Presentational only — it never gates
+  /// an endpoint, and is stored here so it is per-tenant like the rest.
+  confidence        Int      @default(72)
+  updatedById       String?
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   @@index([tenantId])
 }

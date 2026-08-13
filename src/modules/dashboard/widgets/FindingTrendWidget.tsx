@@ -18,7 +18,7 @@ import {
 } from "recharts";
 import { chartDefaults } from "@/lib/chartColors";
 import { CardSection } from "@/components/shared";
-import { WidgetEmpty } from "./primitives";
+import { periodLabel, WidgetEmpty } from "./primitives";
 import type { DashboardWidgetProps } from "./types";
 
 /** Severity → fill. Distinct hues so every stacked segment is distinguishable. */
@@ -31,14 +31,17 @@ const SEVERITY_FILL = {
 
 export const FindingTrendWidget = memo(function FindingTrendWidget({ data }: DashboardWidgetProps) {
   return (
-    <CardSection icon={TrendingUp} iconColor="#6366f1" title="Observation volume & severity">
+    // This is one of only two panels the period filter reaches, so it names its own
+    // window — the rest of the dashboard is current-state and would be misdescribed
+    // by a period label.
+    <CardSection icon={TrendingUp} iconColor="#6366f1" title={`Observations raised · ${periodLabel(data.period)}`}>
       {data.findingTrendEmpty ? (
-        <WidgetEmpty icon={BarChart3} message="No findings logged in this period" hint="Adjust the period filter or log a gap finding." />
+        <WidgetEmpty icon={BarChart3} message={`No findings raised in the ${periodLabel(data.period)}`} hint="Widen the period, or log a gap finding." />
       ) : (
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={data.findingTrend} barSize={14} barGap={2}>
             <CartesianGrid {...chartDefaults.cartesianGrid} />
-            <XAxis dataKey="month" {...chartDefaults.xAxis} />
+            <XAxis dataKey="bucket" {...chartDefaults.xAxis} />
             <YAxis {...chartDefaults.yAxis} allowDecimals={false} />
             <Tooltip {...chartDefaults.tooltip} />
             <Legend

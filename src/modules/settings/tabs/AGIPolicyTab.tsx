@@ -1,18 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
-import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
-import { updateAGI, toggleAgent } from "@/store/settings.slice";
-import type { AGISettings } from "@/store/settings.slice";
 import { Settings, Zap, ChevronDown, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Toggle } from "@/components/ui/Toggle";
+import { loadAgiPolicy, updateAgiPolicy } from "@/actions/agi-policy";
+import {
+  AGI_AGENT_KEYS,
+  DEFAULT_AGI_AGENTS,
+  DEFAULT_AGI_CONFIDENCE,
+  computeAgiMode,
+  type AgiAgentKey,
+  type AgiAgents,
+} from "@/lib/permissions/agiPolicy";
 
 interface AgentEntry {
-  key: keyof AGISettings["agents"];
+  key: AgiAgentKey;
   name: string;
   desc: string;
   canDo: string[];
@@ -55,27 +61,72 @@ const modeColor: Record<string, string> = {
 };
 
 
-function computeMode(agents: AGISettings["agents"]): AGISettings["mode"] {
-  const active = Object.values(agents).filter(Boolean).length;
-  const total = Object.keys(agents).length;
-  if (active === 0) return "manual";
-  if (active < total) return "assisted";
-  return "autonomous";
-}
-
 export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
-  const dispatch = useAppDispatch();
-  const agi = useAppSelector((s) => s.settings.agi);
   const router = useRouter();
-  const activeAgentCount = Object.values(agi.agents).filter(Boolean).length;
-  const computedMode = computeMode(agi.agents);
-  // Auto-save the derived operating mode whenever the agent toggles change it.
-  // Confidence + agent toggles already persist inline (onChange), so agi.mode
-  // stays in sync without a manual Save button.
+
+  // Tenant-scoped SERVER state. This used to be a Redux slice persisted to the
+  // browser's localStorage: per-browser rather than per-organisation, editable
+  // by anyone, unaudited, and — the part that mattered — never read by any
+  // server, so switching an agent off switched nothing off. The policy now
+  // lives in TenantAgiPolicy, is edited only by customer_admin / qa_head, is
+  // audited on every change, and is ENFORCED in the AI proxy.
+  const [agents, setAgents] = useState<AgiAgents>({ ...DEFAULT_AGI_AGENTS });
+  const [confidence, setConfidence] = useState(DEFAULT_AGI_CONFIDENCE);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
-    if (!readOnly) dispatch(updateAGI({ mode: computedMode }));
-  }, [computedMode, readOnly, dispatch]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const policy = await loadAgiPolicy();
+        if (cancelled) return;
+        setAgents(policy.agents);
+        setConfidence(policy.confidence);
+      } catch (e) {
+        if (!cancelled) {
+          console.error("[agi-policy] load failed", e);
+          setError("Couldn't load the AI agent policy.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Optimistic, then reconciled against what the server actually stored — a
+  // rejected change (wrong role) must not leave the switch looking flipped.
+  const persist = useCallback(
+    async (patch: { agents?: Partial<AgiAgents>; confidence?: number }) => {
+      setSaving(true);
+      setError(null);
+      try {
+        const res = await updateAgiPolicy(patch);
+        if (!res.success) {
+          setError(res.error);
+          const current = await loadAgiPolicy();
+          setAgents(current.agents);
+          setConfidence(current.confidence);
+          return;
+        }
+        setAgents(res.data.agents);
+        setConfidence(res.data.confidence);
+      } catch (e) {
+        console.error("[agi-policy] save failed", e);
+        setError("Couldn't save the AI agent policy.");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [],
+  );
+
+  const activeAgentCount = AGI_AGENT_KEYS.filter((k) => agents[k]).length;
+  const computedMode = computeAgiMode(agents);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const disabled = readOnly || loading || saving;
   const isDark = useAppSelector((s) => s.theme.mode === "dark");
 
   return (
@@ -83,6 +134,15 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
       <h2 id="agi-heading" className="sr-only">AGI Policy</h2>
 
       <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
+      {error && (
+        <div
+          role="alert"
+          className="rounded-lg px-3 py-2 text-[12px]"
+          style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger)" }}
+        >
+          {error}
+        </div>
+      )}
       {/* AI Usage Policy banner */}
       <div className={clsx("rounded-2xl border p-5", isDark ? "bg-[rgba(99,102,241,0.06)] border-[rgba(99,102,241,0.2)]" : "bg-[#eef2ff] border-[#c7d2fe]")}>
         <div className="flex items-start gap-3">
@@ -127,13 +187,13 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
         <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl p-5">
           <p className="text-[11px] font-medium text-(--card-muted) mb-2">Confidence Threshold</p>
           <p className="text-2xl font-bold text-(--text-primary)">
-            {agi.confidence}%
+            {confidence}%
           </p>
         </div>
         <div className="bg-(--card-bg) border border-(--bg-border) rounded-2xl p-5">
           <p className="text-[11px] font-medium text-(--card-muted) mb-2">Active Agents</p>
           <p className="text-2xl font-bold text-(--success)">
-            {activeAgentCount} / 7
+            {activeAgentCount} / {AGI_AGENT_KEYS.length}
           </p>
         </div>
       </div>
@@ -172,7 +232,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
               <label htmlFor="agi-confidence" className="text-[11px] font-medium text-(--text-secondary)">
                 Confidence Threshold
               </label>
-              <Badge variant="blue">{agi.confidence}%</Badge>
+              <Badge variant="blue">{confidence}%</Badge>
             </div>
             <p id="agi-conf-hint" className="text-[11px] text-(--text-muted) mb-3">
               Higher = fewer suggestions, higher reliability. Lower = catches more weak signals.
@@ -183,17 +243,21 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
               min={50}
               max={95}
               step={1}
-              value={agi.confidence}
+              value={confidence}
               aria-describedby="agi-conf-hint"
               aria-valuemin={50}
               aria-valuemax={95}
-              aria-valuenow={agi.confidence}
-              aria-valuetext={`${agi.confidence} percent confidence`}
-              disabled={readOnly}
-              onChange={(e) =>
-                !readOnly && dispatch(updateAGI({ confidence: Number(e.target.value) }))
-              }
-              className={`w-full accent-(--brand) ${readOnly ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+              aria-valuenow={confidence}
+              aria-valuetext={`${confidence} percent confidence`}
+              disabled={disabled}
+              onChange={(e) => setConfidence(Number(e.target.value))}
+              onPointerUp={(e) => {
+                // Persist on release, not on every pixel of drag — a range input
+                // fires onChange continuously and each one is a DB write + audit row.
+                if (!disabled) void persist({ confidence: Number(e.currentTarget.value) });
+              }}
+              onBlur={(e) => { if (!disabled) void persist({ confidence: Number(e.currentTarget.value) }); }}
+              className={`w-full accent-(--brand) ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
             />
             <div className="flex justify-between mt-2">
               <span className="text-[10px] text-(--text-muted)">50% — more alerts</span>
@@ -231,7 +295,7 @@ export function AGIPolicyTab({ readOnly = false }: { readOnly?: boolean }) {
                       </div>
                       <p className="text-[11px] text-(--card-muted) mt-0.5">{agent.desc}</p>
                     </div>
-                    <Toggle id={`agent-${agent.key}`} checked={agi.agents[agent.key]} onChange={() => !readOnly && dispatch(toggleAgent(agent.key))} label={agent.name} description={agent.desc} disabled={readOnly} hideLabel />
+                    <Toggle id={`agent-${agent.key}`} checked={agents[agent.key]} onChange={() => { if (!disabled) void persist({ agents: { [agent.key]: !agents[agent.key] } }); }} label={agent.name} description={agent.desc} disabled={disabled} hideLabel />
                   </div>
                   {isExpanded && (
                     <div className={clsx("mt-3 rounded-lg p-3 text-[11px] space-y-2", "bg-(--bg-elevated) border border-(--bg-border)")}>

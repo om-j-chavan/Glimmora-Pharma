@@ -58,6 +58,9 @@ services:
       - path: /api/v1
         preserve_path_prefix: true
     health_check:
+      # The service declares GET /health (app/main.py). It previously did not —
+      # the app exposed only `/` and per-router `/health` paths — so this probe
+      # 404'd and the component could never report healthy.
       http_path: /health
       initial_delay_seconds: 30
       period_seconds: 30
@@ -68,9 +71,6 @@ services:
         scope: RUN_AND_BUILD_TIME
         type: SECRET
       - key: OPENAI_API_KEY
-        scope: RUN_AND_BUILD_TIME
-        type: SECRET
-      - key: PINECONE_API_KEY
         scope: RUN_AND_BUILD_TIME
         type: SECRET
       # The backend reads SECRET_KEY (app/routers/auth_router.py), not

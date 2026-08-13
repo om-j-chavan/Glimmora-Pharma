@@ -21,7 +21,6 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import dayjs from "@/lib/dayjs";
 import { planLabel } from "@/lib/plans";
 import {
   capaArea, computeAreaKPIs, computeDashboardKPIs, computeOperationsKPIs,
@@ -134,95 +133,117 @@ export function useDashboardData(input: UseDashboardDataInput): DashboardDataset
   // server payload remounts the page and re-anchors it.
   const [now] = useState(() => Date.now());
 
-  const cutoff = useMemo(
-    () => (filters.period === "all" ? null : dayjs().subtract(parseInt(filters.period, 10), "day")),
-    [filters.period],
-  );
+  /* ── Filter predicates — ONE definition each, applied to both scopes ───────
+     There is deliberately NO `withinPeriod` predicate any more. The period never
+     narrows a record array; it only chooses the trend charts' bucket window (see
+     Scope B below and `trendBuckets` in src/lib/kpi/trend.ts). */
 
-  /* ── Filter predicates — ONE definition each, applied to both scopes ─────── */
-
-  const withinPeriod = useCallback(
-    (createdAt: string | Date | null | undefined) => {
-      if (!cutoff || !createdAt) return true;
-      return !dayjs.utc(createdAt instanceof Date ? createdAt.toISOString() : createdAt).isBefore(cutoff);
-    },
-    [cutoff],
-  );
-
-  const matchesFindingFilters = useCallback(
-    (f: { siteId?: string | null; severity: string; createdAt?: string | null }) => {
-      if (filters.siteId && f.siteId !== filters.siteId) return false;
-      if (filters.severity && f.severity !== filters.severity) return false;
-      return withinPeriod(f.createdAt);
-    },
-    [filters.siteId, filters.severity, withinPeriod],
-  );
-
-  const matchesCAPAFilters = useCallback(
-    (c: { siteId?: string | null; createdAt?: string | null }) => {
-      if (filters.siteId && c.siteId !== filters.siteId) return false;
-      return withinPeriod(c.createdAt);
-    },
-    [filters.siteId, withinPeriod],
-  );
-
-  const matchesSystemFilters = useCallback(
-    (s: { siteId?: string | null }) => !filters.siteId || s.siteId === filters.siteId,
+  const matchesSite = useCallback(
+    (r: { siteId?: string | null }) => !filters.siteId || r.siteId === filters.siteId,
     [filters.siteId],
   );
 
-  const matchesDeviationFilters = useCallback(
-    (d: KPIDeviation) => {
-      if (filters.siteId && d.siteId !== filters.siteId) return false;
-      if (filters.severity) {
-        const wanted = GENERIC_TO_FDA[filters.severity];
-        if (wanted && normalizeSeverityForDisplay(d.severity, "fda") !== wanted) return false;
-      }
-      return withinPeriod(d.createdAt);
-    },
-    [filters.siteId, filters.severity, withinPeriod],
+  const matchesFindingSeverity = useCallback(
+    (f: { severity: string }) => !filters.severity || f.severity === filters.severity,
+    [filters.severity],
   );
 
-  /* ── Tenant-wide arrays: site-narrow, then filter ────────────────────────── */
+  const matchesDeviationSeverity = useCallback(
+    (d: KPIDeviation) => {
+      if (!filters.severity) return true;
+      const wanted = GENERIC_TO_FDA[filters.severity];
+      return !wanted || normalizeSeverityForDisplay(d.severity, "fda") === wanted;
+    },
+    [filters.severity],
+  );
+
+  /* ══════════════════════════════════════════════════════════════════════════
+   * SCOPE A — CURRENT STATE. Site (+ severity). **NEVER the period.**
+   * ══════════════════════════════════════════════════════════════════════════
+   * "Open", "overdue" and "critical" describe a record's state RIGHT NOW; they are
+   * not events that happened inside a window. Narrowing by `createdAt` before
+   * asking those questions does not shorten the window, it DELETES older records
+   * from the arithmetic — so a CAPA raised in June and still overdue today simply
+   * stopped existing for every count, the readiness penalty, the heatmap and the
+   * compliance signals.
+   *
+   * With the default 30-day period that understated the seeded tenant as: 0
+   * critical findings (1), 1 open finding (10), 1 open CAPA (14), 1 past due (13),
+   * 0 open deviations (4), risk 32% (94%) — and it emitted the compliance signal
+   * "No critical findings, critical deviations or overdue CAPAs. Maintain current
+   * trajectory." while thirteen CAPAs sat past due.
+   *
+   * These arrays feed every KPI card, the readiness/risk model, the area heatmap,
+   * the alert list and the compliance board. The period filter cannot reach them.
+   */
 
   const findings = useMemo(
-    () => allFindings.filter(sitePredicate).filter(matchesFindingFilters),
-    [allFindings, sitePredicate, matchesFindingFilters],
+    () => allFindings.filter(sitePredicate).filter(matchesSite).filter(matchesFindingSeverity),
+    [allFindings, sitePredicate, matchesSite, matchesFindingSeverity],
   );
   const capas = useMemo(
-    () => allCAPAs.filter(sitePredicate).filter(matchesCAPAFilters),
-    [allCAPAs, sitePredicate, matchesCAPAFilters],
+    () => allCAPAs.filter(sitePredicate).filter(matchesSite),
+    [allCAPAs, sitePredicate, matchesSite],
   );
   const systems = useMemo(
-    () => allSystems.filter(sitePredicate).filter(matchesSystemFilters),
-    [allSystems, sitePredicate, matchesSystemFilters],
+    () => allSystems.filter(sitePredicate).filter(matchesSite),
+    [allSystems, sitePredicate, matchesSite],
   );
   const deviations = useMemo(
-    () => allDeviations.filter(sitePredicate).filter(matchesDeviationFilters),
-    [allDeviations, sitePredicate, matchesDeviationFilters],
+    () => allDeviations.filter(sitePredicate).filter(matchesSite).filter(matchesDeviationSeverity),
+    [allDeviations, sitePredicate, matchesSite, matchesDeviationSeverity],
   );
   const fda483 = useMemo(
-    () => allFDA483.filter(sitePredicate),
-    [allFDA483, sitePredicate],
+    () => allFDA483.filter(sitePredicate).filter(matchesSite),
+    [allFDA483, sitePredicate, matchesSite],
   );
 
-  /* ── Visibility-scoped arrays: same filters, so rows and counts agree ───── */
+  /* ══════════════════════════════════════════════════════════════════════════
+   * SCOPE A′ — SEVERITY-INDEPENDENT basis for the SCORES
+   * ══════════════════════════════════════════════════════════════════════════
+   * Readiness, risk score and every heatmap cell are scored from these instead of
+   * the severity-narrowed arrays above. Otherwise selecting "Low" in the severity
+   * dropdown drops every Critical finding out of the penalty stack and an area that
+   * genuinely scores 39% renders as a green "inspection ready" cell. A count may
+   * answer the filter; a posture may not.
+   */
+  const scoredFindings = useMemo(
+    () => allFindings.filter(sitePredicate).filter(matchesSite),
+    [allFindings, sitePredicate, matchesSite],
+  );
+
+  /* ══════════════════════════════════════════════════════════════════════════
+   * SCOPE B — PERIOD / INTAKE. Site only; the period window is applied by the
+   * trend bucketing itself (`trendBuckets`), so nothing is filtered twice.
+   * ══════════════════════════════════════════════════════════════════════════
+   * This is the ONLY scope the period control reaches, and volume-over-time is the
+   * only question a `createdAt` window can answer correctly.
+   */
+  const trendDeviations = useMemo(
+    () => allDeviations.filter(sitePredicate).filter(matchesSite),
+    [allDeviations, sitePredicate, matchesSite],
+  );
+
+  /* ── Visibility-scoped arrays: SAME predicates as Scope A, so the rows a user
+       can open always agree with the counts above them (and are likewise never
+       period-narrowed — an alert for a CAPA that went overdue last quarter is
+       exactly the alert that must not disappear). ─────────────────────────────── */
 
   const scopedFindings = useMemo(
-    () => visibleFindings.filter(matchesFindingFilters),
-    [visibleFindings, matchesFindingFilters],
+    () => visibleFindings.filter(matchesSite).filter(matchesFindingSeverity),
+    [visibleFindings, matchesSite, matchesFindingSeverity],
   );
   const scopedCAPAs = useMemo(
-    () => visibleCAPAs.filter(matchesCAPAFilters),
-    [visibleCAPAs, matchesCAPAFilters],
+    () => visibleCAPAs.filter(matchesSite),
+    [visibleCAPAs, matchesSite],
   );
   const scopedDeviations = useMemo(
-    () => visibleDeviations.filter((d) => matchesDeviationFilters(d as unknown as KPIDeviation)),
-    [visibleDeviations, matchesDeviationFilters],
+    () => visibleDeviations.filter(matchesSite).filter((d) => matchesDeviationSeverity(d as unknown as KPIDeviation)),
+    [visibleDeviations, matchesSite, matchesDeviationSeverity],
   );
   const scopedSystems = useMemo(
-    () => visibleSystems.filter(matchesSystemFilters),
-    [visibleSystems, matchesSystemFilters],
+    () => visibleSystems.filter(matchesSite),
+    [visibleSystems, matchesSite],
   );
 
   /* ── Training records — the real evidence behind training compliance ─────
@@ -242,8 +263,13 @@ export function useDashboardData(input: UseDashboardDataInput): DashboardDataset
   );
 
   const quality = useMemo(
-    () => computeQualityKPIs({ findings, capas, systems, deviations, trainingRecords }),
-    [findings, capas, systems, deviations, trainingRecords],
+    // `readinessFindings` is the severity-INDEPENDENT set (Scope A′): the counts
+    // answer the severity dropdown, the readiness/risk score must not.
+    () => computeQualityKPIs({
+      findings, capas, systems, deviations, trainingRecords,
+      readinessFindings: scoredFindings,
+    }),
+    [findings, capas, systems, deviations, trainingRecords, scoredFindings],
   );
 
   const regulatory = useMemo(
@@ -263,10 +289,22 @@ export function useDashboardData(input: UseDashboardDataInput): DashboardDataset
 
   const kpiFindings = findings as unknown as KPIFinding[];
   const kpiCapas = capas as unknown as KPICapa[];
+  /** Severity-independent findings in KPI shape — what the heatmap scores. */
+  const kpiScoredFindings = scoredFindings as unknown as KPIFinding[];
 
+  /**
+   * A CAPA's GxP area, resolved through its linked finding.
+   *
+   * Bound to the SEVERITY-INDEPENDENT findings on purpose. `capaArea`'s own
+   * contract says the index "should be the tenant-wide set so the mapping is
+   * stable regardless of viewer" — binding it to a narrowed array meant a CAPA
+   * whose linked finding was filtered out fell through to its source-based
+   * fallback ("QMS" / "Manufacturing" / "Regulatory") and silently re-attributed
+   * itself to a different heatmap row as the user changed filters.
+   */
   const capaAreaOf = useCallback(
-    (c: KPICapa) => capaArea(c, kpiFindings),
-    [kpiFindings],
+    (c: KPICapa) => capaArea(c, kpiScoredFindings),
+    [kpiScoredFindings],
   );
 
   const area = useMemo(
@@ -309,8 +347,18 @@ export function useDashboardData(input: UseDashboardDataInput): DashboardDataset
 
   /* ── Chart series ────────────────────────────────────────────────────────── */
 
-  const findingTrend = useMemo(() => severityTrend(kpiFindings, now), [kpiFindings, now]);
-  const deviationTrend = useMemo(() => deviationSeverityTrend(deviations, now), [deviations, now]);
+  /* The ONLY consumers of the period filter. They take the site-scoped but
+     otherwise unfiltered arrays: `trendBuckets` applies the window itself, so
+     pre-filtering would apply it twice and truncate the oldest bar. Bucket
+     boundaries are computed in the tenant's timezone, not the browser's. */
+  const findingTrend = useMemo(
+    () => severityTrend(kpiScoredFindings, now, filters.period, org.timezone),
+    [kpiScoredFindings, now, filters.period, org.timezone],
+  );
+  const deviationTrend = useMemo(
+    () => deviationSeverityTrend(trendDeviations, now, filters.period, org.timezone),
+    [trendDeviations, now, filters.period, org.timezone],
+  );
 
   /* ── Derived presentation lists ──────────────────────────────────────────── */
 
@@ -370,14 +418,15 @@ export function useDashboardData(input: UseDashboardDataInput): DashboardDataset
       timezone: org.timezone,
       dateFormat: org.dateFormat,
       validationSystems: systems,
-      capaAreaOf, kpiFindings, kpiCapas,
+      capaAreaOf, kpiFindings, kpiCapas, kpiScoredFindings,
+      period: filters.period,
     }),
     [
       findings, capas, systems, deviations, fda483, changeControls, inspections,
       scopedFindings, scopedCAPAs, scopedDeviations, scopedSystems,
       core, quality, regulatory, validation, operations, tenant, area,
       readinessScore, readinessLabel, findingTrend, deviationTrend,
-      alerts, pendingTasks, compliance,
+      alerts, pendingTasks, compliance, kpiScoredFindings, filters.period,
       sites, now, tenantName, org.timezone, org.dateFormat,
       capaAreaOf, kpiFindings, kpiCapas,
     ],

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import clsx from "clsx";
 import { LayoutDashboard } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
@@ -229,7 +230,7 @@ export function DashboardPage({
   const activeFilterChips = useMemo<{ key: string; label: string; clear: () => void }[]>(
     () => [
       ...(timeFilter !== "30"
-        ? [{ key: "time", label: timeFilter === "all" ? "All time" : `Last ${timeFilter} days`, clear: () => setTimeFilter("30") }]
+        ? [{ key: "time", label: timeFilter === "all" ? "Raised: all time" : `Raised: last ${timeFilter} days`, clear: () => setTimeFilter("30") }]
         : []),
       ...(showSitePicker && siteFilter
         ? [{ key: "site", label: sites.find((s) => s.id === siteFilter)?.name ?? "Selected site", clear: () => setSiteFilter("") }]
@@ -288,16 +289,23 @@ export function DashboardPage({
             {roleLabel(access.role)}
             {dashboard.focusArea ? ` · ${dashboard.focusArea}` : ""}
           </span>
+          {/* The period control is labelled for what it now does. It scopes the two
+              "raised" trend charts and nothing else — every KPI card, the heatmap and
+              the compliance board are CURRENT STATE and deliberately ignore it, because
+              "open" and "overdue" are not events inside a window. Naming it "Raised"
+              rather than the old bare "Last 30 days" stops the header implying the
+              whole page is period-scoped. */}
           <Dropdown
             value={timeFilter}
             onChange={setTimeFilter}
-            width="w-36"
+            width="w-44"
+            ariaLabel="Trend period — scopes the raised-volume charts only"
             options={[
-              { value: "7", label: "Last 7 days" },
-              { value: "30", label: "Last 30 days" },
-              { value: "60", label: "Last 60 days" },
-              { value: "90", label: "Last 90 days" },
-              { value: "all", label: "All time" },
+              { value: "7", label: "Raised: last 7 days" },
+              { value: "30", label: "Raised: last 30 days" },
+              { value: "60", label: "Raised: last 60 days" },
+              { value: "90", label: "Raised: last 90 days" },
+              { value: "all", label: "Raised: all time" },
             ]}
           />
           {showSitePicker && (
@@ -306,6 +314,7 @@ export function DashboardPage({
               value={siteFilter}
               onChange={setSiteFilter}
               width="w-36"
+              ariaLabel="Filter dashboard by site"
               options={[{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
             />
           )}
@@ -314,6 +323,7 @@ export function DashboardPage({
             value={sevFilter}
             onChange={setSevFilter}
             width="w-32"
+            ariaLabel="Filter findings and deviations by severity"
             options={[
               { value: "", label: "All severities" },
               { value: "Critical", label: "Critical" },
@@ -363,18 +373,34 @@ export function DashboardPage({
             `items-stretch` + `h-full` on each item AND its card make every card in a
             row share that row's height, so tops AND bottoms line up and no short panel
             leaves a blank band beside (or under) a taller neighbour — the dead space
-            the old `items-start` left. A card's `.card-body` is capped
-            (`max-h-[26rem]`) and scrolls internally (`overflow-y-auto`) while its
-            header stays fixed, so a long list (AI insights, risk signals, action plan)
-            scrolls in place instead of stretching the page; the fixed-height charts sit
-            under the cap and never scroll or clip. `min-w-0` keeps a wide child (a
-            chart's ResponsiveContainer, the action-plan table) measuring against its
-            track. `gap-4 lg:gap-6` is the same rhythm token as the KPI row above. */}
+            the old `items-start` left. `min-w-0` keeps a wide child (a chart's
+            ResponsiveContainer, the action-plan table) measuring against its track.
+            `gap-4 lg:gap-6` is the same rhythm token as the KPI row above.
+
+            NO HEIGHT CAP ON THE CARD BODY, deliberately. This grid item used to carry
+            `[&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto` to make long
+            panels scroll in place. That pair never worked: the second class sat
+            immediately against the `${…}` interpolation that appended `md:col-span-2`,
+            so Tailwind's scanner extracted `…overflow-y-auto${wide` as the candidate
+            and never emitted the rule. Only the cap shipped — leaving every widget at
+            `max-height:416px` with `overflow-y:visible` inside a `.card` that is
+            `overflow-hidden`. Anything past 416px was clipped with no scrollbar and no
+            way to reach it (measured: "Quality Signals" rendered 479px of content into
+            the 416px box, so 63px of live compliance signals were unreachable).
+
+            The page scrolls; the widgets do not. `<main>` in AppShell owns the one
+            vertical scroll for every page in the app, so a card that grows simply makes
+            the page longer — which is what a dashboard should do, and what keeps every
+            widget's content reachable with an ordinary trackpad. The single exception is
+            the action plan, whose height is row-count-driven; it keeps its OWN internal
+            scroll box (see ActionPlanTable) and that box is now the only scroller in the
+            card rather than a second one nested inside a shorter cap. Interpolation is
+            done through `clsx` so a class can never be glued to an expression again. */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch [grid-auto-flow:row_dense]">
           {widgets.map(({ key, wide }) => (
             <div
               key={key}
-              className={`min-w-0 h-full [&>*]:h-full [&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto${wide ? " md:col-span-2" : ""}`}
+              className={clsx("min-w-0 h-full [&>*]:h-full", wide && "md:col-span-2")}
             >
               <DashboardWidget widget={key} {...widgetProps} />
             </div>

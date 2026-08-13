@@ -127,15 +127,14 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
   // "New CAPA" creation flow is reserved for QA-side roles.
   const canUseAiCapa = !isViewer;
 
-  const { capas, tenantId } = useTenantData();
+  const { capas } = useTenantData();
   const { org, users, allSites } = useTenantConfig();
-  // For the AI backend, customer_id is the customer admin's aiUserId (the
-  // CUST_xxx that was registered at signup). Fall back to the local tenantId
-  // only if no admin has been signed up yet — the backend will then 422.
-  const aiCustomerId =
-    users.find((u) => u.role === "customer_admin" && u.aiUserId)?.aiUserId ??
-    tenantId ??
-    "";
+  // REMOVED — aiCustomerId. It resolved the AI service's tenant id from a
+  // customer-admin's `aiUserId`, so the identifier the browser sent could
+  // disagree with the tenant in the signed token. The tenant is now decided
+  // server-side in every AI path (the proxy mints it from the session; the AI
+  // service validates any echoed value against the token and 403s on
+  // mismatch), so the browser has no business naming one.
   const complianceUsers = useComplianceUsers();
   const timezone = org.timezone;
   const dateFormat = org.dateFormat;
@@ -407,7 +406,6 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
       <AIGenerateCAPAModal
         isOpen={aiOpen}
         onClose={() => setAiOpen(false)}
-        defaultCustomerId={aiCustomerId}
         onAccepted={async (res: AICapaResponse, form: AICapaForm) => {
           // Map AI form severity → CAPA risk taxonomy ("Medium" → "High" so it
           // still escalates; backend severity is informational anyway).
@@ -420,18 +418,15 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
           // map with the manual create path so the two cannot drift.
           const serverSource = UI_TO_SERVER_CAPA_SOURCE[form.source] ?? "Other";
 
-          // Redux's CAPASource type uses the legacy AI-form vocabulary
-          // (different enum from the server's Zod schema). Keep both in sync
-          // for the degraded-mode fallback dispatch.
-          const REDUX_KNOWN_SOURCES = ["483", "Internal Audit", "Deviation", "Complaint", "OOS", "Change Control", "Gap Assessment"] as const;
-          const reduxSource = (REDUX_KNOWN_SOURCES as readonly string[]).includes(form.source)
-            ? (form.source as typeof REDUX_KNOWN_SOURCES[number])
-            : "Deviation";
-
           // Default due date: 30 days for Critical, 60 for High, 90 for Low.
           const days = risk === "Critical" ? 30 : risk === "High" ? 60 : 90;
-          const dueDateIso = dayjs(res.created_at).add(days, "day").toISOString();
+          const dueDateIso = dayjs().add(days, "day").toISOString();
 
+          // The analysis is ADVISORY CONTEXT carried into the description, not
+          // a set of facts about a second record. Every reference in
+          // similar_capas is one of this tenant's own closed CAPAs — the
+          // analyser drops any id that was not in the history it was given —
+          // so the text below always points at records the reader can open.
           const description = [
             form.problem_statement,
             form.area_affected ? `Area: ${form.area_affected}` : "",
@@ -439,88 +434,59 @@ export function CAPAPage({ openCapaId, capas: serverCAPAs, effectivenessDue = []
             res.ai_recommendation ? `\nAI recommendation: ${res.ai_recommendation}` : "",
             res.pattern_detected ? `Pattern: ${res.pattern_detected}` : "",
             res.recurrence_alert ? `Recurrence: ${res.recurrence_alert}` : "",
+            res.note ? `Note: ${res.note}` : "",
           ].filter(Boolean).join("\n");
 
-          // Persist locally so the CAPA survives page refresh. Prior to this
-          // the AI CAPA only lived in Redux + the AI backend, so refreshing
-          // /capa wiped it from the tracker (capa.slice doesn't persist).
-          // The AI backend's res.capa_id is kept in the audit log's newValue
-          // so the AI lifecycle viewer at /ai-capa/[capaId] is still findable
-          // post-create; the local Prisma row gets its own cuid + reference.
-          // Phase A — short title for the AI CAPA (problem statement, capped).
           const aiTitle = (form.problem_statement || description).slice(0, 120);
-          let persistedToDb = false;
-          let serverCapa: PrismaCAPA | null = null;
-          try {
-            const createRes = await createCAPAServer({
-              title: aiTitle,
-              description,
-              source: serverSource,
-              risk,
-              owner: user?.id || user?.name || "ai-system",
-              dueDate: dueDateIso,
-              siteId: selectedSiteId ?? allSites[0]?.id ?? undefined,
-            });
-            if (createRes.success && createRes.data) {
-              serverCapa = createRes.data as PrismaCAPA;
-              persistedToDb = true;
-            } else if (!createRes.success) {
-              console.warn("[ai-capa] local persist rejected:", createRes.error);
-            }
-          } catch (err) {
-            console.error("[ai-capa] local persist threw:", err);
+
+          // ONE write, through the SAME server action the manual path uses —
+          // so this CAPA gets the same authorization, reference allocation,
+          // readiness gates and Part 11 audit trail as one typed by hand.
+          //
+          // This used to dual-write: a row here AND a row in the AI service's
+          // own CAPA table, linked only by an id buried in an audit log. That
+          // second record then ran its own lifecycle (RCA → closure) which this
+          // one never saw. There is one system of record now.
+          const createRes = await createCAPAServer({
+            title: aiTitle,
+            description,
+            source: serverSource,
+            risk,
+            owner: user?.id || user?.name || "ai-system",
+            dueDate: dueDateIso,
+            siteId: selectedSiteId ?? allSites[0]?.id ?? undefined,
+          });
+
+          if (!createRes.success || !createRes.data) {
+            // No silent degraded mode. The previous version pushed a
+            // Redux-only row that vanished on refresh while telling the user
+            // the CAPA had been created.
+            setErrorMsg(createRes.success ? "Could not create the CAPA." : createRes.error);
+            setErrorPopup(true);
+            return;
           }
 
-          if (persistedToDb && serverCapa) {
-            // Mirror the server's authoritative row into Redux so the tracker
-            // shows the canonical Prisma id + reference, not the AI backend id.
-            dispatch(addCAPA(mapCAPAFromPrisma(serverCapa)));
-          } else {
-            // Degraded mode: persist failed but AI backend has the CAPA.
-            // Keep the user moving — add to Redux so the tracker still shows
-            // something this session. On next page refresh this row will
-            // vanish (capa.slice doesn't persist + Prisma row is missing).
-            dispatch(addCAPA({
-              id: res.capa_id,
-              tenantId: tenantId ?? "",
-              siteId: selectedSiteId ?? allSites[0]?.id ?? "",
-              source: reduxSource,
-              risk,
-              owner: user?.id ?? "",
-              dueDate: dueDateIso,
-              status: "open",
-              title: aiTitle,
-              description,
-              effectivenessCheck: true,
-              diGate: false,
-              createdAt: res.created_at,
-            }));
-          }
+          const serverCapa = createRes.data as PrismaCAPA;
+          dispatch(addCAPA(mapCAPAFromPrisma(serverCapa)));
 
           auditLog({
             action: "CAPA_AI_GENERATED",
             module: "capa",
-            recordId: serverCapa?.id ?? res.capa_id,
+            recordId: serverCapa.id,
             newValue: {
-              riskScore: res.risk_score,
+              // Provenance of the advice that informed this record, so an
+              // auditor can see what the author was shown.
+              recurrenceRiskScore: res.risk_score,
               isRecurring: res.is_recurring,
-              aiBackendId: res.capa_id,
-              persistedToDb,
+              comparedAgainst: res.analyzed_history_count,
+              similarCapaRefs: res.similar_capas.map((c) => c.capa_id),
+              analysisSource: res.source,
+              recurrenceAssessed: !res.note,
             },
           });
           setAiSavedPopup(
-            persistedToDb
-              ? `AI CAPA ${serverCapa?.reference ?? res.capa_id} created and added to the tracker. Open the row to start RCA in the AI lifecycle.`
-              : `AI CAPA ${res.capa_id} created (warning: local persist failed; refresh will clear from tracker).`,
+            `CAPA ${serverCapa.reference ?? serverCapa.id} created and added to the tracker.`,
           );
-          // We used to auto-redirect to /ai-capa/<id> here. That meant the
-          // user got bounced off the CAPA Tracker the moment they clicked
-          // "Save to library" — before the success popup could display and
-          // before they had a chance to verify the row landed. Now the user
-          // stays on /capa, sees the new row in the tracker, sees the
-          // popup, and opens the AI lifecycle on their own terms by clicking
-          // the row (which routes to /ai-capa/<aiBackendId> via the row's
-          // detail handler).
         }}
       />
 

@@ -320,16 +320,26 @@ export async function aiAssistantSend(
 }
 
 /**
- * One-shot voice round-trip. The backend transcribes, generates a reply,
- * and returns audio bytes. The transcript + reply text are returned via
- * CORS-exposed response headers (X-User-Text, X-AI-Reply, X-Intent), so
- * the UI can show them in the chat alongside the played audio.
+ * One-shot voice round-trip.
+ *
+ * The reply now comes back as the SAME `AssistantResponse` envelope the typed
+ * route returns — confidence band, cited sources, ticket handoff, audit id —
+ * carried in the `X-Assistant-Envelope` header alongside the audio.
+ *
+ * Previously this returned only loose `X-AI-Reply` / `X-Intent` strings from a
+ * different, ungrounded backend pipeline, so a spoken answer rendered in the
+ * chat with no provenance at all: no sources, no confidence, no audit entry,
+ * and no refusal when the corpus did not cover the question. Speaking a
+ * question was a way around the grounding the text box enforced.
+ *
+ * Goes through the Next.js route (not the raw proxy) because, exactly like the
+ * typed route, the live-data path needs the caller's tenant figures — which
+ * only this app's database has.
  */
 export interface VoiceChatResult {
-  audio: Blob;
+  audio: Blob | null;
   userText: string | null;
-  aiReply: string | null;
-  intent: string | null;
+  envelope: AssistantResponse | null;
 }
 
 export async function aiVoiceChat(
@@ -339,18 +349,38 @@ export async function aiVoiceChat(
   const fd = new FormData();
   fd.append("audio", audio, audio instanceof File ? audio.name : "speech.webm");
   if (history.length > 0) fd.append("chat_history", JSON.stringify(history));
-  const res = await authedFetch("/api/ai/voice/chat", { method: "POST", body: fd });
-  // Some browsers / proxies decode header values; the backend escapes them
-  // server-side. Try both raw and URI-decoded.
-  const decode = (v: string | null) => {
-    if (!v) return v;
-    try { return decodeURIComponent(v); } catch { return v; }
-  };
+
+  const tag = "[aiChat] POST /api/ai/voice-chat";
+  const res = await fetch("/api/ai/voice-chat", {
+    method: "POST",
+    body: fd,
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let parsed: unknown = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+    const detail = flattenDetail(parsed, res.status);
+    console.error(`${tag} ✗ ${res.status} — ${detail}`, parsed);
+    throw new AiChatError(res.status, detail, parsed);
+  }
+
+  let envelope: (AssistantResponse & { user_text?: string }) | null = null;
+  const raw = res.headers.get("x-assistant-envelope");
+  if (raw) {
+    try {
+      envelope = JSON.parse(raw) as AssistantResponse & { user_text?: string };
+    } catch {
+      // A malformed envelope must not lose the audio; the caller renders a
+      // provenance-free reply and the console records why.
+      console.error(`${tag} — could not parse X-Assistant-Envelope`);
+    }
+  }
+  const blob = await res.blob();
   return {
-    audio: await res.blob(),
-    userText: decode(res.headers.get("x-user-text")),
-    aiReply: decode(res.headers.get("x-ai-reply")),
-    intent: decode(res.headers.get("x-intent")),
+    audio: blob.size > 0 ? blob : null,
+    userText: envelope?.user_text ?? null,
+    envelope,
   };
 }
 

@@ -285,12 +285,33 @@ export function AddFindingModal({ isOpen, onClose, onSave, sites, systems, activ
                     {/* Was a bare "live"/"demo" word — vocabulary no other AI
                         surface used. Now the shared provenance badge. */}
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-                        {triage.confidence}% confidence
-                      </span>
+                      {/* Omitted when the model reported none. This used to
+                          render a hardcoded 70% on every single triage. */}
+                      {triage.confidence != null && (
+                        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                          {triage.confidence}% confidence
+                        </span>
+                      )}
                       <AIBadge source={triage.source} />
                     </span>
                   </div>
+                  {/* The requirement text contained instructions aimed at the
+                      assistant, so the AI classification was discarded and these
+                      values came from the offline classifier. The reviewer needs
+                      to know that before accepting a severity. */}
+                  {triage.warning && (
+                    <p
+                      role="alert"
+                      className="text-[11px] rounded-lg px-2 py-1.5 mb-2"
+                      style={{
+                        background: "var(--warning-bg)",
+                        color: "var(--warning)",
+                        border: "1px solid var(--warning)",
+                      }}
+                    >
+                      {triage.warning}
+                    </p>
+                  )}
                   <div className="flex flex-wrap items-center gap-2 mb-2">
                     <span className="badge badge-blue text-[10px]">{triage.frameworkLabel}</span>
                     {triage.clause && <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>{triage.clause}</span>}

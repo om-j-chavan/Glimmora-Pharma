@@ -27,6 +27,7 @@ import {
   isOpenCapa, isCapaOverdue, isCriticalOpen, isOpenFinding,
   isCsvHighRisk, isValidationDrift, isDIException, pct,
 } from "./records";
+import { inBucket, trendBuckets } from "./trend";
 import { calculateReadiness, type ReadinessResult } from "./readiness";
 import type {
   KPICapa, KPIChangeControl, KPIDeviation, KPIFDA483Event, KPIFinding,
@@ -137,10 +138,22 @@ export interface QualityKPIInput {
   systems: KPISystem[];
   deviations: KPIDeviation[];
   trainingRecords: KPITrainingRecord[];
+  /**
+   * Findings the READINESS / RISK model scores, when they differ from the findings
+   * the counts are taken over. Defaults to `findings`.
+   *
+   * The dashboard's severity dropdown narrows `findings` so the finding COUNTS
+   * answer "how many Critical findings" when Critical is selected. Readiness must
+   * not move with it: scoring a severity-filtered set means picking "Low" drops
+   * every Critical finding out of the penalty stack and an at-risk area renders as
+   * inspection-ready. Readiness is a posture over ALL evidence, so the caller
+   * passes the unnarrowed set here.
+   */
+  readinessFindings?: KPIFinding[];
 }
 
 export function computeQualityKPIs({
-  findings, capas, systems, deviations, trainingRecords,
+  findings, capas, systems, deviations, trainingRecords, readinessFindings,
 }: QualityKPIInput): QualityKPIs {
   const openDev = deviations.filter(isOpenDeviation);
   const openCAPAs = capas.filter(isOpenCapa);
@@ -149,19 +162,22 @@ export function computeQualityKPIs({
   const criticalFindings = findings.filter(isCriticalOpen);
   const training = computeTrainingKPIs(trainingRecords);
 
+  // Severity-independent basis for the score (see `readinessFindings` above).
+  const scored = readinessFindings ?? findings;
+
   // ONE readiness model (calculateReadiness) — the same weights Governance and
   // the area heatmap use, fed the tenant-wide counts. `riskScore` is its inverse
   // so "Risk score" and "Readiness" can never tell contradictory stories.
   const readiness = calculateReadiness({
-    findings: openFindings.length,
-    criticalFindings: criticalFindings.length,
+    findings: scored.filter(isOpenFinding).length,
+    criticalFindings: scored.filter(isCriticalOpen).length,
     highRiskSystems: systems.filter(isCsvHighRisk).length,
     capaOverdue: overdueCAPAs.length,
     validationRisk: systems.filter(isValidationDrift).length,
     diExceptions: capas.filter(isDIException).length,
     trainingCompliance: training.compliance,
   }, {
-    hasData: findings.length + capas.length + systems.length + deviations.length > 0,
+    hasData: scored.length + capas.length + systems.length + deviations.length > 0,
   });
 
   return {
@@ -610,46 +626,49 @@ export function computeTenantKPIs(input: TenantKPIInput): TenantKPIs {
  */
 
 export interface DeviationTrendPoint {
-  month: string;
+  /** Axis label. Named `bucket` (not `month`) since a bucket may be a day or week. */
+  bucket: string;
   Critical: number;
   Major: number;
   Minor: number;
+  /** Deviations whose severity matched neither taxonomy value. Never folded into Minor. */
+  Unclassified: number;
 }
 
-/** Last `months` calendar months of deviation volume, oldest → newest. */
+/**
+ * Deviation volume by severity per bucket, oldest → newest.
+ *
+ * Shares `trendBuckets` with `severityTrend`, so the deviation and finding charts
+ * always draw the SAME x-axis for the same period instead of each rolling their
+ * own month maths. Pass the SITE-SCOPED but otherwise unfiltered deviations — the
+ * buckets apply the period window themselves.
+ *
+ * An unrecognised severity is counted as `Unclassified`, not `Minor`. The previous
+ * `else point.Minor++` silently downgraded any value that normalised to neither
+ * "Critical" nor "Major" into the LOWEST tier — on a GxP severity chart that
+ * understates risk, which is the one direction a compliance chart must not err in.
+ */
 export function deviationSeverityTrend(
   deviations: KPIDeviation[],
   now: number,
-  months = 6,
+  period = "all",
+  timezone = "UTC",
 ): DeviationTrendPoint[] {
-  const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const base = new Date(now);
-  const buckets: DeviationTrendPoint[] = [];
-  const index = new Map<string, DeviationTrendPoint>();
-
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
-    const point: DeviationTrendPoint = { month: MONTH_LABELS[d.getMonth()], Critical: 0, Major: 0, Minor: 0 };
-    buckets.push(point);
-    index.set(`${d.getFullYear()}-${d.getMonth()}`, point);
-  }
-
-  for (const dev of deviations) {
-    const t = ms(dev.createdAt);
-    if (t === null) continue;
-    const d = new Date(t);
-    const point = index.get(`${d.getFullYear()}-${d.getMonth()}`);
-    if (!point) continue;
-    const sev = normalizeSeverityForDisplay(dev.severity, "fda");
-    if (sev === "Critical") point.Critical++;
-    else if (sev === "Major") point.Major++;
-    else point.Minor++;
-  }
-
-  return buckets;
+  return trendBuckets(period, now, timezone).map((b) => {
+    const point: DeviationTrendPoint = { bucket: b.label, Critical: 0, Major: 0, Minor: 0, Unclassified: 0 };
+    for (const dev of deviations) {
+      if (!inBucket(dev.createdAt, b)) continue;
+      const sev = normalizeSeverityForDisplay(dev.severity, "fda");
+      if (sev === "Critical") point.Critical++;
+      else if (sev === "Major") point.Major++;
+      else if (sev === "Minor") point.Minor++;
+      else point.Unclassified++;
+    }
+    return point;
+  });
 }
 
 /** True when every bucket is empty — render an empty state instead of a chart. */
 export function isDeviationTrendEmpty(points: DeviationTrendPoint[]): boolean {
-  return points.every((p) => p.Critical + p.Major + p.Minor === 0);
+  return points.every((p) => p.Critical + p.Major + p.Minor + p.Unclassified === 0);
 }

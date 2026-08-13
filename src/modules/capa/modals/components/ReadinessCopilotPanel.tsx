@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Sparkles, ArrowRight, RefreshCw } from "lucide-react";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { AIButton, AIBadge } from "@/components/ai";
 import {
   getReadinessGuidance,
@@ -11,6 +10,7 @@ import {
 import type { CAPA } from "@/store/capa.slice";
 import type { CAPAReadiness } from "@/lib/capa-readiness";
 import { READINESS_TAB, type DetailSubTab } from "../helpers/getNextStep";
+import { useAgentActive, useAgiPolicy } from "@/hooks/useAgiPolicy";
 
 /* ── Feature K — CAPA Readiness Pre-flight Copilot ──
  *
@@ -42,9 +42,10 @@ export function ReadinessCopilotPanel({
   readiness: CAPAReadiness;
   onChangeTab: (tab: DetailSubTab) => void;
 }) {
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
-  const agiAgent = useAppSelector((s) => s.settings.agi.agents.capa);
-  const agentActive = agiMode !== "manual" && agiAgent;
+  // Server-side tenant policy (was per-browser localStorage). Hiding the
+  // panel is a courtesy; the proxy enforces the same policy on the endpoint.
+  const { mode: agiMode } = useAgiPolicy();
+  const agentActive = useAgentActive("capa");
 
   const [guidance, setGuidance] = useState<ReadinessGuidanceResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -83,7 +84,7 @@ export function ReadinessCopilotPanel({
       });
       setGuidance(result);
     } catch {
-      // getReadinessGuidance falls back to the mock internally, so a throw here
+      // The backend degrades deterministically and stamps `source`, so a throw here
       // is unexpected — surface a soft error and let the user retry.
       setError("Could not prepare guidance. Try again.");
     } finally {
