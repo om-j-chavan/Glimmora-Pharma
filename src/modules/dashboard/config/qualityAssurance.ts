@@ -44,7 +44,6 @@ export const qualityAssuranceDashboard: DashboardConfig = {
     { key: "ai-insights" },
     { key: "quick-actions" },
     { key: "risk-signals" },
-    { key: "nav-shortcuts" },
   ],
 
   quickActions: [SHARED_MY_WORKLIST, QA_CREATE_DEVIATION, SHARED_RAISE_RISK],

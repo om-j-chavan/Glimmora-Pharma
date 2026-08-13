@@ -53,9 +53,25 @@ export interface SeverityTrendPoint {
   Low: number;
 }
 
-/** Findings by severity per month — the Dashboard observation-volume chart. */
-export function severityTrend(findings: KPIFinding[], now: number = Date.now()): SeverityTrendPoint[] {
-  return lastMonths(6, now).map((b) => {
+/**
+ * Findings by severity per month — the Dashboard observation-volume chart.
+ *
+ * `months` is ADDITIVE and defaults to 6, so every existing caller is unchanged.
+ * It exists so a caller with its own date window can express that window in this
+ * function's vocabulary — `now` anchors the LAST bucket and `months` how many
+ * buckets precede it — instead of always charting the six months up to today.
+ * The dashboard's custom date range uses it (see `useDashboardData`); the
+ * "Last N days" presets and every other caller still pass neither.
+ *
+ * Mirrors the `(records, now, months)` signature `deviationSeverityTrend`
+ * (computeRoleKPIs.ts) already had, so both trend charts window the same way.
+ */
+export function severityTrend(
+  findings: KPIFinding[],
+  now: number = Date.now(),
+  months = 6,
+): SeverityTrendPoint[] {
+  return lastMonths(months, now).map((b) => {
     const mf = findings.filter((f) => monthKey(f.createdAt, MONTHS) === b.key);
     return {
       month: b.label,

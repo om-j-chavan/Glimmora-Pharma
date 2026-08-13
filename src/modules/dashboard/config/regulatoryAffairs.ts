@@ -41,8 +41,6 @@ export const regulatoryAffairsDashboard: DashboardConfig = {
     { key: "pending-tasks" },
     { key: "quick-actions" },
     { key: "compliance-status" },
-    { key: "alerts" },
-    { key: "nav-shortcuts" },
   ],
 
   quickActions: [

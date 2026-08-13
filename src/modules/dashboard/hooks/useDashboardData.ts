@@ -54,8 +54,17 @@ export interface DashboardFilters {
   siteId: string;
   /** Severity label from the generic taxonomy, or "" for all. */
   severity: string;
-  /** Lookback in days as a string, or "all". */
+  /** Lookback in days as a string, "all", or "custom" (then `from`/`to` apply). */
   period: string;
+  /**
+   * Custom-range start, "YYYY-MM-DD". Read ONLY when `period === "custom"`.
+   * An incomplete or reversed range (missing end, from > to) is treated as NO
+   * period filter rather than as an empty result — a half-picked range must not
+   * blank the dashboard while the user is still choosing the second date.
+   */
+  from?: string;
+  /** Custom-range end, "YYYY-MM-DD" — INCLUSIVE (expanded to end-of-day). */
+  to?: string;
 }
 
 export interface UseDashboardDataInput {
@@ -134,19 +143,49 @@ export function useDashboardData(input: UseDashboardDataInput): DashboardDataset
   // server payload remounts the page and re-anchors it.
   const [now] = useState(() => Date.now());
 
-  const cutoff = useMemo(
-    () => (filters.period === "all" ? null : dayjs().subtract(parseInt(filters.period, 10), "day")),
-    [filters.period],
-  );
+  /**
+   * The period expressed as a WINDOW rather than a single lower bound, so the
+   * presets and the custom range share one representation:
+   *
+   *   "7"/"30"/"60"/"90"  → { from: N days ago, to: null }  ← open-ended, as before
+   *   "all"               → { from: null, to: null }        ← unbounded, as before
+   *   "custom"            → { from: start-of-day, to: end-of-day }
+   *
+   * A `null` bound means "unbounded on that side". The preset arm keeps the
+   * original local-time `dayjs().subtract(...)` expression verbatim, so preset
+   * behaviour is byte-for-byte what it was.
+   */
+  const periodWindow = useMemo<{ from: dayjs.Dayjs | null; to: dayjs.Dayjs | null }>(() => {
+    if (filters.period === "all") return { from: null, to: null };
+
+    if (filters.period === "custom") {
+      const from = filters.from ? dayjs.utc(`${filters.from}T00:00:00.000Z`) : null;
+      const to = filters.to ? dayjs.utc(`${filters.to}T23:59:59.999Z`) : null;
+      // Incomplete or reversed → no filter. Never throws, never blanks the page.
+      if (!from || !to || !from.isValid() || !to.isValid() || from.isAfter(to)) {
+        return { from: null, to: null };
+      }
+      return { from, to };
+    }
+
+    const days = parseInt(filters.period, 10);
+    if (!Number.isFinite(days)) return { from: null, to: null };
+    return { from: dayjs().subtract(days, "day"), to: null };
+  }, [filters.period, filters.from, filters.to]);
 
   /* ── Filter predicates — ONE definition each, applied to both scopes ─────── */
 
   const withinPeriod = useCallback(
     (createdAt: string | Date | null | undefined) => {
-      if (!cutoff || !createdAt) return true;
-      return !dayjs.utc(createdAt instanceof Date ? createdAt.toISOString() : createdAt).isBefore(cutoff);
+      const { from, to } = periodWindow;
+      if ((!from && !to) || !createdAt) return true;
+      const at = dayjs.utc(createdAt instanceof Date ? createdAt.toISOString() : createdAt);
+      if (from && at.isBefore(from)) return false;
+      // `to` is already end-of-day, so the closing date is INCLUSIVE.
+      if (to && at.isAfter(to)) return false;
+      return true;
     },
-    [cutoff],
+    [periodWindow],
   );
 
   const matchesFindingFilters = useCallback(
@@ -309,8 +348,51 @@ export function useDashboardData(input: UseDashboardDataInput): DashboardDataset
 
   /* ── Chart series ────────────────────────────────────────────────────────── */
 
-  const findingTrend = useMemo(() => severityTrend(kpiFindings, now), [kpiFindings, now]);
-  const deviationTrend = useMemo(() => deviationSeverityTrend(deviations, now), [deviations, now]);
+  /**
+   * Trend anchoring for the CUSTOM range.
+   *
+   * Both trend builders take `(records, now, months)` and chart the `months`
+   * calendar months ENDING at `now`. With a preset they chart the six months up
+   * to today, which is right — a preset is a rolling lookback from today. With a
+   * custom range that would be wrong: pick April–May and the chart still draws
+   * six months, four of them guaranteed empty because the arrays feeding it were
+   * already filtered to the range.
+   *
+   * So for a custom range we re-anchor: `now` moves to the END month and `months`
+   * becomes the number of calendar months the range spans. The bars are then
+   * exactly the range's months. The day-level precision is already handled — the
+   * arrays arrive filtered by `withinPeriod`, so an edge month contains only the
+   * in-range days of that month.
+   *
+   * Span is derived from the raw "YYYY-MM-DD" strings and anchored via a LOCAL
+   * `Date`, because both builders bucket with local `getFullYear()`/`getMonth()`.
+   * Capped at 24 buckets so a multi-year range cannot render an unreadable chart.
+   * `null` → preset/all behaviour, i.e. neither argument is passed at all.
+   */
+  const trendAnchor = useMemo<{ now: number; months: number } | null>(() => {
+    if (filters.period !== "custom" || !periodWindow.from || !periodWindow.to) return null;
+    const [fy, fm] = (filters.from ?? "").split("-").map(Number);
+    const [ty, tm] = (filters.to ?? "").split("-").map(Number);
+    if (!fy || !fm || !ty || !tm) return null;
+    const span = (ty - fy) * 12 + (tm - fm) + 1;
+    return {
+      now: new Date(ty, tm - 1, 1).getTime(),
+      months: Math.min(Math.max(span, 1), 24),
+    };
+  }, [filters.period, filters.from, filters.to, periodWindow]);
+
+  const findingTrend = useMemo(
+    () => (trendAnchor
+      ? severityTrend(kpiFindings, trendAnchor.now, trendAnchor.months)
+      : severityTrend(kpiFindings, now)),
+    [kpiFindings, now, trendAnchor],
+  );
+  const deviationTrend = useMemo(
+    () => (trendAnchor
+      ? deviationSeverityTrend(deviations, trendAnchor.now, trendAnchor.months)
+      : deviationSeverityTrend(deviations, now)),
+    [deviations, now, trendAnchor],
+  );
 
   /* ── Derived presentation lists ──────────────────────────────────────────── */
 

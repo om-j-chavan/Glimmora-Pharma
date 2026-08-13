@@ -41,7 +41,6 @@ export const viewerDashboard: DashboardConfig = {
   railWidgets: [
     { key: "compliance-status" },
     { key: "risk-signals" },
-    { key: "nav-shortcuts" },
   ],
 
   quickActions: [],

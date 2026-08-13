@@ -37,6 +37,9 @@ export const DeviationTrendWidget = memo(function DeviationTrendWidget({
       icon={AlertTriangle}
       iconColor="#f59e0b"
       title={dashboard.focusArea ? `${dashboard.focusArea} deviation trend` : "Deviation volume & severity"}
+      // Fill the card: a flex column body lets the chart take the remaining
+      // height instead of sitting at a fixed height with dead space beneath.
+      bodyClassName="flex flex-col h-full"
       badge={
         data.quality.openDeviations > 0
           ? <Badge variant="amber">{data.quality.openDeviations} open</Badge>
@@ -46,8 +49,16 @@ export const DeviationTrendWidget = memo(function DeviationTrendWidget({
       {data.deviationTrendEmpty ? (
         <WidgetEmpty icon={BarChart3} message="No deviations reported in this period" hint="Adjust the period filter or report a deviation." />
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={data.deviationTrend} barSize={14} barGap={2}>
+        // `flex-1` takes whatever height is left after the category block below,
+        // replacing the former fixed 200px that left dead space when the grid's
+        // `items-stretch` made this card taller. `min-h-48` floors it so the bars
+        // stay legible in a short card. ResponsiveContainer then has a definite
+        // box to measure, so height="100%" resolves. The card-body's own
+        // max-h-[26rem] cap still bounds the whole card, so it can never outgrow
+        // its neighbours. Data, series, colours, legend and tooltips: untouched.
+        <div className="flex-1 min-h-48">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data.deviationTrend} barSize={14} barGap={2}>
             <CartesianGrid {...chartDefaults.cartesianGrid} />
             <XAxis dataKey="month" {...chartDefaults.xAxis} />
             <YAxis {...chartDefaults.yAxis} allowDecimals={false} />
@@ -60,8 +71,9 @@ export const DeviationTrendWidget = memo(function DeviationTrendWidget({
             <Bar dataKey="Critical" name="Critical" fill={FDA_FILL.Critical} stackId="a" />
             <Bar dataKey="Major" name="Major" fill={FDA_FILL.Major} stackId="a" />
             <Bar dataKey="Minor" name="Minor" fill={FDA_FILL.Minor} stackId="a" radius={[3, 3, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       )}
 
       {categories.length > 0 && (

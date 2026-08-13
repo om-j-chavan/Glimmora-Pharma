@@ -232,38 +232,6 @@ export const KPI_OPEN_DEVIATIONS: KpiDefinition = {
   hrefModule: "deviation",
 };
 
-export const KPI_INVESTIGATIONS: KpiDefinition = {
-  key: "investigations-pending",
-  label: "Investigations pending",
-  icon: Search,
-  requiresModules: ["deviation"],
-  select: (d) => ({
-    value: String(d.quality.awaitingInvestigation),
-    sub: d.quality.awaitingCapaDecision > 0
-      ? `${d.quality.awaitingCapaDecision} awaiting CAPA decision`
-      : "Root-cause analysis outstanding",
-    color: countColor(d.quality.awaitingInvestigation, 3),
-  }),
-  href: "/deviation",
-  hrefModule: "deviation",
-};
-
-export const KPI_CAPA_QA_QUEUE: KpiDefinition = {
-  key: "capa-qa-queue",
-  label: "Awaiting QA sign-off",
-  icon: ClipboardList,
-  guard: capaModuleGuard,
-  select: (d) => ({
-    value: String(d.quality.capaAwaitingQA),
-    sub: d.quality.diExceptions > 0
-      ? `${d.quality.diExceptions} open DI gate${s(d.quality.diExceptions)}`
-      : "CAPAs in a QA review queue",
-    color: countColor(d.quality.capaAwaitingQA, 3),
-  }),
-  href: "/capa",
-  hrefModule: "capa",
-};
-
 /* ── CSV / validation ────────────────────────────────────────────────────── */
 
 export const KPI_CSV_HIGH_RISK: KpiDefinition = {
@@ -647,24 +615,6 @@ export const KPI_LICENCE_STATUS: KpiDefinition = {
   }),
   href: "/settings",
   hrefModule: "settings",
-};
-
-export const KPI_MODULE_ADOPTION: KpiDefinition = {
-  key: "module-adoption",
-  label: "Modules in use",
-  icon: Layers,
-  guard: tenantAdminGuard,
-  select: (d) => ({
-    value: `${d.tenant.modulesInUse}/${d.tenant.moduleAdoption.length}`,
-    sub: d.tenant.modulesInUse === 0
-      ? "No records logged yet"
-      : `${d.tenant.moduleAdoption[0]?.label ?? ""} most active`,
-    color: d.tenant.modulesInUse === 0
-      ? READINESS_COLORS.watch
-      : d.tenant.modulesInUse >= Math.ceil(d.tenant.moduleAdoption.length / 2)
-        ? READINESS_COLORS.ready
-        : READINESS_COLORS.watch,
-  }),
 };
 
 /* ══════════════════════════════════════════════════════════════════════════

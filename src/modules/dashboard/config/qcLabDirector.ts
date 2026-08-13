@@ -46,8 +46,6 @@ export const qcLabDirectorDashboard: DashboardConfig = {
     { key: "pending-tasks" },
     { key: "quick-actions" },
     { key: "risk-signals" },
-    { key: "alerts" },
-    { key: "nav-shortcuts" },
   ],
 
   quickActions: [

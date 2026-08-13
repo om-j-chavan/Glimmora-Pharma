@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutDashboard } from "lucide-react";
-import dayjs from "@/lib/dayjs";
+import { FilterX, LayoutDashboard, RefreshCw } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -16,8 +15,8 @@ import { adaptFinding, type FindingWithEdits } from "@/modules/gap-assessment/Ga
 import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
 import { adaptDeviation, type PrismaDeviationWithCapa } from "@/modules/deviation/DeviationPage.adapter";
 import { adaptPrismaSystem } from "@/types/csv-csa";
-import { roleLabel } from "@/lib/labels/roles";
 import { Button } from "@/components/ui/Button";
+import { DateRangePicker } from "@/components/ui/DatePicker";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Drawer } from "@/components/ui/Drawer";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
@@ -122,11 +121,6 @@ export function DashboardPage({
   const router = useRouter();
   const dispatch = useAppDispatch();
 
-  // Data-load timestamp (GP-CA-016): set when the server-fetched props arrive
-  // (mount + every router.refresh()), so it marks the actual load, not a render.
-  // Declared ahead of the seeding effect below, which is its only writer.
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
   /* ── Seed Redux from the VISIBILITY-SCOPED rows (unchanged behaviour) ───────
      The store is shared with GapPage / DeviationPage / Governance, so seeding it
      tenant-wide would leak hidden records into their lists and exports. */
@@ -135,9 +129,6 @@ export function DashboardPage({
     if (serverCAPAs) dispatch(setCAPAs(serverCAPAs.map(mapCAPAFromPrisma)));
     if (serverDeviations) dispatch(setDeviations(serverDeviations.map(adaptDeviation)));
     if (serverSystems) dispatch(setSystems(serverSystems.map(adaptPrismaSystem)));
-    // GP-CA-016: stamp the load time whenever fresh server props arrive (mount +
-    // every router.refresh()), so the "Updated" label marks the real data load.
-    setLastUpdated(new Date());
   }, [serverFindings, serverCAPAs, serverDeviations, serverSystems, dispatch]);
 
   /* ── Authorisation ─────────────────────────────────────────────────────────
@@ -170,11 +161,42 @@ export function DashboardPage({
   const [siteFilter, setSiteFilter] = useState("");
   const [sevFilter, setSevFilter] = useState("");
   const [timeFilter, setTimeFilter] = useState("30");
+  // Custom-range bounds, "YYYY-MM-DD". Read by the hook ONLY when timeFilter is
+  // "custom"; kept (not cleared) when switching to a preset so toggling back
+  // restores the range the user picked.
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [askAiOpen, setAskAiOpen] = useState(false);
 
+  const isCustomRange = timeFilter === "custom";
+
+  /**
+   * ONE reset for every header filter — see the single "Clear filters" button
+   * below. Resets period to the "30" default AND drops the custom range, so no
+   * invisible date window can survive a clear.
+   */
+  const anyFilterActive = timeFilter !== "30" || !!siteFilter || !!sevFilter;
+  const clearAllFilters = useCallback(() => {
+    setTimeFilter("30");
+    setCustomFrom("");
+    setCustomTo("");
+    setSiteFilter("");
+    setSevFilter("");
+  }, []);
+
+  /**
+   * Refresh is `router.refresh()` — it re-runs the server component and streams
+   * fresh props in, but returns void, so there is nothing to await. Wrapping it
+   * in a transition is the App Router's own way to observe it: `isRefreshing`
+   * stays true until the re-rendered payload has been applied, which is exactly
+   * the interval the spinner should cover.
+   */
+  const [isRefreshing, startRefresh] = useTransition();
+  const handleRefresh = useCallback(() => startRefresh(() => router.refresh()), [router]);
+
   const filters = useMemo<DashboardFilters>(
-    () => ({ siteId: siteFilter, severity: sevFilter, period: timeFilter }),
-    [siteFilter, sevFilter, timeFilter],
+    () => ({ siteId: siteFilter, severity: sevFilter, period: timeFilter, from: customFrom, to: customTo }),
+    [siteFilter, sevFilter, timeFilter, customFrom, customTo],
   );
 
   /* ── Adapt the tenant-wide rows to the slice shape the KPI maths expects ── */
@@ -200,7 +222,7 @@ export function DashboardPage({
 
   /* ── Search drawer sources (visibility-scoped, unchanged) ─────────────── */
   const { findings, capas, deviations } = useTenantData();
-  const { sites, org } = useTenantConfig();
+  const { sites } = useTenantConfig();
   const searchSources = useMemo(
     () => [
       ...(canViewCAPAs
@@ -222,22 +244,20 @@ export function DashboardPage({
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const showSitePicker = !selectedSiteId && sites.length > 1;
 
-  // GP-CA-011: active (non-default) filters shown as dismissable chips. Each chip
-  // resets ONLY its own filter via the existing setter — no new state or filtering.
-  // The site chip is listed only when the picker is shown, so a site-bound user
-  // never sees a chip for a filter they cannot clear.
-  const activeFilterChips = useMemo<{ key: string; label: string; clear: () => void }[]>(
-    () => [
-      ...(timeFilter !== "30"
-        ? [{ key: "time", label: timeFilter === "all" ? "All time" : `Last ${timeFilter} days`, clear: () => setTimeFilter("30") }]
-        : []),
-      ...(showSitePicker && siteFilter
-        ? [{ key: "site", label: sites.find((s) => s.id === siteFilter)?.name ?? "Selected site", clear: () => setSiteFilter("") }]
-        : []),
-      ...(sevFilter ? [{ key: "sev", label: sevFilter, clear: () => setSevFilter("") }] : []),
-    ],
-    [timeFilter, siteFilter, sevFilter, showSitePicker, sites],
-  );
+  /*
+   * GP-CA-011's per-filter chips were REMOVED in favour of the single "Clear
+   * filters" button below.
+   *
+   * Each chip restated a value its own control was already displaying — the
+   * period dropdown shows the period, the site dropdown the site, the severity
+   * dropdown the severity, and the range picker's trigger shows the chosen
+   * range. So the chip row carried no information the row above it lacked, and
+   * it put a second, differently-shaped clear affordance (a ✕) beside the
+   * existing "Clear filters" button. One reset, one place.
+   *
+   * Nothing about FILTERING changed: the same five setters and the same default
+   * values, invoked from one handler instead of three.
+   */
 
   const widgetProps = { data, dashboard, access, canOpen };
 
@@ -284,10 +304,9 @@ export function DashboardPage({
       actions={headerActions}
       headerRight={
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] px-2 py-1 rounded-md" style={{ background: "var(--brand-muted)", color: "var(--brand)" }}>
-            {roleLabel(access.role)}
-            {dashboard.focusArea ? ` · ${dashboard.focusArea}` : ""}
-          </span>
+          {/* The role pill (role label · focus area) was removed from the header.
+              Display only — `access.role` still drives resolveDashboard, every
+              permission gate and the focus-area scoping exactly as before. */}
           <Dropdown
             value={timeFilter}
             onChange={setTimeFilter}
@@ -298,8 +317,37 @@ export function DashboardPage({
               { value: "60", label: "Last 60 days" },
               { value: "90", label: "Last 90 days" },
               { value: "all", label: "All time" },
+              { value: "custom", label: "Custom range" },
             ]}
           />
+          {/*
+            Custom range — ONE calendar, replacing the two separate Start/End
+            `DatePicker` fields.
+
+            `DateRangePicker` is the existing sibling export in the same module,
+            built on the same `CalendarPopover` grid as `DatePicker`, so it needs
+            no new component and no new dependency: first click sets the start,
+            second sets the end, and the days between are tinted `--brand-muted`
+            (DatePicker.tsx:640 `isInRange`).
+
+            from <= to is enforced STRUCTURALLY rather than validated: a click
+            before the current start restarts the range there instead of
+            producing an inverted one (DatePicker.tsx:574-586), so an invalid
+            range is unreachable through the UI.
+
+            It emits the same "YYYY-MM-DD" pair into the same two state slots, so
+            `useDashboardData` is untouched — and a start-only selection still
+            yields `to: ""`, which the hook already treats as no filter.
+          */}
+          {isCustomRange && (
+            <DateRangePicker
+              id="dash-period-range"
+              value={{ start: customFrom, end: customTo }}
+              onChange={(r) => { setCustomFrom(r.start); setCustomTo(r.end); }}
+              placeholder="Pick a date range"
+              className="w-56"
+            />
+          )}
           {showSitePicker && (
             <Dropdown
               placeholder="All sites"
@@ -322,34 +370,46 @@ export function DashboardPage({
               { value: "Low", label: "Low" },
             ]}
           />
-          {activeFilterChips.map((c) => (
-            <button
-              key={c.key}
-              type="button"
-              onClick={c.clear}
-              aria-label={`Remove ${c.label} filter`}
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border-none cursor-pointer"
-              style={{ backgroundColor: "var(--bg-border)", color: "var(--text-secondary)" }}
-            >
-              {c.label}
-              <span aria-hidden="true" className="text-[13px] leading-none">×</span>
-            </button>
-          ))}
-          {(siteFilter || sevFilter) && (
-            <Button variant="ghost" size="sm" onClick={() => { setSiteFilter(""); setSevFilter(""); }}>
-              Clear filters
-            </Button>
+          {/*
+            The ONE reset. Previously the period had to be cleared from its chip
+            while this button cleared only site + severity — two affordances that
+            each reset a different subset. It now resets ALL FIVE pieces of
+            filter state, and appears only when something is actually non-default
+            (the app's convention, matching every other filter row).
+          */}
+          {/*
+            Both trailing controls are ICON-ONLY — no text, no hover tooltip.
+            Passing no children makes `Button` square (`isIconOnly` →
+            ICON_ONLY_SIZES, Button.tsx:75/94), so at size="sm" they are two 32px
+            squares sitting flush with the dropdowns beside them.
+
+            `aria-label` is the one thing that stays: it renders nothing and shows
+            no tooltip, but without it these buttons would have no accessible name
+            at all once the text is gone. Same pattern as the other icon-only
+            buttons (e.g. ActionPlanTable.tsx:191).
+          */}
+          {anyFilterActive && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={FilterX}
+              onClick={clearAllFilters}
+              aria-label="Clear filters"
+            />
           )}
-          {/* GP-CA-016 — the timestamp marks the last DATA load (stamped when the
-              server props arrive), so Refresh visibly moves it. */}
-          {lastUpdated && (
-            <span className="text-[11px] whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
-              Updated {dayjs(lastUpdated).tz(org.timezone).format("D MMM HH:mm")}
-            </span>
-          )}
-          <Button variant="ghost" size="sm" onClick={() => router.refresh()}>
-            Refresh
-          </Button>
+          {/* GP-CA-016 — the "Updated <time>" label was removed from the header.
+              Refresh still reloads the server props exactly as before; only the
+              timestamp readout is gone. `loading` swaps the icon for Button's own
+              spinner and disables the control, so a refresh cannot be re-fired
+              while one is in flight. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={RefreshCw}
+            loading={isRefreshing}
+            onClick={handleRefresh}
+            aria-label={isRefreshing ? "Refreshing" : "Refresh"}
+          />
         </div>
       }
     >
@@ -374,7 +434,15 @@ export function DashboardPage({
           {widgets.map(({ key, wide }) => (
             <div
               key={key}
-              className={`min-w-0 h-full [&>*]:h-full [&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto${wide ? " md:col-span-2" : ""}`}
+              // NOTE the space before `${`. Tailwind scans raw source text for class
+              // candidates, so a class glued to a template interpolation is read as
+              // one token (`…overflow-y-auto${wide`) and NEVER generated. That is
+              // exactly what happened here: `max-h-[26rem]` compiled (it had a
+              // trailing space) but `overflow-y-auto` did not, so every card-body was
+              // capped at 26rem with `overflow: visible` and the surplus was clipped
+              // by `.card { overflow: hidden }` (index.css) instead of scrolling.
+              // Keep a separator before any interpolation in a className template.
+              className={`min-w-0 h-full [&>*]:h-full [&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto ${wide ? "md:col-span-2" : ""}`}
             >
               <DashboardWidget widget={key} {...widgetProps} />
             </div>

@@ -39,8 +39,6 @@ export const customerAdminDashboard: DashboardConfig = {
     { key: "ai-insights" },
     { key: "compliance-status" },
     { key: "quick-actions" },
-    { key: "alerts" },
-    { key: "nav-shortcuts" },
   ],
 
   quickActions: [
