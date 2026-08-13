@@ -60,6 +60,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { normalizeSeverityForDisplay } from "@/lib/severity";
 import { truncate } from "@/lib/format/text";
+import { displayUserName } from "@/lib/identity-display";
 import dayjs from "@/lib/dayjs";
 import {
   getRcaSuggestions,
@@ -246,6 +247,13 @@ function ObservationPicker({
           </span>
         </div>
 
+        {/* Anchor for the panel below. The panel used to sit in normal flow
+            (`mt-2`), so opening it PUSHED the whole Step 1/Step 2 stack down and
+            an event with many observations grew the card without bound. It is
+            now absolutely positioned against this wrapper, above the content
+            (z-40) and height-capped, so opening it overlays rather than reflows
+            and the trigger never moves. */}
+        <div className="relative">
         {/* Trigger */}
         <button
           type="button"
@@ -305,7 +313,9 @@ function ObservationPicker({
             role="listbox"
             aria-label="Observation list"
             className={clsx(
-              "mt-2 rounded-lg border overflow-hidden",
+              "absolute left-0 right-0 top-full mt-2 z-40",
+              "rounded-lg border overflow-hidden shadow-lg",
+              "max-h-80 overflow-y-auto",
               "bg-(--bg-surface) border-(--bg-border)",
             )}
           >
@@ -390,6 +400,7 @@ function ObservationPicker({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );
@@ -2359,9 +2370,22 @@ export function InvestigationTab({
                         className="text-[12px]"
                         style={{ color: "var(--text-primary)" }}
                       >
-                        {/* Bug 2 — CAPA.owner stores a userId cuid; resolve to
-                            the display name. Never surface the raw cuid. */}
-                        {users.find((u) => u.id === linkedCapa.owner)?.name ?? "Unknown"}
+                        {/*
+                          `CAPA.owner` is a denormalised display NAME, not an id
+                          — createCAPA writes `owner: ownerName` alongside the
+                          separate `ownerId` FK (capas/lifecycle.ts:614-616).
+                          The previous lookup matched it against `u.id`, so it
+                          never hit and every owner rendered "Unknown"; the
+                          comment that used to sit here asserted the opposite.
+
+                          `displayUserName` is the shared resolver this page
+                          already uses (FDA483Page.tsx:481) and handles all three
+                          shapes: an id resolves to the name, a free-typed name is
+                          preserved (identity-display.ts:71), and an unresolvable
+                          cuid degrades to the fallback rather than leaking
+                          (identity-display.ts:70). Empty owner → "Unassigned".
+                        */}
+                        {displayUserName(linkedCapa.owner, users, "Unassigned")}
                       </span>
                     </div>
                     <div>

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Dropdown } from "@/components/ui/Dropdown";
+import { ExportMenu } from "@/components/ui/ExportMenu";
 import { formatDocumentSource } from "@/lib/labels/documentSource";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
@@ -161,15 +162,34 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
     </div>
   );
 
-  // Bulk-action toolbar — shown only when something is selected. Export + Download
-  // moved to the right of the search/filter row (still selection-gated); the count +
-  // Clear Selection stay here.
+  // Header keeps only the COUNT. "Clear Selection" moved down into the toolbar
+  // row, immediately before Export, so every bulk control sits together instead
+  // of being split between the page header and the toolbar.
   const bulkToolbar = selectedIds.length > 0 ? (
-    <div className="flex items-center gap-2 flex-wrap">
-      <span className="text-[12px] font-medium text-(--text-primary)">{selectedIds.length} Selected</span>
-      <Button variant="ghost" size="sm" icon={X} onClick={clearSel}>Clear Selection</Button>
-    </div>
+    <span className="text-[12px] font-medium text-(--text-primary)">{selectedIds.length} Selected</span>
   ) : null;
+
+  // The bulk controls themselves. Rendered in the filter row for Grid, and inside
+  // the DataTable's own toolbar for Table, so Table ends up with ONE toolbar row
+  // instead of two. Same handlers either way — nothing about what they DO changed.
+  // Label shortened to "Clear". The filter-clear button on the same row is also
+  // labelled "Clear", so both carry distinct aria-labels + titles — visually they
+  // are separated into the left (filters) and right (bulk actions) groups.
+  const clearSelectionButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      icon={X}
+      onClick={clearSel}
+      aria-label="Clear selection"
+      title="Clear selection"
+    >
+      Clear
+    </Button>
+  );
+  const downloadSelectedButton = (
+    <Button variant="secondary" size="sm" icon={Download} onClick={() => setConfirmDownload(true)}>Download Selected</Button>
+  );
 
   const headerRight = (
     <div className="flex items-center gap-3 flex-wrap justify-end">
@@ -227,6 +247,18 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
     { key: "uploadedAt", label: "Uploaded", sortable: true, width: "w-[12%]", exportValue: (d) => (d.uploadedAt ? dayjs(d.uploadedAt).format("YYYY-MM-DD") : ""), render: (d) => <span className="text-[12px] text-(--text-secondary)">{d.uploadedAt ? dayjs(d.uploadedAt).format("DD MMM YYYY") : "—"}</span> },
   ];
 
+  /* The table's Export ▾ (list/metadata → CSV / Excel / PDF) is now rendered in
+     the single toolbar row below instead of inside the DataTable's own toolbar,
+     which is what created the second row. It is the SAME `ExportMenu` the
+     DataTable was rendering, fed the same way: every non-null `exportValue`
+     column, over the same already-filtered set the table receives (Evidence
+     passes `filtered` and no search/filters props, so DataTable's internal
+     `clientFiltered` is exactly `filtered`). Output is byte-identical. */
+  const exportCols = columns.filter((c) => c.exportValue !== null);
+  const exportHeaders = exportCols.map((c) => c.exportHeader ?? c.label);
+  const buildExportRows = () =>
+    filtered.map((d) => exportCols.map((c) => (c.exportValue ? c.exportValue(d) : "")));
+
   return (
     <PageLayout title="Evidence & Documents" description={description} actions={actions} headerRight={headerRight}>
       {/* Summary cards (role-scoped — counts reflect only what this viewer sees) */}
@@ -246,14 +278,38 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
         <Dropdown value={fOrigin} onChange={setFOrigin} width="w-44" placeholder="All sources" options={[{ value: "", label: "All sources" }, ...originOptions]} />
         <Dropdown value={fStatus} onChange={setFStatus} width="w-40" placeholder="All statuses" options={[{ value: "", label: "All statuses" }, ...statusOptions]} />
         {hasFilter && <Button variant="ghost" size="sm" icon={X} onClick={clearFilters}>Clear</Button>}
-        {/* Bulk Export + Download — right-aligned on this row, shown only when
-            documents are selected (same gating + handlers as before; only moved). */}
-        {selectedIds.length > 0 && (
-          <div className="ml-auto flex items-center gap-2 flex-wrap">
-            <Button variant="secondary" size="sm" icon={FileText} onClick={() => exportSelected(selectedDocs, "pdf")}>Export</Button>
-            <Button variant="secondary" size="sm" icon={Download} onClick={() => setConfirmDownload(true)}>Download Selected</Button>
-          </div>
-        )}
+        {/* ACTION GROUP — same row as the filters above, pushed right by
+            `ml-auto` and wrapping onto its own line when space runs out.
+
+            Order is Clear → Export → Download Selected → Refresh.
+
+            Table and Grid differ only in WHICH Export they show, because the two
+            have always done different things and neither changed here:
+              • Table  → ExportMenu: the filtered LIST as CSV / Excel / PDF.
+              • Grid   → exportSelected(): the SELECTION as a PDF report.
+            Refresh is table-only, as before. */}
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {selectedIds.length > 0 && clearSelectionButton}
+          {view === "table" ? (
+            <ExportMenu
+              filename={`evidence-documents-${dayjs().format("YYYY-MM-DD")}`}
+              title="Evidence & Documents"
+              headers={exportHeaders}
+              rows={buildExportRows}
+              size="sm"
+              variant="secondary"
+              disabled={filtered.length === 0}
+            />
+          ) : (
+            selectedIds.length > 0 && (
+              <Button variant="secondary" size="sm" icon={FileText} onClick={() => exportSelected(selectedDocs, "pdf")}>Export</Button>
+            )
+          )}
+          {selectedIds.length > 0 && downloadSelectedButton}
+          {view === "table" && (
+            <Button variant="secondary" size="sm" icon={RefreshCw} onClick={() => router.refresh()}>Refresh</Button>
+          )}
+        </div>
       </div>
 
       {/* ── GRID view ── */}
@@ -297,8 +353,10 @@ export function EvidencePage({ library }: { library: EvidenceLibraryResult }) {
           rowKey={(d) => d.id}
           ariaLabel="Documents"
           columns={columns}
-          exportOptions={{ filename: `evidence-documents-${dayjs().format("YYYY-MM-DD")}`, title: "Evidence & Documents" }}
-          toolbarActions={<Button variant="secondary" size="sm" icon={RefreshCw} onClick={() => router.refresh()}>Refresh</Button>}
+          /* No `exportOptions` / `toolbarActions`: both rendered DataTable's own
+             toolbar, which was the SECOND row. Export ▾, Download Selected, Clear
+             and Refresh all now live in the single row above — same components,
+             same handlers. */
           onRowClick={(d) => setDetailsDoc(d)}
           emptyState={documents.length === 0 ? "No documents yet." : "No documents match the current filters."}
         />

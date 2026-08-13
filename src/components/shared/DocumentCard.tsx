@@ -70,12 +70,35 @@ export function DocumentCard({ doc, onView, selectable, selected, onToggleSelect
   }
 
   return (
-    <div className={clsx("rounded-lg border bg-(--card-bg) p-3 flex flex-col gap-2", selected ? "border-(--brand) ring-1 ring-(--brand)" : "border-(--bg-border)", className)}>
+    /*
+      SELECTION: when `selectable`, the WHOLE CARD toggles selection — the
+      visible per-card checkbox was removed in favour of clicking the card, with
+      the existing brand ring as the selected state. Everything here is gated on
+      `selectable`, and Evidence is the only caller that passes it, so the other
+      DocumentCard consumers (deviation, gap, worklist, support, uploaders)
+      render and behave exactly as before.
+
+      The checkbox is kept but visually hidden rather than deleted: a div with an
+      onClick is invisible to keyboard and assistive tech, and this card already
+      contains real buttons (View/Download/Remove), so promoting the card itself
+      to role="button" would nest interactive controls. An sr-only checkbox keeps
+      a genuine, labelled, keyboard-reachable control for the same state.
+    */
+    <div
+      className={clsx(
+        "rounded-lg border bg-(--card-bg) p-3 flex flex-col gap-2",
+        selected ? "border-(--brand) ring-1 ring-(--brand)" : "border-(--bg-border)",
+        selectable && "cursor-pointer transition-colors hover:border-(--brand)",
+        className,
+      )}
+      onClick={selectable ? onToggleSelect : undefined}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {selectable && (
             <input type="checkbox" aria-label={`Select ${doc.title}`} checked={!!selected} onChange={onToggleSelect}
-              className="cursor-pointer align-middle accent-(--brand)" />
+              onClick={(e) => e.stopPropagation()}
+              className="sr-only" />
           )}
           <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0" style={{ background: "var(--brand-muted)" }}>
             <FileText className="w-4 h-4 text-(--brand)" aria-hidden="true" />
@@ -91,7 +114,12 @@ export function DocumentCard({ doc, onView, selectable, selected, onToggleSelect
         {doc.meta && <p className="text-[10px] text-(--text-muted) truncate">{doc.meta}</p>}
       </div>
       {(canView || canDownload || onRemove) && (
-        <div className="flex items-center gap-1.5 mt-auto pt-1.5 border-t border-(--bg-border)">
+        // stopPropagation so View / Download / Remove act independently and never
+        // toggle selection when the card is selectable.
+        <div
+          className="flex items-center gap-1.5 mt-auto pt-1.5 border-t border-(--bg-border)"
+          onClick={(e) => e.stopPropagation()}
+        >
           {canView && <Button variant="secondary" size="xs" icon={Eye} onClick={view}>View</Button>}
           {canDownload && <Button variant="ghost" size="xs" icon={Download} onClick={download}>{doc.downloadHref ? "Download" : "Open link"}</Button>}
           {onRemove && (

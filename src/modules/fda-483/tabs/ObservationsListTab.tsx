@@ -1,27 +1,8 @@
 "use client";
 
-/**
- * ObservationsListTab — R2 implementation.
- *
- * Renders the observations table for the active event and a right-slide
- * drawer carrying the focused observation's full text + RCA / CAPA
- * preview. Clicking a row opens the drawer (read/edit) — it does NOT
- * switch tabs. The "Start RCA →" footer button in the drawer is the
- * explicit cross-tab deep-link.
- *
- * The drawer is intentionally NOT URL-driven: it's an ephemeral preview
- * panel. selectedObsId / onSelectObs prop pair is owned by the parent
- * (FDA483Page) because the parent also derives obsIndex from the same
- * URL state for the Investigation tab — keeping it as a prop avoids
- * two competing sources of truth inside the tab.
- *
- * Commitments + CAPA-set rendering moved out per R2 spec (Commitments
- * now lives on Overview; CAPA-set lives on Investigation's Step-2 Done
- * state).
- */
 
 import { useRouter } from "next/navigation";
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAppSelector } from "@/hooks/useAppSelector";
 import {
@@ -40,6 +21,7 @@ import { STATUS_LABEL as CAPA_STATUS_LABEL } from "@/types/capa";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { DataTable, type Column } from "@/components/shared";
 import {
   observationSeverityBadge,
@@ -109,14 +91,6 @@ const OBS_FILTER_CHIPS: {
   { key: "needsRca", label: "Needs RCA", predicate: (o) => !o.rootCause?.trim() },
   { key: "needsCapa", label: "Needs CAPA", predicate: (o) => !o.capaId },
 ];
-
-// Chips are grouped All | severity | status | action-needed; a thin divider is
-// rendered before the first chip of each group after "All". Presentation only.
-const OBS_FILTER_GROUP_STARTS = new Set<ObsFilterKey>([
-  "critical",
-  "open",
-  "needsRca",
-]);
 
 function truncate(s: string, n: number) {
   if (!s) return "";
@@ -198,15 +172,30 @@ export function ObservationsListTab({
               aria-hidden="true"
             />
             <span className="card-title">Observations</span>
-            <span
-              className="ml-2 text-[11px]"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {observations.length} item{observations.length === 1 ? "" : "s"}
-            </span>
+            {/* The "N items" count was removed from the header. */}
           </div>
-          {canAct && (
-            <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2">
+            {/* Filters moved OFF the chip row and into this header dropdown,
+                positioned BEFORE Import. Same six options, same predicates,
+                same single-select `filter` state — only the control changed.
+                Rendered whenever there are observations, independent of
+                `canAct`, so a read-only viewer can still filter. */}
+            {observations.length > 0 && (
+              <Dropdown
+                value={filter}
+                onChange={(v) => setFilter(v as ObsFilterKey)}
+                width="w-40"
+                options={OBS_FILTER_CHIPS.map((chip) => ({
+                  value: chip.key,
+                  label:
+                    chip.key === "all"
+                      ? chip.label
+                      : `${chip.label} (${observations.filter(chip.predicate).length})`,
+                }))}
+              />
+            )}
+            {canAct && (
+              <>
               <Button
                 variant="secondary"
                 size="sm"
@@ -223,82 +212,12 @@ export function ObservationsListTab({
               >
                 Add observation
               </Button>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Filter chips — single-select pill/segmented row, grouped
-            All | severity | status | action-needed; counts shown when > 0.
-            Presentation only; each chip's predicate is unchanged. */}
-        {observations.length > 0 && (
-          <div
-            className="px-4 py-3 border-b flex items-center gap-1.5 flex-wrap"
-            style={{ borderColor: "var(--bg-border)" }}
-          >
-            <span
-              className="text-[11px] font-semibold mr-1"
-              style={{ color: "var(--text-muted)" }}
-            >
-              Filter
-            </span>
-            {OBS_FILTER_CHIPS.map((chip) => {
-              const isActive = filter === chip.key;
-              const count =
-                chip.key === "all"
-                  ? 0
-                  : observations.filter(chip.predicate).length;
-              return (
-                <Fragment key={chip.key}>
-                  {OBS_FILTER_GROUP_STARTS.has(chip.key) && (
-                    <span
-                      aria-hidden="true"
-                      className="w-px h-4 mx-0.5"
-                      style={{ background: "var(--bg-border)" }}
-                    />
-                  )}
-                  <button
-                    type="button"
-                    aria-pressed={isActive}
-                    onClick={() =>
-                      setFilter((prev) =>
-                        prev === chip.key ? "all" : chip.key,
-                      )
-                    }
-                    className={
-                      "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium border transition-colors " +
-                      (isActive
-                        ? "border-transparent text-white"
-                        : "text-(--text-secondary) hover:bg-(--bg-elevated)")
-                    }
-                    style={
-                      isActive
-                        ? { background: "var(--brand)" }
-                        : { borderColor: "var(--bg-border)" }
-                    }
-                  >
-                    {chip.label}
-                    {count > 0 && (
-                      <span
-                        className="rounded-full px-1.5 text-[10px] font-semibold leading-4"
-                        style={
-                          isActive
-                            ? { background: "rgba(255,255,255,0.22)", color: "#fff" }
-                            : {
-                                background: "var(--bg-border)",
-                                color: "var(--text-muted)",
-                              }
-                        }
-                      >
-                        {count}
-                      </span>
-                    )}
-                  </button>
-                </Fragment>
-              );
-            })}
-          </div>
-        )}
-
+     
         {observations.length === 0 ? (
           <div className="card-body">
             <div className="text-center py-10 px-4">

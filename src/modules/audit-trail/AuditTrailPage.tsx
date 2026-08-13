@@ -129,14 +129,20 @@ export function AuditTrailPage({ initialData, options }: Props) {
     },
   ];
 
-  // Toolbar filters. Module/action/actor options come from the DB-distinct
-  // values (labels humanised client-side); "time" is a rolling-window preset the
-  // server maps to a dateFrom. Every filter re-queries the server via the
-  // fetcher — so a filter narrows the WHOLE trail, not just the loaded page.
+  // Toolbar filters — module, action and period (plus the search box). Module and
+  // action options come from the DB-distinct values (labels humanised
+  // client-side); "time" is a rolling-window preset the server maps to a
+  // dateFrom. Every filter re-queries the server via the fetcher — so a filter
+  // narrows the WHOLE trail, not just the loaded page.
+  //
+  // The ACTOR facet was removed as UI only. `loadAuditTrail` still accepts an
+  // `actor` param and the query layer still implements it; nothing changed
+  // server-side, and the Actor column (with its role sub-label) still renders
+  // every row exactly as before. Restoring the dropdown is re-adding its entry
+  // here. Actor remains searchable via the search box.
   const filters: DataFilter<AuditTrailRow>[] = [
     { key: "module", label: "modules", options: options.modules.map((m) => ({ value: m, label: moduleLabel(m) })) },
     { key: "action", label: "actions", options: options.actions.map((a) => ({ value: a, label: auditEventLabel(a) })) },
-    { key: "actor", label: "actors", options: options.actors.map((n) => ({ value: n, label: n })) },
     {
       key: "period",
       label: "time",

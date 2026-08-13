@@ -96,14 +96,19 @@ export function AccountSettingsFields({ form, set, mode, isSuperAdmin, regionErr
         )}
 
         {/* Single-QA SoD override — super_admin only. Org attests it runs with one
-            QA; each waived CAPA SoD step is justified, signed where applicable, and
-            audited. Default OFF. (Phase 0 persists the flag; no gate reads it yet.) */}
+            QA; each waived SoD step is justified, signed where applicable, and
+            audited. Default OFF (helpers.ts:176).
+
+            The flag is LIVE: the CAPA, deviation and finding close paths all read
+            Tenant.sodSingleQAOverride before allowing a waiver (sod-override.ts:62-64,
+            deviations.ts:804, queries/capas.ts:57). The former "Phase 0 persists the
+            flag; no gate reads it yet" note here was stale. */}
         {isSuperAdmin && (
           <div className="rounded-lg border p-3" style={{ borderColor: "var(--bg-border)" }}>
             <Toggle
               id="toggle-sod-override"
               label="Single-QA SoD override (org attests one QA)"
-              description="Lets one QA complete separation-of-duties CAPA steps themselves. Each waived step still requires a justification, an e-signature where the step is signed, and a distinct audit entry. Leave OFF unless this org genuinely operates with a single QA."
+              description="Lets a single QA close records without a second reviewer, recorded as an audited SoD waiver."
               checked={form.sodSingleQAOverride}
               onChange={(v) => set("sodSingleQAOverride", v)}
             />

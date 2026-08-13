@@ -41,7 +41,8 @@ import {
   Download,
   Trash2,
 } from "lucide-react";
-import { downloadPDF, downloadLetterPDF, type Cell } from "@/lib/exportTable";
+import { downloadLetterPDF } from "@/lib/exportTable";
+import { downloadResponsePackagePDF } from "../exportResponsePackage";
 import dayjs from "@/lib/dayjs";
 import { addResponseDocument, removeResponseDocument } from "@/actions/fda483";
 import { DocumentUpload } from "@/components/shared";
@@ -311,23 +312,36 @@ export function ResponseDetailTab({
   /* ════════════ Render ════════════ */
 
   function exportResponsePackage() {
-    const headers = ["#", "Observation", "Severity", "Area", "Regulation", "Root cause", "CAPA"];
-    const rows: Cell[][] = liveEvent.observations.map((o) => {
+    // SAME DATA as before — the seven per-observation fields are selected with
+    // the identical expressions (including the `|| "—"` fallbacks and the
+    // capa.reference ?? sliced-id rule). Only the RENDERER changed: this used to
+    // hand the rows to the shared generic table `downloadPDF`, which forced an
+    // observation paragraph into a table cell. It now goes to the module's own
+    // document builder, which lays the same values out as a structured package.
+    const observations = liveEvent.observations.map((o) => {
       const capa = o.capaId ? capas.find((c) => c.id === o.capaId) : undefined;
-      return [
-        o.number,
-        o.text,
-        o.severity,
-        o.area || "—",
-        o.regulation || "—",
-        o.rootCause || "—",
-        capa?.reference ?? (o.capaId ? o.capaId.slice(0, 8) : "—"),
-      ];
+      return {
+        number: o.number,
+        text: o.text,
+        severity: o.severity,
+        area: o.area || "—",
+        regulation: o.regulation || "—",
+        rootCause: o.rootCause || "—",
+        capaReference: capa?.reference ?? (o.capaId ? o.capaId.slice(0, 8) : "—"),
+      };
     });
-    downloadPDF(`response-package-${liveEvent.referenceNumber}`, headers, rows, {
-      title: `FDA 483 ${liveEvent.referenceNumber} — Response Package`,
-      subtitle: `${liveEvent.observations.length} observation${liveEvent.observations.length === 1 ? "" : "s"} · status: ${liveEvent.status}`,
-    });
+    downloadResponsePackagePDF(
+      `response-package-${liveEvent.referenceNumber}`,
+      `FDA 483 ${liveEvent.referenceNumber} — Response Package`,
+      observations,
+      {
+        reference: liveEvent.referenceNumber,
+        agency: liveEvent.agency,
+        // Printed verbatim — the stored status literal, never re-mapped.
+        status: liveEvent.status,
+        generatedOn: dayjs().tz(timezone).format(`${dateFormat} HH:mm`),
+      },
+    );
   }
 
   // The actual response LETTER (the drafted narrative) as a formal PDF the user

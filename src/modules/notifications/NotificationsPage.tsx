@@ -11,7 +11,6 @@ import { DataTable, type DataColumn, type DataFilter } from "@/components/table/
 import { notificationVisual } from "@/components/notifications/visuals";
 import {
   notificationTypeLabel, notificationModuleLabel, NOTIFICATION_MODULES,
-  NOTIFICATION_PRIORITIES, NOTIFICATION_SEVERITIES, NOTIFICATION_SOURCES,
   notificationPriorityLabel,
 } from "@/lib/labels/notifications";
 import {
@@ -35,13 +34,19 @@ const PRIORITY_COLOR: Record<string, string> = {
 
 interface Props {
   initialData: { rows: NotificationRow[]; total: number };
+  /**
+   * Per-user facet values. Still supplied by the route but no longer read here:
+   * its only consumer was the Type dropdown (`options.types`), removed with the
+   * other trimmed facets. Kept on the props so the route — which is server
+   * data-fetching, out of scope for this display-only trim — is unchanged.
+   */
   options: NotificationFilterOptions;
   /** Unread across the whole (unfiltered) scope — the header count. */
   initialUnread: number;
   stats: NotificationStats;
 }
 
-export function NotificationsPage({ initialData, options, initialUnread, stats }: Props) {
+export function NotificationsPage({ initialData, initialUnread, stats }: Props) {
   const router = useRouter();
   const { org } = useTenantConfig();
   const tz = org.timezone;
@@ -239,6 +244,17 @@ export function NotificationsPage({ initialData, options, initialUnread, stats }
     },
   ];
 
+  /**
+   * Two facets, down from seven. Priority, Severity, Type, Source and Period
+   * were removed as UI — seven dropdowns over an inbox most users scan by
+   * reading rather than by faceting.
+   *
+   * Only the DROPDOWNS are gone. `loadNotifications` still accepts every one of
+   * those params and the query layer still implements them; nothing was removed
+   * server-side, so restoring a facet is re-adding its entry here. The columns
+   * that display the same fields (Priority, Type) are untouched, and the table
+   * still sorts on Status/Type/Received exactly as before.
+   */
   const filters: DataFilter<NotificationRow>[] = [
     {
       key: "status",
@@ -250,41 +266,9 @@ export function NotificationsPage({ initialData, options, initialUnread, stats }
       ],
     },
     {
-      key: "priority",
-      label: "Priority",
-      options: NOTIFICATION_PRIORITIES.map((p) => ({ value: p.value, label: p.label })),
-    },
-    {
-      key: "severity",
-      label: "Severity",
-      options: NOTIFICATION_SEVERITIES.map((s) => ({ value: s.value, label: s.label })),
-    },
-    {
       key: "module",
       label: "Module",
       options: NOTIFICATION_MODULES.map((m) => ({ value: m.value, label: m.label })),
-    },
-    {
-      key: "type",
-      label: "Type",
-      // Only the types this user actually has, so the facet never offers a
-      // value that returns an empty set.
-      options: options.types.map((t) => ({ value: t, label: notificationTypeLabel(t) })),
-    },
-    {
-      key: "source",
-      label: "Source",
-      options: NOTIFICATION_SOURCES.map((s) => ({ value: s.value, label: s.label })),
-    },
-    {
-      key: "period",
-      label: "Period",
-      options: [
-        { value: "24h", label: "Last 24 hours" },
-        { value: "7d", label: "Last 7 days" },
-        { value: "30d", label: "Last 30 days" },
-        { value: "90d", label: "Last 90 days" },
-      ],
     },
   ];
 
@@ -298,32 +282,49 @@ export function NotificationsPage({ initialData, options, initialUnread, stats }
     },
   ];
 
+  /**
+   * Two cards, down from eight. Read, Archived, Today, Critical, High and
+   * Overdue were removed — an eight-card strip above a table that already shows
+   * status and priority per row restated what the rows said.
+   *
+   * The COUNTS behind the removed cards are still computed: `stats` arrives
+   * whole from `getNotificationStats` (lib/queries/notifications.ts:186), and
+   * trimming it would mean editing the query layer, which this display-only
+   * change deliberately leaves alone. Restoring a card is one line here.
+   */
   const summaryCards: { label: string; value: number; accent?: string }[] = [
     { label: "Total", value: stats.total },
     { label: "Unread", value: stats.unread, accent: "#0ea5e9" },
-    { label: "Read", value: stats.read },
-    { label: "Archived", value: stats.archived },
-    { label: "Today", value: stats.today },
-    { label: "Critical", value: stats.critical, accent: "#ef4444" },
-    { label: "High", value: stats.high, accent: "#f59e0b" },
-    { label: "Overdue", value: stats.overdue, accent: "#ef4444" },
   ];
 
   return (
     <PageLayout
       title="Notification Center"
       titleIcon={Bell}
-      description="Every notification addressed to you — summary, search, advanced filters, bulk actions, and one-click access to the record behind each alert. Only your own notifications are ever shown."
+      /* One line. PageLayout renders this into a wrapping `max-w-3xl` <p>
+         (PageLayout.tsx:181) and takes no class override, so the copy itself is
+         shortened rather than truncated. The per-user scoping statement is kept
+         — it is the compliance-relevant half; the feature list it replaced was
+         describing controls already visible on the page. */
+      description="Every notification addressed to you — only your own are ever shown."
       actions={actions}
+      /* "All caught up" removed. The readout now renders ONLY when there is
+         something to report; at zero unread the slot is empty. */
       headerRight={
-        <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
-          {unread > 0 ? `${unread} unread` : "All caught up"}
-        </span>
+        unread > 0 ? (
+          <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            {unread} unread
+          </span>
+        ) : undefined
       }
     >
       {/* ── Summary cards ── */}
+      {/* Full width: two equal columns spanning the container, matching the table
+          below. The earlier `sm:max-w-md` cap left them stranded in the left half
+          of the page — the grid now stretches, and `p-4` gives the roomier cards
+          interior space to match. */}
       <div
-        className="grid gap-2 mb-4 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8"
+        className="grid gap-3 mb-4 grid-cols-2 w-full"
         role="list"
         aria-label="Notification summary"
       >
@@ -331,7 +332,7 @@ export function NotificationsPage({ initialData, options, initialUnread, stats }
           <div
             key={c.label}
             role="listitem"
-            className="rounded-xl border p-3"
+            className="rounded-xl border p-4 w-full"
             style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}
           >
             <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>

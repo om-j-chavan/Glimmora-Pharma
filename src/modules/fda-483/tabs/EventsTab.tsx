@@ -7,6 +7,11 @@ import {
   Plus,
   ArrowRight,
   Search,
+  Building2,
+  MapPin,
+  CalendarDays,
+  ClipboardList,
+  Workflow,
 } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { FDA483Event, EventStatus } from "@/types/fda483";
@@ -20,7 +25,9 @@ import {
   daysUntil,
   getEffectiveEventStatus,
   eventStatusBadge,
+  eventTypeBadge,
   isEventLocked,
+  STAGE_CONFIG,
 } from "../_shared";
 
 /* ── Helpers ── */
@@ -166,16 +173,24 @@ export function EventsTab({
             ...["Open", "Response Due", "Response Submitted", "Closed"].map((s) => ({ value: s, label: s })),
           ]}
         />
-        <Dropdown
-          placeholder="All sites"
-          value={siteFilter}
-          onChange={onSiteFilterChange}
-          width="w-36"
-          options={[
-            { value: "", label: "All sites" },
-            ...sites.map((s) => ({ value: s.id, label: s.name })),
-          ]}
-        />
+        {/* Sites filter — customer_admin only. Every other role in
+            FDA483_VIEW_ROLES (qa_head, regulatory_affairs) works a single
+            site's events in practice, so the picker is noise for them.
+            VISIBILITY ONLY: the parent still owns `siteFilter` and its query is
+            unchanged; hiding the control simply leaves the filter at its
+            default for those roles. */}
+        {role === "customer_admin" && (
+          <Dropdown
+            placeholder="All sites"
+            value={siteFilter}
+            onChange={onSiteFilterChange}
+            width="w-36"
+            options={[
+              { value: "", label: "All sites" },
+              ...sites.map((s) => ({ value: s.id, label: s.name })),
+            ]}
+          />
+        )}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
             {searchedEvents.length} of {events.length}
@@ -215,8 +230,11 @@ export function EventsTab({
         <div className="card overflow-hidden">
           <DataTable
             ariaLabel="FDA 483 events"
-            caption="Regulatory events with type, site, observations, RCA progress, status, and response deadline"
-            minWidth={880}
+            caption="Regulatory events with type, agency, site, workflow stage, observations, RCA progress, status, and response deadline"
+            // 880 → 1040: the Reference cell now stacks agency beneath the code
+            // and a Stage column was added, so the row needs more room before the
+            // table's own horizontal scroll engages.
+            minWidth={1040}
             data={pageEvents}
             rowKey={(ev) => ev.id}
             onRowClick={onOpenEvent}
@@ -243,25 +261,86 @@ export function EventsTab({
               {
                 key: "reference",
                 header: "Reference",
-                cellClassName: "font-mono text-[12px] font-semibold text-(--brand)",
-                render: (ev) => ev.referenceNumber,
+                // Identity cell: an icon tile carries the reference, with the
+                // AGENCY beneath it. Agency was already on the row data and on
+                // the model (FDA483Event.agency) but had no column — surfacing
+                // it here is additive display, no query change.
+                render: (ev) => (
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <span className="mt-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-(--brand-muted)">
+                      <FileWarning className="h-3.5 w-3.5 text-(--brand)" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-mono text-[12px] font-semibold text-(--brand) truncate">
+                        {ev.referenceNumber}
+                      </p>
+                      <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-(--text-muted)">
+                        <Building2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {ev.agency}
+                      </p>
+                    </div>
+                  </div>
+                ),
               },
               {
                 key: "type",
                 header: "Type",
-                render: (ev) => <Badge variant="gray">{ev.type}</Badge>,
+                // Restyle only: the label is still `ev.type` verbatim. Previously
+                // hardcoded `variant="gray"`, which discarded the module's own
+                // per-type colour map; `eventTypeBadge` is the existing helper
+                // over FDA483_EVENT_TYPE_VARIANT (_shared.ts:139). No key, label
+                // or map value changed.
+                render: (ev) => {
+                  const t = eventTypeBadge(ev.type);
+                  return <Badge variant={t.variant}>{t.label}</Badge>;
+                },
               },
               {
                 key: "site",
                 header: "Site",
-                cellClassName: "text-[12px] text-(--text-secondary)",
-                render: (ev) => sites.find((s) => s.id === ev.siteId)?.name ?? "—",
+                // Column HIDDEN from display. `hidden` is DataTable's own
+                // per-column flag (the Actions column already uses it), so the
+                // column definition, `ev.siteId`, the `sites` prop and the site
+                // filter all remain — only the rendered column is dropped.
+                hidden: true,
+                render: (ev) => (
+                  <span className="inline-flex items-center gap-1.5 text-[12px] text-(--text-secondary)">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-(--text-muted)" aria-hidden="true" />
+                    {sites.find((s) => s.id === ev.siteId)?.name ?? "—"}
+                  </span>
+                ),
+              },
+              {
+                key: "stage",
+                header: "Stage",
+                // Ownership pointer (`currentStage`), rendered from the existing
+                // STAGE_CONFIG display map (_shared.ts:65). Read-only surfacing of
+                // a field already on the row — no transition logic here.
+                render: (ev) => {
+                  const cfg = STAGE_CONFIG[ev.currentStage];
+                  if (!cfg) return <span className="text-[12px] text-(--text-muted)">—</span>;
+                  return (
+                    <span className="inline-flex items-start gap-1.5 min-w-0">
+                      <Workflow className="mt-0.5 h-3.5 w-3.5 shrink-0 text-(--text-muted)" aria-hidden="true" />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] text-(--text-primary) truncate">{cfg.label}</span>
+                        {cfg.ownerLabel && cfg.ownerLabel !== "—" && (
+                          <span className="block text-[10px] text-(--text-muted) truncate">{cfg.ownerLabel}</span>
+                        )}
+                      </span>
+                    </span>
+                  );
+                },
               },
               {
                 key: "obs",
                 header: "Obs",
-                cellClassName: "text-[12px] text-(--text-secondary)",
-                render: (ev) => ev.observations.length,
+                render: (ev) => (
+                  <span className="inline-flex items-center gap-1.5 text-[12px] text-(--text-secondary)">
+                    <ClipboardList className="h-3.5 w-3.5 shrink-0 text-(--text-muted)" aria-hidden="true" />
+                    {ev.observations.length}
+                  </span>
+                ),
               },
               {
                 key: "rca",
@@ -293,26 +372,37 @@ export function EventsTab({
                 key: "deadline",
                 header: "Deadline",
                 cellClassName: "text-[12px] text-(--text-secondary)",
+                // Same dates, same thresholds, same wording — `daysLeft`,
+                // `getEffectiveStatus` and `isEventLocked` are called exactly as
+                // before. Only the presentation changed: a calendar icon, and the
+                // urgency line promoted from loose red text to a tinted pill so
+                // it reads at a glance down a column of 25 rows.
                 render: (ev) => {
                   const days = daysLeft(ev.responseDeadline);
                   const effectiveStatus = getEffectiveStatus(ev);
                   const isClosed = isEventLocked(effectiveStatus);
+                  const urgent = days < 0 || (days >= 0 && days <= 5);
                   return isClosed ? (
-                    "—"
+                    <span className="text-(--text-muted)">—</span>
                   ) : (
-                    <>
-                      {dayjs.utc(ev.responseDeadline).tz(timezone).format(dateFormat)}
-                      {days < 0 && (
-                        <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
-                          {Math.abs(days)}d overdue
+                    <div className="min-w-0">
+                      <span className="inline-flex items-center gap-1.5">
+                        <CalendarDays className="h-3.5 w-3.5 shrink-0 text-(--text-muted)" aria-hidden="true" />
+                        {dayjs.utc(ev.responseDeadline).tz(timezone).format(dateFormat)}
+                      </span>
+                      {urgent && (
+                        <span
+                          className="mt-1 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                          style={{ background: "var(--danger-bg)", color: "var(--danger)" }}
+                        >
+                          {days < 0
+                            ? `${Math.abs(days)}d overdue`
+                            : days === 0
+                              ? "Due today"
+                              : `${days}d left`}
                         </span>
                       )}
-                      {days >= 0 && days <= 5 && (
-                        <span className="block text-[10px]" style={{ color: "var(--danger)" }}>
-                          {days === 0 ? "Due today" : `${days}d left`}
-                        </span>
-                      )}
-                    </>
+                    </div>
                   );
                 },
               },
