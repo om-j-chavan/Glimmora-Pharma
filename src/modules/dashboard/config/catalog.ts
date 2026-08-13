@@ -13,7 +13,8 @@
  * ROUTES referenced here are the real app routes under `app/(app)/`. Nothing links
  * to `/change-control` unconditionally (the module is behind
  * `CHANGE_CONTROL_ENABLED`, currently false and redirecting to `/`) or to
- * `/agi-console` (no such route — the AGI surfaces are `/ai-capa` / `/ai-policy`).
+ * `/agi-console` (no such route — the AGI policy surface is `/ai-policy`;
+ * `/ai-capa` was removed with the parallel CAPA lifecycle it served).
  */
 
 import {

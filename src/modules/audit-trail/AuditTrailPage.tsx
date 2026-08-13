@@ -6,7 +6,7 @@
 // tamper-evidence / immutable UI claims until the schema supports them.
 
 import { useState } from "react";
-import { ScrollText } from "lucide-react";
+import { Bot, ScrollText } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
 import { Badge } from "@/components/ui/Badge";
@@ -22,6 +22,7 @@ import type { AuditTrailRow, AuditTrailFilterOptions, PlatformAuditRow } from "@
 // reference — never a raw CUID) rather than forking a second one.
 import { AuditDetailModal } from "@/modules/admin/platform-audit/_components/AuditDetailModal";
 import { SEVERITY_VARIANT, severityOf, type Severity } from "./audit-helpers";
+import { AiActivityPanel } from "./AiActivityPanel";
 
 // MUST match the route's getAuditTrailPage pageSize — the route seeds page 1 as
 // initialData, and Show More requests page 2 at this size.
@@ -50,10 +51,18 @@ interface Props {
   options: AuditTrailFilterOptions;
 }
 
+type TrailTab = "actions" | "ai";
+
 export function AuditTrailPage({ initialData, options }: Props) {
   const { org } = useTenantConfig();
   const tz = org.timezone;
   const [detailRow, setDetailRow] = useState<AuditTrailRow | null>(null);
+  // Two trails, one page. The application trail (Prisma AuditLog) records what
+  // people did to records; the AI trail (the AI service's ai_audit_trail)
+  // records what the AI was asked and what it answered. Both are needed to
+  // reconstruct an AI-assisted decision, and the AI one had no reader at all
+  // until now.
+  const [tab, setTab] = useState<TrailTab>("actions");
 
   const columns: DataColumn<AuditTrailRow>[] = [
     {
@@ -175,6 +184,37 @@ export function AuditTrailPage({ initialData, options }: Props) {
       titleIcon={ScrollText}
       description="Every recorded action in your organisation — actor, timestamp, and the affected record (21 CFR Part 11). Read-only."
     >
+      <div
+        role="tablist"
+        aria-label="Audit trail source"
+        className="flex items-center gap-1 rounded-lg p-0.5 mb-4 w-fit"
+        style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
+      >
+        {([
+          { value: "actions", label: "Record actions", icon: ScrollText },
+          { value: "ai", label: "AI activity", icon: Bot },
+        ] as const).map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            role="tab"
+            aria-selected={tab === opt.value}
+            onClick={() => setTab(opt.value)}
+            className="px-3 py-1.5 text-[11px] font-semibold rounded-md cursor-pointer border-0 inline-flex items-center gap-1.5"
+            style={{
+              background: tab === opt.value ? "var(--brand)" : "transparent",
+              color: tab === opt.value ? "#fff" : "var(--text-secondary)",
+            }}
+          >
+            <opt.icon className="w-3.5 h-3.5" aria-hidden="true" />
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "ai" ? (
+        <AiActivityPanel />
+      ) : (
       <DataTable<AuditTrailRow>
         mode="server"
         fetcher={loadAuditTrail}
@@ -190,6 +230,7 @@ export function AuditTrailPage({ initialData, options }: Props) {
         onRowClick={(e) => setDetailRow(e)}
         emptyState="No audit events match the current filters."
       />
+      )}
 
       <AuditDetailModal row={modalRow} onClose={() => setDetailRow(null)} />
     </PageLayout>

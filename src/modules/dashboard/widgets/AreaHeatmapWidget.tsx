@@ -31,7 +31,9 @@ const LEGEND: [string, string][] = [
 export const AreaHeatmapWidget = memo(function AreaHeatmapWidget({
   data, dashboard, canOpen,
 }: DashboardWidgetProps) {
-  const { sites, kpiFindings, kpiCapas, systems } = data;
+  // `kpiScoredFindings`, not `kpiFindings`: a readiness cell is a posture over all
+  // evidence, so it must not brighten because the reader selected a severity.
+  const { sites, kpiScoredFindings, kpiCapas, systems } = data;
   const gapOpen = canOpen("gap");
 
   // The role's own area first, so an Operations Head reads "Manufacturing" on the
@@ -53,11 +55,11 @@ export const AreaHeatmapWidget = memo(function AreaHeatmapWidget({
       cells: sites.map((site) => ({
         site,
         score: computeAreaScore(area, site.id, {
-          findings: kpiFindings, capas: kpiCapas, systems,
+          findings: kpiScoredFindings, capas: kpiCapas, systems,
         }),
       })),
     })),
-    [areas, sites, kpiFindings, kpiCapas, systems],
+    [areas, sites, kpiScoredFindings, kpiCapas, systems],
   );
 
   return (
@@ -71,7 +73,16 @@ export const AreaHeatmapWidget = memo(function AreaHeatmapWidget({
         />
       ) : (
         <>
-          <div className="overflow-x-auto">
+          {/* Focusable for the same reason as the action plan: with 6 areas × N sites
+              this scrolls sideways on narrow viewports (measured 480px of content in a
+              336px track at 390px wide), and a keyboard user cannot reach the
+              right-hand sites unless the box takes focus. */}
+          <div
+            className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-(--brand)"
+            tabIndex={0}
+            role="region"
+            aria-label="Area readiness heatmap, scrollable"
+          >
             <table className="w-full text-[11px]">
               <caption className="sr-only">
                 Weighted readiness score per GxP area and site. Lower scores carry more open findings, overdue CAPAs or validation risk.

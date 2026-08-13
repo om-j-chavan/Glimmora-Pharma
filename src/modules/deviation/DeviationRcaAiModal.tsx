@@ -260,7 +260,7 @@ export function DeviationRcaAiModal({
       setResult(next);
       loadDraft(next.draft);
     } catch (err) {
-      // The gateway already degrades to the mock on backend failure, so
+      // The backend degrades deterministically and stamps `source`, so
       // reaching here means an unexpected client-side fault. Non-blocking:
       // keep any prior result on screen and let the user retry.
       console.error("[deviation-rca] analysis failed", err);

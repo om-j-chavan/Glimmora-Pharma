@@ -607,10 +607,12 @@ export function AIChatbot() {
     setVoiceState("idle");
     try {
       const result = await aiVoiceChat(blob, messages);
-      const url = URL.createObjectURL(result.audio);
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.play().catch(() => undefined);
+      if (result.audio) {
+        const url = URL.createObjectURL(result.audio);
+        if (audioRef.current) {
+          audioRef.current.src = url;
+          audioRef.current.play().catch(() => undefined);
+        }
       }
       setMessages((m) => {
         const next = m.slice();
@@ -622,9 +624,28 @@ export function AIChatbot() {
               : "🎤 (voice message — transcript unavailable)",
           };
         }
+        // A spoken answer carries the SAME provenance as a typed one: the
+        // backend now runs the identical grounded pipeline and returns the
+        // identical envelope, so the confidence band, cited sources and ticket
+        // handoff all render here too. Previously this pushed a bare string
+        // with no `meta`, which looked exactly like a grounded answer while
+        // having bypassed grounding entirely.
+        const env = result.envelope;
         next.push({
           role: "assistant",
-          content: result.aiReply ?? "🔊 (voice reply — playing)",
+          content: env?.answer ?? "🔊 (voice reply — playing)",
+          meta: env
+            ? {
+                status: env.status,
+                band: env.confidence_band,
+                score: env.confidence_score,
+                sources: env.sources ?? [],
+                suggestTicket: env.suggest_ticket,
+                ticketPrefill: env.ticket_prefill,
+                actionRefused: env.action_refused,
+                auditId: env.audit_id,
+              }
+            : undefined,
         });
         return next;
       });

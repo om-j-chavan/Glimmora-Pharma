@@ -2,16 +2,17 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, XCircle, UploadCloud, FileText, X, BellOff } from "lucide-react";
+import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, XCircle, UploadCloud, FileText, X, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { AIButton } from "@/components/ai";
+import { AIBadge, AIButton } from "@/components/ai";
 import { Modal } from "@/components/ui/Modal";
-import { useAppSelector } from "@/hooks/useAppSelector";
-import { capaCreate, AiBackendError } from "@/lib/aiBackend";
+import { AiBackendError } from "@/lib/aiBackend";
 import { friendlyAiError } from "@/lib/friendlyError";
 
 const aiCapaSchema = z.object({
-  customer_id: z.string().min(1, "Customer ID is required"),
+  // No customer_id field. The tenant is taken from the caller's session by the
+  // BFF and validated against the signed token upstream — a browser-supplied
+  // tenant id is exactly what tenant isolation must not depend on.
   problem_statement: z.string().min(10, "Add a problem statement (at least 10 characters)"),
   source: z.string().min(1, "Source is required"),
   area_affected: z.string().min(1, "Area affected is required"),
@@ -20,6 +21,10 @@ const aiCapaSchema = z.object({
 });
 export type AICapaForm = z.infer<typeof aiCapaSchema>;
 
+/** One of the caller's OWN closed CAPAs the analyser matched against.
+ *  `capa_id` is a real Prisma reference the user can open — the backend drops
+ *  any reference that was not in the history it was given, so this can never be
+ *  a CAPA that does not exist. */
 export interface SimilarCAPA {
   capa_id: string;
   similarity_score: number;
@@ -28,23 +33,24 @@ export interface SimilarCAPA {
 }
 
 export interface AICapaResponse {
-  capa_id: string;
-  customer_id: string;
-  status: string;
-  created_at: string;
   is_recurring: boolean;
   similar_capas: SimilarCAPA[];
-  recurrence_alert?: string;
-  pattern_detected?: string;
-  ai_recommendation?: string;
+  recurrence_alert?: string | null;
+  pattern_detected?: string | null;
+  ai_recommendation: string;
   risk_score: number;
-  message: string;
+  /** How many of the tenant's closed CAPAs were actually compared. */
+  analyzed_history_count: number;
+  /** Set when recurrence could NOT be assessed — no comparable history, or the
+   *  analyser was unavailable. The panel renders this instead of a verdict; it
+   *  must never be shown as "no recurrence found". */
+  note?: string | null;
+  source: "backend" | "fallback";
 }
 
 interface AIGenerateCAPAModalProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultCustomerId?: string;
   onAccepted?: (response: AICapaResponse, form: AICapaForm) => void;
 }
 
@@ -62,7 +68,6 @@ interface AIGenerateCAPAModalProps {
 export function AIGenerateCAPAModal({
   isOpen,
   onClose,
-  defaultCustomerId,
   onAccepted,
 }: AIGenerateCAPAModalProps) {
   const {
@@ -73,7 +78,6 @@ export function AIGenerateCAPAModal({
   } = useForm<AICapaForm>({
     resolver: zodResolver(aiCapaSchema),
     defaultValues: {
-      customer_id: defaultCustomerId ?? "",
       problem_statement: "",
       source: "",
       area_affected: "",
@@ -91,7 +95,6 @@ export function AIGenerateCAPAModal({
   useEffect(() => {
     if (isOpen) {
       reset({
-        customer_id: defaultCustomerId ?? "",
         problem_statement: "",
         source: "",
         area_affected: "",
@@ -103,24 +106,53 @@ export function AIGenerateCAPAModal({
       setLastForm(null);
       setError(null);
     }
-  }, [isOpen, defaultCustomerId, reset]);
+  }, [isOpen, reset]);
 
   async function onSubmit(data: AICapaForm) {
     setError(null);
     setResult(null);
     try {
-      const json = await capaCreate(
-        {
-          customer_id: data.customer_id,
-          problem_statement: data.problem_statement,
-          source: data.source,
-          area_affected: data.area_affected,
-          equipment_product: data.equipment_product,
-          initial_severity: data.initial_severity,
-          document: file,
-        },
-      );
-      setResult(json);
+      // Analysis only. This creates NOTHING — the CAPA is created afterwards
+      // by the normal createCAPA server action when the user accepts. The
+      // route reads this tenant's real closed CAPAs and sends them as the
+      // comparison set; the AI service has no CAPA table of its own any more.
+      // An attached document is forwarded as multipart so its text is
+      // extracted SERVER-SIDE by the same helper Document Review uses. The
+      // browser never parses a PDF, and a scanned/unreadable file is reported
+      // rather than silently ignored.
+      let res: Response;
+      if (file) {
+        const fd = new FormData();
+        fd.append("problem_statement", data.problem_statement);
+        fd.append("source", data.source);
+        fd.append("area_affected", data.area_affected);
+        fd.append("equipment_product", data.equipment_product);
+        fd.append("initial_severity", data.initial_severity);
+        fd.append("document", file);
+        res = await fetch("/api/ai/capa-recurrence", {
+          method: "POST",
+          credentials: "same-origin",
+          body: fd,
+        });
+      } else {
+        res = await fetch("/api/ai/capa-recurrence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            problem_statement: data.problem_statement,
+            source: data.source,
+            area_affected: data.area_affected,
+            equipment_product: data.equipment_product,
+            initial_severity: data.initial_severity,
+          }),
+        });
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+        throw new AiBackendError(res.status, body?.detail ?? `Request failed (${res.status})`, body);
+      }
+      setResult((await res.json()) as AICapaResponse);
       setLastForm(data);
     } catch (err) {
       if (err instanceof AiBackendError && err.status === 401) {
@@ -156,11 +188,6 @@ export function AIGenerateCAPAModal({
             Describe the issue. The AI will analyse historical CAPAs, detect
             recurrence patterns, and propose a recommendation.
           </p>
-
-          {/* customer_id is auto-populated from the logged-in user's tenant
-              (the customer admin's aiUserId). Kept as a hidden field so it
-              still flows through react-hook-form into the request payload. */}
-          <input type="hidden" {...register("customer_id")} />
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -408,36 +435,68 @@ function AIResultPanel({
         ? "var(--warning)"
         : "var(--success)";
 
+  // Three distinct states, and the third is the one that used to be missing:
+  // "we could not assess recurrence" is NOT "no recurrence found". When `note`
+  // is set the panel says so plainly instead of showing a reassuring verdict.
+  const unassessed = Boolean(result.note);
+  const bannerBg = unassessed
+    ? "var(--bg-elevated)"
+    : result.is_recurring
+      ? "var(--warning-bg)"
+      : "var(--brand-muted)";
+  const bannerFg = unassessed
+    ? "var(--text-secondary)"
+    : result.is_recurring
+      ? "var(--warning)"
+      : "var(--brand)";
+  const bannerBorder = unassessed
+    ? "var(--bg-border)"
+    : result.is_recurring
+      ? "var(--warning)"
+      : "var(--brand-border)";
+  const headline = unassessed
+    ? "Recurrence not assessed"
+    : result.is_recurring
+      ? "Recurring issue — this resembles previously closed CAPAs"
+      : "No recurrence detected against your closed CAPAs";
+
   return (
     <div className="space-y-4" aria-live="polite">
       <div
         className="rounded-lg px-3 py-2.5 flex items-start gap-2 text-[12px]"
-        style={{
-          background: result.is_recurring ? "var(--warning-bg)" : "var(--brand-muted)",
-          color: result.is_recurring ? "var(--warning)" : "var(--brand)",
-          border: `1px solid ${result.is_recurring ? "var(--warning)" : "var(--brand-border)"}`,
-        }}
+        style={{ background: bannerBg, color: bannerFg, border: `1px solid ${bannerBorder}` }}
       >
-        {result.is_recurring ? (
+        {unassessed ? (
+          <HelpCircle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
+        ) : result.is_recurring ? (
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
         ) : (
           <Sparkles className="w-4 h-4 mt-0.5 shrink-0" aria-hidden="true" />
         )}
         <div className="min-w-0">
-          <p className="font-semibold">{result.message}</p>
+          <p className="font-semibold">{headline}</p>
           <p className="text-[11px] mt-0.5 opacity-80">
-            {result.capa_id} · {result.status} · created {new Date(result.created_at).toLocaleString()}
+            {result.note
+              ? result.note
+              : `Compared against ${result.analyzed_history_count} closed CAPA${
+                  result.analyzed_history_count === 1 ? "" : "s"
+                } in your organisation.`}
           </p>
         </div>
       </div>
+      <AIBadge source={result.source} />
 
       <div
         className="rounded-lg p-3"
         style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}
       >
         <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>
-            AI risk score
+          <span
+            className="text-[11px] font-medium"
+            style={{ color: "var(--text-secondary)" }}
+            title="Computed from the number of matching closed CAPAs, whether any earlier fix was ineffective, and the reported severity. Not a model-generated number."
+          >
+            Recurrence risk (computed)
           </span>
           <span className="text-[13px] font-bold" style={{ color: riskColor }}>
             {riskPct}%
@@ -464,12 +523,9 @@ function AIResultPanel({
         </Section>
       )}
       {result.recurrence_alert && (
-        <div>
-          <Section icon={<AlertTriangle className="w-3.5 h-3.5" />} label="Recurrence alert">
-            {result.recurrence_alert}
-          </Section>
-          <DismissAlertControl capaId={result.capa_id} alertType="recurrence_alert" />
-        </div>
+        <Section icon={<AlertTriangle className="w-3.5 h-3.5" />} label="Recurrence alert">
+          {result.recurrence_alert}
+        </Section>
       )}
       {result.ai_recommendation && (
         <Section icon={<Sparkles className="w-3.5 h-3.5" />} label="AI recommendation">
@@ -483,7 +539,11 @@ function AIResultPanel({
             className="text-[11px] font-semibold uppercase tracking-wider mb-2"
             style={{ color: "var(--text-muted)" }}
           >
-            Similar past CAPAs
+            Similar past CAPAs from your organisation
+          </p>
+          <p className="text-[11px] mb-2" style={{ color: "var(--text-muted)" }}>
+            Every reference below is one of your own closed CAPAs — open it to
+            review what was done last time.
           </p>
           <ul className="space-y-2" role="list">
             {result.similar_capas.map((s) => (
@@ -506,7 +566,7 @@ function AIResultPanel({
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1" style={{ color: "var(--danger)" }}>
-                        <XCircle className="w-3 h-3" aria-hidden="true" /> ineffective
+                        <XCircle className="w-3 h-3" aria-hidden="true" /> not verified effective
                       </span>
                     )}
                   </span>
@@ -523,19 +583,17 @@ function AIResultPanel({
           New analysis
         </Button>
         <div className="flex gap-2">
-          {/* Close — discard the AI suggestion. The CAPA exists on the AI
-              backend already (the capa/create POST fired before this panel
-              rendered) so the lifecycle viewer at /ai-capa/<id> can still
-              reach it, but nothing is written to the local Prisma CAPA
-              library and nothing appears in the CAPA Tracker. */}
+          {/* Discard — nothing was created, so there is nothing to clean up.
+              This analysis is stateless; the CAPA only exists once the user
+              creates it below. */}
           <Button variant="secondary" type="button" onClick={onClose}>
-            Close
+            Discard
           </Button>
-          {/* Save to library — persists the AI CAPA into this customer's
-              local CAPA library (Prisma) via createCAPA server action, then
-              opens the AI lifecycle dashboard for RCA → Action plan → … */}
+          {/* Create the CAPA through the normal createCAPA server action —
+              same authorization, reference allocation and audit trail as one
+              typed by hand. The analysis above is advisory context. */}
           <Button variant="primary" type="button" icon={CheckCircle2} onClick={onSave}>
-            Save to library
+            Create CAPA
           </Button>
         </div>
       </div>
@@ -563,93 +621,6 @@ function Section({
       <p className="text-[12px]" style={{ color: "var(--text-primary)" }}>
         {children}
       </p>
-    </div>
-  );
-}
-
-/* ── Dismiss-alert control ───────────────────────────────────── */
-
-import { capaDismissAlert } from "@/lib/aiBackend";
-
-function DismissAlertControl({ capaId, alertType }: { capaId: string; alertType: string }) {
-  const userName = useAppSelector((s) => s.auth.user?.name ?? "Operator");
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState("");
-  const [signature, setSignature] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (done) {
-    return (
-      <p className="text-[11px] mt-1 inline-flex items-center gap-1" style={{ color: "var(--success)" }}>
-        <CheckCircle2 className="w-3 h-3" aria-hidden="true" /> Alert dismissed.
-      </p>
-    );
-  }
-
-  async function submit() {
-    if (reason.trim().length < 5 || signature.trim().length < 1) {
-      setError("Reason ≥ 5 chars and signature are required.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await capaDismissAlert({
-        capa_id: capaId,
-        alert_type: alertType,
-        dismissal_reason: reason,
-        electronic_signature: signature,
-        dismissed_by: userName,
-      });
-      setDone(true);
-    } catch (e) {
-      console.error("[capa] dismiss alert failed", e); setError(friendlyAiError(e, "Couldn't dismiss the alert. Please try again."));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="text-[11px] mt-1 inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer underline"
-        style={{ color: "var(--text-secondary)" }}
-      >
-        <BellOff className="w-3 h-3" aria-hidden="true" /> Dismiss alert
-      </button>
-    );
-  }
-
-  return (
-    <div className="mt-2 rounded-lg p-3 space-y-2" style={{ background: "var(--bg-elevated)", border: "1px solid var(--bg-border)" }}>
-      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-        Logged in your audit trail with your identity and a timestamp.
-      </p>
-      <textarea
-        rows={2}
-        className="input text-[12px] resize-none"
-        placeholder="Why is this alert being dismissed? (e.g. investigated and confirmed different root cause)"
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      <input
-        type="text"
-        className="input text-[12px]"
-        placeholder="Electronic signature (e.g. QM-2026-001)"
-        value={signature}
-        onChange={(e) => setSignature(e.target.value)}
-      />
-      {error && (
-        <div role="alert" className="rounded-lg px-2 py-1 text-[11px]" style={{ background: "var(--danger-bg)", color: "var(--danger)" }}>{error}</div>
-      )}
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" type="button" onClick={() => setOpen(false)}>Cancel</Button>
-        <Button variant="primary" type="button" loading={busy} onClick={submit}>Dismiss</Button>
-      </div>
     </div>
   );
 }

@@ -9,7 +9,7 @@
  * configurations, restore access controls, make IT security decisions — so
  * this surface is read-only alerting; a human investigates and acts.
  *
- * Alerts flow through the AI gateway getDriftDetection() (mocked now). Flip
+ * Alerts flow through the AI gateway getDriftDetection() → the FastAPI agent,
  * MOCK_AI_RESPONSES + stream from a real config/access/audit monitor to
  * connect a live agent — the DriftAlert return shape stays identical.
  *
@@ -29,12 +29,12 @@ import {
 import dayjs from "@/lib/dayjs";
 import { getDriftDetection, type DriftDetectionResult } from "@/lib/ai";
 import type { DriftAlert, DriftSeverity, DriftStatus } from "@/types/agi";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { AIBadge } from "@/components/ai";
 import { getSeverityVariant, normalizeSeverityForDisplay } from "@/lib/severity";
+import { useAgentActive } from "@/hooks/useAgiPolicy";
 
 function sevBadge(s: DriftSeverity) {
   return (
@@ -66,6 +66,11 @@ export interface DriftDetectionState {
    *  scan resolves. Surfaced as a badge so fixture alerts are never read as a
    *  live finding about the tenant's systems. */
   source: DriftDetectionResult["source"] | null;
+  /** Set when the scan could NOT run (no monitoring signals available, or the
+   *  analyser was unavailable). `alerts` is then empty because nothing was
+   *  assessed — which is not the same as "no drift found", and the panel must
+   *  say so rather than showing an empty list as a pass. */
+  note: string | null;
   /** Alerts not yet Resolved (drives the "N open" count). */
   openCount: number;
   /** Alerts at Critical severity (drives the "· N critical" count). */
@@ -76,9 +81,7 @@ export interface DriftDetectionState {
 }
 
 export function useDriftDetection(): DriftDetectionState {
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
-  const agiAgent = useAppSelector((s) => s.settings.agi.agents.drift);
-  const agentActive = agiMode !== "manual" && !!agiAgent;
+  const agentActive = useAgentActive("drift");
 
   const [result, setResult] = useState<DriftDetectionResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -103,6 +106,7 @@ export function useDriftDetection(): DriftDetectionState {
   return {
     agentActive,
     alerts,
+    note: result?.note ?? null,
     source: result?.source ?? null,
     openCount,
     criticalCount,
@@ -205,7 +209,7 @@ export function DriftDetectionModal({
   onClose: () => void;
   drift: DriftDetectionState;
 }) {
-  const { alerts, loading, scan, source } = drift;
+  const { alerts, loading, scan, source, note } = drift;
   return (
     <Modal
       open={open}
@@ -217,9 +221,10 @@ export function DriftDetectionModal({
             <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
               {driftSummary(drift)}
             </span>
-            {/* Provenance — getDriftDetection() silently falls back to the mock
-                fixture when the backend errors; without this the user cannot tell
-                a real scan from demo data. Mirrors ApprovalBriefPanel. */}
+            {/* Provenance. The gateway no longer substitutes a client-side
+                fixture — degradation happens server-side and is stamped
+                `source` — but a deterministic fallback must still never wear
+                the live-AI colour. */}
             {!loading && source && <AIBadge source={source} />}
           </span>
           <Button
@@ -242,6 +247,23 @@ export function DriftDetectionModal({
           coverage. The agent alerts on drift — it does <strong>not</strong>{" "}
           change configurations, restore access, or make IT security decisions.
         </p>
+
+        {/* An empty alert list means one of two very different things, and
+            conflating them is how a monitoring control reports a clean bill of
+            health it never earned. `note` is set when the scan could not run. */}
+        {note && !loading && (
+          <p
+            role="status"
+            className="text-[11px] rounded-lg px-2.5 py-2"
+            style={{
+              background: "var(--warning-bg)",
+              color: "var(--warning)",
+              border: "1px solid var(--warning)",
+            }}
+          >
+            {note}
+          </p>
+        )}
 
         <DriftAlertList alerts={alerts} loading={loading} />
       </div>

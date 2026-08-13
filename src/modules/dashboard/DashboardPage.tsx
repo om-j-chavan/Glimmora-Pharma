@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import clsx from "clsx";
 import { FilterX, LayoutDashboard, RefreshCw } from "lucide-react";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useAppSelector } from "@/hooks/useAppSelector";
@@ -16,7 +17,6 @@ import { mapCAPAFromPrisma } from "@/lib/mappers/capaMapper";
 import { adaptDeviation, type PrismaDeviationWithCapa } from "@/modules/deviation/DeviationPage.adapter";
 import { adaptPrismaSystem } from "@/types/csv-csa";
 import { Button } from "@/components/ui/Button";
-import { DateRangePicker } from "@/components/ui/DatePicker";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Drawer } from "@/components/ui/Drawer";
 import { PageLayout, type PageAction } from "@/components/layout/PageLayout";
@@ -161,25 +161,15 @@ export function DashboardPage({
   const [siteFilter, setSiteFilter] = useState("");
   const [sevFilter, setSevFilter] = useState("");
   const [timeFilter, setTimeFilter] = useState("30");
-  // Custom-range bounds, "YYYY-MM-DD". Read by the hook ONLY when timeFilter is
-  // "custom"; kept (not cleared) when switching to a preset so toggling back
-  // restores the range the user picked.
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
   const [askAiOpen, setAskAiOpen] = useState(false);
-
-  const isCustomRange = timeFilter === "custom";
 
   /**
    * ONE reset for every header filter — see the single "Clear filters" button
-   * below. Resets period to the "30" default AND drops the custom range, so no
-   * invisible date window can survive a clear.
+   * below. Resets the period to its "30" default alongside site + severity.
    */
   const anyFilterActive = timeFilter !== "30" || !!siteFilter || !!sevFilter;
   const clearAllFilters = useCallback(() => {
     setTimeFilter("30");
-    setCustomFrom("");
-    setCustomTo("");
     setSiteFilter("");
     setSevFilter("");
   }, []);
@@ -195,8 +185,8 @@ export function DashboardPage({
   const handleRefresh = useCallback(() => startRefresh(() => router.refresh()), [router]);
 
   const filters = useMemo<DashboardFilters>(
-    () => ({ siteId: siteFilter, severity: sevFilter, period: timeFilter, from: customFrom, to: customTo }),
-    [siteFilter, sevFilter, timeFilter, customFrom, customTo],
+    () => ({ siteId: siteFilter, severity: sevFilter, period: timeFilter }),
+    [siteFilter, sevFilter, timeFilter],
   );
 
   /* ── Adapt the tenant-wide rows to the slice shape the KPI maths expects ── */
@@ -244,20 +234,22 @@ export function DashboardPage({
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const showSitePicker = !selectedSiteId && sites.length > 1;
 
-  /*
-   * GP-CA-011's per-filter chips were REMOVED in favour of the single "Clear
-   * filters" button below.
-   *
-   * Each chip restated a value its own control was already displaying — the
-   * period dropdown shows the period, the site dropdown the site, the severity
-   * dropdown the severity, and the range picker's trigger shows the chosen
-   * range. So the chip row carried no information the row above it lacked, and
-   * it put a second, differently-shaped clear affordance (a ✕) beside the
-   * existing "Clear filters" button. One reset, one place.
-   *
-   * Nothing about FILTERING changed: the same five setters and the same default
-   * values, invoked from one handler instead of three.
-   */
+  // GP-CA-011: active (non-default) filters shown as dismissable chips. Each chip
+  // resets ONLY its own filter via the existing setter — no new state or filtering.
+  // The site chip is listed only when the picker is shown, so a site-bound user
+  // never sees a chip for a filter they cannot clear.
+  const activeFilterChips = useMemo<{ key: string; label: string; clear: () => void }[]>(
+    () => [
+      ...(timeFilter !== "30"
+        ? [{ key: "time", label: timeFilter === "all" ? "Raised: all time" : `Raised: last ${timeFilter} days`, clear: () => setTimeFilter("30") }]
+        : []),
+      ...(showSitePicker && siteFilter
+        ? [{ key: "site", label: sites.find((s) => s.id === siteFilter)?.name ?? "Selected site", clear: () => setSiteFilter("") }]
+        : []),
+      ...(sevFilter ? [{ key: "sev", label: sevFilter, clear: () => setSevFilter("") }] : []),
+    ],
+    [timeFilter, siteFilter, sevFilter, showSitePicker, sites],
+  );
 
   const widgetProps = { data, dashboard, access, canOpen };
 
@@ -307,53 +299,37 @@ export function DashboardPage({
           {/* The role pill (role label · focus area) was removed from the header.
               Display only — `access.role` still drives resolveDashboard, every
               permission gate and the focus-area scoping exactly as before. */}
+{/* The period control is labelled for what it now does. It scopes the two
+              "raised" trend charts and nothing else — every KPI card, the heatmap and
+              the compliance board are CURRENT STATE and deliberately ignore it, because
+              "open" and "overdue" are not events inside a window. Naming it "Raised"
+              rather than the old bare "Last 30 days" stops the header implying the
+              whole page is period-scoped. */}
           <Dropdown
             value={timeFilter}
             onChange={setTimeFilter}
-            width="w-36"
+            width="w-44"
+            ariaLabel="Trend period — scopes the raised-volume charts only"
             options={[
-              { value: "7", label: "Last 7 days" },
-              { value: "30", label: "Last 30 days" },
-              { value: "60", label: "Last 60 days" },
-              { value: "90", label: "Last 90 days" },
-              { value: "all", label: "All time" },
-              { value: "custom", label: "Custom range" },
+              { value: "7", label: "Raised: last 7 days" },
+              { value: "30", label: "Raised: last 30 days" },
+              { value: "60", label: "Raised: last 60 days" },
+              { value: "90", label: "Raised: last 90 days" },
+              { value: "all", label: "Raised: all time" },
             ]}
           />
-          {/*
-            Custom range — ONE calendar, replacing the two separate Start/End
-            `DatePicker` fields.
-
-            `DateRangePicker` is the existing sibling export in the same module,
-            built on the same `CalendarPopover` grid as `DatePicker`, so it needs
-            no new component and no new dependency: first click sets the start,
-            second sets the end, and the days between are tinted `--brand-muted`
-            (DatePicker.tsx:640 `isInRange`).
-
-            from <= to is enforced STRUCTURALLY rather than validated: a click
-            before the current start restarts the range there instead of
-            producing an inverted one (DatePicker.tsx:574-586), so an invalid
-            range is unreachable through the UI.
-
-            It emits the same "YYYY-MM-DD" pair into the same two state slots, so
-            `useDashboardData` is untouched — and a start-only selection still
-            yields `to: ""`, which the hook already treats as no filter.
-          */}
-          {isCustomRange && (
-            <DateRangePicker
-              id="dash-period-range"
-              value={{ start: customFrom, end: customTo }}
-              onChange={(r) => { setCustomFrom(r.start); setCustomTo(r.end); }}
-              placeholder="Pick a date range"
-              className="w-56"
-            />
-          )}
+          /* The custom date range was DROPPED in the merge with 34f5708. Their
+             trend rework has the buckets self-apply the period, so a "custom"
+             value would need `trendBuckets` support it does not have; keeping our
+             pre-filter would double-apply the window. Their preset period is the
+             single source of truth for trend scoping. */
           {showSitePicker && (
             <Dropdown
               placeholder="All sites"
               value={siteFilter}
               onChange={setSiteFilter}
               width="w-36"
+              ariaLabel="Filter dashboard by site"
               options={[{ value: "", label: "All sites" }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
             />
           )}
@@ -362,6 +338,7 @@ export function DashboardPage({
             value={sevFilter}
             onChange={setSevFilter}
             width="w-32"
+            ariaLabel="Filter findings and deviations by severity"
             options={[
               { value: "", label: "All severities" },
               { value: "Critical", label: "Critical" },
@@ -370,6 +347,23 @@ export function DashboardPage({
               { value: "Low", label: "Low" },
             ]}
           />
+          {/* Chips are THEIRS (34f5708 relabelled them "Raised: …" so the header
+              states what the period actually scopes). Our single "Clear filters"
+              button sits after them and resets everything at once — the two
+              coexist: a chip clears one filter, the button clears all. */}
+          {activeFilterChips.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={c.clear}
+              aria-label={`Remove ${c.label} filter`}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border-none cursor-pointer"
+              style={{ backgroundColor: "var(--bg-border)", color: "var(--text-secondary)" }}
+            >
+              {c.label}
+              <span aria-hidden="true" className="text-[13px] leading-none">×</span>
+            </button>
+          ))}
           {/*
             The ONE reset. Previously the period had to be cleared from its chip
             while this button cleared only site + severity — two affordances that
@@ -423,26 +417,34 @@ export function DashboardPage({
             `items-stretch` + `h-full` on each item AND its card make every card in a
             row share that row's height, so tops AND bottoms line up and no short panel
             leaves a blank band beside (or under) a taller neighbour — the dead space
-            the old `items-start` left. A card's `.card-body` is capped
-            (`max-h-[26rem]`) and scrolls internally (`overflow-y-auto`) while its
-            header stays fixed, so a long list (AI insights, risk signals, action plan)
-            scrolls in place instead of stretching the page; the fixed-height charts sit
-            under the cap and never scroll or clip. `min-w-0` keeps a wide child (a
-            chart's ResponsiveContainer, the action-plan table) measuring against its
-            track. `gap-4 lg:gap-6` is the same rhythm token as the KPI row above. */}
+            the old `items-start` left. `min-w-0` keeps a wide child (a chart's
+            ResponsiveContainer, the action-plan table) measuring against its track.
+            `gap-4 lg:gap-6` is the same rhythm token as the KPI row above.
+
+            NO HEIGHT CAP ON THE CARD BODY, deliberately. This grid item used to carry
+            `[&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto` to make long
+            panels scroll in place. That pair never worked: the second class sat
+            immediately against the `${…}` interpolation that appended `md:col-span-2`,
+            so Tailwind's scanner extracted `…overflow-y-auto${wide` as the candidate
+            and never emitted the rule. Only the cap shipped — leaving every widget at
+            `max-height:416px` with `overflow-y:visible` inside a `.card` that is
+            `overflow-hidden`. Anything past 416px was clipped with no scrollbar and no
+            way to reach it (measured: "Quality Signals" rendered 479px of content into
+            the 416px box, so 63px of live compliance signals were unreachable).
+
+            The page scrolls; the widgets do not. `<main>` in AppShell owns the one
+            vertical scroll for every page in the app, so a card that grows simply makes
+            the page longer — which is what a dashboard should do, and what keeps every
+            widget's content reachable with an ordinary trackpad. The single exception is
+            the action plan, whose height is row-count-driven; it keeps its OWN internal
+            scroll box (see ActionPlanTable) and that box is now the only scroller in the
+            card rather than a second one nested inside a shorter cap. Interpolation is
+            done through `clsx` so a class can never be glued to an expression again. */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch [grid-auto-flow:row_dense]">
           {widgets.map(({ key, wide }) => (
             <div
               key={key}
-              // NOTE the space before `${`. Tailwind scans raw source text for class
-              // candidates, so a class glued to a template interpolation is read as
-              // one token (`…overflow-y-auto${wide`) and NEVER generated. That is
-              // exactly what happened here: `max-h-[26rem]` compiled (it had a
-              // trailing space) but `overflow-y-auto` did not, so every card-body was
-              // capped at 26rem with `overflow: visible` and the surplus was clipped
-              // by `.card { overflow: hidden }` (index.css) instead of scrolling.
-              // Keep a separator before any interpolation in a className template.
-              className={`min-w-0 h-full [&>*]:h-full [&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto ${wide ? "md:col-span-2" : ""}`}
+              className={clsx("min-w-0 h-full [&>*]:h-full", wide && "md:col-span-2")}
             >
               <DashboardWidget widget={key} {...widgetProps} />
             </div>

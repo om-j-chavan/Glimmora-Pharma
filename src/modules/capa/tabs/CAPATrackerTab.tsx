@@ -10,7 +10,6 @@ import { isOverdue, STATUS_LABEL, type CAPAStatus } from "@/types/capa";
 import type { AuthUser } from "@/store/auth.slice";
 import type { UserConfig } from "@/store/settings.slice";
 import { Button } from "@/components/ui/Button";
-import { AIButton } from "@/components/ai";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Badge } from "@/components/ui/Badge";
 import { DataTable, type Column } from "@/components/shared";
@@ -356,23 +355,16 @@ export function CAPATrackerTab({
                   const referenceDisplay = c.reference ?? `CAPA-LEGACY-${c.id.slice(0, 8)}`;
                   return (
                     <div className="flex items-center justify-end gap-1">
-                      {/* AI Lifecycle — opens /ai-capa/<reference> in the
-                          AI-managed lifecycle dashboard. stopPropagation so
-                          the row's onClick (which opens the detail modal)
-                          doesn't fire as well. The button is shown for every
-                          row; if the CAPA isn't AI-tracked the lifecycle page
-                          surfaces an empty-state for the missing record. */}
-                      <AIButton
-                        variant="quiet"
-                        size="xs"
-                        iconOnly
-                        aria-label={`Open ${referenceDisplay} in AI lifecycle`}
-                        title="Open AI lifecycle"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          router.push(`/ai-capa/${encodeURIComponent(c.reference ?? c.id)}`);
-                        }}
-                      />
+                      {/* REMOVED — the "AI Lifecycle" button.
+                          It routed to /ai-capa/<Prisma reference>, but that
+                          page read the AI service's OWN CAPA table, whose ids
+                          are allocated separately (CAPA-2026-301 vs this app's
+                          CAPA-<SITE>-2026-001). The two id spaces never
+                          intersected, so it 404'd for every row and showed an
+                          empty state — including for CAPAs that WERE
+                          AI-generated. The page itself is gone: it drove a
+                          second CAPA lifecycle that never synchronised back
+                          here. This tracker is the system of record. */}
                       {onReopen && (c.status === "closed" || c.status === "rejected") && (
                         <Button variant="ghost" size="xs" icon={RotateCcw} aria-label={`Reopen ${referenceDisplay}`} title="Reopen CAPA" onClick={(e) => { e.stopPropagation(); onReopen(c.id); }} />
                       )}

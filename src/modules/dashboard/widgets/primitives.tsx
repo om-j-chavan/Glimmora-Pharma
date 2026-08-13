@@ -19,6 +19,20 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { READINESS_COLORS } from "@/lib/kpi";
 
+/* ── Period label ─────────────────────────────────────────────────────────── */
+
+/**
+ * Human name for the header's period value, for the two panels the period filter
+ * actually reaches. Defined ONCE so the chart title, its empty state and the
+ * header chip can never describe the same window differently.
+ */
+export function periodLabel(period: string): string {
+  if (period === "all") return "all time";
+  const days = Number.parseInt(period, 10);
+  if (!Number.isFinite(days)) return "all time";
+  return `last ${days} days`;
+}
+
 /* ── Empty state ──────────────────────────────────────────────────────────── */
 
 export function WidgetEmpty({

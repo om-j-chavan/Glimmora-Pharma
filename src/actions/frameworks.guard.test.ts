@@ -14,12 +14,29 @@ import { test, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 
 // Mutable state the fakes read at call time; reset before each test.
+/** Shapes of the Prisma calls this suite records, kept minimal — only the
+ *  fields the assertions actually read. */
+interface PrismaUpdateArgs {
+  where: { id: string };
+  data: Record<string, unknown>;
+}
+interface PrismaCreateArgs {
+  data: Record<string, unknown>;
+}
+
 const state: {
   session: { user: { id: string; tenantId: string; role: string } };
   findUnique: { name: string; platformEnabled: boolean; key: string } | null;
   findMany: { id: string; name: string; platformEnabled: boolean; key: string }[];
   emptied: { value: string; label: string }[];
-  calls: { findUnique: number; findMany: number; update: any[]; audit: any[] };
+  calls: {
+    findUnique: number;
+    findMany: number;
+    // Recorded Prisma call arguments. `unknown` rather than `any`: these are
+    // only ever inspected through explicit narrowing in the assertions below.
+    update: PrismaUpdateArgs[];
+    audit: PrismaCreateArgs[];
+  };
 } = {} as never;
 
 function reset() {
@@ -35,10 +52,10 @@ const fakePrisma = {
   framework: {
     findUnique: async () => { state.calls.findUnique++; return state.findUnique; },
     findMany: async () => { state.calls.findMany++; return state.findMany; },
-    update: async (args: any) => { state.calls.update.push(args); return { id: args.where.id, ...args.data }; },
+    update: async (args: PrismaUpdateArgs) => { state.calls.update.push(args); return { id: args.where.id, ...args.data }; },
     aggregate: async () => ({ _max: { sortOrder: 0 } }),
   },
-  auditLog: { create: async (args: any) => { state.calls.audit.push(args); } },
+  auditLog: { create: async (args: PrismaCreateArgs) => { state.calls.audit.push(args); } },
 };
 
 mock.module("@/lib/prisma", { namedExports: { prisma: fakePrisma } });

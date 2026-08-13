@@ -55,6 +55,9 @@ export interface DropdownProps {
   size?: "sm" | "md";
   disabled?: boolean;
   className?: string;
+  /** Accessible name for the trigger. Without it the only name a screen reader
+   *  gets is the selected value, which never says what the control filters. */
+  ariaLabel?: string;
 }
 
 const badgeColors: Record<string, string> = {
@@ -83,6 +86,7 @@ export function Dropdown({
   size = "md",
   disabled = false,
   className,
+  ariaLabel,
 }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -373,6 +377,10 @@ export function Dropdown({
         onClick={toggleOpen}
         aria-haspopup="listbox"
         aria-expanded={open}
+        // Without this the accessible name is just the CURRENT VALUE — a screen
+        // reader announces "Last 30 days, button" with no clue what it filters.
+        // Optional, so every existing call site is unchanged.
+        aria-label={ariaLabel}
         className={clsx(
           "w-full flex items-center justify-between gap-2",
           "px-3 rounded-lg text-[13px] font-medium",

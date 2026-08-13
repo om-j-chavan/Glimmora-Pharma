@@ -10,7 +10,7 @@
  * determinations, replace Regulatory Affairs expertise — every card carries
  * the advisory disclaimer and the agent never acts on its own.
  *
- * Data flows through the AI gateway getRegulatoryIntelligence() (mocked now;
+ * Data flows through the AI gateway getRegulatoryIntelligence() → the FastAPI
  * flip MOCK_AI_RESPONSES + implement the real fetch to connect a live feed —
  * the return shape stays identical, so this UI needs no changes).
  */
@@ -32,25 +32,34 @@ import dayjs from "@/lib/dayjs";
 import {
   getRegulatoryIntelligence,
   type RegulatoryGuidanceUpdate,
+  type RegulatoryIntelligenceResult,
 } from "@/lib/ai";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { StatCard, CardSection } from "@/components/shared";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { IMPACT_BADGE, IMPACT_LABEL, SOURCE_COLOR } from "./_shared";
+import { AIBadge } from "@/components/ai";
+import { useAgentActive } from "@/hooks/useAgiPolicy";
 
 const MONITORED_SOURCES = ["FDA", "EMA", "ICH", "MHRA"] as const;
 
 export function RegulatoryIntelligencePage() {
   const router = useRouter();
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
-  const agiAgent = useAppSelector((s) => s.settings.agi.agents.regulatory);
-  const agentActive = agiMode !== "manual" && agiAgent;
+  const agentActive = useAgentActive("regulatory");
 
   const [updates, setUpdates] = useState<RegulatoryGuidanceUpdate[]>([]);
   const [scannedAt, setScannedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Set when the agency feed could not be reached. An empty list then means
+  // "nothing was retrieved", not "nothing was published" — and the page must
+  // not present an outage as a quiet period.
+  const [note, setNote] = useState<string | null>(null);
+  // Provenance of the current list. This feature has a genuine non-live
+  // state now (the agency feed unreachable / the classifier unavailable),
+  // so a badge carries real information rather than always saying the same
+  // thing.
+  const [source, setSource] = useState<RegulatoryIntelligenceResult["source"] | null>(null);
   // Acknowledged ids — "Mark reviewed" is a local, advisory action (no
   // determination is recorded). A real backend would persist this per user.
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
@@ -61,6 +70,8 @@ export function RegulatoryIntelligencePage() {
       const result = await getRegulatoryIntelligence();
       setUpdates(result.updates);
       setScannedAt(result.scannedAt);
+      setNote(result.note ?? null);
+      setSource(result.source);
     } finally {
       setLoading(false);
     }
@@ -120,9 +131,18 @@ export function RegulatoryIntelligencePage() {
       >
         <Bot className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "var(--ai-accent)" }} aria-hidden="true" />
         <p className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-          AI-monitored guidance summaries. The agent flags changes and suggests
-          alignment — it does <strong>not</strong> interpret requirements or make
-          compliance determinations. Regulatory Affairs must review and decide.
+          Every item below is a real document retrieved from the US Federal
+          Register — the reference links to the agency&rsquo;s own published page.
+          The AI classifies and summarises what was retrieved; it does{" "}
+          <strong>not</strong> author document references, interpret requirements,
+          or make compliance determinations. Regulatory Affairs must review and
+          decide.
+          {source && (
+            <>
+              {" "}
+              <AIBadge source={source} />
+            </>
+          )}
           {scannedAt && (
             <>
               {" "}
@@ -154,6 +174,18 @@ export function RegulatoryIntelligencePage() {
               Scanning FDA/EMA agency feeds…
             </p>
           </div>
+        ) : note ? (
+          <p
+            role="status"
+            className="text-[12px] rounded-lg px-3 py-2.5 my-2"
+            style={{
+              background: "var(--warning-bg)",
+              color: "var(--warning)",
+              border: "1px solid var(--warning)",
+            }}
+          >
+            {note}
+          </p>
         ) : updates.length === 0 ? (
           <p className="text-[12px] italic py-4" style={{ color: "var(--text-muted)" }}>
             No guidance updates found. Use Scan for updates to check the agency feeds.
@@ -209,7 +241,23 @@ export function RegulatoryIntelligencePage() {
                     {u.title}
                   </p>
                   <p className="text-[11px] mt-0.5" style={{ color: "var(--text-muted)" }}>
-                    <span className="font-mono">{u.docRef}</span> &middot; {u.category} &middot;{" "}
+                    {/* Every item now comes from a real Federal Register
+                        record, so the reference links to the agency's own
+                        published document and the reader can verify it. */}
+                    {u.url ? (
+                      <a
+                        className="font-mono"
+                        href={u.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: "var(--brand)" }}
+                      >
+                        {u.docRef}
+                      </a>
+                    ) : (
+                      <span className="font-mono">{u.docRef}</span>
+                    )}{" "}
+                    &middot; {u.category} &middot;{" "}
                     Published {dayjs(u.publishedDate).format("DD MMM YYYY")}
                   </p>
 

@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import { AIButton, AIBadge } from "@/components/ai";
 import { getApprovalBrief, type ApprovalBriefResult } from "@/lib/ai";
 import type { CAPA } from "@/store/capa.slice";
+import { useAgentActive, useAgiPolicy } from "@/hooks/useAgiPolicy";
 
 /* ── Feature J — CAPA Approval Brief (reviewer assist) ──
  *
@@ -15,7 +15,7 @@ import type { CAPA } from "@/store/capa.slice";
  * e-signed decision stays with the human (see the AGI policy CANNOT-DO list).
  *
  * Gating mirrors the other AGI surfaces (DeviationIntelligencePanel, etc.):
- *   agentActive = settings.agi.mode !== "manual" && settings.agi.agents.capa
+ *   agentActive = useAgentActive("capa")  — tenant policy, server-enforced
  * In "autonomous" mode the brief loads on mount; in "assisted" mode the
  * reviewer clicks to generate. Only rendered while the CAPA is awaiting
  * approvals (pending_qa_review).
@@ -32,9 +32,8 @@ export function ApprovalBriefPanel({
   approvalsRequired: number;
   unresolvedConcerns: number;
 }) {
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
-  const agiAgent = useAppSelector((s) => s.settings.agi.agents.capa);
-  const agentActive = agiMode !== "manual" && agiAgent;
+  const { mode: agiMode } = useAgiPolicy();
+  const agentActive = useAgentActive("capa");
 
   const [brief, setBrief] = useState<ApprovalBriefResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -59,7 +58,7 @@ export function ApprovalBriefPanel({
       });
       setBrief(result);
     } catch {
-      // getApprovalBrief already falls back to the mock internally, so a
+      // The backend degrades deterministically and stamps `source`, so a
       // throw here is unexpected — surface a soft error and let the user retry.
       setError("Could not prepare the approval brief. Try again.");
     } finally {

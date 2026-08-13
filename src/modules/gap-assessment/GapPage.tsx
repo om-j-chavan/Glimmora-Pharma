@@ -54,6 +54,7 @@ import { GapRegisterTab } from "./tabs/GapRegisterTab";
 import { GapEvidenceTab } from "./tabs/GapEvidenceTab";
 import { AddFindingModal, type FindingForm } from "./modals/AddFindingModal";
 import { EvidenceLinkModal } from "./modals/EvidenceLinkModal";
+import { useAgiPolicy } from "@/hooks/useAgiPolicy";
 
 /* ── Constants ── */
 
@@ -161,10 +162,10 @@ export function GapPage({ findings: serverFindings, evidenceDocFindingIds, assig
   // Effective enabled frameworks for THIS tenant — server-resolved, non-persisted
   // (replaces the old settings.frameworks booleans; see frameworks.slice).
   const frameworkList = useAppSelector((s) => s.frameworks.list);
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
+  const { mode: agiMode, agents: agiAgents } = useAgiPolicy();
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const authUser = useAppSelector((s) => s.auth.user);
-  const agiCapa = useAppSelector((s) => s.settings.agi.agents.capa);
+  const agiCapa = agiAgents.capa;
 
   const activeFrameworks = useMemo(
     () => frameworkList.map((f) => f.key),

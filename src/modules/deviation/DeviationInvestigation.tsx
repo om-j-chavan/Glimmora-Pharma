@@ -40,10 +40,10 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { AIButton } from "@/components/ai";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useAppSelector } from "@/hooks/useAppSelector";
 import type { RcaSuggestion } from "@/lib/ai";
 import { DeviationRcaAiModal } from "./DeviationRcaAiModal";
 import type { Deviation, DeviationRCAMethod } from "@/store/deviation.slice";
+import { useAgentActive } from "@/hooks/useAgiPolicy";
 import {
   saveInvestigationProgress as saveInvestigationProgressAction,
   completeInvestigation as completeInvestigationAction,
@@ -297,9 +297,7 @@ export function InvestigationSection({
   // ── Deviation RCA Intelligence (AI investigation assist) ──────────────
   // Gated by the same AGI policy every other agent reads: the deviation agent
   // must be enabled and the tenant must not be in manual mode.
-  const agiMode = useAppSelector((s) => s.settings.agi.mode);
-  const agiDeviationAgent = useAppSelector((s) => s.settings.agi.agents.deviation);
-  const aiAvailable = agiMode !== "manual" && agiDeviationAgent;
+  const aiAvailable = useAgentActive("deviation");
   const [aiOpen, setAiOpen] = useState(false);
   // An AI draft awaiting the "replace your existing analysis?" confirmation.
   const [pendingAi, setPendingAi] = useState<{ method: DeviationRCAMethod; suggestion: RcaSuggestion } | null>(null);

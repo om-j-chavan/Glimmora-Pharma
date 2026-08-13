@@ -148,248 +148,104 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
 }
 
 /* ══════════════════════════════════════════════════════════════ */
-/* CAPA                                                           */
+/* REMOVED — the CAPA lifecycle transport                         */
+/* ══════════════════════════════════════════════════════════════ */
+/**
+ * capaCreate / capaListAll / capaListByCustomer / capaStatus /
+ * capaDismissAlert / rcaSubmit / rcaByCapa / rcaStatus / actionPlanSubmit /
+ * actionPlanByCapa / actionPlanStatus / monitoringCheck / monitoringByCapa /
+ * monitoringStatus / effectivenessCheck / effectivenessByCapa /
+ * effectivenessStatus / closureInitiate / closureByCapa / closureStatus /
+ * usersList — and the SimilarCAPA / CAPACreateResponse / RCACreateRequest / …
+ * types that went with them.
+ *
+ * They addressed a SECOND CAPA system of record inside the AI service, which
+ * ran its own RCA → action plan → monitoring → effectiveness → closure
+ * lifecycle and never synchronised back to the Prisma CAPA these screens
+ * actually show. Inside it, an LLM produced the effectiveness score and the
+ * flag that closed a regulated record, no submit endpoint carried a role check,
+ * and the "electronic signature" was any non-blank string.
+ *
+ * Prisma is the system of record. CAPA lifecycle writes go through the server
+ * actions in src/actions/capas/, which carry the authorization, readiness gates,
+ * Part 11 signing and audit trail. The one genuinely useful piece of the old
+ * flow — recurrence analysis — is now a stateless call to
+ * /api/ai/capa-recurrence, grounded in the tenant's own closed CAPAs.
+ *
+ * Do not reintroduce a CAPA write path here.
+ */
+
+/* ══════════════════════════════════════════════════════════════ */
+/* AI audit trail                                                 */
 /* ══════════════════════════════════════════════════════════════ */
 
-export interface SimilarCAPA {
-  capa_id: string;
-  similarity_score: number;
-  description: string;
-  was_effective: boolean;
-}
-
-export interface CAPACreateResponse {
-  capa_id: string;
-  customer_id: string;
+export interface AiAuditRow {
+  audit_id: string;
+  request_id: string | null;
+  action_type: string;
+  feature_id: string;
+  record_id: string;
+  username: string;
+  model: string | null;
+  prompt_version: string | null;
+  latency_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
   status: string;
-  created_at: string;
-  is_recurring: boolean;
-  similar_capas: SimilarCAPA[];
-  recurrence_alert?: string;
-  pattern_detected?: string;
-  ai_recommendation?: string;
-  risk_score: number;
-  message: string;
+  timestamp: string;
 }
 
-export interface CapaCreateInput {
-  customer_id: string;
-  problem_statement: string;
-  source: string;
-  area_affected: string;
-  equipment_product: string;
-  initial_severity: string;
-  document?: File | null;
+export interface AiAuditPage {
+  total: number;
+  limit: number;
+  offset: number;
+  audit_logs: AiAuditRow[];
 }
 
-export async function capaCreate(input: CapaCreateInput): Promise<CAPACreateResponse> {
-  const fd = new FormData();
-  fd.append("customer_id", input.customer_id);
-  fd.append("problem_statement", input.problem_statement);
-  fd.append("source", input.source);
-  fd.append("area_affected", input.area_affected);
-  fd.append("equipment_product", input.equipment_product);
-  fd.append("initial_severity", input.initial_severity);
-  if (input.document) fd.append("document", input.document);
-  return request<CAPACreateResponse>("/api/v1/capa/create", { method: "POST", formBody: fd });
-}
-
-export const capaListAll = () =>
-  request<unknown>("/api/v1/capa/all", { method: "GET" });
-
-export const capaListByCustomer = (customerId: string) =>
-  request<unknown>(`/api/v1/capa/customer/${encodeURIComponent(customerId)}`, { method: "GET" });
-
-export const capaStatus = (capaId: string) =>
-  request<unknown>(`/api/v1/capa/status/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
-
-export interface AlertDismissalRequest {
-  capa_id: string;
-  alert_type: string;
-  dismissal_reason: string;
-  electronic_signature: string;
-  dismissed_by: string;
-}
-
-export const capaDismissAlert = (body: AlertDismissalRequest) =>
-  request<unknown>("/api/v1/capa/dismiss-alert", { method: "POST", jsonBody: body });
-
-/* ══════════════════════════════════════════════════════════════ */
-/* RCA                                                            */
-/* ══════════════════════════════════════════════════════════════ */
-
-export interface RCACreateRequest {
-  capa_id: string;
-  customer_id: string;
-  rca_method: string;
-  evidence?: string | null;
-}
-export interface RCACreateResponse {
-  rca_id?: string;
+/** Tenant-scoped AI activity. Scoping is enforced upstream from the signed
+ *  token — these filters only narrow what the caller may already see. */
+export function aiAuditList(params: {
+  featureId?: string;
+  actionType?: string;
+  username?: string;
   status?: string;
-  message?: string;
-  [k: string]: unknown;
+  since?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<AiAuditPage> {
+  const q = new URLSearchParams();
+  if (params.featureId) q.set("feature_id", params.featureId);
+  if (params.actionType) q.set("action_type", params.actionType);
+  if (params.username) q.set("username", params.username);
+  if (params.status) q.set("status", params.status);
+  if (params.since) q.set("since", params.since);
+  q.set("limit", String(params.limit ?? 100));
+  q.set("offset", String(params.offset ?? 0));
+  return request<AiAuditPage>(`/api/v1/audit/all?${q.toString()}`, { method: "GET" });
 }
 
-export const rcaSubmit = (body: RCACreateRequest) =>
-  request<RCACreateResponse>("/api/v1/rca/submit", { method: "POST", jsonBody: body });
-
-export const rcaByCapa = (capaId: string) =>
-  request<unknown>(`/api/v1/rca/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
-
-export const rcaStatus = (rcaId: string) =>
-  request<unknown>(`/api/v1/rca/status/${encodeURIComponent(rcaId)}`, { method: "GET" });
-
-/* ══════════════════════════════════════════════════════════════ */
-/* Action Plan                                                    */
-/* ══════════════════════════════════════════════════════════════ */
-
-export interface ActionItem {
-  action_description: string;
-  responsible_person: string;
-  due_date: string;
-}
-export interface ActionPlanCreateRequest {
-  capa_id: string;
-  customer_id: string;
-  rca_id: string;
-  actions: ActionItem[];
-}
-export interface ActionPlanCreateResponse {
-  action_plan_id?: string;
-  status?: string;
-  message?: string;
-  [k: string]: unknown;
+/** Full input/output metadata for one application record's AI activity. */
+export function aiAuditForRecord(recordId: string) {
+  return request<{ record_id: string; total: number; audit_logs: unknown[] }>(
+    `/api/v1/audit/record/${encodeURIComponent(recordId)}`,
+    { method: "GET" },
+  );
 }
 
-export const actionPlanSubmit = (body: ActionPlanCreateRequest) =>
-  request<ActionPlanCreateResponse>("/api/v1/action-plan/submit", { method: "POST", jsonBody: body });
-
-export const actionPlanByCapa = (capaId: string) =>
-  request<unknown>(`/api/v1/action-plan/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
-
-export const actionPlanStatus = (id: string) =>
-  request<unknown>(`/api/v1/action-plan/status/${encodeURIComponent(id)}`, { method: "GET" });
-
-/* ══════════════════════════════════════════════════════════════ */
-/* Implementation Monitoring                                      */
-/* ══════════════════════════════════════════════════════════════ */
-
-export type ActionStatus = "On Track" | "Delayed" | "Completed" | "Blocked" | string;
-export interface ActionProgressUpdate {
-  action_description: string;
-  responsible_person: string;
-  due_date: string;
-  status: ActionStatus;
-  progress_note?: string | null;
-}
-export interface MonitoringRequest {
-  capa_id: string;
-  customer_id: string;
-  action_plan_id: string;
-  action_updates: ActionProgressUpdate[];
-}
-export interface MonitoringResponse {
-  monitoring_id?: string;
-  status?: string;
-  [k: string]: unknown;
+export interface AiUsageRow {
+  feature_id: string;
+  model: string | null;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  avg_latency_ms: number;
 }
 
-export const monitoringCheck = (body: MonitoringRequest) =>
-  request<MonitoringResponse>("/api/v1/monitoring/check", { method: "POST", jsonBody: body });
-
-export const monitoringByCapa = (capaId: string) =>
-  request<unknown>(`/api/v1/monitoring/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
-
-export const monitoringStatus = (id: string) =>
-  request<unknown>(`/api/v1/monitoring/status/${encodeURIComponent(id)}`, { method: "GET" });
-
-/* ══════════════════════════════════════════════════════════════ */
-/* Effectiveness Check                                            */
-/* ══════════════════════════════════════════════════════════════ */
-
-export interface EvidenceItem {
-  action_description: string;
-  completed: boolean;
-  evidence_attached: boolean;
-  evidence_note?: string | null;
+/** Per-feature call counts, token totals and mean latency for this tenant. */
+export function aiUsage(since?: string): Promise<{ usage: AiUsageRow[] }> {
+  const q = since ? `?since=${encodeURIComponent(since)}` : "";
+  return request<{ usage: AiUsageRow[] }>(`/api/v1/audit/usage${q}`, { method: "GET" });
 }
-export interface TrendData {
-  metric_name: string;
-  before_capa: number;
-  after_capa: number;
-  unit: string;
-}
-export interface EffectivenessRequest {
-  capa_id: string;
-  customer_id: string;
-  action_plan_id: string;
-  days_since_capa: number;
-  evidence_items: EvidenceItem[];
-  trend_data: TrendData[];
-  new_issues_reported: boolean;
-  new_issue_details?: string | null;
-}
-export interface EffectivenessResponse {
-  effectiveness_id?: string;
-  status?: string;
-  [k: string]: unknown;
-}
-
-export const effectivenessCheck = (body: EffectivenessRequest) =>
-  request<EffectivenessResponse>("/api/v1/effectiveness/check", { method: "POST", jsonBody: body });
-
-export const effectivenessByCapa = (capaId: string) =>
-  request<unknown>(`/api/v1/effectiveness/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
-
-export const effectivenessStatus = (id: string) =>
-  request<unknown>(`/api/v1/effectiveness/status/${encodeURIComponent(id)}`, { method: "GET" });
-
-/* ══════════════════════════════════════════════════════════════ */
-/* CAPA Closure                                                   */
-/* ══════════════════════════════════════════════════════════════ */
-
-export interface ClosureRequest {
-  capa_id: string;
-  customer_id: string;
-  effectiveness_id: string;
-  approved_by: string;
-  designation: string;
-  electronic_signature: string;
-  closure_rationale: string;
-  related_capas_reviewed: boolean;
-  document_changes_approved: boolean;
-}
-export interface ClosureResponse {
-  closure_id?: string;
-  status?: string;
-  [k: string]: unknown;
-}
-
-export const closureInitiate = (body: ClosureRequest) =>
-  request<ClosureResponse>("/api/v1/closure/initiate", { method: "POST", jsonBody: body });
-
-export const closureByCapa = (capaId: string) =>
-  request<unknown>(`/api/v1/closure/capa/${encodeURIComponent(capaId)}`, { method: "GET", silentStatuses: [404] });
-
-export const closureStatus = (id: string) =>
-  request<unknown>(`/api/v1/closure/status/${encodeURIComponent(id)}`, { method: "GET" });
-
-/* ══════════════════════════════════════════════════════════════ */
-/* Audit Trail                                                    */
-/* ══════════════════════════════════════════════════════════════ */
-
-export const auditAll = () =>
-  request<unknown>("/api/v1/audit/all", { method: "GET" });
-
-export const auditRecord = (recordId: string) =>
-  request<unknown>(`/api/v1/audit/record/${encodeURIComponent(recordId)}`, { method: "GET" });
-
-/* ══════════════════════════════════════════════════════════════ */
-/* Users                                                          */
-/* ══════════════════════════════════════════════════════════════ */
-
-export const usersList = () => request<unknown>("/api/v1/users/", { method: "GET" });
 
 /* ══════════════════════════════════════════════════════════════ */
 /* Document Review (CSV validation stage docs)                    */
@@ -411,9 +267,11 @@ export interface StageDocReviewResponse {
   rubric_version: string;
   findings: StageDocReviewFindingDTO[];
   /** Non-null when the document yielded no reviewable text (scanned PDF,
-   *  unsupported type, parse error). `findings` is then empty and the scan did
-   *  NOT run — this is explicitly not a clean pass. */
+   *  unsupported type, parse error) or was only partially read. `findings` is
+   *  then empty or partial — explicitly not a clean pass. */
   note?: string | null;
+  /** True when only the opening section fit the review budget. */
+  truncated?: boolean;
   scanned_at: string;
   /** "backend" for a live scan, "fallback" when the model call failed. */
   source?: string;

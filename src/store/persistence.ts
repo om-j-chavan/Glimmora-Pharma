@@ -16,7 +16,12 @@ const VERSION_KEY = "glimmora-version";
 // survived sign-out. Nothing reads it any more (the server mints a token per
 // request), but a stale credential must not be left sitting in browser storage,
 // so this bump clears the blob for every existing session on next load.
-const CURRENT_VERSION = "48";
+// 49 — purges the persisted `settings.agi` blob. The AI agent policy used to
+// live here, so every browser held its own copy of a control that governs what
+// AI may do to regulated records — unaudited, unenforced, and diverging between
+// colleagues. It is now tenant-scoped server state (TenantAgiPolicy), so the
+// cached copy must not linger and be mistaken for the live policy.
+const CURRENT_VERSION = "49";
 
 /**
  * Slices to persist to localStorage.
