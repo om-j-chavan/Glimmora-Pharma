@@ -253,28 +253,7 @@ export function DashboardPage({
 
   const widgetProps = { data, dashboard, access, canOpen };
 
-  /**
-   * ONE ordered widget list, not two independent stacks.
-   *
-   * The dashboard used to render a 2/3 "main" column beside a 1/3 rail, each a
-   * self-contained vertical stack. Because a role's rail carries five or six cards
-   * while its main column carries two to four charts, the two stacks ended up
-   * hundreds of pixels apart in height and the grid row — sized to the TALLER of
-   * them — left a dead band the width of the main column under the shorter one
-   * (measured: 641px for Regulatory Affairs, 776px for Operations Head at 1440px).
-   * Nothing rendered there; it was structural, so no amount of padding or
-   * `overflow` tuning could recover it.
-   *
-   * Widgets are now grid ITEMS in a single flow: a chart/table keeps its 2-column
-   * width, a rail card takes one, and the browser packs them. The layout is
-   * therefore driven by how much content a role actually has instead of assuming a
-   * 2:1 split, and it re-balances by itself when a role gains or loses a widget.
-   *
-   * Interleaving wide/narrow here (rather than relying on `grid-auto-flow: dense`
-   * to back-fill) means the DOM order IS the visual order, so the reading and tab
-   * order still run left-to-right, top-to-bottom. `dense` stays on only to close
-   * the one hole the 2-column (tablet) breakpoint can still open.
-   */
+  
   const widgets = useMemo(() => {
     const wide = dashboard.mainWidgets;
     const narrow = dashboard.railWidgets;
@@ -318,11 +297,7 @@ export function DashboardPage({
               { value: "all", label: "Raised: all time" },
             ]}
           />
-          /* The custom date range was DROPPED in the merge with 34f5708. Their
-             trend rework has the buckets self-apply the period, so a "custom"
-             value would need `trendBuckets` support it does not have; keeping our
-             pre-filter would double-apply the window. Their preset period is the
-             single source of truth for trend scoping. */
+        
           {showSitePicker && (
             <Dropdown
               placeholder="All sites"
@@ -364,13 +339,7 @@ export function DashboardPage({
               <span aria-hidden="true" className="text-[13px] leading-none">×</span>
             </button>
           ))}
-          {/*
-            The ONE reset. Previously the period had to be cleared from its chip
-            while this button cleared only site + severity — two affordances that
-            each reset a different subset. It now resets ALL FIVE pieces of
-            filter state, and appears only when something is actually non-default
-            (the app's convention, matching every other filter row).
-          */}
+         
           {/*
             Both trailing controls are ICON-ONLY — no text, no hover tooltip.
             Passing no children makes `Button` square (`isIconOnly` →
@@ -413,33 +382,7 @@ export function DashboardPage({
         {/* KPI row — the role's cards, already permission-resolved */}
         <KpiGrid {...widgetProps} />
 
-        {/* The widget grid. One column on phones, two on tablets, three from `lg`.
-            `items-stretch` + `h-full` on each item AND its card make every card in a
-            row share that row's height, so tops AND bottoms line up and no short panel
-            leaves a blank band beside (or under) a taller neighbour — the dead space
-            the old `items-start` left. `min-w-0` keeps a wide child (a chart's
-            ResponsiveContainer, the action-plan table) measuring against its track.
-            `gap-4 lg:gap-6` is the same rhythm token as the KPI row above.
-
-            NO HEIGHT CAP ON THE CARD BODY, deliberately. This grid item used to carry
-            `[&_.card-body]:max-h-[26rem] [&_.card-body]:overflow-y-auto` to make long
-            panels scroll in place. That pair never worked: the second class sat
-            immediately against the `${…}` interpolation that appended `md:col-span-2`,
-            so Tailwind's scanner extracted `…overflow-y-auto${wide` as the candidate
-            and never emitted the rule. Only the cap shipped — leaving every widget at
-            `max-height:416px` with `overflow-y:visible` inside a `.card` that is
-            `overflow-hidden`. Anything past 416px was clipped with no scrollbar and no
-            way to reach it (measured: "Quality Signals" rendered 479px of content into
-            the 416px box, so 63px of live compliance signals were unreachable).
-
-            The page scrolls; the widgets do not. `<main>` in AppShell owns the one
-            vertical scroll for every page in the app, so a card that grows simply makes
-            the page longer — which is what a dashboard should do, and what keeps every
-            widget's content reachable with an ordinary trackpad. The single exception is
-            the action plan, whose height is row-count-driven; it keeps its OWN internal
-            scroll box (see ActionPlanTable) and that box is now the only scroller in the
-            card rather than a second one nested inside a shorter cap. Interpolation is
-            done through `clsx` so a class can never be glued to an expression again. */}
+       
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch [grid-auto-flow:row_dense]">
           {widgets.map(({ key, wide }) => (
             <div

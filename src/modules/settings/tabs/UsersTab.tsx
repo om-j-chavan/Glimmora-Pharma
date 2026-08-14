@@ -21,7 +21,12 @@ import {
   EyeOff,
   ShieldCheck,
   Power,
+  UserRound,
+  Mail,
+  MapPin,
+  PenTool,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import { useAppDispatch } from "@/hooks/useAppDispatch";
 import { useTenantConfig } from "@/hooks/useTenantConfig";
@@ -128,6 +133,60 @@ const SIGN_CAPABLE_ROLES: readonly string[] = Array.from(
 );
 
 const isSignCapableRole = (role: string): boolean => SIGN_CAPABLE_ROLES.includes(role);
+
+/**
+ * Read-only detail primitives for the "User details" modal.
+ *
+ * Same conventions the sibling settings tabs use, so the modal reads as part of
+ * Settings rather than a one-off: section header = `flex items-center gap-2` +
+ * a `w-4 h-4 text-(--brand)` icon + a 13px semibold title (SubscriptionTab.tsx:97-100);
+ * field label 11px `--text-muted`, value 13px `--text-primary`; surfaces
+ * `--card-bg` / `--card-border`, dividers `--bg-border`.
+ *
+ * Icons are decorative and `aria-hidden`, so each field's accessible name stays
+ * its text label alone.
+ */
+function UserDetailField({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3 py-3">
+      <span className="mt-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-(--brand-muted)">
+        <Icon className="h-3.5 w-3.5 text-(--brand)" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium text-(--text-muted)">{label}</p>
+        <div className="mt-0.5 text-[13px] text-(--text-primary) break-words">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function UserDetailSection({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-(--card-border) bg-(--card-bg) overflow-hidden">
+      <header className="flex items-center gap-2 px-4 py-2.5 border-b border-(--card-border)">
+        <Icon className="w-4 h-4 text-(--brand)" aria-hidden="true" />
+        <span className="text-[13px] font-semibold text-(--text-primary)">{title}</span>
+      </header>
+      <div className="px-4 py-0.5 divide-y divide-(--bg-border)">{children}</div>
+    </section>
+  );
+}
 
 // Matches the server min (CreateUserSchema/UpdateUserSchema password .min(6)).
 const PASSWORD_MIN = 6;
@@ -276,12 +335,19 @@ function UserForm({
   // 1:1 FK): one site, or none. No role gets an all-sites ASSIGNMENT here. Force
   // allSites=false so a freshly picked site is never nulled at write time (also
   // heals a legacy allSites=true row, e.g. a qa_head created under the old rule).
-  // A role that can never sign must not carry signatory authority. Forcing the
-  // field false keeps the submitted payload honest when the role is switched
-  // away from qa_head / regulatory_affairs mid-form (the toggle also hides).
-  useEffect(() => {
-    if (!isSignCapableRole(watchRole)) setValue("gxpSignatory", false);
-  }, [watchRole, setValue]);
+  // NOTE: a role that can never sign must not carry signatory authority, but
+  // that is normalised at SUBMIT time (see `submit` below) — deliberately NOT
+  // by writing the field from a mount effect.
+  //
+  // Why: react-hook-form's FORM-level `isDirty` is a deep comparison of current
+  // values against `defaultValues`, independent of the per-field `shouldDirty`
+  // option. An effect that wrote `gxpSignatory: false` on mount therefore made
+  // the form dirty before the user touched anything — in add mode always (the
+  // defaults pair role "viewer" with gxpSignatory true), and in edit mode for
+  // any user whose stored flag disagrees with their role (seed.ts:330-331 ship
+  // exactly that: csv_val_lead and qc_lab_director with gxpSignatory true).
+  // `requestClose` routes a dirty form into the "Discard changes?" popup, so
+  // Cancel and X stopped closing the modal.
 
   useEffect(() => {
     setValue("allSites", false);
@@ -310,8 +376,15 @@ function UserForm({
   // sat there with no feedback. Surfacing it as a form-level error means a
   // failure is always visible and never silent.
   const submit = async (data: UserFormValues) => {
+    // Normalise here rather than in a mount effect (see the note above): a role
+    // that can never sign never submits signatory authority, and the form's
+    // dirty state is left alone so Cancel/X still close a untouched modal.
+    const normalised: UserFormValues = {
+      ...data,
+      gxpSignatory: isSignCapableRole(data.role) ? data.gxpSignatory : false,
+    };
     try {
-      const res = await onSubmit(data);
+      const res = await onSubmit(normalised);
       if (res?.emailError) {
         setError("email", { type: "server", message: res.emailError });
       }
@@ -1460,36 +1533,64 @@ export function UsersTab({ readOnly = false }: { readOnly?: boolean }) {
           ) : undefined
         }
       >
+        {/*
+          Same SIX fields as before — full name, email, role, site assignment,
+          GxP signatory, status — reorganised, not changed. Identity (name +
+          status) is promoted to a header block; the rest split into Account and
+          Access & authority. Values, `siteNamesFor`, `roleLabel` and the status
+          Badge variant logic are unchanged.
+
+          The GxP row is the one behavioural change: it now renders ONLY for
+          sign-capable roles. It previously printed "Yes"/"No" for every role,
+          so a CSV/Val Lead — who can never sign anything — could read as an
+          authorised signatory. Hidden (not "N/A") to match the table pill,
+          which uses the same `isSignCapableRole` predicate.
+        */}
         {viewUser && (
-          <div className="space-y-0">
-            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
-              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Full name</span>
-              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{viewUser.name}</span>
-            </div>
-            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
-              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Email</span>
-              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{viewUser.email}</span>
-            </div>
-            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
-              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Role</span>
-              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{roleLabel(viewUser.role)}</span>
-            </div>
-            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
-              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Site assignment</span>
-              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">{siteNamesFor(viewUser)}</span>
-            </div>
-            <div className="flex items-start justify-between gap-4 py-2.5 border-b border-(--bg-border)">
-              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">GxP signatory</span>
-              <span className="text-[12px] text-(--text-primary) text-right min-w-0 break-words">
-                {viewUser.gxpSignatory ? "Yes" : "No"}
+          <div className="space-y-3">
+            {/* Identity — full name + status */}
+            <div className="flex items-start gap-3 rounded-xl border border-(--card-border) bg-(--card-bg) px-4 py-3.5">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--brand-muted)">
+                <UserRound className="h-5 w-5 text-(--brand)" aria-hidden="true" />
               </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium text-(--text-muted)">Full name</p>
+                <p className="mt-0.5 text-[15px] font-semibold text-(--text-primary) break-words">
+                  {viewUser.name}
+                </p>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <Power className="h-3 w-3 text-(--text-muted)" aria-hidden="true" />
+                  <span className="text-[11px] text-(--text-muted)">Status</span>
+                  <Badge variant={viewUser.status === "Active" ? "green" : "gray"}>
+                    {viewUser.status}
+                  </Badge>
+                </div>
+              </div>
             </div>
-            <div className="flex items-start justify-between gap-4 py-2.5">
-              <span className="text-[11px] font-medium text-(--text-secondary) shrink-0 pt-0.5">Status</span>
-              <span className="text-right min-w-0">
-                <Badge variant={viewUser.status === "Active" ? "green" : "gray"}>{viewUser.status}</Badge>
-              </span>
-            </div>
+
+            {/* Account */}
+            <UserDetailSection icon={Mail} title="Account">
+              <UserDetailField icon={Mail} label="Email">
+                {viewUser.email}
+              </UserDetailField>
+              <UserDetailField icon={ShieldCheck} label="Role">
+                {roleLabel(viewUser.role)}
+              </UserDetailField>
+            </UserDetailSection>
+
+            {/* Access & authority */}
+            <UserDetailSection icon={MapPin} title="Access & authority">
+              <UserDetailField icon={MapPin} label="Site assignment">
+                {siteNamesFor(viewUser)}
+              </UserDetailField>
+              {isSignCapableRole(viewUser.role) && (
+                <UserDetailField icon={PenTool} label="GxP signatory">
+                  <Badge variant={viewUser.gxpSignatory ? "green" : "red"}>
+                    {viewUser.gxpSignatory ? "Authorised signatory" : "Not a signatory"}
+                  </Badge>
+                </UserDetailField>
+              )}
+            </UserDetailSection>
           </div>
         )}
       </Modal>

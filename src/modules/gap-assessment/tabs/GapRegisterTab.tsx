@@ -489,6 +489,23 @@ export function GapRegisterTab({
   const closeBlockers = selectedFinding ? findingCloseBlockers(selectedFinding, user?.id ?? null) : [];
 
   /**
+   * Is a single-QA SoD waiver available for THIS finding and THIS user?
+   *
+   * SERVER-COMPUTED — `review.sodReveal` comes from the query layer
+   * (queries/findings.ts:190), which resolves the tenant flag, the Critical
+   * ceiling and the two self-checks. The client never re-implements the severity
+   * rule. Hoisted here (it was inline on FindingCloseModal's `overrideNeeded`)
+   * so the close BUTTON's enabled-state and the modal's override INPUTS are
+   * driven by one expression instead of two copies that could drift.
+   */
+  const sodOverrideAvailable = Boolean(
+    review?.sodReveal &&
+    review.sodReveal.flagOn &&
+    !review.sodReveal.ceiling &&
+    (review.sodReveal.assignee || review.sodReveal.rcaAuthor),
+  );
+
+  /**
    * THE single source of truth for "can this user close this finding, and if not
    * why". Both close affordances read it — the Disposition button and the QA
    * review card — so the two can never disagree with each other or with the
@@ -521,8 +538,41 @@ export function GapRegisterTab({
       return { visible: true, canClose: false, reason: "Finding must be submitted for review before it can be closed." };
     }
     if (closeBlockers.length > 0) {
-      // The SAME message findingCloseBlockers returns and the server replies
-      // with — rca_missing or rca_self_close, verbatim.
+      /*
+       * WAIVABLE vs HARD blockers.
+       *
+       * `rca_self_close` is a separation-of-duties IDENTITY rule, and the
+       * single-QA override exists precisely to waive it: with the tenant flag on
+       * and the finding below the Critical ceiling, `reviewFinding` ACCEPTS the
+       * close and records a `FindingSODOverride` waiver. Disabling the button on
+       * it therefore refused a close the server would have allowed, and left the
+       * override flow unreachable — the user could never supply the waiver the
+       * modal asks for.
+       *
+       * `rca_missing` is a COMPLETENESS rule, not an identity one. Nothing can
+       * waive a root cause that does not exist, so it stays a hard block. It is
+       * also structurally exclusive: findingCloseBlockers returns early on
+       * rca_missing (finding-close.ts:108-116), so the two never co-occur — the
+       * filter below is defensive, not load-bearing.
+       */
+      const WAIVABLE_BLOCKER_KEYS = new Set(["rca_self_close"]);
+      const hardBlockers = closeBlockers.filter((b) => !WAIVABLE_BLOCKER_KEYS.has(b.key));
+      if (hardBlockers.length > 0) {
+        return { visible: true, canClose: false, reason: hardBlockers[0].message };
+      }
+      // Only waivable blockers remain. Enable ONLY when the server would accept a
+      // waiver — the same server-computed reveal the modal gates its override
+      // inputs on (`sodOverrideAvailable`), so the button and the modal can never
+      // disagree about whether an override is on the table.
+      if (sodOverrideAvailable) {
+        return {
+          visible: true,
+          canClose: true,
+          reason: "You recorded this RCA — closing requires a recorded single-QA SoD waiver.",
+        };
+      }
+      // Flag off, or Critical (ceiling) — no waiver is possible, so the original
+      // refusal stands, verbatim.
       return { visible: true, canClose: false, reason: closeBlockers[0].message };
     }
     return { visible: true, canClose: true, reason: null };
@@ -1380,26 +1430,6 @@ export function GapRegisterTab({
                                 which is also the honest label for a row whose
                                 assignment predates the column: we don't know that
                                 anyone assigned them. */}
-                            {(() => {
-                              const name = ownerName(selectedFinding.owner);
-                              const u = users.find((x) => x.id === selectedFinding.owner);
-                              const initials = name.split(" ").filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
-                              const isAssigned = !!selectedFinding.assignedAt;
-                              return (
-                                <div className="flex items-center gap-2.5 rounded-lg border p-2.5" style={{ borderColor: "var(--brand-border)", background: "var(--brand-muted)" }}>
-                                  <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-[12px] font-semibold" style={{ background: "var(--brand)", color: "#fff" }} aria-hidden="true">
-                                    {initials}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{isAssigned ? "Assigned to" : "Owner"}</p>
-                                    <p className="text-[13px] font-semibold truncate" style={{ color: "var(--text-primary)" }}>
-                                      {name}
-                                      {u && <span className="font-normal" style={{ color: "var(--text-secondary)" }}> · {roleLabel(u.role)}</span>}
-                                    </p>
-                                  </div>
-                                </div>
-                              );
-                            })()}
                             {canRaiseCapa && (
                               <div className="mt-2"><Button variant="secondary" icon={Plus} fullWidth onClick={() => onRaiseCapa(selectedFinding)}>Raise CAPA</Button></div>
                             )}
@@ -1436,6 +1466,42 @@ export function GapRegisterTab({
                         )}
                       </div>
                     )}
+                    {/* ── Assigned to — repositioned BELOW the actions ──────────
+                        The person moved from above the action buttons to under
+                        them, so the QA Head reads the decision controls first and
+                        "who is on this" after.
+
+                        DOCS + WORK NOTES DELIBERATELY NOT HERE. They render once,
+                        in the QA review card below, which is where QA judges the
+                        verdict against the evidence in view. Adding them here too
+                        broke the invariant stated at the top of this file (:387-391):
+                        either the card renders the docs or the block does, never
+                        both. This section is the PERSON only.
+
+                        Name resolution unchanged: `ownerName` → `displayUserName`
+                        (identity-display.ts), which resolves an id to a name and
+                        falls back rather than leaking a cuid. No data or query
+                        changed. */}
+                    {(() => {
+                      const name = ownerName(selectedFinding.owner);
+                      const u = users.find((x) => x.id === selectedFinding.owner);
+                      const initials = name.split(" ").filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
+                      const isAssigned = !!selectedFinding.assignedAt;
+                      return (
+                        <div className="mt-3 flex items-center gap-2.5 rounded-lg border p-2.5" style={{ borderColor: "var(--brand-border)", background: "var(--brand-muted)" }}>
+                          <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-[12px] font-semibold" style={{ background: "var(--brand)", color: "#fff" }} aria-hidden="true">
+                            {initials}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{isAssigned ? "Assigned to" : "Owner"}</p>
+                            <p className="text-[13px] font-semibold truncate" style={{ color: "var(--text-primary)" }}>
+                              {name}
+                              {u && <span className="font-normal" style={{ color: "var(--text-secondary)" }}> · {roleLabel(u.role)}</span>}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )
               );
@@ -1483,7 +1549,12 @@ export function GapRegisterTab({
                         a close-flow modal. A modal would be the THIRD writer of
                         rootCause (Edit was the accidental second, and undoing that
                         took two items). One writer, one rule, one place. */}
-                    {closeBlockers.length > 0 && (
+                    {/* Shown only when the close is ACTUALLY refused. Previously
+                        keyed on `closeBlockers.length > 0`, which would now
+                        contradict itself: with a waiver available the button is
+                        enabled, so a panel saying "you cannot close it" beside it
+                        would be false. `closeGate` is the one arbiter. */}
+                    {closeBlockers.length > 0 && !closeGate.canClose && (
                       <div className="rounded-lg border p-2.5 mb-2 flex items-start gap-2" style={{ background: "var(--warning-bg, var(--bg-surface))", borderColor: "var(--warning, var(--bg-border))" }}>
                         <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: "var(--warning, var(--text-muted))" }} aria-hidden="true" />
                         <div className="min-w-0">
@@ -1755,13 +1826,10 @@ export function GapRegisterTab({
           notesMin={FINDING_CLOSURE_NOTES_MIN}
           // Server-computed reveal — the client never evaluates the severity
           // ceiling. Flag on + non-Critical + a self-check tripped ⇒ a waiver is
-          // required in addition to the signature.
-          overrideNeeded={Boolean(
-            review?.sodReveal &&
-            review.sodReveal.flagOn &&
-            !review.sodReveal.ceiling &&
-            (review.sodReveal.assignee || review.sodReveal.rcaAuthor),
-          )}
+          // required in addition to the signature. Same value `closeGate` uses to
+          // decide whether the button that OPENS this modal is enabled, so the
+          // two can never disagree.
+          overrideNeeded={sodOverrideAvailable}
         />
       )}
 

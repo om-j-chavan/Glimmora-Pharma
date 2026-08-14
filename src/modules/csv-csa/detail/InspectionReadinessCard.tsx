@@ -87,6 +87,47 @@ export function InspectionReadinessCard({ system, rtmEntries, timezone, dateForm
     },
   ];
 
+  /*
+   * EMPTY STATE (step 3) — a system with NOTHING started yet has no readiness
+   * to report. The five rows would all resolve to warn/bad and read as five
+   * failures on a system nobody has begun validating, which is alarming rather
+   * than informative on day one.
+   *
+   * "Not started" is deliberately narrow: no stage has moved off `not_started`,
+   * no RTM rows, no findings, no CAPAs, and no review date. The moment ANY of
+   * those exists the full checklist renders exactly as before — this only
+   * suppresses the all-empty case, never a populated one.
+   *
+   * DISPLAY ONLY. Every computation above (`q1Tone`…`q5Tone`, `coverage`,
+   * `openFindings`) is untouched and still runs; this decides what to render.
+   */
+  const nothingStarted =
+    stages.every((s) => s.status === "not_started") &&
+    rtmTotal === 0 &&
+    (system.findings ?? []).length === 0 &&
+    (system.capas ?? []).length === 0 &&
+    !system.nextReview;
+
+  if (nothingStarted) {
+    return (
+      <div className="card">
+        <div className="card-header"><div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" /><span className="card-title">Inspection readiness</span></div></div>
+        <div className="card-body">
+          <p className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+            Nothing to assess yet — readiness appears once validation stages, requirements or findings exist for this system.
+          </p>
+          <button
+            type="button"
+            onClick={() => onNavigateTab("lifecycle")}
+            className="mt-2 inline-flex items-center gap-0.5 text-[11px] text-[#0ea5e9] hover:underline border-none bg-transparent cursor-pointer p-0"
+          >
+            Start the validation lifecycle <ArrowRight className="w-3 h-3" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="card-header"><div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" /><span className="card-title">Inspection readiness</span></div></div>
