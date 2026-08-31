@@ -125,23 +125,36 @@ export function RiskControlsPanel({
             </button>
           )}
         </div>
-        <div className="card-body space-y-0">
-          {classificationRows.map((r, i, arr) => (
-            <div key={r.key} className={clsx("flex justify-between items-center py-3", i < arr.length - 1 && "border-b")} style={{ borderColor: "var(--bg-border)" }}>
-              <span className="text-[12px]" style={{ color: "var(--text-primary)" }}>{r.label}</span>
-              {editingRiskClass ? (
-                <Dropdown
-                  value={riskForm[r.key]}
-                  onChange={(v) => setRiskForm((prev) => ({ ...prev, [r.key]: v as RiskLevel }))}
-                  options={RISK_LEVEL_OPTIONS}
-                  size="sm"
-                  width="w-28"
-                />
-              ) : (
-                <Badge variant={r.level === "HIGH" ? "red" : r.level === "MEDIUM" ? "amber" : "green"}>{r.level}</Badge>
-              )}
-            </div>
-          ))}
+        {/* 2-PER-ROW GRID (layout only). The four dimensions were four
+            full-width rows with the control pushed to the far right, wasting
+            most of the width; they now sit two per row, so four fields occupy
+            two rows. The label stacks above its control inside each cell rather
+            than sitting opposite it across the card.
+
+            ONE map still drives BOTH views, so read and edit stay consistent by
+            construction. The Dropdown — its `value`, `onChange`, `options` and
+            the Badge variant rule — is untouched; only the wrapper changed. */}
+        <div className="card-body">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+            {classificationRows.map((r) => (
+              <div key={r.key} className="flex flex-col gap-1.5 min-w-0">
+                <span className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>{r.label}</span>
+                {editingRiskClass ? (
+                  <Dropdown
+                    value={riskForm[r.key]}
+                    onChange={(v) => setRiskForm((prev) => ({ ...prev, [r.key]: v as RiskLevel }))}
+                    options={RISK_LEVEL_OPTIONS}
+                    size="sm"
+                    width="w-28"
+                  />
+                ) : (
+                  <span>
+                    <Badge variant={r.level === "HIGH" ? "red" : r.level === "MEDIUM" ? "amber" : "green"}>{r.level}</Badge>
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
           {editingRiskClass && (
             <div className="flex items-center justify-end gap-2 pt-3">
               <Button variant="ghost" size="sm" type="button" onClick={handleCancelRiskClass}>Cancel</Button>

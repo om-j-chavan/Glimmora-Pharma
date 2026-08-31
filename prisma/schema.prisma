@@ -14,15 +14,15 @@ datasource db {
 // ── AUTH / TENANTS ──
 
 model Tenant {
-  id                  String   @id @default(cuid())
-  customerCode        String   @unique
+  id                  String    @id @default(cuid())
+  customerCode        String    @unique
   name                String
-  username            String   @unique
-  email               String   @unique
+  username            String    @unique
+  email               String    @unique
   passwordHash        String
-  role                String   @default("customer_admin")
-  language            String   @default("en")
-  timezone            String   @default("Asia/Kolkata")
+  role                String    @default("customer_admin")
+  language            String    @default("en")
+  timezone            String    @default("Asia/Kolkata")
   logoUrl             String?
   // Regulatory region is owned by the platform super_admin (set on tenant
   // create/edit), NOT the customer_admin. Nullable for the backfill window.
@@ -30,45 +30,45 @@ model Tenant {
   // keeps this as the PRIMARY shim (= regions[0]); the TenantRegion set is the
   // source of truth for framework resolution.
   regulatoryRegion    String?
-  isActive            Boolean  @default(true)
+  isActive            Boolean   @default(true)
   // Soft-delete timestamp. Lifecycle: ACTIVE (isActive=true, deletedAt=null),
   // SUSPENDED (isActive=false, deletedAt=null), DELETED-soft (deletedAt set).
   // Both SUSPENDED and DELETED block login; DELETED is recoverable via Restore.
   // A hard/permanent delete removes the row entirely (cascades to children).
   deletedAt           DateTime?
-  mfaEnabled          Boolean  @default(false)
+  mfaEnabled          Boolean   @default(false)
   // Single-QA SoD override (org attests it operates with one QA). When true, a QA
   // may complete specific SoD-blocked CAPA steps THEMSELVES — but each waived step
   // is justified, e-signed where applicable, audited (CAPA_SOD_OVERRIDE_USED), and
   // recorded in CAPASODOverride. Super-Admin-set ONLY; never a tenant-side control,
   // never a per-CAPA switch. Phase 0 adds the flag + record only — NO gate reads it yet.
-  sodSingleQAOverride Boolean  @default(false)
-  sessionsValidAfter  DateTime @default(now())
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  sodSingleQAOverride Boolean   @default(false)
+  sessionsValidAfter  DateTime  @default(now())
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  plan          Plan?
-  subscription  Subscription?
-  sites         Site[]
-  users         User[]
-  findings      Finding[]
-  capas         CAPA[]
-  deviations    Deviation[]
-  fda483Events  FDA483Event[]
-  systems       GxPSystem[]
-  documents       Document[]
-  risks           Risk[]
-  managementDecisions ManagementDecision[]
-  auditLogs       AuditLog[]
-  inspections     Inspection[]
-  playbooks       Playbook[]
-  trainingRecords TrainingRecord[]
+  plan                  Plan?
+  subscription          Subscription?
+  sites                 Site[]
+  users                 User[]
+  findings              Finding[]
+  capas                 CAPA[]
+  deviations            Deviation[]
+  fda483Events          FDA483Event[]
+  systems               GxPSystem[]
+  documents             Document[]
+  risks                 Risk[]
+  managementDecisions   ManagementDecision[]
+  auditLogs             AuditLog[]
+  inspections           Inspection[]
+  playbooks             Playbook[]
+  trainingRecords       TrainingRecord[]
   // SME Section 1, Stage 4 (FULL) — reverse for CAPAActionItem.tenantId.
-  capaActionItems CAPAActionItem[]
+  capaActionItems       CAPAActionItem[]
   // Stage 1 (deviation redesign) — reverse for DeviationTask.tenantId.
-  deviationTasks  DeviationTask[]
+  deviationTasks        DeviationTask[]
   // CSV/CSA stage rework — reverse for ValidationStageTask.tenantId.
-  validationStageTasks ValidationStageTask[]
+  validationStageTasks  ValidationStageTask[]
   // Stage 5 — reverse for DeviationTaskMessage.tenantId.
   deviationTaskMessages DeviationTaskMessage[]
   // Frameworks Phase 1 — per-tenant framework enablement.
@@ -83,10 +83,12 @@ model Tenant {
   capaSodOverrides      CAPASODOverride[]
   // Same org flag, deviation-closure waivers (DeviationSODOverride).
   deviationSodOverrides DeviationSODOverride[]
+  // Same org flag, CSV stage-approval waivers (SystemStageSODOverride).
+  stageSodOverrides     SystemStageSODOverride[]
   // Same org flag, finding-closure waivers (FindingSODOverride).
   // ⚠️ UNVERIFIED — built without DB access.
   findingSodOverrides   FindingSODOverride[]
-  agiPolicy           TenantAgiPolicy?
+  agiPolicy             TenantAgiPolicy?
 }
 
 // Tenant ↔ regulatory region link (multi-region). A tenant operates under one OR
@@ -123,11 +125,11 @@ model Plan {
   id                String   @id @default(cuid())
   tenantId          String   @unique
   tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tier              String   // PlanTier values; validated at app layer (SQLite has no enums)
-  displayName       String?  // TAILORED only; null => UI shows "TAILORED"
-  maxUsers          Int      // frozen at assignment
-  maxSites          Int      // frozen at assignment
-  minRetentionYears Int      // promise only; NO purge logic in Phase 1
+  tier              String // PlanTier values; validated at app layer (SQLite has no enums)
+  displayName       String? // TAILORED only; null => UI shows "TAILORED"
+  maxUsers          Int // frozen at assignment
+  maxSites          Int // frozen at assignment
+  minRetentionYears Int // promise only; NO purge logic in Phase 1
   // Subscription term in months (tier preset; TAILORED custom). expiryDate is
   // DERIVED = startDate + durationMonths and frozen below. Separate from
   // minRetentionYears (retention is a compliance floor, NOT the term).
@@ -140,7 +142,7 @@ model Plan {
   updatedAt         DateTime @updatedAt
 
   // Role-Based User Limits (Phase A, INERT) — this plan's DEFAULT per-role caps.
-  roleLimits        PlanRoleLimit[]
+  roleLimits PlanRoleLimit[]
 }
 
 // Central lookup of Regulatory Region values, shared across ALL tenants (not
@@ -149,25 +151,25 @@ model Plan {
 // immediately selectable everywhere. `value` is @unique; the action layer
 // additionally guards against case-insensitive duplicates.
 model RegulatoryRegion {
-  id        String   @id @default(cuid())
+  id          String    @id @default(cuid())
   // IMMUTABLE key — stored as a bare FK string in TenantRegion.region
   // and FrameworkRegion.region. Renaming would orphan those refs, so a value
   // change is archive-and-alias with reference re-pointing (never an in-place
   // mutation).
-  value     String   @unique
+  value       String    @unique
   // Editable display label (never part of the contract).
-  label     String
+  label       String
   // Optional free-text description (Stage 2) — presentation only, never part of
   // any contract.
   description String?
   // Soft-archive (null = active). Archived regions drop out of dropdowns but
   // still resolve their label for historical display.
-  archivedAt DateTime?
+  archivedAt  DateTime?
   // Archive-and-alias lineage — old.aliasOfId → successor (same locked direction
   // as Framework). Set on the archived OLD row during a value supersede.
-  aliasOfId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  aliasOfId   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   aliasOf   RegulatoryRegion?  @relation("RegionLineage", fields: [aliasOfId], references: [id])
   aliasedBy RegulatoryRegion[] @relation("RegionLineage")
@@ -189,9 +191,9 @@ model Subscription {
   contractEndDate   DateTime?
 
   // Trial management
-  trialStartDate  DateTime?
-  trialEndDate    DateTime?
-  trialConverted  Boolean   @default(false)
+  trialStartDate DateTime?
+  trialEndDate   DateTime?
+  trialConverted Boolean   @default(false)
 
   // Current billing period
   currentPeriodStart DateTime?
@@ -217,27 +219,27 @@ model SubscriptionPlan {
   description String?
 
   // Pricing (in smallest currency unit, e.g., paise for INR)
-  priceMonthly  Int // Monthly price
-  priceYearly   Int // Yearly price (discounted)
-  currency      String @default("INR")
+  priceMonthly Int // Monthly price
+  priceYearly  Int // Yearly price (discounted)
+  currency     String @default("INR")
 
   // Features
-  maxAccounts   Int     @default(5)
-  maxSites      Int     @default(1)
-  features      String? // JSON array of feature strings
+  maxAccounts Int     @default(5)
+  maxSites    Int     @default(1)
+  features    String? // JSON array of feature strings
 
   // Trial
   trialDays Int @default(14)
 
   // Plan status
-  isActive    Boolean @default(true)
-  isPopular   Boolean @default(false) // Highlight in UI
-  sortOrder   Int     @default(0)
+  isActive  Boolean @default(true)
+  isPopular Boolean @default(false) // Highlight in UI
+  sortOrder Int     @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  subscriptions Subscription[]
+  subscriptions  Subscription[]
   pendingSignups PendingSignup[]
 }
 
@@ -251,8 +253,8 @@ model PendingSignup {
 
   // Admin user details
   adminName     String
-  adminEmail    String   @unique
-  adminUsername String   @unique
+  adminEmail    String @unique
+  adminUsername String @unique
   passwordHash  String // Pre-hashed password
 
   // Contact
@@ -279,7 +281,7 @@ model PendingSignup {
 }
 
 model Payment {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   subscriptionId String
   tenantId       String
 
@@ -293,11 +295,11 @@ model Payment {
   currency String @default("INR")
 
   // Payment status
-  status       String  @default("pending") // pending, captured, failed, refunded
-  method       String? // card, netbanking, upi, wallet
-  bank         String?
-  wallet       String?
-  vpa          String? // UPI VPA
+  status String  @default("pending") // pending, captured, failed, refunded
+  method String? // card, netbanking, upi, wallet
+  bank   String?
+  wallet String?
+  vpa    String? // UPI VPA
 
   // Payment metadata
   description String?
@@ -369,61 +371,61 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site   Site?  @relation(fields: [siteId], references: [id])
+  tenant                           Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site                             Site?                      @relation(fields: [siteId], references: [id])
   // SME Section 1, Stage 5 (FULL) — virtual reverse field for the
   // Deviation.createdById FK. Carries no column; Prisma uses it for
   // include/select queries.
-  createdDeviations Deviation[] @relation("DeviationCreatedBy")
+  createdDeviations                Deviation[]                @relation("DeviationCreatedBy")
   // Tier 2, Items 3+4 — virtual reverse fields for the new Deviation SoD
   // FKs (who completed the investigation / who made the CAPA decision).
-  investigationCompletedDeviations Deviation[] @relation("DeviationInvestigationCompletedBy")
-  capaDecisionDeviations           Deviation[] @relation("DeviationCapaDecisionBy")
+  investigationCompletedDeviations Deviation[]                @relation("DeviationInvestigationCompletedBy")
+  capaDecisionDeviations           Deviation[]                @relation("DeviationCapaDecisionBy")
   // Stage 1 (deviation redesign) — reverse relations for DeviationTask actor FKs.
-  assignedDeviationTasks        DeviationTask[] @relation("DeviationTaskAssignee")
-  submittedDeviationTasks       DeviationTask[] @relation("DeviationTaskSubmittedBy")
-  reviewedDeviationTasks        DeviationTask[] @relation("DeviationTaskReviewedBy")
-  reworkRequestedDeviationTasks DeviationTask[] @relation("DeviationTaskReworkBy")
+  assignedDeviationTasks           DeviationTask[]            @relation("DeviationTaskAssignee")
+  submittedDeviationTasks          DeviationTask[]            @relation("DeviationTaskSubmittedBy")
+  reviewedDeviationTasks           DeviationTask[]            @relation("DeviationTaskReviewedBy")
+  reworkRequestedDeviationTasks    DeviationTask[]            @relation("DeviationTaskReworkBy")
   // CSV/CSA stage rework — reverse relations for ValidationStageTask actor FKs
   // (mirrors the DeviationTask actor-FK pattern above).
-  assignedStageTasks  ValidationStageTask[] @relation("ValidationStageTaskAssignee")
-  submittedStageTasks ValidationStageTask[] @relation("ValidationStageTaskSubmittedBy")
-  reviewedStageTasks  ValidationStageTask[] @relation("ValidationStageTaskReviewedBy")
+  assignedStageTasks               ValidationStageTask[]      @relation("ValidationStageTaskAssignee")
+  submittedStageTasks              ValidationStageTask[]      @relation("ValidationStageTaskSubmittedBy")
+  reviewedStageTasks               ValidationStageTask[]      @relation("ValidationStageTaskReviewedBy")
   // SME Section 1, Stage 4 (FULL) — virtual reverse fields for the
   // CAPAActionItem.ownerId / completedById FKs.
-  ownedCAPAActionItems     CAPAActionItem[] @relation("CAPAActionItemOwner")
-  completedCAPAActionItems CAPAActionItem[] @relation("CAPAActionItemCompletedBy")
+  ownedCAPAActionItems             CAPAActionItem[]           @relation("CAPAActionItemOwner")
+  completedCAPAActionItems         CAPAActionItem[]           @relation("CAPAActionItemCompletedBy")
   // SoD integrity (CAPA audit FIX 1) — reverse field for the CAPA.createdById FK.
-  createdCAPAs             CAPA[]           @relation("CAPACreatedBy")
+  createdCAPAs                     CAPA[]                     @relation("CAPACreatedBy")
   // Phase 3 — reverse field for the CAPA.ownerId driver FK.
-  ownedCAPAs               CAPA[]           @relation("CAPAOwner")
+  ownedCAPAs                       CAPA[]                     @relation("CAPAOwner")
   // Phase 4 — reverse field for the CAPA.rejectedById FK.
-  rejectedCAPAs            CAPA[]           @relation("CAPARejectedBy")
+  rejectedCAPAs                    CAPA[]                     @relation("CAPARejectedBy")
   // Governance Phase 1 — reverse fields for the two Risk record-visibility FKs.
-  ownedRisks               Risk[]           @relation("RiskOwner")
-  createdRisks             Risk[]           @relation("RiskCreatedBy")
+  ownedRisks                       Risk[]                     @relation("RiskOwner")
+  createdRisks                     Risk[]                     @relation("RiskCreatedBy")
   // Governance Phase 3 — reverse fields for the ManagementDecision FKs.
-  createdManagementDecisions ManagementDecision[] @relation("ManagementDecisionCreatedBy")
-  chairedManagementDecisions ManagementDecision[] @relation("ManagementDecisionChair")
-  ownedDecisionItems         DecisionItem[]       @relation("DecisionItemOwner")
+  createdManagementDecisions       ManagementDecision[]       @relation("ManagementDecisionCreatedBy")
+  chairedManagementDecisions       ManagementDecision[]       @relation("ManagementDecisionChair")
+  ownedDecisionItems               DecisionItem[]             @relation("DecisionItemOwner")
   // Phase 2 — reverse fields for the new nullable FKs.
-  reworkRequestedCAPAActionItems CAPAActionItem[] @relation("CAPAActionItemReworkRequestedBy")
-  uploadedEvidenceFiles          EvidenceFile[]   @relation("EvidenceFileUploadedBy")
+  reworkRequestedCAPAActionItems   CAPAActionItem[]           @relation("CAPAActionItemReworkRequestedBy")
+  uploadedEvidenceFiles            EvidenceFile[]             @relation("EvidenceFileUploadedBy")
   // FDA 483 events this user owns internally (notifications/reminders target).
-  fda483EventsAsOwner      FDA483Event[]    @relation("FDA483EventInternalOwner")
+  fda483EventsAsOwner              FDA483Event[]              @relation("FDA483EventInternalOwner")
   // Record-visibility (Phase 5.5) — reverse field for the FDA483Event.createdById FK.
-  createdFDA483Events      FDA483Event[]    @relation("FDA483EventCreatedBy")
+  createdFDA483Events              FDA483Event[]              @relation("FDA483EventCreatedBy")
   // FDA 483 first-class commitments — created / completed by this user, plus
   // evidence documents they uploaded.
-  createdFDA483Commitments     FDA483Commitment[]         @relation("FDA483CommitmentCreatedBy")
-  completedFDA483Commitments   FDA483Commitment[]         @relation("FDA483CommitmentCompletedBy")
-  uploadedFDA483CommitmentDocs FDA483CommitmentDocument[] @relation("FDA483CommitmentDocUploadedBy")
+  createdFDA483Commitments         FDA483Commitment[]         @relation("FDA483CommitmentCreatedBy")
+  completedFDA483Commitments       FDA483Commitment[]         @relation("FDA483CommitmentCompletedBy")
+  uploadedFDA483CommitmentDocs     FDA483CommitmentDocument[] @relation("FDA483CommitmentDocUploadedBy")
   // Record-visibility (Phase 0) — reverse fields for the new createdById FKs on
   // Finding / GxPSystem / Inspection (mirrors createdDeviations). Enables
   // creator-scoped visibility once the shared helper is adopted (Phase 2+).
-  createdFindings    Finding[]    @relation("FindingCreatedBy")
-  createdSystems     GxPSystem[]  @relation("GxPSystemCreatedBy")
-  createdInspections Inspection[] @relation("InspectionCreatedBy")
+  createdFindings                  Finding[]                  @relation("FindingCreatedBy")
+  createdSystems                   GxPSystem[]                @relation("GxPSystemCreatedBy")
+  createdInspections               Inspection[]               @relation("InspectionCreatedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -432,30 +434,30 @@ model User {
 // ── GAP ASSESSMENT ──
 
 model Finding {
-  id           String    @id @default(cuid())
+  id              String    @id @default(cuid())
   // Human-readable per-tenant per-site per-year reference, format
   // "FND-{siteCode}-{year}-{NNN}". Nullable for the backfill window;
   // every created Finding populates it atomically via createFinding.
-  reference    String?   @unique
-  tenantId     String
-  siteId       String?
-  requirement  String
+  reference       String?   @unique
+  tenantId        String
+  siteId          String?
+  requirement     String
   // Why this gap matters / what closing it achieves. Surfaced in the report
   // form, register table, and detail view.
-  purpose      String?
-  area         String
-  framework    String?
-  severity     String
-  status       String    @default("Open")
-  owner        String
-  targetDate   DateTime?
+  purpose         String?
+  area            String
+  framework       String?
+  severity        String
+  status          String    @default("Open")
+  owner           String
+  targetDate      DateTime?
   // Gap RCA (Batch B) — mirrors the CAPA pattern: `rcaMethod` is the canonical
   // method (CAPA_RCA_METHODS set), `rcaDetail` is the structured analysis as
   // JSON-as-text, and `rootCause` stays the readable plain-text mirror that the
   // table/export/detail/edit-prefill read (unchanged downstream).
-  rcaMethod    String?
-  rcaDetail    String?
-  rootCause    String?
+  rcaMethod       String?
+  rcaDetail       String?
+  rootCause       String?
   // Item 17 — RCA provenance, the same shape as assignedAt/By and submittedAt/By.
   // Written ONLY by saveFindingRCA (the single door to rootCause/rcaMethod/rcaDetail).
   // rcaRecordedById is the AUTHOR of the analysis — the actor, mirroring
@@ -472,7 +474,7 @@ model Finding {
   // so an unattributed RCA never silently satisfies the separation-of-duties check.
   rcaRecordedAt   DateTime?
   rcaRecordedById String?
-  evidenceLink String?
+  evidenceLink    String?
   // Gap Step 3 — the assignee's work/completion notes (mirrors
   // DeviationTask.completionNotes). Distinct from rootCause (RCA); nullable.
   completionNotes String?
@@ -489,44 +491,44 @@ model Finding {
   // from status (wrong 6 of 7 times: createCAPA and status edits both reach
   // In Progress without assigning) nor from owner !== createdById (wrong both
   // ways: QA may assign back to the raiser, findings.ts:436-438).
-  assignedAt   DateTime?
-  assignedById String?
+  assignedAt      DateTime?
+  assignedById    String?
   // Gap Step 4 — submit → QA review → rework loop (mirrors DeviationTask).
   // submittedAt/By: set when the assignee submits. reworkReason is the "current
   // ask" banner; the durable history lives in FindingMessage.
-  submittedAt   DateTime?
-  submittedById String?
-  reworkReason  String?
-  reworkAt      DateTime?
-  reworkById    String?
-  linkedCAPAId String?
-  createdBy    String
+  submittedAt     DateTime?
+  submittedById   String?
+  reworkReason    String?
+  reworkAt        DateTime?
+  reworkById      String?
+  linkedCAPAId    String?
+  createdBy       String
   // Record-visibility (Phase 0) — authoritative creator userId FK (dual-field
   // with the createdBy display-name string, mirroring Deviation.createdById).
   // Nullable for the backfill window; onDelete: SetNull. Reads stay unchanged
   // until the shared visibility helper is adopted (Phase 2+).
-  createdById  String?
+  createdById     String?
   // SME Section 1, Stage 6 (FULL) — recurrence linkage. Same shape as
   // Deviation.previousCAPAId. Nullable; onDelete: SetNull.
-  previousCAPAId String?
+  previousCAPAId  String?
 
   /// Governance Phase 2 — REVERSE half of the risk-conversion bidirectional link.
   /// Non-null only when this record was created by converting a Risk. The FORWARD
   /// half is Risk.convertedToType/convertedToId. Nullable + additive: every record
   /// raised the normal way keeps it null. onDelete: SetNull — archiving the source
   /// risk must never cascade into a GxP record.
-  raisedFromRiskId String?
+  raisedFromRiskId   String?
   // RUNG 2 — real FK to the GxP system this finding is raised against
   // (replaces the former Redux-only linkedSystemId soft reference).
-  systemId       String?
+  systemId           String?
   // ── QA closure metadata (mirrors Deviation.closedBy/closedDate/closureNotes) ──
   // Written by the QA close path in src/actions/findings.ts. Null on findings
   // closed before this existed, and on the CAPA-cascade close (capas/closure.ts),
   // which sets status only.
   //
-  closedBy      String?
-  closedDate    DateTime?
-  closureNotes  String?
+  closedBy           String?
+  closedDate         DateTime?
+  closureNotes       String?
   // ⚠️ UNVERIFIED — finding-closure signing built without DB access. MUST be
   // verified against Postgres before deploy: mint a FINDING_CLOSURE signature,
   // mutate an input, confirm verifyFindingClosure detects drift, and confirm all
@@ -536,31 +538,31 @@ model Finding {
   // Deviation.closureSignatureId). NULL until the signed close path writes it —
   // and NOTHING writes it yet: the live close (reviewFinding) is still
   // AUDITED-NOT-SIGNED. Wiring is Part 2. Legacy closures keep NULL forever.
-  closureSignatureId String?  @unique
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  closureSignatureId String?   @unique
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
   // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAComment).
-  deletedAt      DateTime?
-  deletedById    String?
-  deletedByName  String?
-  deletionReason String?
+  deletedAt          DateTime?
+  deletedById        String?
+  deletedByName      String?
+  deletionReason     String?
 
-  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site   Site?         @relation(fields: [siteId], references: [id])
-  createdByUser User?  @relation("FindingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  capa   CAPA?
-  system    GxPSystem? @relation(fields: [systemId], references: [id], onDelete: SetNull)
-  rtmEntries RTMEntry[]
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site             Site?                @relation(fields: [siteId], references: [id])
+  createdByUser    User?                @relation("FindingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  capa             CAPA?
+  system           GxPSystem?           @relation(fields: [systemId], references: [id], onDelete: SetNull)
+  rtmEntries       RTMEntry[]
   // SME Section 1, Stage 6 (FULL) — FK to the prior CAPA whose
   // recurrence this Finding represents.
-  previousCAPA CAPA? @relation("FindingRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
-  raisedFromRisk Risk? @relation("FindingRaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
+  previousCAPA     CAPA?                @relation("FindingRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
+  raisedFromRisk   Risk?                @relation("FindingRaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
   // ⚠️ UNVERIFIED (see closureSignatureId above). Mirrors Deviation.closureSignature.
-  closureSignature SignedRecord? @relation("FindingClosureSignature", fields: [closureSignatureId], references: [id])
-  edits  FindingEdit[]
-  messages FindingMessage[]
+  closureSignature SignedRecord?        @relation("FindingClosureSignature", fields: [closureSignatureId], references: [id])
+  edits            FindingEdit[]
+  messages         FindingMessage[]
   // ⚠️ UNVERIFIED — single-QA SoD override built without DB access.
-  sodOverrides FindingSODOverride[]
+  sodOverrides     FindingSODOverride[]
 
   @@index([deletedAt])
 }
@@ -572,7 +574,7 @@ model FindingEdit {
   id           String   @id @default(cuid())
   findingId    String
   tenantId     String
-  editedBy     String   // acting user id (resolved to a name in the UI)
+  editedBy     String // acting user id (resolved to a name in the UI)
   editedByName String
   editedAt     DateTime @default(now())
   reason       String?
@@ -605,7 +607,7 @@ model FindingMessage {
 // ── CAPA ──
 
 model CAPA {
-  id                 String    @id @default(cuid())
+  id                        String    @id @default(cuid())
   // Human-readable per-tenant identifier, e.g. "CAPA-2026-014".
   // Nullable for the migration-then-backfill window; populated for every
   // row by the post-migration backfill, and for new rows by createCAPA's
@@ -613,33 +615,33 @@ model CAPA {
   // (rather than per-tenant) because the cross-tenant collision space is
   // tiny — a tenant rarely creates >999 CAPAs in a year — and a global
   // unique index is cheaper to enforce in SQLite than a composite one.
-  reference          String?   @unique
-  tenantId           String
-  siteId             String?
-  findingId          String?   @unique
+  reference                 String?   @unique
+  tenantId                  String
+  siteId                    String?
+  findingId                 String?   @unique
   // RUNG 2 — real FK to the GxP system this CAPA is raised against
   // (replaces the former Redux-only soft match in DIAuditPanel).
-  systemId           String?
-  source             String
+  systemId                  String?
+  source                    String
   // Phase A — short human title (the tracker's primary label). Required;
   // backfilled from the first 120 chars of description for pre-existing rows.
-  title              String
-  description        String
-  risk               String
-  owner              String
-  dueDate            DateTime?
+  title                     String
+  description               String
+  risk                      String
+  owner                     String
+  dueDate                   DateTime?
   // Valid values: "open" | "in_progress" | "pending_qa_review" | "closed" | "rejected".
   // Kept as String (not a Prisma enum) for SQLite portability — see
   // src/types/capa.ts for the canonical type and CAPA_STATUS_VALUES list.
-  status             String    @default("open")
-  rca                String?
-  rcaMethod          String?
+  status                    String    @default("open")
+  rca                       String?
+  rcaMethod                 String?
   // Batch 2 — method-specific structured RCA (5-Why array / Fishbone buckets /
   // Fault-Tree fields), stored as a JSON string. Additive + portable. `rca`
   // remains the human-readable mirror that readiness / rca-review read; this
   // column is only the structured source the Edit modal reconstructs from.
-  rcaDetail          String?
-  correctiveActions  String?
+  rcaDetail                 String?
+  correctiveActions         String?
   // ── Substage 4.7 — Action-to-Cause Alignment Review (manual reviewer flag) ──
   // alignmentStatus values: "aligned" | "cosmetic" | "needs_review" | null.
   // Validated at the application layer via ALIGNMENT_STATUSES in
@@ -693,7 +695,7 @@ model CAPA {
   verifiedById              String?
   verifiedAt                DateTime?
   verificationNotes         String?
-  verificationSignatureId   String?  @unique
+  verificationSignatureId   String?   @unique
   // SME Section 1, Stage 6 (FULL) — Effectiveness review.
   // effectivenessCheck (legacy boolean) = "was 90-day monitoring
   // committed to at closure?", set true atomically with closedAt.
@@ -706,43 +708,43 @@ model CAPA {
   // cryptographically attested.
   // Phase A — the 90-day effectiveness check is always scheduled at closure
   // (not optional); default true. signAndCloseCAPA also sets it true atomically.
-  effectivenessCheck         Boolean   @default(true)
-  effectivenessDate          DateTime?
+  effectivenessCheck        Boolean   @default(true)
+  effectivenessDate         DateTime?
   // Six fields capturing the review outcome — populated by
   // recordEffectivenessReview, cleared by revokeEffectivenessReview.
   // effectivenessVerdict: "effective" | "ineffective" | "partial"
-  effectivenessReviewedAt    DateTime?
-  effectivenessVerdict       String?
-  effectivenessReviewedBy    String?
-  effectivenessReviewedById  String?
-  effectivenessReviewNotes   String?
-  effectivenessSignatureId   String?   @unique
-  diGate             Boolean   @default(false)
-  diGateStatus       String?
-  diGateNotes        String?
-  diGateReviewedBy   String?
-  diGateReviewDate   DateTime?
-  closedBy           String?
-  closedAt           DateTime?
+  effectivenessReviewedAt   DateTime?
+  effectivenessVerdict      String?
+  effectivenessReviewedBy   String?
+  effectivenessReviewedById String?
+  effectivenessReviewNotes  String?
+  effectivenessSignatureId  String?   @unique
+  diGate                    Boolean   @default(false)
+  diGateStatus              String?
+  diGateNotes               String?
+  diGateReviewedBy          String?
+  diGateReviewDate          DateTime?
+  closedBy                  String?
+  closedAt                  DateTime?
   // Phase 1 — required closure rationale (min 20 chars, enforced in
   // signAndCloseCAPA); bound into the closure SignedRecord contentHash.
   // Nullable so legacy closures predating this column remain valid.
-  closingNotes       String?
+  closingNotes              String?
   // Substage 6.4 — Linked CC dependency override metadata. Populated only
   // when a Medium/Low risk CAPA is marked implemented while linked Change
   // Controls are still incomplete and the owner has elected to override
   // the soft-gate. Critical/High CAPAs cannot use this — they hard-gate.
   // Stays null on the normal flow (all linked CCs Implemented or Closed).
-  ccBlockOverrideReason   String?
-  ccBlockOverrideById     String?
-  ccBlockOverrideByName   String?
-  ccBlockOverrideAt       DateTime?
+  ccBlockOverrideReason     String?
+  ccBlockOverrideById       String?
+  ccBlockOverrideByName     String?
+  ccBlockOverrideAt         DateTime?
   // Substage 5.4 — Part 11 e-signature link for the CAPA closure event.
   // Stays null until signAndCloseCAPA mints a SignedRecord; @@unique
   // enforces 1:1 with the SignedRecord row. Pre-existing CAPAs from
   // before this column landed remain null (legacy closures predate the
   // closure-signature requirement; the audit trail captures them).
-  closureSignatureId String? @unique
+  closureSignatureId        String?   @unique
   // SME Section 1, Stage 2 (FULL) — bidirectional CAPA↔Deviation link.
   // Mirrors the Finding precedent: nullable FK + @unique for 1:1
   // semantics + named relation to disambiguate from the legacy
@@ -753,7 +755,7 @@ model CAPA {
   // gate); createCAPA writes BOTH sides atomically and closeDeviation
   // verifies they agree before allowing closure. Unifying on this
   // relation alone is a future rung.
-  deviationId        String?  @unique
+  deviationId               String?   @unique
   // createdBy is the denormalised display-name cache (kept for join-free
   // reads). createdById is the authoritative userId FK used by the CAPA
   // segregation-of-duties guards (RCA review / approval / verification:
@@ -762,34 +764,34 @@ model CAPA {
   // stay null and fall back to name comparison. Mirrors Deviation.createdBy
   // / createdById. onDelete: SetNull because the CAPA is an independent
   // regulatory record that must survive User deletion.
-  createdBy          String
-  createdById        String?
+  createdBy                 String
+  createdById               String?
 
   /// Governance Phase 2 — REVERSE half of the risk-conversion bidirectional link.
   /// Non-null only when this CAPA was created by converting a Risk. The FORWARD
   /// half is Risk.convertedToType/convertedToId. Nullable + additive; onDelete:
   /// SetNull — archiving the source risk must never cascade into a GxP record.
-  raisedFromRiskId   String?
+  raisedFromRiskId String?
   // Phase 3 — authoritative CAPA driver/owner userId FK (the owner dropdown
   // already selects a userId; createCAPA/updateCAPA capture it here). The
   // legacy `owner` string stays as the denormalised display value. Nullable +
   // SetNull, same pattern as createdById. Enables the CAPA-driver access path
   // (isAssignedToTask / addCAPAComment) to resolve the driver as a real User.
-  ownerId            String?
+  ownerId          String?
   // Phase 4 — targeted reject. Rejection metadata stored as first-class
   // columns (was previously crammed into diGateNotes). A reject now bounces
   // the CAPA back to in_progress for rework rather than the dead-end
   // "rejected" status. All additive/nullable.
-  rejectionReason    String?
-  rejectedById       String?
-  rejectedAt         DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  rejectionReason  String?
+  rejectedById     String?
+  rejectedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
   // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAComment).
-  deletedAt          DateTime?
-  deletedById        String?
-  deletedByName      String?
-  deletionReason     String?
+  deletedAt        DateTime?
+  deletedById      String?
+  deletedByName    String?
+  deletionReason   String?
 
   tenant                 Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   raisedFromRisk         Risk?                        @relation("CAPARaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
@@ -923,6 +925,47 @@ model FindingSODOverride {
   @@index([tenantId])
 }
 
+// ⚠️ UNVERIFIED — CSV stage-approval SoD override, built without DB access.
+// Requires (1) QA/regulatory policy authorization to enable single-QA stage
+// approval, and (2) Postgres verification before deploy. Waives the ONLY
+// identity control in the CSV validation chain — ceiling is load-bearing.
+//
+// Single-QA SoD override for CSV/CSA STAGE APPROVAL — the analogue of
+// FindingSODOverride, scoped to a ValidationStage. One row per waived control.
+//
+// REUSES Tenant.sodSingleQAOverride — the one org attestation that already
+// covers CAPA, Deviation and Finding. No new flag.
+//
+// NO signedRecordId, unlike all three siblings. Stage approval is NOT a signed
+// record: approveStage writes approvedBy/approvedById on the stage and mints no
+// SignedRecord. The waiver therefore attaches to the STAGE (stageId), which is
+// why this feature touches no canonicaliser and cannot invalidate an existing
+// CSV_VALIDATION_SIGNOFF. `stagesApproved` still counts rows whose status is
+// "approved" — the override permits the approval, it does not change what an
+// approval means or how it is counted or hashed.
+model SystemStageSODOverride {
+  id            String   @id @default(cuid())
+  tenantId      String
+  systemId      String
+  // The stage whose submitter!=approver rule was waived.
+  stageId       String
+  control       String
+  actorUserId   String
+  actorName     String
+  actorRole     String
+  reasonCode    String
+  justification String
+  createdAt     DateTime @default(now())
+
+  system GxPSystem       @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  stage  ValidationStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([stageId])
+  @@index([systemId])
+  @@index([tenantId])
+}
+
 // ── SME Section 1, Stage 4 (FULL) — Structured CAPA Action Plan items ──
 // Replaces the free-text CAPA.correctiveActions blob. Each action plan
 // step is now its own row with owner, due date, status, completion
@@ -931,58 +974,58 @@ model FindingSODOverride {
 // working; updateCAPA now rejects writes to correctiveActions — all
 // writes go through addActionItem / updateActionItem / etc.
 model CAPAActionItem {
-  id              String   @id @default(cuid())
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  capaId          String
-  capa            CAPA     @relation("CAPAActionItems", fields: [capaId], references: [id], onDelete: Cascade)
+  id                    String    @id @default(cuid())
+  tenantId              String
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  capaId                String
+  capa                  CAPA      @relation("CAPAActionItems", fields: [capaId], references: [id], onDelete: Cascade)
   // Stable ordering — set at create time (append after the current max).
-  sequence        Int
-  description     String
+  sequence              Int
+  description           String
   // Display-name cache + nullable userId FK. Matches the dual-write
   // pattern adopted in Stage 5 for Deviation.createdBy/createdById.
-  owner           String
-  ownerId         String?
-  ownerUser       User?    @relation("CAPAActionItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  dueDate         DateTime
+  owner                 String
+  ownerId               String?
+  ownerUser             User?     @relation("CAPAActionItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  dueDate               DateTime
   // "pending" | "in_progress" | "complete" | "skipped" | "rework". Stored as
   // String (not Prisma enum) for SQLite portability, validated at app layer
   // via ACTION_ITEM_STATUSES. "rework" (Phase 2) marks an item the QA review
   // sent back for revision — the targeted-reject flow is Phase 4; this phase
   // only adds the value + fields.
-  status          String   @default("pending")
+  status                String    @default("pending")
   // Phase 2 — per-action rework state. Populated when an item is returned
   // for revision (flow wiring deferred to Phase 4). All nullable/additive.
-  reworkReason        String?
-  reworkRequestedById String?
-  reworkRequestedAt   DateTime?
-  reworkRequestedByUser User? @relation("CAPAActionItemReworkRequestedBy", fields: [reworkRequestedById], references: [id], onDelete: SetNull)
-  completedBy     String?
-  completedById   String?
-  completedByUser User?    @relation("CAPAActionItemCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
-  completedAt     DateTime?
-  completionNotes String?
+  reworkReason          String?
+  reworkRequestedById   String?
+  reworkRequestedAt     DateTime?
+  reworkRequestedByUser User?     @relation("CAPAActionItemReworkRequestedBy", fields: [reworkRequestedById], references: [id], onDelete: SetNull)
+  completedBy           String?
+  completedById         String?
+  completedByUser       User?     @relation("CAPAActionItemCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+  completedAt           DateTime?
+  completionNotes       String?
   // Phase 2 — per-person QA acceptance (written by acceptWork). NOT a Part 11
   // signature (a review step; only closure is signed) — attribution lives here
   // + in the CAPA_WORK_ACCEPTED audit row. Plain-string acceptedById (no FK)
   // matches the createdById convention on this model.
-  acceptedBy      String?
-  acceptedById    String?
-  acceptedAt      DateTime?
-  acceptanceNotes String?
-  createdAt       DateTime @default(now())
-  createdBy       String
-  createdById     String?
-  updatedAt       DateTime @updatedAt
+  acceptedBy            String?
+  acceptedById          String?
+  acceptedAt            DateTime?
+  acceptanceNotes       String?
+  createdAt             DateTime  @default(now())
+  createdBy             String
+  createdById           String?
+  updatedAt             DateTime  @updatedAt
   // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAComment).
-  deletedAt       DateTime?
-  deletedById     String?
-  deletedByName   String?
-  deletionReason  String?
+  deletedAt             DateTime?
+  deletedById           String?
+  deletedByName         String?
+  deletionReason        String?
 
   // Phase 2 — per-action attachments + comments (reverse relations).
-  evidenceFiles   EvidenceFile[] @relation("ActionItemEvidenceFiles")
-  comments        CAPAComment[]  @relation("ActionItemComments")
+  evidenceFiles EvidenceFile[] @relation("ActionItemEvidenceFiles")
+  comments      CAPAComment[]  @relation("ActionItemComments")
 
   @@index([tenantId, capaId])
   @@index([capaId, sequence])
@@ -1055,7 +1098,7 @@ model Deviation {
   /// half is Risk.convertedToType/convertedToId. Nullable + additive: every record
   /// raised the normal way keeps it null. onDelete: SetNull — archiving the source
   /// risk must never cascade into a GxP record.
-  raisedFromRiskId      String?
+  raisedFromRiskId           String?
   // ── Tier 2, Item 4 — Investigation (RCA performed AFTER the report, by
   //    someone other than the reporter; SoD enforced via createdById vs
   //    investigationCompletedById). rcaMethod + rootCause above are reused:
@@ -1079,36 +1122,36 @@ model Deviation {
   capaDecisionReason         String?
   capaDecisionAt             DateTime?
   capaDecisionById           String?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
   // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAComment).
-  deletedAt            DateTime?
-  deletedById          String?
-  deletedByName        String?
-  deletionReason       String?
+  deletedAt                  DateTime?
+  deletedById                String?
+  deletedByName              String?
+  deletionReason             String?
 
-  tenant            Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site              Site?          @relation(fields: [siteId], references: [id])
-  closureSignature  SignedRecord?  @relation("DeviationClosureSignature", fields: [closureSignatureId], references: [id])
-  createdByUser     User?          @relation("DeviationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  tenant                       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site                         Site?                  @relation(fields: [siteId], references: [id])
+  closureSignature             SignedRecord?          @relation("DeviationClosureSignature", fields: [closureSignatureId], references: [id])
+  createdByUser                User?                  @relation("DeviationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   // Tier 2 — investigation completer + CAPA-decision maker FKs (SoD chain).
-  investigationCompletedByUser User? @relation("DeviationInvestigationCompletedBy", fields: [investigationCompletedById], references: [id], onDelete: SetNull)
-  capaDecisionByUser           User? @relation("DeviationCapaDecisionBy", fields: [capaDecisionById], references: [id], onDelete: SetNull)
+  investigationCompletedByUser User?                  @relation("DeviationInvestigationCompletedBy", fields: [investigationCompletedById], references: [id], onDelete: SetNull)
+  capaDecisionByUser           User?                  @relation("DeviationCapaDecisionBy", fields: [capaDecisionById], references: [id], onDelete: SetNull)
   // SME Section 1, Stage 6 (FULL) — FK to the prior CAPA whose
   // recurrence this Deviation represents.
-  previousCAPA      CAPA?          @relation("DeviationRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
-  raisedFromRisk     Risk? @relation("DeviationRaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
+  previousCAPA                 CAPA?                  @relation("DeviationRecurrenceOf", fields: [previousCAPAId], references: [id], onDelete: SetNull)
+  raisedFromRisk               Risk?                  @relation("DeviationRaisedFromRisk", fields: [raisedFromRiskId], references: [id], onDelete: SetNull)
   // SME Section 1, Stage 2 (FULL) — virtual reverse field for the
   // CAPA↔Deviation 1:1 relation. Carries no column of its own (the FK
   // lives on CAPA.deviationId); Prisma uses this for include/select
   // queries. Coexists with the legacy `linkedCAPAId String?` column
   // above — same logical relationship, different sides; createCAPA
   // writes both atomically.
-  sourcedCAPA       CAPA?          @relation("CAPADeviationSource")
+  sourcedCAPA                  CAPA?                  @relation("CAPADeviationSource")
   // Stage 1 (deviation redesign) — low-priority lightweight tasks (DeviationTask).
-  tasks             DeviationTask[] @relation("DeviationTaskDeviation")
+  tasks                        DeviationTask[]        @relation("DeviationTaskDeviation")
   // Single-QA SoD override — waivers used at this deviation's closure (on-record).
-  sodOverrides      DeviationSODOverride[]
+  sodOverrides                 DeviationSODOverride[]
 
   @@index([deletedAt])
 }
@@ -1119,16 +1162,16 @@ model Deviation {
 // the Worklist key (getWorklist will union `where assigneeId == userId` in
 // Stage 4). NO behavior is wired yet — this is the schema foundation only.
 model DeviationTask {
-  id              String    @id @default(cuid())
+  id              String                 @id @default(cuid())
   tenantId        String
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   deviationId     String
-  deviation       Deviation @relation("DeviationTaskDeviation", fields: [deviationId], references: [id], onDelete: Cascade)
+  deviation       Deviation              @relation("DeviationTaskDeviation", fields: [deviationId], references: [id], onDelete: Cascade)
   // Assignee — the Worklist key. Display-name cache + nullable userId FK, the
   // same dual-write pattern as CAPAActionItem.owner/ownerId.
   assignee        String
   assigneeId      String?
-  assigneeUser    User?     @relation("DeviationTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assigneeUser    User?                  @relation("DeviationTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   // QA's instruction to the assignee.
   message         String
   dueDate         DateTime?
@@ -1136,27 +1179,27 @@ model DeviationTask {
   // ("closed" written only by the signed closeDeviation; "cancelled" by the
   // raise-CAPA escalation). Stored as String (SQLite has no enums), validated
   // at the app layer (Stage 4).
-  status          String    @default("pending")
+  status          String                 @default("pending")
   // Assignee submission.
   completionNotes String?
   submittedAt     DateTime?
   submittedById   String?
-  submittedByUser User?     @relation("DeviationTaskSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  submittedByUser User?                  @relation("DeviationTaskSubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
   // QA review (Stage 4 enforces SoD: reviewer != assignee).
   reviewedAt      DateTime?
   reviewedById    String?
-  reviewedByUser  User?     @relation("DeviationTaskReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedByUser  User?                  @relation("DeviationTaskReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   // Rework — QA returns the task to the assignee.
   reworkReason    String?
   reworkAt        DateTime?
   reworkById      String?
-  reworkByUser    User?     @relation("DeviationTaskReworkBy", fields: [reworkById], references: [id], onDelete: SetNull)
+  reworkByUser    User?                  @relation("DeviationTaskReworkBy", fields: [reworkById], references: [id], onDelete: SetNull)
   // Document link: reuse the generic Document pattern — Document.linkedModule =
   // "Deviation Task", linkedRecordId = this task's id — exactly how Deviation
   // docs attach today ("Deviation Management"). No FK column needed here.
-  createdAt       DateTime  @default(now())
+  createdAt       DateTime               @default(now())
   createdById     String?
-  updatedAt       DateTime  @updatedAt
+  updatedAt       DateTime               @updatedAt
   // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAActionItem).
   deletedAt       DateTime?
   deletedById     String?
@@ -1193,48 +1236,48 @@ model DeviationTaskMessage {
 // ── FDA 483 ──
 
 model FDA483Event {
-  id               String    @id @default(cuid())
-  tenantId         String
-  referenceNumber  String
-  eventType        String
-  agency           String
-  siteId           String
-  inspectionDate   DateTime
-  responseDeadline DateTime
-  status           String    @default("Open")
-  responseDraft    String?
-  agiDraft         String?
-  submittedAt      DateTime?
-  submittedBy      String?
-  signatureMeaning String?
-  closedAt         DateTime?
+  id                  String    @id @default(cuid())
+  tenantId            String
+  referenceNumber     String
+  eventType           String
+  agency              String
+  siteId              String
+  inspectionDate      DateTime
+  responseDeadline    DateTime
+  status              String    @default("Open")
+  responseDraft       String?
+  agiDraft            String?
+  submittedAt         DateTime?
+  submittedBy         String?
+  signatureMeaning    String?
+  closedAt            DateTime?
   // Role-based workflow pointer (orthogonal to `status`): intake →
   // investigation → response → outcome → closed. Owner is a fixed role
   // mapping (see STAGE_CONFIG in src/modules/fda-483/_shared.ts). Legacy
   // rows default to "intake"; soft handoff (does not lock editing).
-  currentStage     String    @default("intake")
+  currentStage        String    @default("intake")
   // FDA outcome capture (Record Outcome step, Part 11 signed). Null until
   // recordFDA483Outcome runs. outcomeType ∈ Acknowledged | Closed |
   // Warning Letter | Follow-up Requested.
-  outcomeType        String?
-  outcomeNote        String?
-  outcomeSignatureId String? @unique
+  outcomeType         String?
+  outcomeNote         String?
+  outcomeSignatureId  String?   @unique
   // Substage 5.4 — Part 11 e-signature link for the response submission
   // event. Null until signSubmitFDA483Response mints a SignedRecord.
   // Legacy submissions (predating this column) remain null.
-  responseSignatureId String? @unique
+  responseSignatureId String?   @unique
   // Extended capture fields. All nullable for backward compat with seed
   // data; internalOwnerId is required at the form layer for new events.
-  inspectionEndDate DateTime?           // optional; falls back to inspectionDate when blank
-  leadInvestigator  String?             // optional; FDA inspector name from the form
-  internalOwnerId   String?             // optional in DB, required in the modal
-  createdBy        String
+  inspectionEndDate   DateTime? // optional; falls back to inspectionDate when blank
+  leadInvestigator    String? // optional; FDA inspector name from the form
+  internalOwnerId     String? // optional in DB, required in the modal
+  createdBy           String
   // Record-visibility (Phase 5.5) — authoritative creator userId FK (dual-field
   // with the createdBy display-name string; mirrors Deviation.createdById).
   // Nullable for the backfill window; onDelete: SetNull.
-  createdById      String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdById         String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   responseSignature SignedRecord?       @relation("FDA483ResponseSignature", fields: [responseSignatureId], references: [id])
@@ -1279,19 +1322,19 @@ model FDA483Observation {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  event FDA483Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event       FDA483Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
   // First-class commitments may cite this observation as their source.
   commitments FDA483Commitment[]
 }
 
 model FDA483Commitment {
-  id      String    @id @default(cuid())
-  eventId String
-  text    String
-  dueDate DateTime?
+  id              String    @id @default(cuid())
+  eventId         String
+  text            String
+  dueDate         DateTime?
   // `owner` stores a userId (resolved to a name in the UI via ownerName).
-  owner   String?
-  status  String    @default("Pending")
+  owner           String?
+  status          String    @default("Pending")
   // ── First-class commitment fields (FDA 483 commitments rung) ──
   // Human-readable reference "COMM-{siteCode}-{year}-{NNN}"; nullable for
   // the backfill window (legacy seeded commitments have none).
@@ -1312,11 +1355,11 @@ model FDA483Commitment {
   updatedAt       DateTime  @default(now()) @updatedAt
   createdById     String?
 
-  event           FDA483Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  observation     FDA483Observation? @relation(fields: [observationId], references: [id], onDelete: SetNull)
-  capa            CAPA?              @relation("FDA483CommitmentSourceCAPA", fields: [capaId], references: [id], onDelete: SetNull)
-  completedByUser User?              @relation("FDA483CommitmentCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
-  createdByUser   User?              @relation("FDA483CommitmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  event           FDA483Event                @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  observation     FDA483Observation?         @relation(fields: [observationId], references: [id], onDelete: SetNull)
+  capa            CAPA?                      @relation("FDA483CommitmentSourceCAPA", fields: [capaId], references: [id], onDelete: SetNull)
+  completedByUser User?                      @relation("FDA483CommitmentCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+  createdByUser   User?                      @relation("FDA483CommitmentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   documents       FDA483CommitmentDocument[]
 }
 
@@ -1338,71 +1381,71 @@ model FDA483CommitmentDocument {
 // ── CSV/CSA ──
 
 model GxPSystem {
-  id               String   @id @default(cuid())
-  tenantId         String
-  name             String
-  type             String
-  vendor           String?
-  version          String?
-  gxpRelevance     String   @default("Major")
-  part11Status     String   @default("N/A")
-  annex11Status    String   @default("N/A")
-  gamp5Category    String   @default("4")
-  validationStatus String   @default("Not Started")
-  riskLevel        String   @default("MEDIUM")
-  siteId           String?
-  intendedUse      String?
-  gxpScope         String?
-  plannedActions   String?
-  owner            String?
-  createdBy        String
+  id                         String    @id @default(cuid())
+  tenantId                   String
+  name                       String
+  type                       String
+  vendor                     String?
+  version                    String?
+  gxpRelevance               String    @default("Major")
+  part11Status               String    @default("N/A")
+  annex11Status              String    @default("N/A")
+  gamp5Category              String    @default("4")
+  validationStatus           String    @default("Not Started")
+  riskLevel                  String    @default("MEDIUM")
+  siteId                     String?
+  intendedUse                String?
+  gxpScope                   String?
+  plannedActions             String?
+  owner                      String?
+  createdBy                  String
   // Record-visibility (Phase 0) — authoritative creator userId FK (dual-field
   // with createdBy; mirrors Deviation.createdById). Nullable; onDelete: SetNull.
-  createdById      String?
+  createdById                String?
   // ── RUNG 1 "Stop Lying" — persistence-integrity fields ──
   // ICH Q9 risk classification (was orphaned UI-only; now persisted).
   // "Low" | "Medium" | "High"; null = fall back to gxpRelevance-derived.
-  patientSafetyRisk    String?
-  productQualityImpact String?
-  regulatoryExposure   String?
-  diImpact             String?
+  patientSafetyRisk          String?
+  productQualityImpact       String?
+  regulatoryExposure         String?
+  diImpact                   String?
   // Free-text detail fields (adapter previously hardcoded "").
-  criticalFunctions    String?
-  riskFactors          String?
+  criticalFunctions          String?
+  riskFactors                String?
   // Requalification dates (nextReview may be auto-derived on stage approval).
-  lastValidated        DateTime?
-  nextReview           DateTime?
+  lastValidated              DateTime?
+  nextReview                 DateTime?
   // Data-integrity remediation tracking (DI tab). status: open|in-progress|closed.
-  remediationPlan      String?
-  remediationStatus    String?
+  remediationPlan            String?
+  remediationStatus          String?
   // Soft-delete (columns added now for parity with StageDocument; UI wired in Rung 3).
-  deletedAt            DateTime?
-  deletedById          String?
-  deletionReason       String?
+  deletedAt                  DateTime?
+  deletedById                String?
+  deletionReason             String?
   // Manual status attestation — lets auto-derive respect a manual sign-off.
-  statusManuallySet       Boolean   @default(false)
-  statusManualReason      String?
-  statusManuallySetAt     DateTime?
-  statusManuallySetByName String?
+  statusManuallySet          Boolean   @default(false)
+  statusManualReason         String?
+  statusManuallySetAt        DateTime?
+  statusManuallySetByName    String?
   // Human-readable reference (generation wired in Rung 3; column added now).
-  reference            String?   @unique
+  reference                  String?   @unique
   // ── RUNG 2.6 — Part 11 validation sign-off snapshot ──
   // Set by signValidation() when QA signs off a fully-executed system; cleared
   // by unsignValidation(). The immutable e-signature itself lives in a
   // SignedRecord row (recordType "CSV_VALIDATION_SIGNOFF"); these denormalized
   // columns snapshot the system's state at the moment of sign-off for fast
   // display on the Sign Off / Inspect tabs without re-deriving history.
-  signedOffAt               DateTime?
-  signedOffById             String?   // resolveUserFk(session.user.id) or null for Tenant logins
-  signedOffByName           String?
-  signedOffReason           String?
-  signedOffContentHash      String?
-  signedOffSignatureId      String?   // SignedRecord.id of the sign-off signature
-  signedOffPart11Compliant  Boolean?
-  signedOffAnnex11Compliant Boolean?
-  signedOffRtmCoverage      Float?
-  signedOffStagesApproved   Int?
-  signedOffStagesTotal      Int?
+  signedOffAt                DateTime?
+  signedOffById              String? // resolveUserFk(session.user.id) or null for Tenant logins
+  signedOffByName            String?
+  signedOffReason            String?
+  signedOffContentHash       String?
+  signedOffSignatureId       String? // SignedRecord.id of the sign-off signature
+  signedOffPart11Compliant   Boolean?
+  signedOffAnnex11Compliant  Boolean?
+  signedOffRtmCoverage       Float?
+  signedOffStagesApproved    Int?
+  signedOffStagesTotal       Int?
   // RTM-coverage gate override (sign-off gate 4). Full requirements traceability
   // — every RTMEntry at traceabilityStatus "complete", and at least one entry —
   // is required to sign off. A QA Head may still sign a system that falls short,
@@ -1419,12 +1462,13 @@ model GxPSystem {
   // manifest from current documents would make every legacy record read as drift.
   // Cleared by unsignValidation alongside the rest of the snapshot.
   signedOffDocManifestSha256 String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 
-  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdByUser     User?             @relation("GxPSystemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  tenant            Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByUser     User?                    @relation("GxPSystemCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   validationStages  ValidationStage[]
+  stageSodOverrides SystemStageSODOverride[]
   rtmEntries        RTMEntry[]
   roadmapActivities RoadmapActivity[]
   // RUNG 2 — real cross-module FKs (replacing the former Redux-only soft links).
@@ -1455,11 +1499,12 @@ model ValidationStage {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  system    GxPSystem       @relation(fields: [systemId], references: [id], onDelete: Cascade)
-  documents StageDocument[]
+  system       GxPSystem                @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  documents    StageDocument[]
   // CSV/CSA stage rework — lightweight, assignable fix-tasks raised after a QA
   // rejection (mirrors the low-priority DeviationTask pattern).
-  reworkTasks ValidationStageTask[]
+  reworkTasks  ValidationStageTask[]
+  sodOverrides SystemStageSODOverride[]
 }
 
 // CSV/CSA stage rework task — a lightweight, assignable fix-task the Validation
@@ -1525,30 +1570,30 @@ model ValidationStageTask {
 // and deletes (no separate lockedAt column needed — the stage itself is
 // the lock signal).
 model StageDocument {
-  id                String    @id @default(cuid())
-  tenantId          String
+  id       String @id @default(cuid())
+  tenantId String
 
   validationStageId String
   validationStage   ValidationStage @relation(fields: [validationStageId], references: [id], onDelete: Cascade)
 
-  fileName          String    // sanitized stored name
-  originalFileName  String    // user's upload name (post-sanitize, kept for audit)
-  fileSize          Int       // bytes
-  fileType          String    // MIME type
-  fileUrl           String    // storage key relative to fileStorage root
-  contentHashSha256 String    // SHA-256 hex of file contents at upload time
+  fileName          String // sanitized stored name
+  originalFileName  String // user's upload name (post-sanitize, kept for audit)
+  fileSize          Int // bytes
+  fileType          String // MIME type
+  fileUrl           String // storage key relative to fileStorage root
+  contentHashSha256 String // SHA-256 hex of file contents at upload time
 
-  retainUntil       DateTime  // upload + 7 years (Part 11 retention floor)
+  retainUntil DateTime // upload + 7 years (Part 11 retention floor)
 
   // Soft delete — Part 11 §11.10(e). Bytes survive on disk; row stays.
-  deletedAt         DateTime?
-  deletedById       String?
-  deletedByName     String?
-  deletionReason    String?
+  deletedAt      DateTime?
+  deletedById    String?
+  deletedByName  String?
+  deletionReason String?
 
-  uploadedById      String
-  uploadedByName    String
-  uploadedAt        DateTime  @default(now())
+  uploadedById   String
+  uploadedByName String
+  uploadedAt     DateTime @default(now())
 
   @@index([validationStageId])
   @@index([tenantId, uploadedAt])
@@ -1632,8 +1677,8 @@ model RoadmapActivity {
 //   • Add siteId/category as nullable; add (tenantId, uploadedAt) index;
 //     flip status default to "Pending".
 model Document {
-  id             String    @id @default(cuid())
-  tenantId       String
+  id       String @id @default(cuid())
+  tenantId String
 
   // ── Legacy columns (1.3a keeps intact; 1.3b backfills + drops/renames) ──
   fileName       String
@@ -1660,35 +1705,35 @@ model Document {
   updatedAt      DateTime  @updatedAt
 
   // ── 1.3a additions — all nullable for now ──
-  sourceModule     String?
-  sourceId         String?
-  siteId           String?
-  category         String?
+  sourceModule        String?
+  sourceId            String?
+  siteId              String?
+  category            String?
   // Gap-doc bucketing — STABLE source stamped at upload, never re-derived from
   // the (mutable) finding owner. "create" = Add Finding modal / QA gap-detail
   // supporting doc; "work" = the assigned worker's categorized upload. Nullable +
   // default "create" (additive/reversible). Only meaningful for
   // linkedModule="Gap Assessment" rows; harmless elsewhere. Backfill corrects
   // legacy gap docs (category → "work", else "create").
-  uploadSource     String?   @default("create")
-  sha256           String?
-  storageKey       String?
-  originalFileName String?
-  fileExtension    String?
-  retainUntil      DateTime?
-  deletedAt        DateTime?
-  deletedBy        String?
-  deletionReason   String?
-  notes            String?
+  uploadSource        String?   @default("create")
+  sha256              String?
+  storageKey          String?
+  originalFileName    String?
+  fileExtension       String?
+  retainUntil         DateTime?
+  deletedAt           DateTime?
+  deletedBy           String?
+  deletionReason      String?
+  notes               String?
   // New canonical timestamp — written by the Phase 2 upload service.
   // 1.3b backfills NULLs from createdAt, marks NOT NULL, then drops createdAt.
-  uploadedAt       DateTime?
+  uploadedAt          DateTime?
   // Substage 5.4 — Part 11 e-signature link for the document approval
   // event. Null until approveDocument mints a SignedRecord.
-  approvalSignatureId String? @unique
+  approvalSignatureId String?   @unique
 
-  tenant             Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  approvalSignature  SignedRecord?  @relation("DocumentApprovalSignature", fields: [approvalSignatureId], references: [id])
+  tenant            Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  approvalSignature SignedRecord? @relation("DocumentApprovalSignature", fields: [approvalSignatureId], references: [id])
 
   @@index([tenantId, sourceModule, sourceId])
   @@index([tenantId, uploadedById])
@@ -1723,15 +1768,15 @@ model Document {
 /// does). Document has no hard FK to its parent, so no Prisma relation field is
 /// possible here — this mirrors every other module.
 model Risk {
-  id          String @id @default(cuid())
+  id        String  @id @default(cuid())
   /// Human-readable per-tenant per-site per-year reference: "RISK-CHN-2026-001".
   /// Globally @unique (matches CAPA/Finding); the create action retries on P2002.
   /// Nullable only so the column can be added additively.
-  reference   String? @unique
-  tenantId    String
+  reference String? @unique
+  tenantId  String
   /// Drives the <SITE> segment of `reference`. Nullable — a tenant-level risk
   /// falls back to the 2-segment "RISK-2026-001" form (see buildReferencePrefix).
-  siteId      String?
+  siteId    String?
 
   title       String
   description String
@@ -1816,7 +1861,7 @@ model Risk {
 /// document table. A meeting's docs are the Document rows where
 /// `sourceModule = "management-decisions"` AND `sourceId = decision.id`.
 model ManagementDecision {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   /// Human-readable per-tenant per-year reference: "MGT-2026-001". Globally
   /// @unique (matches CAPA/Finding/Risk); the create action retries on P2002.
   /// TENANT-level, not site-scoped — a management review is not a site record —
@@ -2030,25 +2075,25 @@ model TrainingRecord {
 // (No native enums: SQLite + Prisma uses string fields with Zod runtime
 // validation — same pattern as CAPA.risk, Finding.severity, etc.)
 model EvidenceItem {
-  id                String   @id @default(cuid())
-  capaId            String
-  category          String
-  status            String   @default("PENDING")
-  notes             String?
+  id       String  @id @default(cuid())
+  capaId   String
+  category String
+  status   String  @default("PENDING")
+  notes    String?
   // Phase 2 — first-class N/A rationale. Dual-written alongside the existing
   // EvidenceNoteVersion note-row on N/A transitions; reads still go through
   // the note-row path for now. Holds the current "why N/A" reason; cleared
   // when the item leaves NOT_APPLICABLE.
-  naReason          String?
+  naReason String?
 
   // Per-evidence QA disposition — when QA rejects a specific evidence item at
   // pending_qa_review (via rejectCAPA), status becomes "REJECTED" and these
   // capture who/when/why. Cleared when the driver re-works the item (any
   // updateEvidenceStatus status change). REJECTED is not in the readiness
   // RESOLVED set, so a rejected item auto-un-resolves its category.
-  reviewedById      String?
-  reviewedAt        DateTime?
-  rejectionReason   String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  rejectionReason String?
 
   // Wave 3 e-sig lock placeholder (unused in v1; schema-stable for future).
   // When set, all mutations on this EvidenceItem and its files are rejected.
@@ -2056,13 +2101,13 @@ model EvidenceItem {
   lockedBy          String?
   lockedSignatureId String?
 
-  createdBy         String
-  updatedAt         DateTime @updatedAt
-  createdAt         DateTime @default(now())
+  createdBy String
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 
-  capa              CAPA                  @relation(fields: [capaId], references: [id], onDelete: Cascade)
-  files             EvidenceFile[]
-  noteVersions      EvidenceNoteVersion[]
+  capa         CAPA                  @relation(fields: [capaId], references: [id], onDelete: Cascade)
+  files        EvidenceFile[]
+  noteVersions EvidenceNoteVersion[]
 
   @@unique([capaId, category])
   @@index([capaId])
@@ -2073,14 +2118,14 @@ model EvidenceItem {
 // preserved per ALCOA+ Original. statusAtTime captures the EvidenceItem.status
 // at the moment the snapshot was taken.
 model EvidenceNoteVersion {
-  id              String   @id @default(cuid())
-  evidenceItemId  String
-  notes           String
-  statusAtTime    String
-  createdBy       String
-  createdAt       DateTime @default(now())
+  id             String   @id @default(cuid())
+  evidenceItemId String
+  notes          String
+  statusAtTime   String
+  createdBy      String
+  createdAt      DateTime @default(now())
 
-  evidenceItem    EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
 
   @@index([evidenceItemId])
 }
@@ -2103,19 +2148,19 @@ model EvidenceFile {
   retainUntil       DateTime
 
   // Soft delete metadata
-  deletedAt         DateTime?
-  deletedBy         String?
-  deletionReason    String?
+  deletedAt      DateTime?
+  deletedBy      String?
+  deletionReason String?
 
-  uploadedBy        String
+  uploadedBy   String
   // Phase 2 — evidence hardening: authoritative uploader userId FK alongside
   // the existing uploadedBy display-name string (name stays for display /
   // legacy). Nullable + SetNull so file metadata survives User deletion.
-  uploadedById      String?
+  uploadedById String?
   // Phase 2 — per-action attachments: optionally scope a file to a specific
   // action item (still belongs to its EvidenceItem/category). Nullable +
   // SetNull so removing an action item never deletes the file.
-  actionItemId      String?
+  actionItemId String?
   // Phase 3 — STORED provenance, mirroring Document.uploadSource (:1461).
   //   "gap"      = carried from the originating finding/deviation via
   //                convertCategorizedDocsToEvidence (read-only).
@@ -2128,12 +2173,12 @@ model EvidenceFile {
   // "qa_added" would make carried read-only files look deletable between the
   // migration and the backfill, so pre-backfill rows stay null (UI treats
   // unknown provenance conservatively) and the backfill sets every row.
-  uploadSource      String?
-  createdAt         DateTime @default(now())
+  uploadSource String?
+  createdAt    DateTime @default(now())
 
-  evidenceItem      EvidenceItem    @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
-  uploadedByUser    User?           @relation("EvidenceFileUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
-  actionItem        CAPAActionItem? @relation("ActionItemEvidenceFiles", fields: [actionItemId], references: [id], onDelete: SetNull)
+  evidenceItem   EvidenceItem    @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+  uploadedByUser User?           @relation("EvidenceFileUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  actionItem     CAPAActionItem? @relation("ActionItemEvidenceFiles", fields: [actionItemId], references: [id], onDelete: SetNull)
 
   @@index([evidenceItemId])
   @@index([deletedAt])
@@ -2147,32 +2192,32 @@ model EvidenceFile {
 // the e-signature substage lands. Soft-deleted (Part 11 retention) — see the
 // deletedAt/deletedById columns below; the audit trail captures the event too.
 model CAPAEffectivenessCriterion {
-  id                 String    @id @default(cuid())
-  tenantId           String
-  capaId             String
+  id       String @id @default(cuid())
+  tenantId String
+  capaId   String
 
-  description        String
-  targetMetric       String
-  measurementMethod  String
-  targetValue        String
-  monitoringPeriod   String
+  description       String
+  targetMetric      String
+  measurementMethod String
+  targetValue       String
+  monitoringPeriod  String
 
-  createdBy          String
-  createdAt          DateTime  @default(now())
-  updatedBy          String?
-  updatedAt          DateTime  @updatedAt
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedBy String?
+  updatedAt DateTime @updatedAt
 
-  lockedAt           DateTime?
-  lockedBy           String?
-  lockedSignatureId  String?
+  lockedAt          DateTime?
+  lockedBy          String?
+  lockedSignatureId String?
 
   // Soft-delete (Part 11 retention) — CAPA-family convention (CAPAComment).
-  deletedAt          DateTime?
-  deletedById        String?
-  deletedByName      String?
-  deletionReason     String?
+  deletedAt      DateTime?
+  deletedById    String?
+  deletedByName  String?
+  deletionReason String?
 
-  capa               CAPA      @relation(fields: [capaId], references: [id], onDelete: Cascade)
+  capa CAPA @relation(fields: [capaId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, capaId])
   @@index([capaId])
@@ -2188,52 +2233,52 @@ model CAPAEffectivenessCriterion {
 // any subsequent change to the underlying record is detectable. Rows
 // here are immutable — never updated, never deleted.
 model SignedRecord {
-  id                  String    @id @default(cuid())
-  tenantId            String
+  id       String @id @default(cuid())
+  tenantId String
 
   // What was signed
   // "FINDING_CLOSURE" is ⚠️ UNVERIFIED + NOT YET MINTED — see Finding.closureSignatureId.
-  recordType          String    // "CAPA_APPROVAL" | "CAPA_APPROVAL_REVOCATION" | "CAPA_CLOSURE" | "FDA483_RESPONSE" | "FINDING_CLOSURE" | …
-  recordId            String    // FK target id — polymorphic, no formal FK constraint
+  recordType String // "CAPA_APPROVAL" | "CAPA_APPROVAL_REVOCATION" | "CAPA_CLOSURE" | "FDA483_RESPONSE" | "FINDING_CLOSURE" | …
+  recordId   String // FK target id — polymorphic, no formal FK constraint
 
   // Who signed
-  signerId            String
-  signerName          String
-  signerRole          String
-  signerEmail         String    // captured at signing time (immutable even if user later changes email)
+  signerId    String
+  signerName  String
+  signerRole  String
+  signerEmail String // captured at signing time (immutable even if user later changes email)
 
   // What the signature means (Part 11 §11.50)
-  signatureMeaning    String    // "Approved" | "Rejected" | "Reviewed" | "Authored" | "Revoked" …
+  signatureMeaning String // "Approved" | "Rejected" | "Reviewed" | "Authored" | "Revoked" …
 
   // Integrity (Part 11 §11.50 — link signature to record)
-  contentHash         String    // SHA-256 hex of the canonical record state at signing time
-  contentSummary     String     // human-readable snapshot for audit display
+  contentHash    String // SHA-256 hex of the canonical record state at signing time
+  contentSummary String // human-readable snapshot for audit display
 
   // Authentication metadata (Part 11 §11.200(a)(1)(ii))
-  passwordVerifiedAt  DateTime  // exact moment password re-verification succeeded
+  passwordVerifiedAt DateTime // exact moment password re-verification succeeded
 
   // Provenance — best-effort; not all server contexts provide these.
-  ipAddress           String?
-  userAgent           String?
+  ipAddress String?
+  userAgent String?
 
-  createdAt           DateTime  @default(now())
+  createdAt DateTime @default(now())
 
-  approval                  CAPAApproval?
+  approval                CAPAApproval?
   // Back-references for substage 5.4 surfaces — each FK on the source
   // model is at most 1:1 with a SignedRecord row. ChangeControl.latest...
   // is N:1 (one SignedRecord backs at most one CC's "latest" pointer; the
   // CC's full history lives in (recordType, recordId) lookups). All are
   // nullable because the SignedRecord may also serve other recordTypes
   // (CAPA_APPROVAL, CAPA_APPROVAL_REVOCATION) that don't link back here.
-  capaClosure               CAPA?            @relation("CAPAClosureSignature")
-  capaVerification          CAPA?            @relation("CAPAVerificationSignature")
-  capaEffectiveness         CAPA?            @relation("CAPAEffectivenessSignature")
-  fda483Response            FDA483Event?     @relation("FDA483ResponseSignature")
-  documentApproval          Document?        @relation("DocumentApprovalSignature")
-  deviationClosure          Deviation?       @relation("DeviationClosureSignature")
+  capaClosure             CAPA?           @relation("CAPAClosureSignature")
+  capaVerification        CAPA?           @relation("CAPAVerificationSignature")
+  capaEffectiveness       CAPA?           @relation("CAPAEffectivenessSignature")
+  fda483Response          FDA483Event?    @relation("FDA483ResponseSignature")
+  documentApproval        Document?       @relation("DocumentApprovalSignature")
+  deviationClosure        Deviation?      @relation("DeviationClosureSignature")
   // ⚠️ UNVERIFIED — finding-closure signing built without DB access (see Finding).
-  findingClosure            Finding?         @relation("FindingClosureSignature")
-  changeControlTransition   ChangeControl[]  @relation("ChangeControlTransitionSignature")
+  findingClosure          Finding?        @relation("FindingClosureSignature")
+  changeControlTransition ChangeControl[] @relation("ChangeControlTransitionSignature")
 
   @@index([recordType, recordId])
   @@index([tenantId, signerId])
@@ -2248,21 +2293,21 @@ model SignedRecord {
 // e-signature substage lands. Rows are hard-deleted via revokeCAPAApproval
 // — the audit trail captures the snapshot in oldValue.
 model CAPAApproval {
-  id           String   @id @default(cuid())
-  tenantId     String
-  capaId       String
+  id       String @id @default(cuid())
+  tenantId String
+  capaId   String
 
   approverRole String
   approverName String
   approverId   String
-  approvedAt   DateTime @default(now())
+  approvedAt   DateTime      @default(now())
   comment      String?
   // Substage 5.4 — Part 11 e-signature link. Required for new approvals
   // created by the post-substage-5.4 codepath; nullable to keep migrations
   // simple for any pre-existing approval rows that predate the e-sig
   // requirement. @@unique enforces the 1:1 — a given SignedRecord backs at
   // most one approval row (a revocation event creates a NEW SignedRecord).
-  signatureId  String?  @unique
+  signatureId  String?       @unique
   signature    SignedRecord? @relation(fields: [signatureId], references: [id])
 
   // Revocation soft-delete — Part 11 records are immutable, so revokeCAPAApproval
@@ -2274,7 +2319,7 @@ model CAPAApproval {
   revokedAt          DateTime?
   revokedSignatureId String?
 
-  capa         CAPA     @relation(fields: [capaId], references: [id], onDelete: Cascade)
+  capa CAPA @relation(fields: [capaId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, capaId])
   @@index([capaId])
@@ -2288,17 +2333,17 @@ model CAPAApproval {
 // "[deleted]" placeholder is rendered client-side, replies under a deleted
 // parent stay visible.
 model CAPAComment {
-  id              String    @id @default(cuid())
-  tenantId        String
-  capaId          String
-  parentId        String?
+  id           String  @id @default(cuid())
+  tenantId     String
+  capaId       String
+  parentId     String?
   // Phase 2 — action-level comments. Null = CAPA-level comment (unchanged
   // behaviour); set = comment scoped to a specific action item. Nullable +
   // SetNull so removing an action item never deletes the comment thread.
-  actionItemId    String?
+  actionItemId String?
 
-  body            String
-  isConcern       Boolean   @default(false)
+  body      String
+  isConcern Boolean @default(false)
 
   // Gap→CAPA carry provenance. Non-null ONLY on the note createCAPA carries from
   // the originating finding's completionNotes at raise (capas/lifecycle.ts).
@@ -2320,22 +2365,22 @@ model CAPAComment {
   resolvedByName  String?
   resolvedComment String?
 
-  deletedAt       DateTime?
-  deletedById     String?
-  deletedByName   String?
-  deletionReason  String?
+  deletedAt      DateTime?
+  deletedById    String?
+  deletedByName  String?
+  deletionReason String?
 
-  authorId        String
-  authorName      String
-  authorRole      String
+  authorId   String
+  authorName String
+  authorRole String
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  capa            CAPA            @relation(fields: [capaId], references: [id], onDelete: Cascade)
-  parent          CAPAComment?    @relation("CommentReplies", fields: [parentId], references: [id])
-  replies         CAPAComment[]   @relation("CommentReplies")
-  actionItem      CAPAActionItem? @relation("ActionItemComments", fields: [actionItemId], references: [id], onDelete: SetNull)
+  capa       CAPA            @relation(fields: [capaId], references: [id], onDelete: Cascade)
+  parent     CAPAComment?    @relation("CommentReplies", fields: [parentId], references: [id])
+  replies    CAPAComment[]   @relation("CommentReplies")
+  actionItem CAPAActionItem? @relation("ActionItemComments", fields: [actionItemId], references: [id], onDelete: SetNull)
 
   @@index([capaId, createdAt])
   @@index([tenantId, capaId])
@@ -2358,41 +2403,41 @@ model CAPAComment {
 // SignedRecord-backed signing pattern from substage 5.4 will be adopted
 // for CC approvals later as a separate substage.
 model ChangeControl {
-  id              String    @id @default(cuid())
-  tenantId        String
-  reference       String?   @unique
+  id        String  @id @default(cuid())
+  tenantId  String
+  reference String? @unique
 
-  title           String
-  description     String
+  title       String
+  description String
   // Allowed values: "SOP" | "Equipment" | "Process" | "Product" |
   // "Computer System" | "Material" | "Other". Validated at the action
   // layer via zod (same pattern as CAPA.source / CAPA.risk).
-  changeType      String
-  rationale       String
+  changeType  String
+  rationale   String
 
   // Allowed values: "Critical" | "High" | "Medium" | "Low".
-  risk            String
+  risk             String
   impactAssessment String?
-  affectedSystems String?
+  affectedSystems  String?
 
   // Allowed values: "Draft" | "In Review" | "Approved" |
   // "In Implementation" | "Implemented" | "Closed" | "Rejected".
-  status          String    @default("Draft")
+  status String @default("Draft")
 
-  owner           String
-  ownerName       String
+  owner     String
+  ownerName String
 
   targetImplementationDate DateTime?
   actualImplementationDate DateTime?
-  closedAt        DateTime?
-  closedById      String?
-  closedByName    String?
+  closedAt                 DateTime?
+  closedById               String?
+  closedByName             String?
 
   // Soft-delete metadata (Part 11 — never hard-delete).
-  deletedAt       DateTime?
-  deletedById     String?
-  deletedByName   String?
-  deletionReason  String?
+  deletedAt      DateTime?
+  deletedById    String?
+  deletedByName  String?
+  deletionReason String?
 
   // Substage 5.4 — quick-lookup pointer at the most recent SignedRecord
   // backing a consequential transition (In Review→Approved, In Review→
@@ -2403,13 +2448,13 @@ model ChangeControl {
   // against the same CC over its lifetime.
   latestSignedTransitionId String?
 
-  createdBy       String
-  createdByName   String
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdBy     String
+  createdByName String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  capaLinks               CAPAChangeControlLink[]
-  latestSignedTransition  SignedRecord?           @relation("ChangeControlTransitionSignature", fields: [latestSignedTransitionId], references: [id])
+  capaLinks              CAPAChangeControlLink[]
+  latestSignedTransition SignedRecord?           @relation("ChangeControlTransitionSignature", fields: [latestSignedTransitionId], references: [id])
 
   @@index([tenantId, status])
   @@index([tenantId, createdAt])
@@ -2422,24 +2467,24 @@ model ChangeControl {
 // without ambiguity). Hard-deleted on unlink — links are not Part 11
 // records themselves; the audit trail is the immutable history.
 model CAPAChangeControlLink {
-  id              String    @id @default(cuid())
-  tenantId        String
+  id       String @id @default(cuid())
+  tenantId String
 
-  capaId          String
-  capa            CAPA      @relation(fields: [capaId], references: [id], onDelete: Cascade)
+  capaId String
+  capa   CAPA   @relation(fields: [capaId], references: [id], onDelete: Cascade)
 
   changeControlId String
   changeControl   ChangeControl @relation(fields: [changeControlId], references: [id], onDelete: Cascade)
 
   // "CAPA" | "ChangeControl" — which side initiated the link.
-  initiatedFrom   String
+  initiatedFrom String
 
-  linkRationale   String?
+  linkRationale String?
 
-  linkedById      String
-  linkedByName    String
+  linkedById   String
+  linkedByName String
 
-  createdAt       DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([capaId, changeControlId])
   @@index([capaId])
@@ -2453,14 +2498,14 @@ model CAPAChangeControlLink {
 // (identifier, tenantId) lookup is sufficient; tenantId is null for Tenant-row
 // matches and set for User-row matches.
 model EmailOTP {
-  id          String    @id @default(cuid())
-  identifier  String
-  tenantId    String?
-  codeHash    String
-  expiresAt   DateTime
-  consumedAt  DateTime?
-  attempts    Int       @default(0)
-  createdAt   DateTime  @default(now())
+  id         String    @id @default(cuid())
+  identifier String
+  tenantId   String?
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
 
   @@index([identifier, tenantId])
   @@index([expiresAt])
@@ -2488,24 +2533,24 @@ model Notification {
 
   // ── Notification Center (Phase 2) — all additive & backward-compatible.
   // priority drives ranking/badges: critical|high|medium|low|info.
-  priority        String    @default("medium")
+  priority   String    @default("medium")
   // severity drives the accent/tone: critical|warning|success|info.
-  severity        String    @default("info")
+  severity   String    @default("info")
   // who/what produced it: user|system|ai (ai reserved for the AI follow-up).
-  source          String    @default("system")
+  source     String    @default("system")
   // Archive is a soft "move out of the inbox" (recoverable); deletedAt is a
   // soft delete (hidden everywhere). Neither ever hard-deletes a GxP record.
-  isArchived      Boolean   @default(false)
-  archivedAt      DateTime?
-  deletedAt       DateTime?
-  updatedAt       DateTime  @default(now()) @updatedAt
+  isArchived Boolean   @default(false)
+  archivedAt DateTime?
+  deletedAt  DateTime?
+  updatedAt  DateTime  @default(now()) @updatedAt
   // Free-text tags for search/grouping (comma-joined string — SQLite has no
   // array type; matches the app's other list-as-string columns).
-  tags            String?
+  tags       String?
   // Best-effort idempotency key (type|entityId|recipient|window). Indexed, not
   // UNIQUE — a constraint would risk violations against pre-existing dup rows;
   // notify() checks it within a short window instead. See src/lib/notify.ts.
-  dedupeKey       String?
+  dedupeKey  String?
 
   @@index([recipientUserId, isRead, createdAt])
   @@index([tenantId])
@@ -2525,12 +2570,12 @@ model Notification {
 // Document rows (sourceModule="Support", sourceId=ticket.id) via the existing
 // upload pipeline — no attachment table here.
 model Ticket {
-  id        String  @id @default(cuid())
-  reference String? @unique // TKT-<year>-<NNNNN> (flat, global — not tenant/region coded)
-  tenantId  String
+  id           String  @id @default(cuid())
+  reference    String? @unique // TKT-<year>-<NNNNN> (flat, global — not tenant/region coded)
+  tenantId     String
   // Site the ticket was raised for. Required for a customer_admin (chosen in the
   // Raise modal); derived from the requester's User row for other roles.
-  siteId    String?
+  siteId       String?
   // Optional evidence link (free-text URL) supplied by the requester.
   evidenceLink String?
 
@@ -2551,7 +2596,7 @@ model Ticket {
   // Default "super_admin" preserves TODAY'S behaviour (everything is effectively
   // SA-central now), so existing tickets are unchanged. Nothing routes to
   // customer_admin until Phase B wires the escalate/default-routing flow.
-  currentHandler String @default("super_admin")
+  currentHandler  String    @default("super_admin")
   // Escalation trail — set ONLY when a customer_admin escalates to SA (Phase B);
   // null on every ticket until then.
   escalatedAt     DateTime?
@@ -2559,8 +2604,8 @@ model Ticket {
   escalatedByName String?
 
   // Optional link to a domain record — REQUEST only; never mutates the record.
-  relatedModule   String?
-  relatedRecordId String?
+  relatedModule    String?
+  relatedRecordId  String?
   relatedRecordRef String?
 
   slaDueAt           DateTime?
@@ -2600,7 +2645,7 @@ model Ticket {
 
 // Threaded conversation + admin-only internal notes (append-only).
 model TicketMessage {
-  id         String  @id @default(cuid())
+  id         String   @id @default(cuid())
   ticketId   String
   tenantId   String
   authorId   String
@@ -2609,7 +2654,7 @@ model TicketMessage {
   body       String
   // Internal notes are visible to support managers only — NEVER returned to the
   // requester (enforced in queries + actions).
-  isInternal Boolean @default(false)
+  isInternal Boolean  @default(false)
   createdAt  DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -2620,7 +2665,7 @@ model TicketMessage {
 // Human-readable per-ticket timeline (append-only). Distinct from the central
 // AuditLog: this is the in-page activity panel; AuditLog is the compliance trail.
 model TicketActivity {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   ticketId  String
   tenantId  String
   type      String
@@ -2643,14 +2688,14 @@ model TicketActivity {
 // match the strings already stored in Finding.framework across the app and MUST
 // never be renamed or dropped. New frameworks get a fresh unique slug key.
 model Framework {
-  id                  String   @id @default(cuid())
-  key                 String   @unique
+  id                  String    @id @default(cuid())
+  key                 String    @unique
   name                String
   description         String?
-  platformEnabled     Boolean  @default(true)
+  platformEnabled     Boolean   @default(true)
   // GLOBAL = applies to every regulatory region. When false, applicability is
   // restricted to the linked FrameworkRegion rows.
-  appliesToAllRegions Boolean  @default(true)
+  appliesToAllRegions Boolean   @default(true)
   // Soft-archive marker. null = active; a timestamp = archived (excluded from
   // tenant-facing reads, but kept so historical Finding.framework keys still
   // resolve their label via this row). Hard delete is prohibited.
@@ -2663,10 +2708,10 @@ model Framework {
   // name still resolves the old-key label directly.
   aliasOfId           String?
   // Display metadata (Item #5) — presentation only, never part of any contract.
-  sortOrder           Int      @default(0)   // manual display order (backfilled)
-  category            String?                // optional grouping label (nullable)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  sortOrder           Int       @default(0) // manual display order (backfilled)
+  category            String? // optional grouping label (nullable)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   regions          FrameworkRegion[]
   tenantFrameworks TenantFramework[]
@@ -2732,7 +2777,7 @@ model PlanRoleLimit {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@unique([planId, role])
   @@index([planId])
@@ -2748,7 +2793,7 @@ model TenantRoleLimit {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, role])
   @@index([tenantId])

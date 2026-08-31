@@ -119,6 +119,25 @@ export function EditSystemModal({ open, system, sites, users, onSave, onClose }:
             <label className={lbl} style={{ color: "var(--text-muted)" }}>GAMP 5 category *</label>
             <Controller name="gamp5Category" control={control} render={({ field }) => (<Dropdown value={field.value} onChange={field.onChange} width="w-full" options={GAMP5_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))} />)} />
             <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>Cat 5 requires full IQ/OQ/PQ</p>
+            {/*
+              EDIT-ONLY clarification. The category scopes which validation
+              stages start active, but ONLY at creation (systems.ts:353, the sole
+              caller of applicableStagesFor). `updateSystem` writes the scalar
+              column and never touches ValidationStage rows — deliberately:
+              re-deriving would move `stagesApproved`, which is bound into
+              CSV_VALIDATION_SIGNOFF, and could un-resolve a signed system's
+              stage gate.
+
+              Without this line the dropdown reads as a live re-scoping control,
+              which is what it looks like next to the Cat-5 hint above. The Add
+              modal keeps its live stage preview unchanged — there the promise is
+              accurate, because creation is what applies the template.
+
+              TEXT ONLY. No logic, no re-derivation.
+            */}
+            <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+              Changing the category won&apos;t re-scope existing validation stages — adjust them per stage in Execute.
+            </p>
           </div>
         </div>
 

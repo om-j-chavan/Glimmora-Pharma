@@ -172,10 +172,52 @@ function RTMDetailModal({ entry, canEdit, onClose, onError, onSaved, router }: {
     </div>
   ) : undefined;
 
+  /*
+   * COVERAGE INDICATOR — DISPLAY ONLY, single source.
+   *
+   * The Badge renders `entry.traceabilityStatus`, the SERVER-DERIVED value that
+   * was already shown at the bottom of this modal. It is NOT recomputed here.
+   *
+   * The FS/IQ/OQ/PQ chips beside it show which INPUTS are currently satisfied —
+   * the same `fsReference ? "✓" : "○"` / `result === "pass"` presentation the
+   * RTM table's coverage column already uses (see the `coverage` column above).
+   * They read the live form state so the user can see what they are changing,
+   * but they are inputs, not a second derivation: the status Badge only moves
+   * when the server re-derives it on save, which the note states.
+   */
+  const inputChips: [string, boolean][] = [
+    ["FS", !!fs.trim()],
+    ["IQ", iqR === "pass"],
+    ["OQ", oqR === "pass"],
+    ["PQ", pqR === "pass"],
+  ];
+
   return (
     <Modal open onClose={onClose} title={entry.reference ?? entry.ursId} footer={footer}>
-      <div className="space-y-3">
-        {/* Reference (read-only) + author tag + priority + regulation */}
+      <div className="space-y-4">
+        {/* ── COVERAGE, surfaced at the top ── */}
+        <div className="rounded-lg border p-3" style={{ background: "var(--bg-elevated)", borderColor: "var(--bg-border)" }}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={lbl} style={{ color: "var(--text-muted)", marginBottom: 0 }}>Coverage</span>
+            <Badge variant={TR_VARIANT[entry.traceabilityStatus]}>{TR_LABEL[entry.traceabilityStatus]}</Badge>
+            <span className="inline-flex items-center gap-1.5 ml-auto">
+              {inputChips.map(([k, ok]) => (
+                <span
+                  key={k}
+                  className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-mono font-semibold"
+                  style={{ background: ok ? "#10b98122" : "var(--bg-border)", color: ok ? "#10b981" : "var(--text-muted)" }}
+                >
+                  {k}{ok ? "✓" : "○"}
+                </span>
+              ))}
+            </span>
+          </div>
+          <p className="text-[10px] mt-1.5" style={{ color: "var(--text-muted)" }}>
+            Auto-derived from FS/IQ/OQ/PQ on save (Evidence: {entry.evidenceStatus})
+          </p>
+        </div>
+
+        {/* Identity strip — reference / tag / priority / regulation */}
         <div className="flex items-center gap-2 flex-wrap text-[11px]" style={{ color: "var(--text-muted)" }}>
           {entry.reference && <span className="font-mono font-semibold" style={{ color: "var(--brand)" }}>{entry.reference}</span>}
           <span>Tag: {entry.ursId}</span>
@@ -183,32 +225,40 @@ function RTMDetailModal({ entry, canEdit, onClose, onError, onSaved, router }: {
           {entry.ursRegulation && <span>{entry.ursRegulation}</span>}
         </div>
 
-        {/* Requirement text — editable (RUNG 2.8) */}
+        {/* ── GROUP 1 — REQUIREMENT ── */}
         <div>
           <label className={lbl} style={{ color: "var(--text-muted)" }}>Requirement</label>
           <textarea rows={3} className="input text-[12px] resize-none w-full" disabled={!canEdit} value={req} onChange={(e) => setReq(e.target.value)} placeholder="Describe the user requirement (min 10 characters)…" />
         </div>
 
-        <div><label className={lbl} style={{ color: "var(--text-muted)" }}>FS reference</label><input className="input text-[11px]" disabled={!canEdit} value={fs} onChange={(e) => setFs(e.target.value)} placeholder="FS-..." /></div>
-        <div><label className={lbl} style={{ color: "var(--text-muted)" }}>DS reference</label><input className="input text-[11px]" disabled={!canEdit} value={ds} onChange={(e) => setDs(e.target.value)} placeholder="DS-..." /></div>
-
-        {([["IQ", iqId, setIqId, iqR, setIqR], ["OQ", oqId, setOqId, oqR, setOqR], ["PQ", pqId, setPqId, pqR, setPqR]] as const).map(([label, id, setId, res, setRes]) => (
-          <div key={label} className="grid grid-cols-2 gap-2">
-            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>{label} test ID</label><input className="input text-[11px]" disabled={!canEdit} value={id} onChange={(e) => (setId as (v: string) => void)(e.target.value)} /></div>
-            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>{label} result</label><Dropdown value={res} onChange={setRes as (v: string) => void} width="w-full" options={RESULT_OPTS} /></div>
-          </div>
-        ))}
-
-        <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Notes</label><textarea rows={2} className="input text-[11px] resize-none w-full" disabled={!canEdit} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
-
-        {/* Coverage status (read-only, auto-derived on save) */}
+        {/* ── GROUP 2 — DESIGN REFERENCES ── */}
         <div>
-          <label className={lbl} style={{ color: "var(--text-muted)" }}>Coverage status</label>
-          <div className="flex items-center gap-2">
-            <Badge variant={TR_VARIANT[entry.traceabilityStatus]}>{TR_LABEL[entry.traceabilityStatus]}</Badge>
-            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>Auto-derived from FS/IQ/OQ/PQ on save (Evidence: {entry.evidenceStatus})</span>
+          <p className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--text-primary)" }}>Design references</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>FS reference</label><input className="input text-[11px]" disabled={!canEdit} value={fs} onChange={(e) => setFs(e.target.value)} placeholder="FS-..." /></div>
+            <div><label className={lbl} style={{ color: "var(--text-muted)" }}>DS reference</label><input className="input text-[11px]" disabled={!canEdit} value={ds} onChange={(e) => setDs(e.target.value)} placeholder="DS-..." /></div>
           </div>
         </div>
+
+        {/* ── GROUP 3 — QUALIFICATION EVIDENCE ──
+            IQ/OQ/PQ as a matched set: stage label + test id + result on ONE row.
+            The same map, the same Dropdown, the same RESULT_OPTS and the same
+            setters as before — only the row layout changed. */}
+        <div>
+          <p className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--text-primary)" }}>Qualification evidence</p>
+          <div className="rounded-lg border divide-y" style={{ borderColor: "var(--bg-border)" }}>
+            {([["IQ", iqId, setIqId, iqR, setIqR], ["OQ", oqId, setOqId, oqR, setOqR], ["PQ", pqId, setPqId, pqR, setPqR]] as const).map(([label, id, setId, res, setRes]) => (
+              <div key={label} className="flex items-center gap-2 p-2" style={{ borderColor: "var(--bg-border)" }}>
+                <span className="w-8 shrink-0 text-[11px] font-mono font-semibold" style={{ color: "var(--text-primary)" }}>{label}</span>
+                <input className="input text-[11px] flex-1 min-w-0" disabled={!canEdit} value={id} onChange={(e) => (setId as (v: string) => void)(e.target.value)} placeholder={`${label} test ID`} aria-label={`${label} test ID`} />
+                <Dropdown value={res} onChange={setRes as (v: string) => void} width="w-28" options={RESULT_OPTS} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── GROUP 4 — NOTES ── */}
+        <div><label className={lbl} style={{ color: "var(--text-muted)" }}>Notes</label><textarea rows={2} className="input text-[11px] resize-none w-full" disabled={!canEdit} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
 
         {/* Linked finding / CAPA (read-only deep links) */}
         {(entry.findingRef || entry.capaRef) && (

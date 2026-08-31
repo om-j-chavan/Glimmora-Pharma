@@ -379,3 +379,165 @@ export async function writeFindingSodOverride(
     },
   });
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * CSV/CSA STAGE APPROVAL — single-QA SoD override
+ *
+ * ⚠️ UNVERIFIED — CSV stage-approval SoD override, built without DB access.
+ * Requires (1) QA/regulatory policy authorization to enable single-QA stage
+ * approval, and (2) Postgres verification before deploy. Waives the ONLY
+ * identity control in the CSV validation chain — ceiling is load-bearing.
+ *
+ * ⚠️ NOT WIRED. Nothing calls these yet. `approveStage` (systems.ts:548) still
+ * hard-blocks a self-approval at systems.ts:580; wiring is Part 2.
+ *
+ * Everything below is ADDITIVE. No existing control type, evaluator, writer or
+ * shared constant was touched — CAPA, Deviation and Finding behave exactly as
+ * before, and this reuses SOD_REASON_CODES / SodOverrideInput / SodDecision /
+ * tenantSodOverrideOn / the 20-char justification minimum rather than
+ * duplicating them.
+ *
+ * 🟢 SIGNING: this touches NO canonicaliser and NO signature. Stage approval is
+ * not a signed record — approveStage writes approvedBy/approvedById and mints no
+ * SignedRecord — so the waiver attaches to the STAGE, not to a signedRecordId
+ * (the one structural difference from the three siblings). `stagesApproved`
+ * still counts rows whose status is "approved", so an existing
+ * CSV_VALIDATION_SIGNOFF cannot be invalidated by this feature.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * The CSV stage-approval identity checks a single-QA override may waive.
+ *
+ * ONE control today: the submitter!=approver rule at systems.ts:580.
+ *
+ * DELIBERATELY ABSENT — the sign-off gates. `signValidation` has NO identity
+ * rule at all (verified: its only use of session.user.id is writing signerId),
+ * so there is nothing there to waive. Its other gates — all stages resolved,
+ * zero open findings, zero open critical/high CAPAs — are COMPLETENESS rules,
+ * not identity ones, exactly as `rca_missing` is on the finding side. No control
+ * code exists for them here, so evaluate/write cannot express them and those
+ * hard blocks always stand.
+ */
+export type SystemStageSodControl = "STAGE_APPROVE_SELF";
+
+/** The identity rule the control waives — recorded for inspectors. */
+export const SYSTEM_STAGE_SOD_WAIVED_RULE: Record<SystemStageSodControl, string> = {
+  STAGE_APPROVE_SELF: "submitter!=approver",
+};
+
+export const SYSTEM_STAGE_SOD_OVERRIDE_CEILING_BLOCK =
+  "GAMP Category 5 and high-risk systems require independent QA approval; the single-QA override does not apply.";
+
+/**
+ * Decide block vs justified-proceed at the CSV stage-approval identity check.
+ * Gate order is IDENTICAL to evaluateSodOverride / evaluateDeviationSodOverride
+ * / evaluateFindingSodOverride: flag OFF first ⇒ the check's ORIGINAL message
+ * (a tenant without the override never sees override wording, even at the
+ * ceiling); flag ON + ceiling ⇒ ceiling block; otherwise require a reason code +
+ * justification.
+ *
+ * 🔴 CEILING DECISION — LOAD-BEARING, and stricter than the siblings by design.
+ *
+ * This override waives the ONLY identity control in the entire CSV validation
+ * chain. The finding/CAPA/deviation waivers sit alongside a second control (a
+ * Part 11 signature at closure); here there is no such backstop — `signValidation`
+ * has no identity rule, and `super_admin` may sign too (systems.ts:2002). So a
+ * fully-waived system could be submitted, approved and signed off by one person
+ * end to end. The ceiling is what stops that happening on the systems where it
+ * matters most, and it is TWO-PART:
+ *
+ *   · GAMP Category 5 — custom/bespoke software, the full V-model. The category
+ *     that carries the most validation risk and the least supplier assurance.
+ *   · riskLevel HIGH or CRITICAL — the system's own risk classification,
+ *     independent of category, so a Cat 3/4 system running a high-risk process
+ *     is covered too.
+ *
+ * EITHER condition blocks. Both are read off GxPSystem (gamp5Category
+ * schema.prisma:1350 default "4"; riskLevel default "MEDIUM"). riskLevel is
+ * compared case-insensitively because the column is a free String and legacy
+ * rows may hold lowercase.
+ *
+ * Do not soften either arm without QA/regulatory sign-off: with the ceiling
+ * removed this feature permits single-person end-to-end validation of a
+ * bespoke, high-risk GxP system.
+ */
+export function evaluateSystemStageSodOverride(opts: {
+  gamp5Category: string | null;
+  riskLevel: string | null;
+  flagOn: boolean;
+  existingBlockError: string;
+  input: SodOverrideInput;
+}): SodDecision {
+  if (!opts.flagOn) return { proceed: false, error: opts.existingBlockError };
+  const isCat5 = (opts.gamp5Category ?? "").trim() === "5";
+  const risk = (opts.riskLevel ?? "").trim().toUpperCase();
+  const isHighRisk = risk === "HIGH" || risk === "CRITICAL";
+  if (isCat5 || isHighRisk) {
+    return { proceed: false, error: SYSTEM_STAGE_SOD_OVERRIDE_CEILING_BLOCK };
+  }
+  const reasonCode = opts.input.sodOverrideReasonCode;
+  const justification = (opts.input.sodOverrideJustification ?? "").trim();
+  if (!reasonCode || !(SOD_REASON_CODES as readonly string[]).includes(reasonCode)) {
+    return { proceed: false, error: "A reason code is required to proceed under single-QA override." };
+  }
+  if (justification.length < 20) {
+    return { proceed: false, error: "A justification (min 20 chars) is required under single-QA override." };
+  }
+  return { proceed: true, reasonCode, justification };
+}
+
+/** Write the SystemStageSODOverride record + SYSTEM_STAGE_SOD_OVERRIDE_USED audit
+ *  inside the caller's transaction (atomic with the stage approval). Attaches to
+ *  stageId — there is NO signedRecordId, because stage approval mints no
+ *  signature. One row per waived control. */
+export async function writeSystemStageSodOverride(
+  tx: Prisma.TransactionClient,
+  opts: {
+    tenantId: string;
+    systemId: string;
+    stageId: string;
+    control: SystemStageSodControl;
+    actorUserId: string;
+    actorName: string;
+    actorRole: string;
+    reasonCode: string;
+    justification: string;
+    recordTitle: string;
+  },
+): Promise<void> {
+  await tx.systemStageSODOverride.create({
+    data: {
+      tenantId: opts.tenantId,
+      systemId: opts.systemId,
+      stageId: opts.stageId,
+      control: opts.control,
+      actorUserId: opts.actorUserId,
+      actorName: opts.actorName,
+      actorRole: opts.actorRole,
+      reasonCode: opts.reasonCode,
+      justification: opts.justification,
+    },
+  });
+  await tx.auditLog.create({
+    data: {
+      tenantId: opts.tenantId,
+      userId: opts.actorUserId,
+      userName: opts.actorName,
+      userRole: opts.actorRole,
+      module: "CSV Validation / SoD Override",
+      action: "SYSTEM_STAGE_SOD_OVERRIDE_USED",
+      recordId: opts.systemId,
+      recordTitle: opts.recordTitle.slice(0, 80),
+      newValue: JSON.stringify({
+        control: opts.control,
+        waivedRule: SYSTEM_STAGE_SOD_WAIVED_RULE[opts.control],
+        stageId: opts.stageId,
+        reasonCode: opts.reasonCode,
+        justification: opts.justification,
+        approverUserId: opts.actorUserId,
+        approverName: opts.actorName,
+        approverRole: opts.actorRole,
+      }),
+    },
+  });
+}

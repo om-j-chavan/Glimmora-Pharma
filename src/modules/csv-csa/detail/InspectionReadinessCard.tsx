@@ -1,6 +1,7 @@
 "use client";
 
-import { CheckCircle2, AlertTriangle, XCircle, ShieldCheck, ArrowRight } from "lucide-react";
+import { useState } from "react";
+import { CheckCircle2, AlertTriangle, XCircle, ShieldCheck, ArrowRight, ChevronDown } from "lucide-react";
 import dayjs from "@/lib/dayjs";
 import type { GxPSystem, RTMEntry } from "@/types/csv-csa";
 import { Badge } from "@/components/ui/Badge";
@@ -22,6 +23,9 @@ export interface InspectionReadinessCardProps {
 }
 
 export function InspectionReadinessCard({ system, rtmEntries, timezone, dateFormat, onNavigateTab }: InspectionReadinessCardProps) {
+  // Declared BEFORE any early return so the hook order is identical on every
+  // render path (the `nothingStarted` branch returns without using it).
+  const [open, setOpen] = useState(true);
   const stages = system.validationStages ?? [];
   const docCount = stages.reduce((n, s) => n + (s.documents?.length ?? 0), 0);
 
@@ -128,9 +132,27 @@ export function InspectionReadinessCard({ system, rtmEntries, timezone, dateForm
     );
   }
 
+  /*
+   * COLLAPSIBLE (progressive disclosure). Expanded whenever the checklist has
+   * signal — which, past the `nothingStarted` guard above, it always does — so
+   * the default here is OPEN and a reader loses nothing. The toggle exists so a
+   * long Assess tab can be folded down once the section has been read.
+   *
+   * Every row and every tone above is computed exactly as before; this only
+   * decides whether the body is mounted.
+   */
   return (
     <div className="card">
-      <div className="card-header"><div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" /><span className="card-title">Inspection readiness</span></div></div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="card-header w-full text-left bg-transparent border-x-0 border-t-0 cursor-pointer"
+      >
+        <div className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" style={{ color: "var(--brand)" }} aria-hidden="true" /><span className="card-title">Inspection readiness</span></div>
+        <ChevronDown className={`ml-auto w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+      </button>
+      {open && (
       <div className="card-body space-y-2.5">
         {rows.map((r, i) => (
           <div key={i} className="flex items-start gap-2.5 text-[12px]">
@@ -147,6 +169,7 @@ export function InspectionReadinessCard({ system, rtmEntries, timezone, dateForm
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

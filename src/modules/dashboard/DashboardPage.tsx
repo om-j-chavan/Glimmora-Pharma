@@ -163,10 +163,7 @@ export function DashboardPage({
   const [timeFilter, setTimeFilter] = useState("30");
   const [askAiOpen, setAskAiOpen] = useState(false);
 
-  /**
-   * ONE reset for every header filter — see the single "Clear filters" button
-   * below. Resets the period to its "30" default alongside site + severity.
-   */
+
   const anyFilterActive = timeFilter !== "30" || !!siteFilter || !!sevFilter;
   const clearAllFilters = useCallback(() => {
     setTimeFilter("30");
@@ -174,13 +171,7 @@ export function DashboardPage({
     setSevFilter("");
   }, []);
 
-  /**
-   * Refresh is `router.refresh()` — it re-runs the server component and streams
-   * fresh props in, but returns void, so there is nothing to await. Wrapping it
-   * in a transition is the App Router's own way to observe it: `isRefreshing`
-   * stays true until the re-rendered payload has been applied, which is exactly
-   * the interval the spinner should cover.
-   */
+  
   const [isRefreshing, startRefresh] = useTransition();
   const handleRefresh = useCallback(() => startRefresh(() => router.refresh()), [router]);
 
@@ -234,10 +225,7 @@ export function DashboardPage({
   const selectedSiteId = useAppSelector((s) => s.auth.selectedSiteId);
   const showSitePicker = !selectedSiteId && sites.length > 1;
 
-  // GP-CA-011: active (non-default) filters shown as dismissable chips. Each chip
-  // resets ONLY its own filter via the existing setter — no new state or filtering.
-  // The site chip is listed only when the picker is shown, so a site-bound user
-  // never sees a chip for a filter they cannot clear.
+ 
   const activeFilterChips = useMemo<{ key: string; label: string; clear: () => void }[]>(
     () => [
       ...(timeFilter !== "30"
@@ -269,21 +257,11 @@ export function DashboardPage({
     <PageLayout
       title="Dashboard"
       titleIcon={LayoutDashboard}
-      // The description states the ROLE'S remit, so the page announces whose view
-      // this is — the single clearest signal that the dashboard is personalised.
       description={dashboard.description}
       actions={headerActions}
       headerRight={
         <div className="flex items-center gap-2 flex-wrap">
-          {/* The role pill (role label · focus area) was removed from the header.
-              Display only — `access.role` still drives resolveDashboard, every
-              permission gate and the focus-area scoping exactly as before. */}
-{/* The period control is labelled for what it now does. It scopes the two
-              "raised" trend charts and nothing else — every KPI card, the heatmap and
-              the compliance board are CURRENT STATE and deliberately ignore it, because
-              "open" and "overdue" are not events inside a window. Naming it "Raised"
-              rather than the old bare "Last 30 days" stops the header implying the
-              whole page is period-scoped. */}
+         
           <Dropdown
             value={timeFilter}
             onChange={setTimeFilter}
@@ -322,10 +300,8 @@ export function DashboardPage({
               { value: "Low", label: "Low" },
             ]}
           />
-          {/* Chips are THEIRS (34f5708 relabelled them "Raised: …" so the header
-              states what the period actually scopes). Our single "Clear filters"
-              button sits after them and resets everything at once — the two
-              coexist: a chip clears one filter, the button clears all. */}
+         
+    
           {activeFilterChips.map((c) => (
             <button
               key={c.key}
@@ -339,18 +315,6 @@ export function DashboardPage({
               <span aria-hidden="true" className="text-[13px] leading-none">×</span>
             </button>
           ))}
-         
-          {/*
-            Both trailing controls are ICON-ONLY — no text, no hover tooltip.
-            Passing no children makes `Button` square (`isIconOnly` →
-            ICON_ONLY_SIZES, Button.tsx:75/94), so at size="sm" they are two 32px
-            squares sitting flush with the dropdowns beside them.
-
-            `aria-label` is the one thing that stays: it renders nothing and shows
-            no tooltip, but without it these buttons would have no accessible name
-            at all once the text is gone. Same pattern as the other icon-only
-            buttons (e.g. ActionPlanTable.tsx:191).
-          */}
           {anyFilterActive && (
             <Button
               variant="ghost"
@@ -360,11 +324,7 @@ export function DashboardPage({
               aria-label="Clear filters"
             />
           )}
-          {/* GP-CA-016 — the "Updated <time>" label was removed from the header.
-              Refresh still reloads the server props exactly as before; only the
-              timestamp readout is gone. `loading` swaps the icon for Button's own
-              spinner and disables the control, so a refresh cannot be re-fired
-              while one is in flight. */}
+   
           <Button
             variant="ghost"
             size="sm"
@@ -376,13 +336,8 @@ export function DashboardPage({
         </div>
       }
     >
-      {/* One vertical rhythm for the whole page: the gap between the KPI row and
-          the widget grid is the SAME token as the gap between two widgets. */}
       <div className="space-y-4 lg:space-y-6">
-        {/* KPI row — the role's cards, already permission-resolved */}
         <KpiGrid {...widgetProps} />
-
-       
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch [grid-auto-flow:row_dense]">
           {widgets.map(({ key, wide }) => (
             <div
@@ -393,12 +348,7 @@ export function DashboardPage({
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Ask AI — the cross-module record search. Executes CLIENT-SIDE over the
-          visibility-scoped Redux arrays, so a record the viewer can't open on its
-          module page can never be matched; the CAPA source is omitted for
-          non-CAPA-module roles. */}
+      </div>     
       <Drawer open={askAiOpen} onClose={() => setAskAiOpen(false)} title="Ask AI · Record Search" width="lg">
         <SmartRecordSearch title="Search" defaultScope="all" sources={searchSources} />
       </Drawer>
